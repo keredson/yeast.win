@@ -69,7 +69,6 @@ button, input, textarea { font: inherit; }
 .login-card { width: min(100%, 430px); box-shadow: 0 24px 80px #24433716; }
 .login-brand { margin-bottom: 28px; }
 .login-brand small { color: #6f8177; opacity: 1; }
-.login-note { margin: 20px 0 0; }
 @media (max-width: 1050px) {
   .section-grid { grid-template-columns: 230px minmax(0, 1fr); gap: 28px; }
   .batch-columns { grid-template-columns: 1fr; }

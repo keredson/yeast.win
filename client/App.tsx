@@ -193,6 +193,5 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
       <Form.Item name="password" label="Password" rules={[{ required: true }]}><Input.Password autoComplete="current-password" size="large" /></Form.Item>
       <Button htmlType="submit" type="primary" size="large" block loading={busy}>Sign in</Button>
     </Form>
-    <p className="muted login-note">First run? Set the owner username and password in <code>.env</code>, then restart the server.</p>
   </Card></div>;
 }
