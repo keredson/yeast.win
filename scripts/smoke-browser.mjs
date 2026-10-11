@@ -31,7 +31,7 @@ async function signIn(page, createAccount = false) {
   if (createAccount) await page.getByLabel('Confirm password').fill(password);
   await page.locator('.login-card form button[type="submit"]').click();
   await page.getByRole('heading', { name: 'Batches' }).waitFor({ timeout: 30_000 });
-  await page.getByRole('button', { name: 'New', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'New batch' }).waitFor();
 }
 
 try {
@@ -51,7 +51,7 @@ try {
   await page.getByRole('textbox', { name: 'Brewery name' }).fill(secondBrewery);
   await page.getByRole('dialog', { name: 'New brewery' }).getByRole('button', { name: 'Create' }).click();
   await page.locator('.workspace-select').getByText(secondBrewery).waitFor();
-  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByRole('button', { name: 'New batch' }).click();
   await page.getByLabel('Batch name').fill('Second brewery batch');
   await page.getByRole('button', { name: 'Create batch' }).click();
   await page.getByRole('heading', { name: 'Second brewery batch' }).waitFor();
@@ -62,10 +62,10 @@ try {
   await page.getByRole('combobox', { name: 'Brewery' }).click();
   await page.getByText('Homebrew', { exact: true }).last().click();
   await page.locator('.workspace-select').getByText('Homebrew').waitFor();
-  await page.getByRole('button', { name: 'New', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'New batch' }).waitFor();
   console.log('Created and switched breweries from the header switcher');
 
-  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByRole('button', { name: 'New batch' }).click();
   await page.getByLabel('Batch name').fill(`Smoke batch ${Date.now()}`);
   const batchName = await page.getByLabel('Batch name').inputValue();
   await page.getByRole('button', { name: 'Create batch' }).click();
@@ -151,13 +151,18 @@ try {
   if (!await page.locator('.app-nav').evaluate(element => element.classList.contains('ant-layout-sider'))) {
     throw new Error('Desktop navigation is not an Ant Design Sider');
   }
-  await page.getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByRole('dialog', { name: 'New equipment' }).getByLabel('Name').fill('Smoke pH meter');
-  await page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Kind' }).click();
+  await page.getByRole('button', { name: 'New equipment' }).click();
+  await page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Find in shared equipment catalog' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'pH meter' }).click();
+  await page.getByRole('dialog', { name: 'New equipment' }).getByLabel('Name').fill('Smoke pH meter');
   await page.getByRole('button', { name: 'Create equipment' }).click();
   await page.getByRole('heading', { name: 'Smoke pH meter' }).waitFor();
   if (!/^\/equipment\/[A-Za-z0-9_-]{10,32}$/.test(new URL(page.url()).pathname)) throw new Error('Equipment detail URL was not set');
+  await page.getByRole('button', { name: 'New calibration' }).click();
+  await page.getByRole('spinbutton', { name: 'pH 4.00 buffer reading' }).fill('4.01');
+  await page.getByRole('spinbutton', { name: 'pH 7.00 buffer reading' }).fill('7.02');
+  await page.getByRole('button', { name: 'Save calibration' }).click();
+  await page.getByText('Two-point pH').waitFor();
   await page.getByRole('button', { name: 'Delete equipment' }).click();
   await page.getByRole('dialog', { name: 'Delete equipment?' }).getByRole('button', { name: 'Delete' }).click();
   await page.waitForURL('**/equipment');
@@ -165,19 +170,29 @@ try {
   console.log('Created and deleted equipment with a defined kind');
 
   await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Recipes' }).click();
-  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByRole('button', { name: 'New recipe' }).click();
   await page.getByLabel('Recipe name').fill('Smoke recipe');
   await page.getByRole('button', { name: 'Create recipe' }).click();
   await page.waitForURL(url => /^\/recipe\/[A-Za-z0-9_-]{10,32}$/.test(url.pathname));
   await page.goBack();
   await page.waitForURL('**/recipes');
   await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Inventory' }).click();
-  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByRole('button', { name: 'New inventory item' }).click();
+  await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Find in shared inventory catalog' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Maris Otter malt' }).click();
   await page.getByLabel('Item', { exact: true }).fill('Smoke grain');
-  await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Category' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Grain' }).click();
+  if (await page.getByRole('dialog', { name: 'New inventory item' }).locator('#default_unit').inputValue() !== 'g') throw new Error('Grain unit default was not set');
   await page.getByRole('button', { name: 'Create item' }).click();
   await page.waitForURL(url => /^\/inventory\/[A-Za-z0-9_-]{10,32}$/.test(url.pathname));
+  await page.route('**/api/**', route => route.abort());
+  await page.goto(`${baseUrl}/inventory`);
+  await page.getByRole('heading', { name: 'Inventory', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'New inventory item' }).click();
+  await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Find in shared inventory catalog' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Maris Otter malt' }).waitFor();
+  await page.getByRole('dialog', { name: 'New inventory item' }).locator('.ant-modal-close').click();
+  await page.getByRole('dialog', { name: 'New inventory item' }).waitFor({ state: 'hidden' });
+  await page.unroute('**/api/**');
   console.log('Navigated recipe and inventory detail URLs');
 
   await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Batches' }).click();

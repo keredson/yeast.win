@@ -23,20 +23,20 @@ yarn build
 yarn start
 ```
 
-The server serves the built PWA and API together on port 3001. Point your Cloudflare Tunnel at that port using one HTTPS hostname. Keep `data/` and the downloaded `vendor/crsqlite.so` on the host; `data/` holds the auth and workspace databases. Back up the SQLite database files consistently, including their WAL files, or use SQLite's backup API. Do not copy a live database file alone as a backup.
+The server serves the built PWA and API together on port 3001. Point your Cloudflare Tunnel at that port using one HTTPS hostname. Keep `data/` and the downloaded `vendor/crsqlite.so` on the host; `data/` holds the auth, catalog, and brewery databases. Back up the SQLite database files consistently, including their WAL files, or use SQLite's backup API. Do not copy a live database file alone as a backup.
 
 ## Current workflow
 
 - Create separate breweries for your home setup and commercial operation.
 - Create batches directly or copy a recipe's planned events into a new batch.
 - Plan fixed-time or anchored events, then record actual events or explicitly skip a plan.
-- Record additions, measurements, equipment settings, transfers, packaging, milestones, notes, inventory entries, equipment calibrations, and batch photos. Equipment kind uses a defined picker; unused equipment can be deleted.
+- Record additions, measurements, equipment settings, transfers, packaging, milestones, notes, inventory entries, equipment calibrations, and batch photos. Search the shared catalog when adding equipment or inventory, or create a custom item. Equipment calibration fields match the instrument type; unused equipment can be deleted.
 - Continue working offline; the app syncs on reconnect and at regular intervals.
 - Use the Ant Design left sidebar to open batches, recipes, inventory, and equipment. Detail pages have shareable URLs such as `/batch/:id`; links include the brewery ID so they open the right database.
 - Open `/me` from the avatar to upload an account avatar, choose preferred units, change your password, adjust automatic sync, or sign out. The sync icon there starts a manual sync and shows when sync last succeeded.
 - Use the same navigation on phones, tablets, and desktop screens. On phones, it opens in a left Drawer.
 
-Accounts can register and each account can own multiple private breweries. Sync covers each full brewery; sharing, per-batch permissions and filtered sync are later targets. RAPT Pill ingestion and server Web Push reminders are specified in [DESIGN.md](DESIGN.md) but are not wired up yet. The equipment catalog is also planned; brewery-owned equipment can already be entered manually.
+Accounts can register and each account can own multiple private breweries. Sync covers each full brewery; sharing, per-batch permissions and filtered sync are later targets. RAPT Pill ingestion and server Web Push reminders are specified in [DESIGN.md](DESIGN.md) but are not wired up yet. A separate read-only `data/catalog.sqlite` holds example equipment and inventory entries. Signed-in devices keep a separate local SQLite copy for offline search; copying an entry creates an independent brewery-owned item. Catalog edits on the server require incrementing `catalog_meta.version` so devices download the new snapshot.
 
 ## Checks
 

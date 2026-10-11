@@ -1,6 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="Brewlog">
   <rect width="192" height="192" rx="40" fill="#193b39"/>
-  <path d="M53 58h86l-9 75c-2 19-16 29-34 29s-32-10-34-29z" fill="#e5aa56"/>
-  <path d="M48 58h96M66 87h60" fill="none" stroke="#fff4dd" stroke-width="10" stroke-linecap="round"/>
-  <circle cx="96" cy="120" r="8" fill="#fff4dd"/>
+  <path d="M47 48h98l-8 74c-3 24-19 40-41 40s-38-16-41-40z" fill="#e7b464"/>
+  <path d="M48 48h96M60 74h72" fill="none" stroke="#fff4dd" stroke-width="9" stroke-linecap="round"/>
+  <path d="M67 93h58l-3 28c-2 16-12 26-26 26s-24-10-26-26z" fill="#fff4dd" opacity=".82"/>
+  <path d="M78 103h36" stroke="#193b39" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="96" cy="127" r="7" fill="#193b39"/>
 </svg>

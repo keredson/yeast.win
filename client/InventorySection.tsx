@@ -1,19 +1,22 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Empty, Form, Input, InputNumber, Modal, Select, Tag } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
+import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
 import { addInventoryEntry, createInventoryItem, type InventoryItem, type LocalDb } from './db.ts';
 import { formatTime } from './time.ts';
 import type { PreferredUnits } from './api.ts';
 
 interface Movement { id: string; kind: string; quantity: number; unit: string; at: number }
 
-export function InventorySection({ db, accountId, items, preferredUnits, selectedId, onSelect, onChanged }: {
-  db: LocalDb; accountId: string; items: InventoryItem[]; preferredUnits: PreferredUnits;
+export function InventorySection({ db, accountId, items, catalog, preferredUnits, selectedId, onSelect, onChanged }: {
+  db: LocalDb; accountId: string; items: InventoryItem[]; catalog: CatalogInventory[]; preferredUnits: PreferredUnits;
   selectedId: string | null; onSelect: (id: string) => void; onChanged: () => Promise<void>;
 }) {
   const [movements, setMovements] = useState<Movement[]>([]);
   const [newItem, setNewItem] = useState(false);
   const [entryKind, setEntryKind] = useState<'purchase' | 'count' | null>(null);
   const [error, setError] = useState('');
+  const [itemForm] = Form.useForm();
   const item = items.find(row => row.id === selectedId) || null;
 
   async function refreshMovements() {
@@ -39,7 +42,7 @@ export function InventorySection({ db, accountId, items, preferredUnits, selecte
   async function create(values: { name: string; category: string; default_unit: string }) {
     try {
       const id = await createInventoryItem(db, values.name.trim(), values.category.trim(), values.default_unit.trim());
-      setNewItem(false); onSelect(id); await onChanged();
+      setNewItem(false); itemForm.resetFields(); onSelect(id); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
@@ -53,7 +56,7 @@ export function InventorySection({ db, accountId, items, preferredUnits, selecte
 
   return <div className="section-grid">
     <div className="section-sidebar"><div className="section-heading"><div><span className="eyebrow">Stock ledger</span><h1>Inventory</h1></div>
-      <Button type="primary" onClick={() => setNewItem(true)}>New</Button></div>
+      <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New inventory item" title="New inventory item" onClick={() => setNewItem(true)} /></div>
       <p className="muted">Purchases, uses from batches, and physical counts.</p>
       {items.length ? <div className="choice-list">{items.map(row => <button key={row.id}
         className={row.id === selectedId ? 'list-choice selected' : 'list-choice'} onClick={() => onSelect(row.id)}>
@@ -72,12 +75,18 @@ export function InventorySection({ db, accountId, items, preferredUnits, selecte
       </>}
     </div>
     <Modal title="New inventory item" open={newItem} onCancel={() => setNewItem(false)} footer={null} destroyOnHidden>
-      <Form layout="vertical" onFinish={create} initialValues={{ default_unit: preferredUnits.mass }}>
+      <Form form={itemForm} layout="vertical" onFinish={create}>
+        <Form.Item name="catalog_id" label="Find in shared inventory catalog">
+          <Select showSearch allowClear placeholder="Search common ingredients and supplies" optionFilterProp="label"
+            options={catalog.map(row => ({ value: row.id, label: `${row.name} · ${row.category}` }))}
+            onChange={value => { const entry = catalog.find(row => row.id === value);
+              if (entry) itemForm.setFieldsValue({ name: entry.name, category: entry.category,
+                default_unit: ['Grain', 'Hops', 'Nutrient'].includes(entry.category) ? preferredUnits.mass : entry.unit }); }} />
+        </Form.Item>
         <Form.Item name="name" label="Item" rules={[{ required: true }]}><Input placeholder="e.g. Maris Otter, 12 oz bottles" /></Form.Item>
-        <Form.Item name="category" label="Category" rules={[{ required: true }]}><Select options={[
-          'Grain', 'Hops', 'Yeast', 'Nutrient', 'Chemical', 'Packaging', 'Other'
-        ].map(value => ({ value, label: value }))} /></Form.Item>
-        <Form.Item name="default_unit" label="Usual unit" rules={[{ required: true }]}><Input placeholder="kg, g, bottle, packet…" /></Form.Item>
+        <Form.Item name="category" label="Category" rules={[{ required: true }]}><Select options={inventoryCategories.map(value => ({ value, label: value }))}
+          onChange={value => itemForm.setFieldValue('default_unit', unitForCategory(value, preferredUnits.mass))} /></Form.Item>
+        <Form.Item name="default_unit" label="Unit" rules={[{ required: true }]}><Input placeholder="g, ml, each, packet…" /></Form.Item>
         <Button type="primary" htmlType="submit">Create item</Button>
       </Form>
     </Modal>

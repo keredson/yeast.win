@@ -10,7 +10,7 @@ button, input, textarea { font: inherit; }
 .mobile-menu-button { display: none !important; }
 .brand strong { display: block; font-size: 23px; letter-spacing: -.03em; line-height: 1.05; }
 .brand small { display: block; margin-top: 4px; opacity: .72; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; }
-.brand-mark { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 13px; color: #193b39; background: #e7b464; font: 800 23px Georgia, serif; }
+.brand-mark { display: block; width: 40px; height: 40px; border-radius: 13px; }
 .header-controls { display: flex; align-items: center; gap: 10px; }
 .workspace-select { width: 200px; }
 .app-header .ant-btn { color: white; border-color: #56736f; background: transparent; }

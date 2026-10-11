@@ -10,6 +10,8 @@ import { RecipeSection } from './RecipeSection.tsx';
 import { InventorySection } from './InventorySection.tsx';
 import { EquipmentSection } from './EquipmentSection.tsx';
 import { AccountSection } from './AccountSection.tsx';
+import { openLocalCatalog, readLocalCatalog, syncLocalCatalog } from './catalog.ts';
+import type { CatalogEquipment, CatalogInventory } from '../shared/catalog.ts';
 
 type Section = 'batches' | 'recipes' | 'inventory' | 'equipment' | 'me';
 interface Route { section: Section; selectedId: string | null }
@@ -90,6 +92,8 @@ export function App() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
+  const [catalogEquipment, setCatalogEquipment] = useState<CatalogEquipment[]>([]);
+  const [catalogInventory, setCatalogInventory] = useState<CatalogInventory[]>([]);
   const [error, setError] = useState('');
   const [syncPhase, setSyncPhase] = useState<'idle' | 'syncing' | 'synced' | 'failed'>('idle');
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
@@ -125,6 +129,28 @@ export function App() {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    const load = async () => {
+      const catalogDb = await openLocalCatalog();
+      const cached = await readLocalCatalog(catalogDb);
+      if (!cancelled) { setCatalogEquipment(cached.equipment); setCatalogInventory(cached.inventory); }
+      try {
+        await syncLocalCatalog(catalogDb);
+        const updated = await readLocalCatalog(catalogDb);
+        if (!cancelled) { setCatalogEquipment(updated.equipment); setCatalogInventory(updated.inventory); }
+      } catch { /* Cached catalog remains searchable offline. */ }
+    };
+    const refreshCatalog = () => {
+      void load().catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
+    };
+    refreshCatalog();
+    const timer = window.setInterval(refreshCatalog, 5 * 60_000);
+    window.addEventListener('online', refreshCatalog);
+    return () => { cancelled = true; window.clearInterval(timer); window.removeEventListener('online', refreshCatalog); };
+  }, [session?.account.id]);
 
   useEffect(() => {
     if (location.pathname === '/') history.replaceState(null, '', '/batches');
@@ -249,7 +275,7 @@ export function App() {
       <div className="header-brand-row">
         <Button className="mobile-menu-button" type="text" shape="circle" aria-label="Open navigation"
           icon={<MenuOutlined />} onClick={() => setMenuOpen(true)} />
-        <div className="brand"><span className="brand-mark">B</span><div><strong>Brewlog</strong><small>Batch-first brewing</small></div></div>
+        <div className="brand"><img className="brand-mark" src="/icon.svg" alt="" /><div><strong>Brewlog</strong><small>Batch-first brewing</small></div></div>
       </div>
       <div className="header-controls">
         <Select className="workspace-select" value={workspaceId} placeholder="Select brewery"
@@ -293,9 +319,9 @@ export function App() {
               selectedId={route.selectedId} onSelect={id => showItem('recipes', id)}
               onChanged={changed} onBatchStarted={id => showItem('batches', id)} />}
             {section === 'inventory' && <InventorySection key={workspaceId} db={db} accountId={session.account.id} items={inventory}
-              preferredUnits={preferredUnits} selectedId={route.selectedId} onSelect={id => showItem('inventory', id)} onChanged={changed} />}
-            {section === 'equipment' && <EquipmentSection key={workspaceId} db={db} equipment={equipment}
-              selectedId={route.selectedId} onSelect={id => showItem('equipment', id)} onChanged={changed} />}
+              catalog={catalogInventory} preferredUnits={preferredUnits} selectedId={route.selectedId} onSelect={id => showItem('inventory', id)} onChanged={changed} />}
+            {section === 'equipment' && <EquipmentSection key={workspaceId} db={db} accountId={session.account.id} equipment={equipment}
+              catalog={catalogEquipment} selectedId={route.selectedId} onSelect={id => showItem('equipment', id)} onChanged={changed} />}
           </>}
       </main>
     </div>
@@ -324,7 +350,7 @@ function AccountAccess({ onAuthenticated }: { onAuthenticated: (session: Session
     finally { setBusy(false); }
   }
   return <div className="login-page"><Card className="login-card">
-    <div className="brand login-brand"><span className="brand-mark">B</span><div><strong>Brewlog</strong><small>Your batches, as they happened</small></div></div>
+    <div className="brand login-brand"><img className="brand-mark" src="/icon.svg" alt="" /><div><strong>Brewlog</strong><small>Your batches, as they happened</small></div></div>
     <div className="auth-switch" role="group" aria-label="Account access">
       <button type="button" className={mode === 'login' ? 'active' : ''} aria-pressed={mode === 'login'}
         onClick={() => { setMode('login'); setError(''); }}>Sign in</button>

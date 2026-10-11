@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Empty, Form, Input, Modal, Tag, Typography } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
 import { addBatchPlan, addPhoto, createBatch, eventDetails, listEvents, listPhotos, listPlans,
   recordEvent, type ActualEvent, type Batch, type Equipment, type InventoryItem, type LocalDb, type Plan } from './db.ts';
 import { kindLabel } from './constants.ts';
@@ -88,7 +89,7 @@ export function BatchSection({ db, accountId, batches, equipment, inventory, pre
   return <div className="section-grid">
     <div className="section-sidebar">
       <div className="section-heading"><div><span className="eyebrow">Your brewing record</span><h1>Batches</h1></div>
-        <Button type="primary" onClick={() => setNewBatch(true)}>New</Button></div>
+        <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New batch" title="New batch" onClick={() => setNewBatch(true)} /></div>
       <p className="muted">Plans, actions and readings, all around the batch.</p>
       {batches.length === 0 ? <Empty description="No batches yet" /> : <div className="choice-list">{batches.map(item =>
         <button key={item.id} className={item.id === selectedId ? 'list-choice selected' : 'list-choice'} onClick={() => onSelect(item.id)}>

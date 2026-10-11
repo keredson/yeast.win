@@ -2,6 +2,7 @@ import initWasm, { type DB } from '@vlcn.io/crsqlite-wasm';
 import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { nanoid } from 'nanoid';
 import { equipmentKinds } from '../shared/equipment.ts';
+import type { CatalogEquipment } from '../shared/catalog.ts';
 import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 
@@ -203,11 +204,12 @@ export async function listEquipment(db: DB): Promise<Equipment[]> {
   return db.execO<Equipment>('SELECT id, name, kind FROM equipment ORDER BY name COLLATE NOCASE');
 }
 
-export async function createEquipment(db: DB, name: string, kind: string): Promise<string> {
+export async function createEquipment(db: DB, name: string, kind: string, catalogModel?: CatalogEquipment): Promise<string> {
   if (!equipmentKinds.some(item => item.value === kind)) throw new Error('Choose a valid equipment kind');
+  if (catalogModel && catalogModel.kind !== kind) throw new Error('Catalog kind does not match equipment kind');
   const id = nanoid();
-  await db.exec('INSERT INTO equipment(id, name, kind, created_at) VALUES (?, ?, ?, ?)',
-    [id, name, kind, nowSeconds()]);
+  await db.exec('INSERT INTO equipment(id, name, kind, catalog_model_id, specification_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    [id, name, kind, catalogModel?.id || null, catalogModel?.specification_json || null, nowSeconds()]);
   return id;
 }
 

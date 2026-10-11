@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Empty, Form, Input, List, Modal, Tag, Typography } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
 import { addRecipePlan, createRecipe, listRecipePlans, startBatchFromRecipe,
   type LocalDb, type PlanInput, type Recipe } from './db.ts';
 import { PlanForm } from './PlanForm.tsx';
@@ -45,7 +46,7 @@ export function RecipeSection({ db, accountId, recipes, selectedId, onSelect, on
 
   return <div className="section-grid">
     <div className="section-sidebar">
-      <div className="section-heading"><div><span className="eyebrow">Planning</span><h1>Recipes</h1></div><Button type="primary" onClick={() => setNewRecipe(true)}>New</Button></div>
+      <div className="section-heading"><div><span className="eyebrow">Planning</span><h1>Recipes</h1></div><Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New recipe" title="New recipe" onClick={() => setNewRecipe(true)} /></div>
       <p className="muted">Reusable event plans. Starting a batch copies the plan into its own history.</p>
       {recipes.length === 0 ? <Empty description="No recipes yet" /> : <List dataSource={recipes} renderItem={item =>
         <button className={item.id === selectedId ? 'list-choice selected' : 'list-choice'} onClick={() => onSelect(item.id)}>

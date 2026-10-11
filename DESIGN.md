@@ -21,7 +21,7 @@ The app should work for a homebrewer with one operation and for an account that 
 | Database | Location | Sync | Purpose |
 | --- | --- | --- | --- |
 | Auth DB | Server only | Never synced as a database to browsers | Login/session data, account avatars, preferred units, integration credentials, push subscriptions, and server jobs. Later: workspace memberships and sharing grants. |
-| Known-equipment DB | Server and devices | Read-only to clients | Community or curated equipment models and their published specifications. A user copies a model into a workspace before customizing it. |
+| Shared catalog DB | Server and devices | Read-only to clients | Common equipment and inventory templates. The server stores `catalog.sqlite`; devices keep a separate persistent SQLite copy and refresh it by version. Copying a template creates an independent brewery item. The first catalog contains a small set of examples. |
 | Workspace DB | Server and authorized devices | Whole-DB sync initially; filtered batch sync later | Batches, plans, actual events, equipment instances, calibrations, inventory, and photos. One DB represents a brewery, not an account or a batch. |
 
 The UI calls each operation a **brewery**; APIs and database tables retain `workspace` as their internal name. An account can own several private breweries. A shared batch stays in its brewery's workspace DB. Batch sharing, follower databases, and workspace membership are **later implementation targets**; they do not block the initial whole-workspace app.

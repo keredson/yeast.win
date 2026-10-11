@@ -4,12 +4,14 @@ import { resolve, extname, sep } from 'node:path';
 import type Database from 'better-sqlite3';
 import { accountForToken, changePassword, clearSessionCookie, getAvatar, getPreferredUnits, login, logout,
   readSessionCookie, register, saveAvatar, savePreferredUnits, sessionCookie } from './auth.ts';
-import { closeWorkspaceDb, createWorkspace, openAuthDb, openWorkspaceDb } from './db.ts';
+import { closeWorkspaceDb, createWorkspace, dataDir, openAuthDb, openWorkspaceDb } from './db.ts';
+import { catalogSnapshot, openCatalogDb } from './catalog.ts';
 import { syncWorkspace, validateSyncRequest } from './sync.ts';
 import { isValidId } from '../shared/schema.ts';
 import { validPreferredUnits } from '../shared/units.ts';
 
 const authDb = openAuthDb();
+const catalogDb = openCatalogDb(dataDir);
 const workspaceDbs = new Map<string, Database.Database>();
 const distDir = resolve('dist');
 const port = Number(process.env.BREWLOG_PORT || 3001);
@@ -149,6 +151,10 @@ const server = createServer(async (req, res) => {
     if (pathname === '/api/me' && req.method === 'GET') {
       return json(res, 200, { account, workspaces: ownerWorkspaces(account.id), preferred_units: getPreferredUnits(authDb, account.id) });
     }
+    if (pathname === '/api/catalog' && req.method === 'GET') {
+      const version = Number(url.searchParams.get('version') || 0);
+      return json(res, 200, catalogSnapshot(catalogDb, Number.isSafeInteger(version) && version >= 0 ? version : 0));
+    }
     if (pathname === '/api/me/preferences' && req.method === 'PATCH') {
       const units = await readJson(req, 4 * 1024);
       if (!validPreferredUnits(units)) return json(res, 400, { error: 'Choose valid preferred units' });
@@ -232,6 +238,7 @@ function shutdown() {
   server.close();
   for (const db of workspaceDbs.values()) closeWorkspaceDb(db);
   authDb.close();
+  catalogDb.close();
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

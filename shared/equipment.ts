@@ -7,10 +7,12 @@ export const equipmentKinds = [
   { value: 'temperature_controller', label: 'Temperature controller' },
   { value: 'pump', label: 'Pump' },
   { value: 'hydrometer', label: 'Hydrometer' },
+  { value: 'thermometer', label: 'Thermometer' },
   { value: 'refractometer', label: 'Refractometer' },
   { value: 'ph_meter', label: 'pH meter' },
   { value: 'pressure_gauge', label: 'Pressure gauge' },
   { value: 'carbonation_meter', label: 'Carbonation meter' },
+  { value: 'dissolved_oxygen_meter', label: 'Dissolved oxygen meter' },
   { value: 'scale', label: 'Scale' },
   { value: 'other', label: 'Other equipment' }
 ] as const;

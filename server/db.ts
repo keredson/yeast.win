@@ -5,7 +5,7 @@ import { nanoid } from 'nanoid';
 import { indexStatements, nowSeconds, replicatedTables, schemaStatements } from '../shared/schema.ts';
 
 if (existsSync('.env')) process.loadEnvFile('.env');
-const dataDir = resolve(process.env.BREWLOG_DATA_DIR || './data');
+export const dataDir = resolve(process.env.BREWLOG_DATA_DIR || './data');
 const extensionPath = resolve('vendor/crsqlite.so');
 mkdirSync(dataDir, { recursive: true });
 
