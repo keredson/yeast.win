@@ -12,19 +12,26 @@ The app should work for a homebrewer with one operation and for an account that 
 
 - **Client:** React PWA with SQLite in the browser. Reads, timelines, calculations, charts, and analysis run on the device. Writes work offline and sync later. A service worker caches the app shell; it is not the database authority.
 - **UI:** Ant Design is a candidate for desktop and tablet workflows. Prototype the phone-sized brew-day screen before choosing between Ant Design and Ant Design Mobile for the main UI. Component selection does not affect the data model.
-- **Server:** A small service on our own machine handles authentication, authorization, sync, sensor ingestion, push scheduling, and backups. It does not run UI analysis queries. SQLite is the server storage engine.
+- **Server:** A small Node.js service written in TypeScript runs on our own machine. It handles login, whole-workspace sync, sensor ingestion, push scheduling, and backups. It does not run UI analysis queries. SQLite is the server storage engine. The same TypeScript definitions can describe event payloads and sync messages on client and server; runtime input validation is still required.
 - **Exposure:** `cloudflared` publishes the app and API on a stable HTTPS hostname through Cloudflare Tunnel. Prefer one origin for the PWA and API. No Cloudflare Worker is required for each sync request. If the machine or tunnel is down, the installed PWA remains usable locally, but sync, sensor ingestion, and server-triggered reminders pause.
-- **Replication:** Evaluate `cr-sqlite` CRRs for mergeable tables and implement the browser/server transport over HTTPS, with WebSockets if useful. The transport and authorization layer belong to Brewlog; CR-SQLite does not provide those policies.
+- **Replication:** Evaluate `cr-sqlite` CRRs for mergeable tables and implement the browser/server transport over HTTPS, with WebSockets if useful. Start with whole-workspace sync. The transport belongs to Brewlog; CR-SQLite does not provide application authorization policies.
 
 ### Database boundaries
 
 | Database | Location | Sync | Purpose |
 | --- | --- | --- | --- |
-| Auth DB | Server only | Never to browsers | Accounts, sessions, workspace memberships, sharing grants, integration credentials, push subscriptions, and server jobs. |
+| Auth DB | Server only | Never to browsers | Initially login/session data, integration credentials, push subscriptions, and server jobs. Later: workspace memberships and sharing grants. |
 | Known-equipment DB | Server and devices | Read-only to clients | Community or curated equipment models and their published specifications. A user copies a model into a workspace before customizing it. |
-| Workspace DB | Server and authorized devices | Read/write for members; filtered read or write for batch followers | Batches, plans, actual events, equipment instances, calibrations, inventory, and photos. One DB represents an operation, not an account or a batch. |
+| Workspace DB | Server and authorized devices | Whole-DB sync initially; filtered batch sync later | Batches, plans, actual events, equipment instances, calibrations, inventory, and photos. One DB represents an operation, not an account or a batch. |
 
-An account can own or join several workspaces. A shared batch remains in its workspace DB. A follower may keep a local **following DB** containing only the rows authorized for that batch rather than downloading the whole workspace. Granting full workspace access is a separate permission from sharing an individual batch.
+An account may eventually own or join several workspaces. A shared batch stays in its workspace DB. Batch sharing, follower databases, and workspace membership are **later implementation targets**; they do not block the initial single-owner, whole-workspace app.
+
+### Implementation phases
+
+1. **Initial:** One owner account, one or more workspace DBs, full local copies on that owner's devices, authenticated whole-workspace sync, batches and plans, and the first useful event types. Add RAPT ingestion and reminders as the batch workflow matures.
+2. **Later:** Multiple accounts, workspace membership, per-batch read and read/write grants, filtered sync into following DBs, server-side enforcement of incoming writes, and revocation behavior. Complete a filtered-sync proof of concept before exposing any shared batch.
+
+Keep IDs, provenance, and batch ownership explicit from the start so the later phase has the information it needs. Initial authentication still protects a machine exposed through Cloudflare Tunnel; it does not imply a full permission system.
 
 ## Data conventions
 
@@ -108,13 +115,15 @@ Inventory is a ledger, not a mutable `quantity_on_hand` field. Additions and pac
 
 ## Sync and authorization
 
-For full workspace members, sync CRR changes between the device and the workspace DB. `crsql_changes.db_version` is the replication cursor; `received_at` is for provenance and ingest ordering, not for completeness of sync. Retain source site IDs and use idempotent application/retry. HTTPS request/response is sufficient for correctness; WebSockets can reduce latency.
+Initially, sync all CRR changes between the owner's device and each workspace DB it opens. `crsql_changes.db_version` is the replication cursor; `received_at` is for provenance and ingest ordering, not for completeness of sync. Retain source site IDs and use idempotent application/retry. Transport 64-bit SQLite cursor values as BigInt or decimal strings rather than assuming every value fits a JavaScript `number`. HTTPS request/response is sufficient for correctness; WebSockets can reduce latency. Authentication is required, but there is no per-batch permission filtering in the initial implementation.
+
+### Later: sharing and filtered sync
 
 For a batch follower, the server must authorize **each incoming and outgoing change**. It may scan a workspace changeset and filter in memory, then stream authorized changes, provided benchmarks show this is acceptable. Every child row, photo, and delete must be mapped to its batch even if a deletion change carries only an opaque row ID. Keep the mapping/tombstone information needed for that decision, and avoid syncing unrelated recipes, inventory, private equipment details, or other batches as accidental dependencies. Batch membership in a row cannot be mutable without reworking this scheme.
 
 Read-only followers get a read-only UI. The server rejects their writes regardless of what someone does to a local SQLite file. Write access to a batch requires server validation of the entire proposed change, including referenced rows. Revoking a grant stops future sync, but cannot erase data a device already downloaded while authorized; local following DBs should be purged on the next contact.
 
-**Major feasibility gate:** upstream CR-SQLite documents partial CRR sync as possible with its primitives but unsupported and not advised, and says its change indexes are not optimized for multi-tenant filtering. This architecture therefore needs a focused proof of concept before production use: two batches in one workspace, a follower for only one, updates and deletes in parent/child rows, photos, permission changes, concurrent offline edits, and reconnects. If safe filtered sync proves too fragile, revisit the replication boundary rather than assuming CR-SQLite supplies row-level security.
+**Later-phase feasibility gate:** upstream CR-SQLite documents partial CRR sync as possible with its primitives but unsupported and not advised, and says its change indexes are not optimized for multi-tenant filtering. Before implementing sharing, build a focused proof of concept: two batches in one workspace, a follower for only one, updates and deletes in parent/child rows, photos, permission changes, concurrent offline edits, and reconnects. If safe filtered sync proves too fragile, revisit the replication boundary rather than assuming CR-SQLite supplies row-level security.
 
 CRR tables also cannot rely on checked foreign keys, non-primary-key uniqueness, or cross-column checks. Validate relationships on local writes and at the server sync boundary, and audit/repair orphaned data. The server-only auth DB can use ordinary SQLite constraints.
 
@@ -134,7 +143,7 @@ CRR tables also cannot rely on checked foreign keys, non-primary-key uniqueness,
 
 ## Decisions still open
 
-1. Prove CR-SQLite partial batch sync, especially delete authorization, dependent rows, photos, and revocation. Decide whether following DBs are per source workspace or per grant.
+1. **Later sharing phase:** Prove CR-SQLite partial batch sync, especially delete authorization, dependent rows, photos, and revocation. Decide whether following DBs are per source workspace or per grant.
 2. Select and test browser SQLite persistence (for example OPFS versus the library's IndexedDB-backed path), including large databases and interrupted writes.
 3. Define correction/supersession UI, tie handling for same-second events, and how an anchored plan resolves if its anchor is skipped or fulfilled more than once.
 4. Finalize measurement units and uncertainty representations for gravity, carbonation, dissolved oxygen, and pressure; define dimension-safe conversion rules for inventory.
@@ -147,4 +156,5 @@ CRR tables also cannot rely on checked foreign keys, non-primary-key uniqueness,
 - [CR-SQLite partial CRR sync status](https://vlcn.io/docs/cr-sqlite/networking/partial-crr-sync)
 - [CR-SQLite constraint limitations](https://vlcn.io/docs/cr-sqlite/constraints)
 - [CR-SQLite change API](https://vlcn.io/docs/cr-sqlite/api-methods/crsql_changes)
+- [CR-SQLite in Node.js with a loadable SQLite extension](https://vlcn.io/docs/cr-sqlite/js/nodejs)
 - [Cloudflare Tunnel published applications](https://developers.cloudflare.com/tunnel/concepts/routing/)
