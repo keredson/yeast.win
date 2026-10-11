@@ -2,7 +2,7 @@ import type { BinaryWire, IntegerWire, WireChange, WireValue } from './schema.ts
 
 export interface SqlChangeRow {
   table: string;
-  pk: string;
+  pk: Uint8Array;
   cid: string;
   val: unknown;
   col_version: number | bigint;
@@ -42,7 +42,7 @@ export function decodeValue(value: WireValue): string | number | bigint | Uint8A
 export function encodeChange(row: SqlChangeRow): WireChange {
   return {
     table: row.table,
-    pk: row.pk,
+    pk: { type: 'binary', base64: bytesToBase64(row.pk) },
     cid: row.cid,
     val: encodeValue(row.val),
     col_version: String(row.col_version),
@@ -53,10 +53,10 @@ export function encodeChange(row: SqlChangeRow): WireChange {
   };
 }
 
-export function decodeChange(change: WireChange): [string, string, string, string | number | bigint | Uint8Array | null, bigint, bigint, Uint8Array, bigint, bigint] {
+export function decodeChange(change: WireChange): [string, Uint8Array, string, string | number | bigint | Uint8Array | null, bigint, bigint, Uint8Array, bigint, bigint] {
   return [
     change.table,
-    change.pk,
+    base64ToBytes(change.pk.base64),
     change.cid,
     decodeValue(change.val),
     BigInt(change.col_version),

@@ -11,6 +11,7 @@
     "start": "node --import tsx server/index.ts",
     "test": "tsx --test tests/*.test.ts",
     "setup:sqlite": "bash scripts/setup-sqlite.sh",
+    "smoke:browser": "node scripts/smoke-browser.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -23,12 +24,13 @@
     "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "6.1.2",
     "@types/better-sqlite3": "7.6.13",
     "@types/node": "22.18.6",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
+    "@vitejs/plugin-react": "6.1.2",
     "concurrently": "9.2.1",
+    "playwright-core": "1.64.0",
     "tsx": "4.23.15",
     "typescript": "5.9.3",
     "vite": "8.3.4",

@@ -11,7 +11,7 @@ The app should work for a homebrewer with one operation and for an account that 
 ## Architecture
 
 - **Client:** React PWA with SQLite in the browser. Reads, timelines, calculations, charts, and analysis run on the device. Writes work offline and sync later. A service worker caches the app shell; it is not the database authority.
-- **UI:** Ant Design is a candidate for desktop and tablet workflows. Prototype the phone-sized brew-day screen before choosing between Ant Design and Ant Design Mobile for the main UI. Component selection does not affect the data model.
+- **UI:** One responsive PWA must work on mobile, tablet, and desktop. Use Ant Design components where they fit, with layouts and touch targets adapted to each viewport. Prototype the batch timeline and event-entry flow at all three sizes. Component selection does not affect the data model.
 - **Server:** A small Node.js service written in TypeScript runs on our own machine. It handles login, whole-workspace sync, sensor ingestion, push scheduling, and backups. It does not run UI analysis queries. SQLite is the server storage engine. The same TypeScript definitions can describe event payloads and sync messages on client and server; runtime input validation is still required.
 - **Exposure:** `cloudflared` publishes the app and API on a stable HTTPS hostname through Cloudflare Tunnel. Prefer one origin for the PWA and API. No Cloudflare Worker is required for each sync request. If the machine or tunnel is down, the installed PWA remains usable locally, but sync, sensor ingestion, and server-triggered reminders pause.
 - **Replication:** Evaluate `cr-sqlite` CRRs for mergeable tables and implement the browser/server transport over HTTPS, with WebSockets if useful. Start with whole-workspace sync. The transport belongs to Brewlog; CR-SQLite does not provide application authorization policies.
@@ -148,7 +148,7 @@ CRR tables also cannot rely on checked foreign keys, non-primary-key uniqueness,
 3. Define correction/supersession UI, tie handling for same-second events, and how an anchored plan resolves if its anchor is skipped or fulfilled more than once.
 4. Finalize measurement units and uncertainty representations for gravity, carbonation, dissolved oxygen, and pressure; define dimension-safe conversion rules for inventory.
 5. Verify the current RAPT integration path and notification behavior on the browsers we intend to support.
-6. Prototype a phone-sized batch timeline and event-entry flow before settling on Ant Design or Ant Design Mobile.
+6. Test the batch timeline and event-entry flow at mobile, tablet, and desktop widths, including touch use and keyboard use.
 
 ## References for implementation constraints
 

@@ -57,7 +57,7 @@ export type WireValue = string | number | null | BinaryWire | IntegerWire;
 
 export interface WireChange {
   table: string;
-  pk: string;
+  pk: BinaryWire;
   cid: string;
   val: WireValue;
   col_version: string;
@@ -89,7 +89,7 @@ export function validateChange(input: unknown): input is WireChange {
   if (!input || typeof input !== 'object') return false;
   const c = input as Partial<WireChange>;
   return typeof c.table === 'string' && replicatedTables.includes(c.table)
-    && typeof c.pk === 'string' && c.pk.length < 512
+    && !!c.pk && c.pk.type === 'binary' && typeof c.pk.base64 === 'string' && c.pk.base64.length < 512
     && typeof c.cid === 'string' && c.cid.length < 100
     && typeof c.col_version === 'string' && /^\d+$/.test(c.col_version)
     && typeof c.db_version === 'string' && /^\d+$/.test(c.db_version)

@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { nanoid } from 'nanoid';
-import { changeColumns, nowSeconds, type SyncRequest } from '../shared/schema.ts';
+import { changeColumns, nowSeconds, type SyncRequest, validateChange, } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 
 process.env.BREWLOG_DATA_DIR = mkdtempSync(join(tmpdir(), 'brewlog-sync-'));
@@ -38,6 +38,7 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
       .run(batchB, 'B', 'active', timestamp, timestamp);
 
     const outgoing = (first.prepare(selectChanges).all(0) as SqlChangeRow[]).map(encodeChange);
+    assert.ok(outgoing.every(validateChange));
     const request: SyncRequest = { serverCursor: '0', localCursor: '0', changes: outgoing };
     const response = syncWorkspace(second, request);
     assert.equal((second.prepare('SELECT COUNT(*) AS count FROM batches').get() as { count: number }).count, 2);

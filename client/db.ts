@@ -244,7 +244,16 @@ function stateValue(db: DB, key: string): Promise<string> {
     .then(rows => rows[0]?.value || '0');
 }
 
-export async function syncNow(db: DB, workspaceId: string): Promise<number> {
+const syncQueues = new WeakMap<DB, Promise<void>>();
+
+export function syncNow(db: DB, workspaceId: string): Promise<number> {
+  const previous = syncQueues.get(db) || Promise.resolve();
+  const current = previous.catch(() => undefined).then(() => performSync(db, workspaceId));
+  syncQueues.set(db, current.then(() => undefined, () => undefined));
+  return current;
+}
+
+async function performSync(db: DB, workspaceId: string): Promise<number> {
   const [serverCursor, localCursor] = await Promise.all([
     stateValue(db, 'serverCursor'), stateValue(db, 'localCursor')
   ]);
