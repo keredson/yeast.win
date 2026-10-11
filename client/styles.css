@@ -43,8 +43,8 @@ button, input, textarea { font: inherit; }
 .app-main { min-height: 65vh; }
 .section-page { min-width: 0; }
 .record-index { max-width: 980px; }
+.equipment-index { max-width: none; }
 .record-detail { max-width: 1050px; }
-.back-link { padding-left: 0 !important; margin: -3px 0 15px; }
 .record-list, .card-stack, .group-tables { display: flex; flex-direction: column; gap: 12px; }
 .record-list { margin-top: 22px; }
 .record-link { display: block; padding: 18px 20px; background: white; border: 1px solid #dce4d9; border-radius: 12px; color: #263c36; text-decoration: none; }
@@ -53,7 +53,10 @@ button, input, textarea { font: inherit; }
 .record-link small { color: #728079; margin-top: 5px; font-size: 13px; }
 .group-tables { margin-top: 24px; gap: 30px; }
 .group-table h2 { margin: 0 0 10px; font-size: 20px; }
-.group-table .ant-table-wrapper { overflow-x: auto; }
+.group-table { min-width: 0; width: 100%; }
+.group-table .ant-table-wrapper { width: 100%; }
+.capacity-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(110px, 1fr); gap: 12px; }
+.nav-recent-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .section-heading, .content-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
 .section-heading h1, .content-heading h2 { margin: 4px 0 8px; letter-spacing: -.04em; line-height: 1.15; }
 .section-heading h1 { font-size: 34px; }

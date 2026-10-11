@@ -38,7 +38,7 @@ async function navigateSection(page, section) {
   const mobile = await page.getByRole('button', { name: 'Open navigation' }).isVisible();
   if (mobile) await page.getByRole('button', { name: 'Open navigation' }).click();
   const nav = mobile ? page.locator('.ant-drawer').last() : page.locator('.app-nav');
-  await nav.locator('.ant-menu-submenu-title').filter({ hasText: section }).click();
+  await nav.locator('.ant-menu-item').filter({ hasText: section }).first().click();
   await page.getByRole('heading', { name: section, exact: true }).waitFor();
 }
 
@@ -158,12 +158,12 @@ try {
         await openBatch(page, batchName);
         const columns = await page.locator('.batch-columns').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length);
         if (columns !== 1) throw new Error('Batch detail should have one content column');
-        if (!await page.getByRole('button', { name: 'All batches' }).isVisible()) throw new Error('Batch detail lacks index link');
+        if (await page.getByRole('button', { name: 'All batches' }).count()) throw new Error('Batch detail has a duplicate back button');
         if (width > 720 && !await page.locator('.app-nav .ant-menu-item').filter({ hasText: batchName }).isVisible()) {
           throw new Error('Recent batch link is hidden in the desktop navigation');
         }
-        if (width > 720 && !await page.locator('.app-nav .ant-menu-submenu-open').filter({ hasText: 'Batches' }).count()) {
-          throw new Error('Active navigation section should stay expanded');
+        if (width > 720 && !await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Batches' }).first().count()) {
+          throw new Error('Batches navigation link is missing');
         }
       }
       if (section === 'Batches' || name.includes('mobile')) {
@@ -177,24 +177,29 @@ try {
     throw new Error('Desktop navigation is not an Ant Design Sider');
   }
   await page.getByRole('button', { name: 'New equipment' }).click();
+  await page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Type' }).fill('pH meter');
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'pH meter' }).last().click();
   await page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Find in shared equipment catalog' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'pH meter' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'pH meter' }).last().click();
   await page.getByRole('dialog', { name: 'New equipment' }).getByLabel('Name').fill('Smoke pH meter');
   await page.getByRole('button', { name: 'Create equipment' }).click();
   await page.getByRole('heading', { name: 'Smoke pH meter' }).waitFor();
   if (!/^\/equipment\/[A-Za-z0-9_-]{10,32}$/.test(new URL(page.url()).pathname)) throw new Error('Equipment detail URL was not set');
-  await page.getByRole('button', { name: 'New calibration' }).click();
+  await page.getByRole('button', { name: 'Equipment settings' }).click();
+  await page.getByRole('menuitem', { name: 'New calibration' }).click();
   await page.getByRole('spinbutton', { name: 'pH 4.00 buffer reading' }).fill('4.01');
   await page.getByRole('spinbutton', { name: 'pH 7.00 buffer reading' }).fill('7.02');
   await page.getByRole('button', { name: 'Save calibration' }).click();
   await page.getByText('Two-point pH').waitFor();
-  await page.getByRole('button', { name: 'All equipment' }).click();
+  await navigateSection(page, 'Equipment');
   await page.getByRole('button', { name: 'New equipment' }).click();
-  await page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Find in shared equipment catalog' }).click();
+  await page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Type' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Thermometer' }).click();
+  await page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Find in shared equipment catalog' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Thermometer' }).last().click();
   await page.getByRole('button', { name: 'Create equipment' }).click();
   await page.getByRole('heading', { name: 'Thermometer', exact: true }).waitFor();
-  await page.getByRole('button', { name: 'All equipment' }).click();
+  await navigateSection(page, 'Equipment');
   if (await page.locator('.group-table').count() !== 2) throw new Error('Equipment kinds should have separate tables');
   await page.setViewportSize({ width: 320, height: 720 });
   if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw new Error('Grouped equipment tables overflow a narrow phone');
@@ -215,11 +220,13 @@ try {
   await navigateSection(page, 'Equipment');
   await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Smoke pH meter' }).click();
   await page.getByRole('heading', { name: 'Smoke pH meter' }).waitFor();
-  await page.getByRole('button', { name: 'Delete equipment' }).click();
+  await page.getByRole('button', { name: 'Equipment settings' }).click();
+  await page.getByRole('menuitem', { name: 'Delete equipment' }).click();
   await page.getByRole('dialog', { name: 'Delete equipment?' }).getByRole('button', { name: 'Delete' }).click();
   await page.waitForURL('**/equipment');
   await page.locator('.group-table a').filter({ hasText: 'Thermometer' }).click();
-  await page.getByRole('button', { name: 'Delete equipment' }).click();
+  await page.getByRole('button', { name: 'Equipment settings' }).click();
+  await page.getByRole('menuitem', { name: 'Delete equipment' }).click();
   await page.getByRole('dialog', { name: 'Delete equipment?' }).getByRole('button', { name: 'Delete' }).click();
   await page.waitForURL('**/equipment');
   await page.getByText('No equipment yet').waitFor();
@@ -237,19 +244,23 @@ try {
   await page.waitForURL('**/recipes');
   await navigateSection(page, 'Inventory');
   await page.getByRole('button', { name: 'New inventory item' }).click();
+  await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Type' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Grain' }).click();
   await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Find in shared inventory catalog' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Maris Otter malt' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Maris Otter malt' }).last().click();
   await page.getByLabel('Item', { exact: true }).fill('Smoke grain');
   if (await page.getByRole('dialog', { name: 'New inventory item' }).locator('#default_unit').inputValue() !== 'g') throw new Error('Grain unit default was not set');
   await page.getByRole('button', { name: 'Create item' }).click();
   await page.waitForURL(url => /^\/inventory\/[A-Za-z0-9_-]{10,32}$/.test(url.pathname));
-  await page.getByRole('button', { name: 'All inventory' }).click();
+  await navigateSection(page, 'Inventory');
   await page.getByRole('button', { name: 'New inventory item' }).click();
+  await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Type' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Packaging' }).click();
   await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Find in shared inventory catalog' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: '12 oz bottle' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: '12 oz bottle' }).last().click();
   if (await page.getByRole('dialog', { name: 'New inventory item' }).locator('#default_unit').inputValue() !== 'each') throw new Error('Packaging unit default was not set');
   await page.getByRole('button', { name: 'Create item' }).click();
-  await page.getByRole('button', { name: 'All inventory' }).click();
+  await navigateSection(page, 'Inventory');
   if (await page.locator('.group-table').count() !== 2) throw new Error('Inventory categories should have separate tables');
   await page.setViewportSize({ width: 320, height: 720 });
   if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw new Error('Grouped inventory tables overflow a narrow phone');
@@ -258,6 +269,8 @@ try {
   await page.goto(`${baseUrl}/inventory`);
   await page.getByRole('heading', { name: 'Inventory', exact: true }).waitFor();
   await page.getByRole('button', { name: 'New inventory item' }).click();
+  await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Type' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Grain' }).click();
   await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Find in shared inventory catalog' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Maris Otter malt' }).waitFor();
   await page.getByRole('dialog', { name: 'New inventory item' }).locator('.ant-modal-close').click();

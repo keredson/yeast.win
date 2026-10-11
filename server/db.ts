@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { nanoid } from 'nanoid';
-import { indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, workspaceV2Statements } from '../shared/schema.ts';
+import { indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, workspaceV2Statements, workspaceV3Statements } from '../shared/schema.ts';
 
 if (existsSync('.env')) process.loadEnvFile('.env');
 export const dataDir = resolve(process.env.BREWLOG_DATA_DIR || './data');
@@ -107,11 +107,15 @@ export function openWorkspaceDb(id: string): Database.Database {
       db.close();
       throw error;
     }
-  } else if (row.version === 1) {
+  } else if (row.version === 1 || row.version === 2) {
     db.exec('BEGIN');
     try {
-      for (const statement of workspaceV2Statements) db.exec(statement);
-      db.prepare('SELECT crsql_as_crr(?)').get('equipment_archives');
+      if (row.version < 2) {
+        for (const statement of workspaceV2Statements) db.exec(statement);
+        db.prepare('SELECT crsql_as_crr(?)').get('equipment_archives');
+      }
+      for (const statement of workspaceV3Statements) db.exec(statement);
+      db.prepare('SELECT crsql_as_crr(?)').get('inventory_item_specs');
       db.prepare('UPDATE schema_meta SET version = ?').run(workspaceSchemaVersion);
       db.exec('COMMIT');
     } catch (error) {

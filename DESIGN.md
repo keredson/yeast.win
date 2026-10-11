@@ -21,7 +21,7 @@ The app should work for a homebrewer with one operation and for an account that 
 | Database | Location | Sync | Purpose |
 | --- | --- | --- | --- |
 | Auth DB | Server only | Never synced as a database to browsers | Login/session data, account avatars, preferred units, integration credentials, push subscriptions, and server jobs. Later: workspace memberships and sharing grants. |
-| Shared catalog DB | Server and devices | Read-only to clients | Common equipment and inventory templates. The server stores `catalog.sqlite`; devices keep a separate persistent SQLite copy and refresh it by version. Copying a template creates an independent brewery item. The first catalog contains a small set of examples. |
+| Shared catalog DB | Server and devices | Read-only to clients | Common equipment and inventory templates. The server stores `catalog.sqlite`; devices keep a separate persistent SQLite copy and refresh it by version. Copying a template creates an independent brewery item. Templates include common ingredients, supplies, vessels, and instruments. |
 | Workspace DB | Server and authorized devices | Whole-DB sync initially; filtered batch sync later | Batches, plans, actual events, equipment instances, calibrations, inventory, and photos. One DB represents a brewery, not an account or a batch. |
 
 The UI calls each operation a **brewery**; APIs and database tables retain `workspace` as their internal name. An account can own several private breweries. A shared batch stays in its brewery's workspace DB. Batch sharing, follower databases, and workspace membership are **later implementation targets**; they do not block the initial whole-workspace app.
@@ -95,7 +95,7 @@ If one fridge serves several batches, record the relevant temperature-control ev
 
 | Table | Main fields and role |
 | --- | --- |
-| `equipment` | Workspace-owned physical items: kettle, controller, chiller, fermenter, fridge, hydrometer, pH meter, etc. May retain a source catalog model ID and a copied specification. Consumable bottles belong in inventory. |
+| `equipment` | Workspace-owned physical items: kettle, controller, chiller, fermenter, fridge, hydrometer, pH meter, etc. May retain a source catalog model ID and a copied specification, including capacity in liters. Consumable bottles belong in inventory. |
 | `equipment_archives` | Hides equipment used by events from active lists while retaining the referenced equipment and calibration rows for history. Unused equipment can be deleted outright. |
 | `equipment_calibrations` | Immutable records of calibration parameters, method, effective time, and author. Measurements link to the calibration used at capture time. |
 | `equipment_characterization_observations` | Observed power, temperatures, volumes, time, and evaporation/heat-loss data used to fit kettle behavior. |
@@ -107,6 +107,7 @@ Measurements store **corrected values** and per-reading uncertainty. The calibra
 | Table | Main fields and role |
 | --- | --- |
 | `inventory_items` | Distinct stock identities, such as a specific grain variety, yeast, nutrient, bottle, or other supply; category and default display unit. |
+| `inventory_item_specs` | Optional capacity per inventory item, stored in liters for bottles, kegs, and other containers. This is separate from stock quantity and unit. |
 | `inventory_purchases` | Quantity and unit added, date, supplier/lot/cost when known. |
 | `inventory_counts` | A dated assertion that a quantity of an item was physically on hand. This anchors later balance calculations. |
 

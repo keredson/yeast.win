@@ -3,7 +3,7 @@ import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { nanoid } from 'nanoid';
 import { equipmentKinds } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, workspaceV2Statements, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
+import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, workspaceV2Statements, workspaceV3Statements, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 
 export type LocalDb = DB;
@@ -17,8 +17,8 @@ export interface ActualEvent {
   id: string; batch_id: string; event_type: string; actual_at: number; planned_event_id: string | null;
   note: string | null; source_id: string | null;
 }
-export interface Equipment { id: string; name: string; kind: string }
-export interface InventoryItem { id: string; name: string; category: string; default_unit: string }
+export interface Equipment { id: string; name: string; kind: string; specification_json: string | null }
+export interface InventoryItem { id: string; name: string; category: string; default_unit: string; capacity_liters: number | null }
 
 let sqlitePromise: ReturnType<typeof initWasm> | undefined;
 const opened = new Map<string, Promise<DB>>();
@@ -39,10 +39,14 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
           await tx.exec('CREATE TABLE sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
           await tx.exec('INSERT INTO schema_meta(version) VALUES (?)', [workspaceSchemaVersion]);
         });
-      } else if (version[0].version === 1) {
+      } else if (version[0].version === 1 || version[0].version === 2) {
         await db.tx(async tx => {
-          for (const statement of workspaceV2Statements) await tx.exec(statement);
-          await tx.exec('SELECT crsql_as_crr(?)', ['equipment_archives']);
+          if (version[0].version < 2) {
+            for (const statement of workspaceV2Statements) await tx.exec(statement);
+            await tx.exec('SELECT crsql_as_crr(?)', ['equipment_archives']);
+          }
+          for (const statement of workspaceV3Statements) await tx.exec(statement);
+          await tx.exec('SELECT crsql_as_crr(?)', ['inventory_item_specs']);
           await tx.exec('UPDATE schema_meta SET version = ?', [workspaceSchemaVersion]);
         });
       } else if (version[0].version !== workspaceSchemaVersion) {
@@ -207,17 +211,28 @@ export async function eventDetails(db: DB, event: ActualEvent): Promise<string> 
 }
 
 export async function listEquipment(db: DB): Promise<Equipment[]> {
-  return db.execO<Equipment>(`SELECT id, name, kind FROM equipment
+  return db.execO<Equipment>(`SELECT id, name, kind, specification_json FROM equipment
     WHERE id NOT IN (SELECT equipment_id FROM equipment_archives) ORDER BY name COLLATE NOCASE`);
 }
 
-export async function createEquipment(db: DB, name: string, kind: string, catalogModel?: CatalogEquipment): Promise<string> {
+export async function createEquipment(db: DB, name: string, kind: string, catalogModel?: CatalogEquipment,
+  capacityLiters?: number | null): Promise<string> {
   if (!equipmentKinds.some(item => item.value === kind)) throw new Error('Choose a valid equipment kind');
   if (catalogModel && catalogModel.kind !== kind) throw new Error('Catalog kind does not match equipment kind');
   const id = nanoid();
+  const specification = JSON.parse(catalogModel?.specification_json || '{}') as Record<string, unknown>;
+  if (capacityLiters != null) specification.capacity_liters = capacityLiters;
   await db.exec('INSERT INTO equipment(id, name, kind, catalog_model_id, specification_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    [id, name, kind, catalogModel?.id || null, catalogModel?.specification_json || null, nowSeconds()]);
+    [id, name, kind, catalogModel?.id || null, Object.keys(specification).length ? JSON.stringify(specification) : null, nowSeconds()]);
   return id;
+}
+
+export async function updateEquipmentCapacity(db: DB, item: Equipment, capacityLiters: number | null): Promise<void> {
+  const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
+  if (capacityLiters == null) delete specification.capacity_liters;
+  else specification.capacity_liters = capacityLiters;
+  await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?',
+    [Object.keys(specification).length ? JSON.stringify(specification) : null, item.id]);
 }
 
 export async function deleteEquipment(db: DB, id: string): Promise<void> {
@@ -246,13 +261,19 @@ export async function deleteEquipment(db: DB, id: string): Promise<void> {
 }
 
 export async function listInventory(db: DB): Promise<InventoryItem[]> {
-  return db.execO<InventoryItem>('SELECT id, name, category, default_unit FROM inventory_items ORDER BY name COLLATE NOCASE');
+  return db.execO<InventoryItem>(`SELECT i.id, i.name, i.category, i.default_unit, s.capacity_liters
+    FROM inventory_items i LEFT JOIN inventory_item_specs s ON s.inventory_item_id = i.id ORDER BY i.name COLLATE NOCASE`);
 }
 
-export async function createInventoryItem(db: DB, name: string, category: string, defaultUnit: string): Promise<string> {
+export async function createInventoryItem(db: DB, name: string, category: string, defaultUnit: string,
+  capacityLiters?: number | null): Promise<string> {
   const id = nanoid();
-  await db.exec('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)',
-    [id, name, category, defaultUnit, nowSeconds()]);
+  await db.tx(async tx => {
+    await tx.exec('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)',
+      [id, name, category, defaultUnit, nowSeconds()]);
+    if (capacityLiters != null) await tx.exec('INSERT INTO inventory_item_specs(id, inventory_item_id, capacity_liters) VALUES (?, ?, ?)',
+      [nanoid(), id, capacityLiters]);
+  });
   return id;
 }
 

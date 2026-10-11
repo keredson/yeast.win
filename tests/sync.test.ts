@@ -56,23 +56,27 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
   }
 });
 
-test('existing version 1 workspace gains replicated equipment archives', () => {
+for (const version of [1, 2]) test(`existing version ${version} workspace gains replicated inventory specs`, () => {
   const id = nanoid();
   const file = join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`);
   const old = new Database(file);
   old.loadExtension(resolve('vendor/crsqlite.so'));
-  old.exec('CREATE TABLE schema_meta(version INTEGER NOT NULL); INSERT INTO schema_meta VALUES (1)');
-  for (const statement of schemaStatements.filter(sql => !sql.includes('equipment_archives'))) old.exec(statement);
-  for (const table of replicatedTables.filter(name => name !== 'equipment_archives')) old.prepare('SELECT crsql_as_crr(?)').get(table);
+  old.exec(`CREATE TABLE schema_meta(version INTEGER NOT NULL); INSERT INTO schema_meta VALUES (${version})`);
+  const existing = replicatedTables.filter(name => name !== 'inventory_item_specs' && (version > 1 || name !== 'equipment_archives'));
+  for (const statement of schemaStatements.filter(sql => existing.some(name => sql.startsWith(`CREATE TABLE IF NOT EXISTS ${name} `)))) old.exec(statement);
+  for (const table of existing) old.prepare('SELECT crsql_as_crr(?)').get(table);
   for (const statement of indexStatements) old.exec(statement);
   old.close();
 
   const migrated = openWorkspaceDb(id);
   try {
-    assert.equal((migrated.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 2);
+    assert.equal((migrated.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 3);
     migrated.prepare('INSERT INTO equipment_archives(id, equipment_id, archived_at) VALUES (?, ?, ?)')
       .run(nanoid(), nanoid(), nowSeconds());
     assert.ok((migrated.prepare("SELECT 1 FROM crsql_changes WHERE \"table\" = 'equipment_archives' LIMIT 1").get()));
+    migrated.prepare('INSERT INTO inventory_item_specs(id, inventory_item_id, capacity_liters) VALUES (?, ?, ?)')
+      .run(nanoid(), nanoid(), 0.5);
+    assert.ok((migrated.prepare("SELECT 1 FROM crsql_changes WHERE \"table\" = 'inventory_item_specs' LIMIT 1").get()));
   } finally {
     closeWorkspaceDb(migrated);
   }

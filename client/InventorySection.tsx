@@ -5,6 +5,7 @@ import { inventoryCategories, unitForCategory, type CatalogInventory } from '../
 import { addInventoryEntry, createInventoryItem, type InventoryItem, type LocalDb } from './db.ts';
 import { formatTime } from './time.ts';
 import type { PreferredUnits } from './api.ts';
+import { capacityInLiters, capacityLabel, capacityUnits } from '../shared/capacity.ts';
 
 interface Movement { id: string; kind: string; quantity: number; unit: string; at: number }
 
@@ -18,6 +19,7 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
   const [error, setError] = useState('');
   const [itemForm] = Form.useForm();
   const item = items.find(row => row.id === selectedId) || null;
+  const selectedCategory = Form.useWatch('category', itemForm) as string | undefined;
   const categories = [...inventoryCategories, ...items.map(row => row.category).filter(category =>
     !inventoryCategories.some(known => known === category))].filter((category, index, all) => all.indexOf(category) === index);
 
@@ -41,9 +43,10 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
   const balance = item && !mixedUnits ? (currentCount?.quantity || 0) + afterAnchor.reduce((sum, row) =>
     sum + (row.kind === 'Purchased' ? row.quantity : row.kind === 'Used' ? -row.quantity : 0), 0) : null;
 
-  async function create(values: { name: string; category: string; default_unit: string }) {
+  async function create(values: { name: string; category: string; default_unit: string; capacity?: number; capacity_unit?: string }) {
     try {
-      const id = await createInventoryItem(db, values.name.trim(), values.category.trim(), values.default_unit.trim());
+      const id = await createInventoryItem(db, values.name.trim(), values.category.trim(), values.default_unit.trim(),
+        capacityInLiters(values.capacity, values.capacity_unit));
       setNewItem(false); itemForm.resetFields(); onSelect(id); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -67,12 +70,13 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
           <Table<InventoryItem> dataSource={rows} rowKey="id" pagination={false} size="small"
             columns={[{ title: 'Item', dataIndex: 'name', render: (_, row) =>
               <a href={`${basePath}/inventory/${row.id}`} onClick={event => { event.preventDefault(); onSelect(row.id); }}>{row.name}</a> },
+            { title: 'Capacity', dataIndex: 'capacity_liters', width: 110, responsive: ['sm'], render: value => capacityLabel(value) },
             { title: 'Unit', dataIndex: 'default_unit', width: 100 }]} /></section> : null;
       })}</div> : <Empty description="No inventory items" />}
     </section> : !item ? <Empty description="Inventory item not found" /> : <section className="record-detail">
-        <Button type="link" className="back-link" onClick={() => onSelect(null)}>← All inventory</Button>
         <div className="content-heading"><div><span className="eyebrow">{item.category}</span><h2>{item.name}</h2>
-          <p className="muted">{mixedUnits ? 'Balance needs unit conversion' : `${balance ?? 0} ${item.default_unit} estimated on hand`}</p></div>
+          <p className="muted">{mixedUnits ? 'Balance needs unit conversion' : `${balance ?? 0} ${item.default_unit} estimated on hand`}
+            {item.capacity_liters != null && ` · ${capacityLabel(item.capacity_liters)} per item`}</p></div>
           <div className="heading-actions"><Button onClick={() => setEntryKind('purchase')}>Bought some</Button>
             <Button type="primary" onClick={() => setEntryKind('count')}>Count stock</Button></div></div>
         <div className="card-stack">{movements.length ? movements.map(row => <Card size="small" key={`${row.kind}-${row.id}`}>
@@ -80,18 +84,22 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
         </Card>) : <Card><Empty description="No movements yet" /></Card>}</div>
       </section>}
     <Modal title="New inventory item" open={newItem} onCancel={() => setNewItem(false)} footer={null} destroyOnHidden>
-      <Form form={itemForm} layout="vertical" onFinish={create}>
+      <Form form={itemForm} layout="vertical" onFinish={create} initialValues={{ capacity_unit: 'L' }}>
+        <Form.Item name="category" label="Type" rules={[{ required: true }]}><Select options={inventoryCategories.map(value => ({ value, label: value }))}
+          onChange={value => itemForm.setFieldsValue({ catalog_id: undefined, name: undefined,
+            default_unit: unitForCategory(value, preferredUnits.mass), capacity: undefined })} /></Form.Item>
         <Form.Item name="catalog_id" label="Find in shared inventory catalog">
-          <Select showSearch allowClear placeholder="Search common ingredients and supplies" optionFilterProp="label"
-            options={catalog.map(row => ({ value: row.id, label: `${row.name} · ${row.category}` }))}
+          <Select showSearch allowClear disabled={!selectedCategory} placeholder={selectedCategory ? 'Search this inventory type' : 'Choose type first'} optionFilterProp="label"
+            options={catalog.filter(row => row.category === selectedCategory).map(row => ({ value: row.id, label: row.name }))}
             onChange={value => { const entry = catalog.find(row => row.id === value);
-              if (entry) itemForm.setFieldsValue({ name: entry.name, category: entry.category,
-                default_unit: ['Grain', 'Hops', 'Nutrient'].includes(entry.category) ? preferredUnits.mass : entry.unit }); }} />
+              if (entry) itemForm.setFieldsValue({ name: entry.name,
+                default_unit: ['Grain', 'Hops', 'Nutrient'].includes(entry.category) ? preferredUnits.mass : entry.unit,
+                capacity: entry.capacity_liters ?? undefined, capacity_unit: 'L' }); }} />
         </Form.Item>
         <Form.Item name="name" label="Item" rules={[{ required: true }]}><Input placeholder="e.g. Maris Otter, 12 oz bottles" /></Form.Item>
-        <Form.Item name="category" label="Category" rules={[{ required: true }]}><Select options={inventoryCategories.map(value => ({ value, label: value }))}
-          onChange={value => itemForm.setFieldValue('default_unit', unitForCategory(value, preferredUnits.mass))} /></Form.Item>
         <Form.Item name="default_unit" label="Unit" rules={[{ required: true }]}><Input placeholder="g, ml, each, packet…" /></Form.Item>
+        <div className="capacity-fields"><Form.Item name="capacity" label="Capacity per item (optional)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
+          <Form.Item name="capacity_unit" label="Capacity unit"><Select options={[...capacityUnits]} /></Form.Item></div>
         <Button type="primary" htmlType="submit">Create item</Button>
       </Form>
     </Modal>

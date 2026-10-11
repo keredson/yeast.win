@@ -55,7 +55,6 @@ export function RecipeSection({ db, basePath, accountId, recipes, selectedId, on
           <strong>{item.name}</strong><small>{item.description || 'No description'}</small>
         </a>)}</div>}
     </section> : !recipe ? <Empty description="Recipe not found" /> : <section className="record-detail">
-        <Button type="link" className="back-link" onClick={() => onSelect(null)}>← All recipes</Button>
         <div className="content-heading"><div><span className="eyebrow">Recipe plan</span><h2>{recipe.name}</h2><p className="muted">{recipe.description}</p></div>
           <div className="heading-actions"><Button onClick={() => setNewPlan(true)}>Add planned event</Button><Button type="primary" onClick={() => setNewBatch(true)}>Start batch</Button></div>
         </div>

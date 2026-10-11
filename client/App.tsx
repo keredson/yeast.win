@@ -54,19 +54,22 @@ function SectionNavigation({ route, recent, records, onNavigate }: {
   route: Route; recent: RecentItems; records: Record<RecordSection, { id: string; name: string }[]>;
   onNavigate: (section: RecordSection, id: string | null) => void;
 }) {
-  const items = navItems.map(({ key, label, icon: Icon }) => ({
-    key, label, icon: <Icon />,
-    onTitleClick: () => onNavigate(key, null),
-    children: [
-      { key: `${key}:all`, label: `All ${label.toLowerCase()}` },
-      ...recent[key].map(id => records[key].find(item => item.id === id)).filter((item): item is { id: string; name: string } => !!item)
-        .map(item => ({ key: `${key}:${item.id}`, label: <span className="nav-recent-title" title={item.name}>{item.name}</span> }))
-    ]
-  }));
-  return <Menu mode="inline" openKeys={route.section === 'me' ? [] : [route.section]}
-    selectedKeys={route.section === 'me' ? [] : [`${route.section}:${route.selectedId || 'all'}`]}
+  const items = navItems.flatMap(({ key, label, icon: Icon }) => {
+    const links = recent[key].map(id => records[key].find(item => item.id === id))
+      .filter((item): item is { id: string; name: string } => !!item);
+    return [
+      { key, label, icon: <Icon /> },
+      ...(route.section === key && links.length ? [{
+        key: `${key}:recent`, type: 'group' as const, label: 'Recent', children: links.map(item => ({
+          key: `${key}:${item.id}`, label: <span className="nav-recent-title" title={item.name}>{item.name}</span>
+        }))
+      }] : [])
+    ];
+  });
+  return <Menu mode="inline"
+    selectedKeys={route.section === 'me' ? [] : [route.selectedId ? `${route.section}:${route.selectedId}` : route.section]}
     items={items}
-    onClick={({ key }) => { const [section, id] = key.split(':'); onNavigate(section as RecordSection, id === 'all' ? null : id); }} />;
+    onClick={({ key }) => { const [section, id] = key.split(':'); onNavigate(section as RecordSection, id || null); }} />;
 }
 const newBreweryOption = '~new-brewery';
 const cachedSessionKey = 'brewlog:last-session';

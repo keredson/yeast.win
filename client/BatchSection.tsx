@@ -98,7 +98,6 @@ export function BatchSection({ db, basePath, accountId, batches, equipment, inve
           <strong>{item.name}</strong><small>{item.description || formatTime(item.created_at)}</small>
         </a>)}</div>}
     </section> : !batch ? <Empty description="Batch not found" /> : <section className="record-detail">
-        <Button type="link" className="back-link" onClick={() => onSelect(null)}>← All batches</Button>
         <div className="content-heading"><div><span className="eyebrow">Batch log</span><h2>{batch.name}</h2>
           <p className="muted">{batch.description || 'A living record of this brew.'}</p></div>
           <div className="heading-actions"><Button onClick={() => setNewPlan(true)}>Plan</Button>

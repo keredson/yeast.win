@@ -11,16 +11,21 @@ export function openCatalogDb(dataDir: string): Database.Database {
       id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, specification_json TEXT
     );
     CREATE TABLE IF NOT EXISTS catalog_inventory (
-      id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL, unit TEXT NOT NULL
+      id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL, unit TEXT NOT NULL, capacity_liters REAL
     );
   `);
-  if (!(db.prepare('SELECT 1 FROM catalog_meta LIMIT 1').get())) {
+  const columns = db.prepare('PRAGMA table_info(catalog_inventory)').all() as { name: string }[];
+  if (!columns.some(column => column.name === 'capacity_liters')) db.exec('ALTER TABLE catalog_inventory ADD COLUMN capacity_liters REAL');
+  const current = db.prepare('SELECT version FROM catalog_meta LIMIT 1').get() as { version: number } | undefined;
+  if (!current || current.version < 2) {
     db.transaction(() => {
-      const addEquipment = db.prepare('INSERT INTO catalog_equipment(id, name, kind, specification_json) VALUES (?, ?, ?, ?)');
-      const addInventory = db.prepare('INSERT INTO catalog_inventory(id, name, category, unit) VALUES (?, ?, ?, ?)');
+      const addEquipment = db.prepare('INSERT OR IGNORE INTO catalog_equipment(id, name, kind, specification_json) VALUES (?, ?, ?, ?)');
+      const addInventory = db.prepare('INSERT OR IGNORE INTO catalog_inventory(id, name, category, unit, capacity_liters) VALUES (?, ?, ?, ?, ?)');
       for (const item of initialCatalogEquipment) addEquipment.run(item.id, item.name, item.kind, item.specification_json);
-      for (const item of initialCatalogInventory) addInventory.run(item.id, item.name, item.category, item.unit);
-      db.prepare('INSERT INTO catalog_meta(version) VALUES (1)').run();
+      for (const item of initialCatalogInventory) addInventory.run(item.id, item.name, item.category, item.unit, item.capacity_liters ?? null);
+      db.prepare('UPDATE catalog_inventory SET capacity_liters = ? WHERE id = ? AND capacity_liters IS NULL').run(0.35488235475, 'inventory_bottle_12oz');
+      if (current) db.prepare('UPDATE catalog_meta SET version = 2').run();
+      else db.prepare('INSERT INTO catalog_meta(version) VALUES (2)').run();
     })();
   }
   return db;
@@ -32,6 +37,6 @@ export function catalogSnapshot(db: Database.Database, clientVersion: number): C
   return {
     version,
     equipment: db.prepare('SELECT id, name, kind, specification_json FROM catalog_equipment ORDER BY name COLLATE NOCASE').all() as CatalogSnapshot['equipment'],
-    inventory: db.prepare('SELECT id, name, category, unit FROM catalog_inventory ORDER BY name COLLATE NOCASE').all() as CatalogSnapshot['inventory']
+    inventory: db.prepare('SELECT id, name, category, unit, capacity_liters FROM catalog_inventory ORDER BY name COLLATE NOCASE').all() as CatalogSnapshot['inventory']
   };
 }
