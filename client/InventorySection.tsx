@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Empty, Form, Input, InputNumber, Modal, Select, Tag } from 'antd';
+import { Alert, Button, Card, Empty, Form, Input, InputNumber, Modal, Select, Table, Tag } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
 import { addInventoryEntry, createInventoryItem, type InventoryItem, type LocalDb } from './db.ts';
@@ -8,9 +8,9 @@ import type { PreferredUnits } from './api.ts';
 
 interface Movement { id: string; kind: string; quantity: number; unit: string; at: number }
 
-export function InventorySection({ db, accountId, items, catalog, preferredUnits, selectedId, onSelect, onChanged }: {
-  db: LocalDb; accountId: string; items: InventoryItem[]; catalog: CatalogInventory[]; preferredUnits: PreferredUnits;
-  selectedId: string | null; onSelect: (id: string) => void; onChanged: () => Promise<void>;
+export function InventorySection({ db, basePath, accountId, items, catalog, preferredUnits, selectedId, onSelect, onChanged }: {
+  db: LocalDb; basePath: string; accountId: string; items: InventoryItem[]; catalog: CatalogInventory[]; preferredUnits: PreferredUnits;
+  selectedId: string | null; onSelect: (id: string | null) => void; onChanged: () => Promise<void>;
 }) {
   const [movements, setMovements] = useState<Movement[]>([]);
   const [newItem, setNewItem] = useState(false);
@@ -18,6 +18,8 @@ export function InventorySection({ db, accountId, items, catalog, preferredUnits
   const [error, setError] = useState('');
   const [itemForm] = Form.useForm();
   const item = items.find(row => row.id === selectedId) || null;
+  const categories = [...inventoryCategories, ...items.map(row => row.category).filter(category =>
+    !inventoryCategories.some(known => known === category))].filter((category, index, all) => all.indexOf(category) === index);
 
   async function refreshMovements() {
     if (!selectedId) return;
@@ -54,17 +56,21 @@ export function InventorySection({ db, accountId, items, catalog, preferredUnits
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  return <div className="section-grid">
-    <div className="section-sidebar"><div className="section-heading"><div><span className="eyebrow">Stock ledger</span><h1>Inventory</h1></div>
+  return <div className="section-page">
+    {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
+    {!selectedId ? <section className="record-index"><div className="section-heading"><div><span className="eyebrow">Stock ledger</span><h1>Inventory</h1></div>
       <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New inventory item" title="New inventory item" onClick={() => setNewItem(true)} /></div>
       <p className="muted">Purchases, uses from batches, and physical counts.</p>
-      {items.length ? <div className="choice-list">{items.map(row => <button key={row.id}
-        className={row.id === selectedId ? 'list-choice selected' : 'list-choice'} onClick={() => onSelect(row.id)}>
-        <strong>{row.name}</strong><small>{row.category} · {row.default_unit}</small></button>)}</div> : <Empty description="No inventory items" />}
-    </div>
-    <div className="section-content">
-      {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
-      {!item ? <Empty description="Create or select an item" /> : <>
+      {items.length ? <div className="group-tables">{categories.map(category => {
+        const rows = items.filter(row => row.category === category);
+        return rows.length ? <section key={category} className="group-table"><h2>{category}</h2>
+          <Table<InventoryItem> dataSource={rows} rowKey="id" pagination={false} size="small"
+            columns={[{ title: 'Item', dataIndex: 'name', render: (_, row) =>
+              <a href={`${basePath}/inventory/${row.id}`} onClick={event => { event.preventDefault(); onSelect(row.id); }}>{row.name}</a> },
+            { title: 'Unit', dataIndex: 'default_unit', width: 100 }]} /></section> : null;
+      })}</div> : <Empty description="No inventory items" />}
+    </section> : !item ? <Empty description="Inventory item not found" /> : <section className="record-detail">
+        <Button type="link" className="back-link" onClick={() => onSelect(null)}>← All inventory</Button>
         <div className="content-heading"><div><span className="eyebrow">{item.category}</span><h2>{item.name}</h2>
           <p className="muted">{mixedUnits ? 'Balance needs unit conversion' : `${balance ?? 0} ${item.default_unit} estimated on hand`}</p></div>
           <div className="heading-actions"><Button onClick={() => setEntryKind('purchase')}>Bought some</Button>
@@ -72,8 +78,7 @@ export function InventorySection({ db, accountId, items, catalog, preferredUnits
         <div className="card-stack">{movements.length ? movements.map(row => <Card size="small" key={`${row.kind}-${row.id}`}>
           <div className="timeline-card"><div><strong>{row.quantity} {row.unit}</strong><div className="muted">{formatTime(row.at)}</div></div><Tag>{row.kind}</Tag></div>
         </Card>) : <Card><Empty description="No movements yet" /></Card>}</div>
-      </>}
-    </div>
+      </section>}
     <Modal title="New inventory item" open={newItem} onCancel={() => setNewItem(false)} footer={null} destroyOnHidden>
       <Form form={itemForm} layout="vertical" onFinish={create}>
         <Form.Item name="catalog_id" label="Find in shared inventory catalog">

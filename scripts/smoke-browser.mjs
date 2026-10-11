@@ -34,6 +34,19 @@ async function signIn(page, createAccount = false) {
   await page.getByRole('button', { name: 'New batch' }).waitFor();
 }
 
+async function navigateSection(page, section) {
+  const mobile = await page.getByRole('button', { name: 'Open navigation' }).isVisible();
+  if (mobile) await page.getByRole('button', { name: 'Open navigation' }).click();
+  const nav = mobile ? page.locator('.ant-drawer').last() : page.locator('.app-nav');
+  await nav.locator('.ant-menu-submenu-title').filter({ hasText: section }).click();
+  await page.getByRole('heading', { name: section, exact: true }).waitFor();
+}
+
+async function openBatch(page, name) {
+  await page.locator('.record-link').filter({ hasText: name }).click();
+  await page.getByRole('heading', { name }).waitFor();
+}
+
 try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
@@ -56,12 +69,23 @@ try {
   await page.getByRole('button', { name: 'Create batch' }).click();
   await page.getByRole('heading', { name: 'Second brewery batch' }).waitFor();
   const secondBreweryBatchUrl = page.url();
-  if (!new URL(secondBreweryBatchUrl).searchParams.get('brewery')) throw new Error('Batch link is missing its brewery');
+  if (!/^\/brewery\/[a-z0-9-]+\/batch\/[A-Za-z0-9_-]{10,32}$/.test(new URL(secondBreweryBatchUrl).pathname)
+    || new URL(secondBreweryBatchUrl).search) throw new Error('Second brewery batch should use a clean brewery slug URL');
   await page.reload();
   await page.getByRole('heading', { name: 'Second brewery batch' }).waitFor();
+  await navigateSection(page, 'Equipment');
+  if (!/^\/brewery\/[a-z0-9-]+\/equipment$/.test(new URL(page.url()).pathname)) {
+    throw new Error('Second brewery equipment should use a slug URL');
+  }
   await page.getByRole('combobox', { name: 'Brewery' }).click();
   await page.getByText('Homebrew', { exact: true }).last().click();
   await page.locator('.workspace-select').getByText('Homebrew').waitFor();
+  if (new URL(page.url()).pathname !== '/batches') throw new Error('Homebrew should use the root batch URL');
+  await page.goBack();
+  await page.getByRole('heading', { name: 'Equipment', exact: true }).waitFor();
+  await page.locator('.workspace-select').getByText(secondBrewery).waitFor();
+  await page.goForward();
+  await page.getByRole('heading', { name: 'Batches', exact: true }).waitFor();
   await page.getByRole('button', { name: 'New batch' }).waitFor();
   console.log('Created and switched breweries from the header switcher');
 
@@ -70,7 +94,13 @@ try {
   const batchName = await page.getByLabel('Batch name').inputValue();
   await page.getByRole('button', { name: 'Create batch' }).click();
   await page.getByRole('heading', { name: batchName }).waitFor();
-  if (!/^\/batch\/[A-Za-z0-9_-]{10,32}$/.test(new URL(page.url()).pathname)) throw new Error('Batch detail URL was not set');
+  if (!/^\/batch\/[A-Za-z0-9_-]{10,32}$/.test(new URL(page.url()).pathname) || new URL(page.url()).search) {
+    throw new Error('Default brewery batch should use a clean root URL');
+  }
+  await page.locator('.app-nav .ant-menu-item').filter({ hasText: batchName }).waitFor();
+  await navigateSection(page, 'Batches');
+  await page.locator('.app-nav .ant-menu-item').filter({ hasText: batchName }).click();
+  await page.getByRole('heading', { name: batchName }).waitFor();
   console.log('Created batch:', batchName);
 
   await page.getByRole('button', { name: 'Plan', exact: true }).click();
@@ -112,21 +142,10 @@ try {
   for (const [name, width, height] of [['small-mobile', 320, 720], ['mobile', 390, 844], ['tablet', 820, 1024], ['desktop', 1280, 900]]) {
     await page.setViewportSize({ width, height });
     for (const section of ['Batches', 'Recipes', 'Inventory', 'Equipment']) {
-      if (width <= 720) {
-        await page.getByRole('button', { name: 'Open navigation' }).click();
-        await page.locator('.ant-drawer').last().locator('.ant-menu-item').filter({ hasText: section }).click();
-      } else {
-        await page.locator('.app-nav .ant-menu-item').filter({ hasText: section }).click();
-      }
-      await page.getByRole('heading', { name: section, exact: true }).waitFor();
-      if (section === 'Batches') await page.locator('.choice-list .list-choice').filter({ hasText: batchName }).click();
+      await navigateSection(page, section);
       const layout = await page.evaluate(() => ({
         overflow: document.documentElement.scrollWidth > innerWidth + 1,
-        sidebarColumns: getComputedStyle(document.querySelector('.section-grid')).gridTemplateColumns.split(' ').length,
-        batchColumns: document.querySelector('.batch-columns')
-          ? getComputedStyle(document.querySelector('.batch-columns')).gridTemplateColumns.split(' ').length : 0,
-        choiceDirection: document.querySelector('.choice-list')
-          ? getComputedStyle(document.querySelector('.choice-list')).flexDirection : ''
+        index: !!document.querySelector('.record-index'), detail: !!document.querySelector('.record-detail')
       }));
       if (layout.overflow) {
         const offenders = await page.evaluate(() => Array.from(document.querySelectorAll('body *'))
@@ -134,12 +153,18 @@ try {
           .slice(0, 12).map(element => `${element.tagName}.${element.className} ${Math.round(element.getBoundingClientRect().right)}`));
         throw new Error(`${name} ${section} has horizontal page overflow: ${offenders.join(', ')}`);
       }
+      if (!layout.index || layout.detail) throw new Error(`${section} should be an index page`);
       if (section === 'Batches') {
-        if (name.includes('mobile') && layout.choiceDirection !== 'row') throw new Error('Mobile batch picker is not horizontal');
-        if (name === 'desktop' && (layout.sidebarColumns !== 2 || layout.batchColumns !== 2)) {
-          throw new Error('Desktop layout should have side-by-side lists and timeline columns');
+        await openBatch(page, batchName);
+        const columns = await page.locator('.batch-columns').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length);
+        if (columns !== 1) throw new Error('Batch detail should have one content column');
+        if (!await page.getByRole('button', { name: 'All batches' }).isVisible()) throw new Error('Batch detail lacks index link');
+        if (width > 720 && !await page.locator('.app-nav .ant-menu-item').filter({ hasText: batchName }).isVisible()) {
+          throw new Error('Recent batch link is hidden in the desktop navigation');
         }
-        if (name === 'tablet' && layout.sidebarColumns !== 2) throw new Error('Tablet should retain a sidebar');
+        if (width > 720 && !await page.locator('.app-nav .ant-menu-submenu-open').filter({ hasText: 'Batches' }).count()) {
+          throw new Error('Active navigation section should stay expanded');
+        }
       }
       if (section === 'Batches' || name.includes('mobile')) {
         await page.screenshot({ path: `/tmp/brewlog-${name}-${section.toLowerCase()}.png`, fullPage: true });
@@ -163,20 +188,54 @@ try {
   await page.getByRole('spinbutton', { name: 'pH 7.00 buffer reading' }).fill('7.02');
   await page.getByRole('button', { name: 'Save calibration' }).click();
   await page.getByText('Two-point pH').waitFor();
+  await page.getByRole('button', { name: 'All equipment' }).click();
+  await page.getByRole('button', { name: 'New equipment' }).click();
+  await page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Find in shared equipment catalog' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Thermometer' }).click();
+  await page.getByRole('button', { name: 'Create equipment' }).click();
+  await page.getByRole('heading', { name: 'Thermometer', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'All equipment' }).click();
+  if (await page.locator('.group-table').count() !== 2) throw new Error('Equipment kinds should have separate tables');
+  await page.setViewportSize({ width: 320, height: 720 });
+  if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw new Error('Grouped equipment tables overflow a narrow phone');
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await navigateSection(page, 'Batches');
+  await openBatch(page, batchName);
+  await page.getByRole('button', { name: 'Log event' }).click();
+  const measurementDialog = page.getByRole('dialog', { name: 'Log an event' });
+  await measurementDialog.getByRole('combobox', { name: 'Event type' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Measurement' }).click();
+  await measurementDialog.getByRole('combobox', { name: 'Measurement' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'pH' }).click();
+  await measurementDialog.getByRole('spinbutton', { name: 'Corrected value' }).fill('5.2');
+  await measurementDialog.getByRole('combobox', { name: 'Instrument' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke pH meter' }).click();
+  await measurementDialog.getByRole('button', { name: 'Save event' }).click();
+  await page.getByText('ph 5.2 pH').waitFor();
+  await navigateSection(page, 'Equipment');
+  await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Smoke pH meter' }).click();
+  await page.getByRole('heading', { name: 'Smoke pH meter' }).waitFor();
+  await page.getByRole('button', { name: 'Delete equipment' }).click();
+  await page.getByRole('dialog', { name: 'Delete equipment?' }).getByRole('button', { name: 'Delete' }).click();
+  await page.waitForURL('**/equipment');
+  await page.locator('.group-table a').filter({ hasText: 'Thermometer' }).click();
   await page.getByRole('button', { name: 'Delete equipment' }).click();
   await page.getByRole('dialog', { name: 'Delete equipment?' }).getByRole('button', { name: 'Delete' }).click();
   await page.waitForURL('**/equipment');
   await page.getByText('No equipment yet').waitFor();
-  console.log('Created and deleted equipment with a defined kind');
+  await navigateSection(page, 'Batches');
+  await openBatch(page, batchName);
+  await page.getByText('ph 5.2 pH').waitFor();
+  console.log('Grouped equipment and hid used gear while preserving its measurement');
 
-  await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Recipes' }).click();
+  await navigateSection(page, 'Recipes');
   await page.getByRole('button', { name: 'New recipe' }).click();
   await page.getByLabel('Recipe name').fill('Smoke recipe');
   await page.getByRole('button', { name: 'Create recipe' }).click();
   await page.waitForURL(url => /^\/recipe\/[A-Za-z0-9_-]{10,32}$/.test(url.pathname));
   await page.goBack();
   await page.waitForURL('**/recipes');
-  await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Inventory' }).click();
+  await navigateSection(page, 'Inventory');
   await page.getByRole('button', { name: 'New inventory item' }).click();
   await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Find in shared inventory catalog' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Maris Otter malt' }).click();
@@ -184,6 +243,17 @@ try {
   if (await page.getByRole('dialog', { name: 'New inventory item' }).locator('#default_unit').inputValue() !== 'g') throw new Error('Grain unit default was not set');
   await page.getByRole('button', { name: 'Create item' }).click();
   await page.waitForURL(url => /^\/inventory\/[A-Za-z0-9_-]{10,32}$/.test(url.pathname));
+  await page.getByRole('button', { name: 'All inventory' }).click();
+  await page.getByRole('button', { name: 'New inventory item' }).click();
+  await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Find in shared inventory catalog' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: '12 oz bottle' }).click();
+  if (await page.getByRole('dialog', { name: 'New inventory item' }).locator('#default_unit').inputValue() !== 'each') throw new Error('Packaging unit default was not set');
+  await page.getByRole('button', { name: 'Create item' }).click();
+  await page.getByRole('button', { name: 'All inventory' }).click();
+  if (await page.locator('.group-table').count() !== 2) throw new Error('Inventory categories should have separate tables');
+  await page.setViewportSize({ width: 320, height: 720 });
+  if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw new Error('Grouped inventory tables overflow a narrow phone');
+  await page.setViewportSize({ width: 1280, height: 900 });
   await page.route('**/api/**', route => route.abort());
   await page.goto(`${baseUrl}/inventory`);
   await page.getByRole('heading', { name: 'Inventory', exact: true }).waitFor();
@@ -193,10 +263,10 @@ try {
   await page.getByRole('dialog', { name: 'New inventory item' }).locator('.ant-modal-close').click();
   await page.getByRole('dialog', { name: 'New inventory item' }).waitFor({ state: 'hidden' });
   await page.unroute('**/api/**');
-  console.log('Navigated recipe and inventory detail URLs');
+  console.log('Navigated recipe and inventory pages with grouped inventory tables');
 
-  await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Batches' }).click();
-  await page.locator('.choice-list .list-choice').filter({ hasText: batchName }).click();
+  await navigateSection(page, 'Batches');
+  await openBatch(page, batchName);
 
   const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9V+c0AAAAASUVORK5CYII=', 'base64');
   const beforePhotoSync = await page.evaluate(() => {
@@ -218,7 +288,7 @@ try {
   await second.getByRole('combobox', { name: 'Brewery' }).click();
   await second.getByText('Homebrew', { exact: true }).last().click();
   await second.locator('.workspace-select').getByText('Homebrew').waitFor();
-  await second.locator('.choice-list .list-choice').filter({ hasText: batchName }).click();
+  await openBatch(second, batchName);
   await second.getByRole('heading', { name: batchName }).waitFor({ timeout: 30_000 });
   await second.locator('.photo-grid img').waitFor();
   const syncedPhoto = await second.locator('.photo-grid img').evaluate(async img =>
@@ -299,8 +369,8 @@ try {
   await page.locator('.app-header .ant-avatar img').waitFor();
   const secondUnits = await second.evaluate(async () => (await (await fetch('/api/me')).json()).preferred_units.temperature);
   if (secondUnits !== '°F') throw new Error('Preferred units did not persist across devices');
-  await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Batches' }).click();
-  await page.locator('.choice-list .list-choice').filter({ hasText: batchName }).click();
+  await navigateSection(page, 'Batches');
+  await openBatch(page, batchName);
   await page.getByRole('button', { name: 'Log event' }).click();
   await page.getByRole('dialog', { name: 'Log an event' }).getByRole('combobox', { name: 'Event type' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Measurement' }).click();

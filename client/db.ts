@@ -3,7 +3,7 @@ import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { nanoid } from 'nanoid';
 import { equipmentKinds } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
+import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, workspaceV2Statements, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 
 export type LocalDb = DB;
@@ -37,9 +37,15 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
           for (const table of replicatedTables) await tx.exec('SELECT crsql_as_crr(?)', [table]);
           for (const statement of indexStatements) await tx.exec(statement);
           await tx.exec('CREATE TABLE sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
-          await tx.exec('INSERT INTO schema_meta(version) VALUES (1)');
+          await tx.exec('INSERT INTO schema_meta(version) VALUES (?)', [workspaceSchemaVersion]);
         });
-      } else if (version[0].version !== 1) {
+      } else if (version[0].version === 1) {
+        await db.tx(async tx => {
+          for (const statement of workspaceV2Statements) await tx.exec(statement);
+          await tx.exec('SELECT crsql_as_crr(?)', ['equipment_archives']);
+          await tx.exec('UPDATE schema_meta SET version = ?', [workspaceSchemaVersion]);
+        });
+      } else if (version[0].version !== workspaceSchemaVersion) {
         throw new Error(`Unsupported local schema ${version[0].version}`);
       }
       return db;
@@ -201,7 +207,8 @@ export async function eventDetails(db: DB, event: ActualEvent): Promise<string> 
 }
 
 export async function listEquipment(db: DB): Promise<Equipment[]> {
-  return db.execO<Equipment>('SELECT id, name, kind FROM equipment ORDER BY name COLLATE NOCASE');
+  return db.execO<Equipment>(`SELECT id, name, kind FROM equipment
+    WHERE id NOT IN (SELECT equipment_id FROM equipment_archives) ORDER BY name COLLATE NOCASE`);
 }
 
 export async function createEquipment(db: DB, name: string, kind: string, catalogModel?: CatalogEquipment): Promise<string> {
@@ -217,15 +224,20 @@ export async function deleteEquipment(db: DB, id: string): Promise<void> {
   await db.tx(async tx => {
     const referenced = async (table: string, where: string, binds: string[]) =>
       (await tx.execO<{ used: number }>(`SELECT 1 AS used FROM ${table} WHERE ${where} LIMIT 1`, binds)).length > 0;
+    let used = false;
     for (const table of Object.values(measurementTables)) {
       if (await referenced(table, 'equipment_id = ? OR calibration_id IN (SELECT id FROM equipment_calibrations WHERE equipment_id = ?)', [id, id])) {
-        throw new Error('Equipment used by a measurement cannot be deleted');
+        used = true;
+        break;
       }
     }
-    if (await referenced('temperature_control_events', 'equipment_id = ?', [id])
+    used ||= await referenced('temperature_control_events', 'equipment_id = ?', [id])
       || await referenced('pressure_control_events', 'equipment_id = ?', [id])
-      || await referenced('transfers', 'from_vessel_id = ? OR to_vessel_id = ?', [id, id])) {
-      throw new Error('Equipment used by a batch event cannot be deleted');
+      || await referenced('transfers', 'from_vessel_id = ? OR to_vessel_id = ?', [id, id]);
+    if (used) {
+      await tx.exec('INSERT INTO equipment_archives(id, equipment_id, archived_at) VALUES (?, ?, ?)',
+        [nanoid(), id, nowSeconds()]);
+      return;
     }
     await tx.exec('DELETE FROM equipment_calibrations WHERE equipment_id = ?', [id]);
     await tx.exec('DELETE FROM equipment_characterization_observations WHERE equipment_id = ?', [id]);

@@ -30,9 +30,9 @@ The server serves the built PWA and API together on port 3001. Point your Cloudf
 - Create separate breweries for your home setup and commercial operation.
 - Create batches directly or copy a recipe's planned events into a new batch.
 - Plan fixed-time or anchored events, then record actual events or explicitly skip a plan.
-- Record additions, measurements, equipment settings, transfers, packaging, milestones, notes, inventory entries, equipment calibrations, and batch photos. Search the shared catalog when adding equipment or inventory, or create a custom item. Equipment calibration fields match the instrument type; unused equipment can be deleted.
+- Record additions, measurements, equipment settings, transfers, packaging, milestones, notes, inventory entries, equipment calibrations, and batch photos. Search the shared catalog when adding equipment or inventory, or create a custom item. Equipment calibration fields match the instrument type. Deleting used equipment hides it from active lists while preserving historical event references.
 - Continue working offline; the app syncs on reconnect and at regular intervals.
-- Use the Ant Design left sidebar to open batches, recipes, inventory, and equipment. Detail pages have shareable URLs such as `/batch/:id`; links include the brewery ID so they open the right database.
+- Use the Ant Design left sidebar to open batches, recipes, inventory, and equipment, with recent item links under each section. Each section URL shows an index and each item has its own detail page. Equipment and inventory indexes use separate tables per type. The default Homebrew brewery uses root URLs such as `/equipment` and `/batch/:id`; other breweries use `/brewery/:slug/equipment` and `/brewery/:slug/batch/:id`.
 - Open `/me` from the avatar to upload an account avatar, choose preferred units, change your password, adjust automatic sync, or sign out. The sync icon there starts a manual sync and shows when sync last succeeded.
 - Use the same navigation on phones, tablets, and desktop screens. On phones, it opens in a left Drawer.
 

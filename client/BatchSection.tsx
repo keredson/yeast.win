@@ -19,9 +19,9 @@ function effectivePlanTime(plan: Plan, plans: Plan[], events: ActualEvent[]): nu
   return Math.min(...actuals.map(item => item.actual_at)) + (plan.offset_seconds || 0);
 }
 
-export function BatchSection({ db, accountId, batches, equipment, inventory, preferredUnits, selectedId, onSelect, onChanged }: {
-  db: LocalDb; accountId: string; batches: Batch[]; equipment: Equipment[]; inventory: InventoryItem[];
-  preferredUnits: PreferredUnits; selectedId: string | null; onSelect: (id: string) => void;
+export function BatchSection({ db, basePath, accountId, batches, equipment, inventory, preferredUnits, selectedId, onSelect, onChanged }: {
+  db: LocalDb; basePath: string; accountId: string; batches: Batch[]; equipment: Equipment[]; inventory: InventoryItem[];
+  preferredUnits: PreferredUnits; selectedId: string | null; onSelect: (id: string | null) => void;
   onChanged: () => Promise<void>;
 }) {
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -86,19 +86,19 @@ export function BatchSection({ db, accountId, batches, equipment, inventory, pre
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  return <div className="section-grid">
-    <div className="section-sidebar">
+  return <div className="section-page">
+    {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
+    {!selectedId ? <section className="record-index">
       <div className="section-heading"><div><span className="eyebrow">Your brewing record</span><h1>Batches</h1></div>
         <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New batch" title="New batch" onClick={() => setNewBatch(true)} /></div>
       <p className="muted">Plans, actions and readings, all around the batch.</p>
-      {batches.length === 0 ? <Empty description="No batches yet" /> : <div className="choice-list">{batches.map(item =>
-        <button key={item.id} className={item.id === selectedId ? 'list-choice selected' : 'list-choice'} onClick={() => onSelect(item.id)}>
+      {batches.length === 0 ? <Empty description="No batches yet" /> : <div className="record-list">{batches.map(item =>
+        <a key={item.id} className="record-link" href={`${basePath}/batch/${item.id}`}
+          onClick={event => { event.preventDefault(); onSelect(item.id); }}>
           <strong>{item.name}</strong><small>{item.description || formatTime(item.created_at)}</small>
-        </button>)}</div>}
-    </div>
-    <div className="section-content">
-      {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
-      {!batch ? <Empty description="Create or select a batch" /> : <>
+        </a>)}</div>}
+    </section> : !batch ? <Empty description="Batch not found" /> : <section className="record-detail">
+        <Button type="link" className="back-link" onClick={() => onSelect(null)}>← All batches</Button>
         <div className="content-heading"><div><span className="eyebrow">Batch log</span><h2>{batch.name}</h2>
           <p className="muted">{batch.description || 'A living record of this brew.'}</p></div>
           <div className="heading-actions"><Button onClick={() => setNewPlan(true)}>Plan</Button>
@@ -139,8 +139,7 @@ export function BatchSection({ db, accountId, batches, equipment, inventory, pre
           {photos.length ? <div className="photo-grid">{photos.map(photo => <img key={photo.id} src={photo.url} alt="Batch" />)}</div> :
             <p className="muted">No photos yet. Images up to 5 MB are saved with this brewery.</p>}
         </section>
-      </>}
-    </div>
+      </section>}
     <Modal title="New batch" open={newBatch} onCancel={() => setNewBatch(false)} footer={null} destroyOnHidden>
       <Form layout="vertical" onFinish={create}>
         <Form.Item name="name" label="Batch name" rules={[{ required: true }]}><Input maxLength={100} /></Form.Item>

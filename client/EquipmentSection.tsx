@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Empty, Form, Input, InputNumber, Modal, Select, Tag } from 'antd';
+import { Alert, Button, Card, Empty, Form, Input, InputNumber, Modal, Select, Table, Tag } from 'antd';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { nanoid } from 'nanoid';
 import { equipmentKindLabel, equipmentKinds } from '../shared/equipment.ts';
@@ -39,8 +39,8 @@ const calibrationProfiles: Record<string, { method: string; fields: { key: strin
   ] }
 };
 
-export function EquipmentSection({ db, accountId, equipment, catalog, selectedId, onSelect, onChanged }: {
-  db: LocalDb; accountId: string; equipment: Equipment[]; catalog: CatalogEquipment[]; selectedId: string | null; onSelect: (id: string | null) => void;
+export function EquipmentSection({ db, basePath, accountId, equipment, catalog, selectedId, onSelect, onChanged }: {
+  db: LocalDb; basePath: string; accountId: string; equipment: Equipment[]; catalog: CatalogEquipment[]; selectedId: string | null; onSelect: (id: string | null) => void;
   onChanged: () => Promise<void>;
 }) {
   const [calibrations, setCalibrations] = useState<Calibration[]>([]);
@@ -52,6 +52,8 @@ export function EquipmentSection({ db, accountId, equipment, catalog, selectedId
   const item = equipment.find(row => row.id === selectedId) || null;
   const selectedCatalogId = Form.useWatch('catalog_id', equipmentForm) as string | undefined;
   const profile = item ? calibrationProfiles[item.kind] : undefined;
+  const kinds = [...equipmentKinds.map(row => row.value), ...equipment.map(row => row.kind).filter(kind =>
+    !equipmentKinds.some(known => known.value === kind))].filter((kind, index, all) => all.indexOf(kind) === index);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -84,17 +86,21 @@ export function EquipmentSection({ db, accountId, equipment, catalog, selectedId
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  return <div className="section-grid">
-    <div className="section-sidebar"><div className="section-heading"><div><span className="eyebrow">Your gear</span><h1>Equipment</h1></div>
+  return <div className="section-page">
+    {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
+    {!selectedId ? <section className="record-index"><div className="section-heading"><div><span className="eyebrow">Your gear</span><h1>Equipment</h1></div>
       <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New equipment" title="New equipment" onClick={() => setNewEquipment(true)} /></div>
       <p className="muted">Measurements and control settings can reference a specific item.</p>
-      {equipment.length ? <div className="choice-list">{equipment.map(row => <button key={row.id}
-        className={row.id === selectedId ? 'list-choice selected' : 'list-choice'} onClick={() => onSelect(row.id)}>
-        <strong>{row.name}</strong><small>{equipmentKindLabel(row.kind)}</small></button>)}</div> : <Empty description="No equipment yet" />}
-    </div>
-    <div className="section-content">
-      {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
-      {!item ? <Empty description="Create or select equipment" /> : <>
+      {equipment.length ? <div className="group-tables">{kinds.map(kind => {
+        const rows = equipment.filter(row => row.kind === kind);
+        return rows.length ? <section key={kind} className="group-table"><h2>{equipmentKindLabel(kind)}</h2>
+          <Table<Equipment> dataSource={rows} rowKey="id" pagination={false} size="small"
+            columns={[{ title: 'Equipment', dataIndex: 'name', render: (_, row) =>
+              <a href={`${basePath}/equipment/${row.id}`} onClick={event => { event.preventDefault(); onSelect(row.id); }}>{row.name}</a> }]} />
+        </section> : null;
+      })}</div> : <Empty description="No equipment yet" />}
+    </section> : !item ? <Empty description="Equipment not found" /> : <section className="record-detail">
+        <Button type="link" className="back-link" onClick={() => onSelect(null)}>← All equipment</Button>
         <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(item.kind)}</span><h2>{item.name}</h2></div>
           <div className="heading-actions"><Button type="text" danger shape="circle" icon={<DeleteOutlined />} aria-label="Delete equipment" title="Delete equipment" onClick={() => setDeleteOpen(true)} />
             {profile && <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New calibration" title="New calibration" onClick={() => setNewCalibration(true)} />}</div></div>
@@ -103,8 +109,7 @@ export function EquipmentSection({ db, accountId, equipment, catalog, selectedId
           <div className="timeline-card"><div><strong>{row.method}</strong><div className="muted">{formatTime(row.effective_at)}</div></div><Tag>Immutable</Tag></div>
           <pre className="calibration-data">{row.parameters_json}</pre>
         </Card>) : <Card><Empty description={profile ? 'No calibrations yet' : 'This equipment type does not use measurement calibration'} /></Card>}</div>
-      </>}
-    </div>
+      </section>}
     <Modal title="New equipment" open={newEquipment} onCancel={() => setNewEquipment(false)} footer={null} destroyOnHidden>
       <Form form={equipmentForm} layout="vertical" onFinish={create}>
         <Form.Item name="catalog_id" label="Find in shared equipment catalog">
@@ -128,7 +133,7 @@ export function EquipmentSection({ db, accountId, equipment, catalog, selectedId
     </Modal>
     <Modal title="Delete equipment?" open={deleteOpen} onCancel={() => setDeleteOpen(false)}
       onOk={() => void remove()} okText="Delete" okButtonProps={{ danger: true }}>
-      <p>Delete {item?.name}? Its unused calibrations and observations will also be deleted. Equipment used by batch events cannot be deleted.</p>
+      <p>Delete {item?.name}? Equipment used by batch events will be hidden from your equipment list and kept in historical records. Unused equipment and its calibrations will be removed.</p>
     </Modal>
   </div>;
 }

@@ -70,8 +70,8 @@ function jpegDimensions(image: Buffer): { width: number; height: number } | null
 }
 
 function ownerWorkspaces(accountId: string) {
-  return authDb.prepare('SELECT id, name FROM workspaces WHERE owner_account_id = ? ORDER BY created_at, id')
-    .all(accountId) as { id: string; name: string }[];
+  return authDb.prepare('SELECT id, name, slug FROM workspaces WHERE owner_account_id = ? ORDER BY created_at, rowid')
+    .all(accountId) as { id: string; name: string; slug: string }[];
 }
 
 function ownsWorkspace(accountId: string, workspaceId: string): boolean {

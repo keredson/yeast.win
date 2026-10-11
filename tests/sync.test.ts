@@ -4,7 +4,9 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { nanoid } from 'nanoid';
-import { changeColumns, nowSeconds, type SyncRequest, validateChange, } from '../shared/schema.ts';
+import Database from 'better-sqlite3';
+import { resolve } from 'node:path';
+import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, type SyncRequest, validateChange, } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 
 process.env.BREWLOG_DATA_DIR = mkdtempSync(join(tmpdir(), 'brewlog-sync-'));
@@ -51,5 +53,27 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
   } finally {
     closeWorkspaceDb(first);
     closeWorkspaceDb(second);
+  }
+});
+
+test('existing version 1 workspace gains replicated equipment archives', () => {
+  const id = nanoid();
+  const file = join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`);
+  const old = new Database(file);
+  old.loadExtension(resolve('vendor/crsqlite.so'));
+  old.exec('CREATE TABLE schema_meta(version INTEGER NOT NULL); INSERT INTO schema_meta VALUES (1)');
+  for (const statement of schemaStatements.filter(sql => !sql.includes('equipment_archives'))) old.exec(statement);
+  for (const table of replicatedTables.filter(name => name !== 'equipment_archives')) old.prepare('SELECT crsql_as_crr(?)').get(table);
+  for (const statement of indexStatements) old.exec(statement);
+  old.close();
+
+  const migrated = openWorkspaceDb(id);
+  try {
+    assert.equal((migrated.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 2);
+    migrated.prepare('INSERT INTO equipment_archives(id, equipment_id, archived_at) VALUES (?, ?, ?)')
+      .run(nanoid(), nanoid(), nowSeconds());
+    assert.ok((migrated.prepare("SELECT 1 FROM crsql_changes WHERE \"table\" = 'equipment_archives' LIMIT 1").get()));
+  } finally {
+    closeWorkspaceDb(migrated);
   }
 });

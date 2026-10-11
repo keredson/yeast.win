@@ -14,17 +14,30 @@ import { openLocalCatalog, readLocalCatalog, syncLocalCatalog } from './catalog.
 import type { CatalogEquipment, CatalogInventory } from '../shared/catalog.ts';
 
 type Section = 'batches' | 'recipes' | 'inventory' | 'equipment' | 'me';
-interface Route { section: Section; selectedId: string | null }
+interface Route { section: Section; selectedId: string | null; slug: string | null }
 const detailPaths = { batches: 'batch', recipes: 'recipe', inventory: 'inventory', equipment: 'equipment' } as const;
 
 function routeFromPath(path: string): Route {
-  if (path === '/me') return { section: 'me', selectedId: null };
+  if (path === '/me') return { section: 'me', selectedId: null, slug: null };
+  const prefix = /^\/brewery\/([a-z0-9-]+)(?=\/|$)/.exec(path);
+  const slug = prefix?.[1] || null;
+  const localPath = prefix ? path.slice(prefix[0].length) || '/' : path;
   for (const section of ['batches', 'recipes', 'inventory', 'equipment'] as const) {
-    if (path === `/${section}`) return { section, selectedId: null };
-    const match = new RegExp(`^/${detailPaths[section]}/([A-Za-z0-9_-]{10,32})$`).exec(path);
-    if (match) return { section, selectedId: match[1] };
+    if (localPath === `/${section}`) return { section, selectedId: null, slug };
+    const match = new RegExp(`^/${detailPaths[section]}/([A-Za-z0-9_-]{10,32})$`).exec(localPath);
+    if (match) return { section, selectedId: match[1], slug };
   }
-  return { section: 'batches', selectedId: null };
+  return { section: 'batches', selectedId: null, slug };
+}
+
+function workspaceBase(workspaceId: string | null, workspaces: Workspace[]): string {
+  const index = workspaces.findIndex(item => item.id === workspaceId);
+  return index <= 0 ? '' : `/brewery/${workspaces[index].slug}`;
+}
+
+function routePath(section: Section, selectedId: string | null, base: string): string {
+  if (section === 'me') return '/me';
+  return selectedId ? `${base}/${detailPaths[section]}/${selectedId}` : `${base}/${section}`;
 }
 const navItems = [
   { key: 'batches', label: 'Batches', icon: AppstoreOutlined },
@@ -32,11 +45,28 @@ const navItems = [
   { key: 'inventory', label: 'Inventory', icon: InboxOutlined },
   { key: 'equipment', label: 'Equipment', icon: ToolOutlined }
 ] as const;
-const menuItems = navItems.map(({ key, label, icon: Icon }) => ({ key, label, icon: <Icon /> }));
+type RecordSection = Exclude<Section, 'me'>;
+type RecentItems = Record<RecordSection, string[]>;
+const recordSections: RecordSection[] = ['batches', 'recipes', 'inventory', 'equipment'];
+const emptyRecents = (): RecentItems => ({ batches: [], recipes: [], inventory: [], equipment: [] });
 
-function SectionNavigation({ section, onNavigate }: { section: Section; onNavigate: (section: Section) => void }) {
-  return <Menu mode="inline" selectedKeys={[section]} items={menuItems}
-    onClick={({ key }) => onNavigate(key as Section)} />;
+function SectionNavigation({ route, recent, records, onNavigate }: {
+  route: Route; recent: RecentItems; records: Record<RecordSection, { id: string; name: string }[]>;
+  onNavigate: (section: RecordSection, id: string | null) => void;
+}) {
+  const items = navItems.map(({ key, label, icon: Icon }) => ({
+    key, label, icon: <Icon />,
+    onTitleClick: () => onNavigate(key, null),
+    children: [
+      { key: `${key}:all`, label: `All ${label.toLowerCase()}` },
+      ...recent[key].map(id => records[key].find(item => item.id === id)).filter((item): item is { id: string; name: string } => !!item)
+        .map(item => ({ key: `${key}:${item.id}`, label: <span className="nav-recent-title" title={item.name}>{item.name}</span> }))
+    ]
+  }));
+  return <Menu mode="inline" openKeys={route.section === 'me' ? [] : [route.section]}
+    selectedKeys={route.section === 'me' ? [] : [`${route.section}:${route.selectedId || 'all'}`]}
+    items={items}
+    onClick={({ key }) => { const [section, id] = key.split(':'); onNavigate(section as RecordSection, id === 'all' ? null : id); }} />;
 }
 const newBreweryOption = '~new-brewery';
 const cachedSessionKey = 'brewlog:last-session';
@@ -46,16 +76,43 @@ const activeBreweryKey = 'brewlog:active-brewery';
 
 function initialBrewery(workspaces: Workspace[]): string | null {
   const linked = new URLSearchParams(location.search).get('brewery');
+  const slug = routeFromPath(location.pathname).slug;
   const remembered = localStorage.getItem(activeBreweryKey);
-  return workspaces.find(item => item.id === linked)?.id
-    || workspaces.find(item => item.id === remembered)?.id || workspaces[0]?.id || null;
+  if (linked) return workspaces.find(item => item.id === linked)?.id || workspaces[0]?.id || null;
+  if (slug) return workspaces.find(item => item.slug === slug)?.id || workspaces[0]?.id || null;
+  if (location.pathname === '/me') return workspaces.find(item => item.id === remembered)?.id || workspaces[0]?.id || null;
+  return workspaces[0]?.id || null;
+}
+
+function canonicalizeLocation(workspaces: Workspace[]): void {
+  const linked = new URLSearchParams(location.search).get('brewery');
+  const route = routeFromPath(location.pathname);
+  if (route.section === 'me') return;
+  const workspace = linked ? workspaces.find(item => item.id === linked)
+    : route.slug ? workspaces.find(item => item.slug === route.slug) : null;
+  if (linked || route.slug) {
+    const path = workspace ? routePath(route.section, route.selectedId, workspaceBase(workspace.id, workspaces)) : '/batches';
+    if (location.pathname + location.search !== path) history.replaceState(null, '', path);
+  }
 }
 
 function cachedSession(): Session | null {
   try {
     const value = JSON.parse(localStorage.getItem(cachedSessionKey) || 'null') as Session | null;
     if (value && typeof value.account?.id === 'string' && Array.isArray(value.workspaces)
-      && value.workspaces.every(item => typeof item.id === 'string' && typeof item.name === 'string')) return value;
+      && value.workspaces.every(item => typeof item.id === 'string' && typeof item.name === 'string')) {
+      const used = new Set<string>();
+      const workspaces = [...value.workspaces].sort((a, b) =>
+        Number(b.name === 'Homebrew') - Number(a.name === 'Homebrew')).map(item => {
+        const base = item.name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'brewery';
+        let slug = typeof item.slug === 'string' && item.slug ? item.slug : base;
+        for (let number = 2; used.has(slug); number++) slug = `${base}-${number}`;
+        used.add(slug);
+        return { ...item, slug };
+      });
+      return { ...value, workspaces };
+    }
   } catch { /* Ignore corrupt local metadata. */ }
   return null;
 }
@@ -92,6 +149,7 @@ export function App() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
+  const [recent, setRecent] = useState<RecentItems>(emptyRecents);
   const [catalogEquipment, setCatalogEquipment] = useState<CatalogEquipment[]>([]);
   const [catalogInventory, setCatalogInventory] = useState<CatalogInventory[]>([]);
   const [error, setError] = useState('');
@@ -109,14 +167,18 @@ export function App() {
       return;
     }
     api<Session>('/me').then(result => {
+      canonicalizeLocation(result.workspaces);
       rememberSession(result);
       setSession(result);
       setWorkspaceId(initialBrewery(result.workspaces));
+      setRoute(routeFromPath(location.pathname));
     }).catch(cause => {
       if (cause instanceof ApiError && cause.status === 401) localStorage.removeItem(cachedSessionKey);
       const remembered = cause instanceof ApiError && cause.status === 401 ? null : cachedSession();
+      if (remembered) canonicalizeLocation(remembered.workspaces);
       setSession(remembered);
       setWorkspaceId(remembered ? initialBrewery(remembered.workspaces) : null);
+      setRoute(routeFromPath(location.pathname));
     }).finally(() => setLoading(false));
   }, []);
 
@@ -154,22 +216,51 @@ export function App() {
 
   useEffect(() => {
     if (location.pathname === '/') history.replaceState(null, '', '/batches');
-    const onBackOrForward = () => setRoute(routeFromPath(location.pathname));
+    const onBackOrForward = () => {
+      if (session) canonicalizeLocation(session.workspaces);
+      const next = routeFromPath(location.pathname);
+      setRoute(next);
+      if (next.section === 'me' || !session) return;
+      const workspace = next.slug ? session.workspaces.find(item => item.slug === next.slug) : session.workspaces[0];
+      if (workspace) {
+        setWorkspaceId(workspace.id);
+        localStorage.setItem(activeBreweryKey, workspace.id);
+      }
+    };
     window.addEventListener('popstate', onBackOrForward);
     return () => window.removeEventListener('popstate', onBackOrForward);
-  }, []);
+  }, [session]);
 
-  function showSection(next: Section) {
-    const path = next === 'me' ? '/me' : `/${next}`;
-    if (location.pathname !== path) history.pushState(null, '', path);
-    setRoute({ section: next, selectedId: null });
+  useEffect(() => {
+    if (!workspaceId) return;
+    const next = emptyRecents();
+    for (const name of recordSections) {
+      try {
+        const saved = JSON.parse(localStorage.getItem(`brewlog:recent:${workspaceId}:${name}`) || '[]') as unknown;
+        next[name] = Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string').slice(0, 5) : [];
+      } catch { next[name] = []; }
+    }
+    if (route.section !== 'me' && route.selectedId) {
+      const name = route.section;
+      next[name] = [route.selectedId, ...next[name].filter(id => id !== route.selectedId)].slice(0, 5);
+      localStorage.setItem(`brewlog:recent:${workspaceId}:${name}`, JSON.stringify(next[name]));
+    }
+    setRecent(next);
+  }, [workspaceId, route]);
+
+  function showSection(next: Section, targetWorkspaceId = workspaceId) {
+    const base = workspaceBase(targetWorkspaceId, session?.workspaces || []);
+    const path = routePath(next, null, base);
+    if (location.pathname !== path || location.search) history.pushState(null, '', path);
+    setRoute({ section: next, selectedId: null, slug: next === 'me' ? null : base.split('/')[2] || null });
     setMenuOpen(false);
   }
 
   function showItem(next: Exclude<Section, 'me'>, id: string | null) {
-    const path = id ? `/${detailPaths[next]}/${id}${workspaceId ? `?brewery=${workspaceId}` : ''}` : `/${next}`;
-    if (location.pathname !== path) history.pushState(null, '', path);
-    setRoute({ section: next, selectedId: id });
+    const base = workspaceBase(workspaceId, session?.workspaces || []);
+    const path = routePath(next, id, base);
+    if (location.pathname !== path || location.search) history.pushState(null, '', path);
+    setRoute({ section: next, selectedId: id, slug: base.split('/')[2] || null });
   }
 
   async function signOut() {
@@ -179,7 +270,7 @@ export function App() {
     setSession(null);
     setOpenedDb(null);
     history.replaceState(null, '', '/');
-    setRoute({ section: 'batches', selectedId: null });
+    setRoute({ section: 'batches', selectedId: null, slug: null });
   }
 
   const refresh = useCallback(async (activeDb: LocalDb, targetWorkspaceId: string) => {
@@ -252,7 +343,9 @@ export function App() {
       setOpenedDb(null);
       setWorkspaceDialog(false);
       setWorkspaceName('');
-      showSection('batches');
+      const path = `/brewery/${workspace.slug}/batches`;
+      history.pushState(null, '', path);
+      setRoute({ section: 'batches', selectedId: null, slug: workspace.slug });
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
@@ -269,6 +362,7 @@ export function App() {
     if (location.pathname === '/') showSection('batches'); }} />;
   const avatarSrc = session.account.has_avatar ? `/api/me/avatar?v=${avatarVersion}` : undefined;
   const preferredUnits = session.preferred_units || defaultPreferredUnits;
+  const activeBase = workspaceBase(workspaceId, session.workspaces);
 
   return <div className="app-shell">
     <header className="app-header">
@@ -284,7 +378,7 @@ export function App() {
             { label: '＋ New brewery', value: newBreweryOption }]}
           onChange={value => {
             if (value === newBreweryOption) setWorkspaceDialog(true);
-            else { setWorkspaceId(value); localStorage.setItem(activeBreweryKey, value); setOpenedDb(null); showSection('batches'); }
+            else { setWorkspaceId(value); localStorage.setItem(activeBreweryKey, value); setOpenedDb(null); showSection('batches', value); }
           }} />
         <Tooltip title="Account settings">
           <Button className="avatar-button" type="text" shape="circle" aria-label="Account settings" onClick={() => showSection('me')}>
@@ -295,11 +389,13 @@ export function App() {
     </header>
 
     <div className="app-body">
-      <Layout.Sider className="app-nav" width={180} theme="light" aria-label="Sections">
-        <SectionNavigation section={section} onNavigate={showSection} />
+      <Layout.Sider className="app-nav" width={220} theme="light" aria-label="Sections">
+        <SectionNavigation route={route} recent={recent} records={{ batches, recipes, inventory, equipment }}
+          onNavigate={(name, id) => id ? showItem(name, id) : showSection(name)} />
       </Layout.Sider>
       <Drawer className="mobile-nav-drawer" title="Sections" placement="left" width={250} open={menuOpen} onClose={() => setMenuOpen(false)}>
-        <div className="drawer-nav"><SectionNavigation section={section} onNavigate={showSection} /></div>
+        <div className="drawer-nav"><SectionNavigation route={route} recent={recent} records={{ batches, recipes, inventory, equipment }}
+          onNavigate={(name, id) => { id ? showItem(name, id) : showSection(name); setMenuOpen(false); }} /></div>
       </Drawer>
       <main className="app-main">
         {error && <Alert type="warning" showIcon closable onClose={() => setError('')} message={error} className="page-alert" />}
@@ -312,15 +408,15 @@ export function App() {
           autoSync={autoSync} onAutoSyncChange={enabled => { localStorage.setItem(autoSyncKey, enabled ? '1' : '0'); setAutoSync(enabled); }}
           onSignOut={signOut} /> : !workspaceId ? <Empty description="Create a brewery to begin"><Button type="primary" onClick={() => setWorkspaceDialog(true)}>New brewery</Button></Empty> :
           !db ? <div className="loading-screen"><Spin tip="Opening local database" /></div> : <>
-            {section === 'batches' && <BatchSection key={workspaceId} db={db} accountId={session.account.id} batches={batches}
+            {section === 'batches' && <BatchSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} batches={batches}
               equipment={equipment} inventory={inventory} preferredUnits={preferredUnits}
               selectedId={route.selectedId} onSelect={id => showItem('batches', id)} onChanged={changed} />}
-            {section === 'recipes' && <RecipeSection key={workspaceId} db={db} accountId={session.account.id} recipes={recipes}
+            {section === 'recipes' && <RecipeSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} recipes={recipes}
               selectedId={route.selectedId} onSelect={id => showItem('recipes', id)}
               onChanged={changed} onBatchStarted={id => showItem('batches', id)} />}
-            {section === 'inventory' && <InventorySection key={workspaceId} db={db} accountId={session.account.id} items={inventory}
+            {section === 'inventory' && <InventorySection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} items={inventory}
               catalog={catalogInventory} preferredUnits={preferredUnits} selectedId={route.selectedId} onSelect={id => showItem('inventory', id)} onChanged={changed} />}
-            {section === 'equipment' && <EquipmentSection key={workspaceId} db={db} accountId={session.account.id} equipment={equipment}
+            {section === 'equipment' && <EquipmentSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} equipment={equipment}
               catalog={catalogEquipment} selectedId={route.selectedId} onSelect={id => showItem('equipment', id)} onChanged={changed} />}
           </>}
       </main>

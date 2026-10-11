@@ -1,7 +1,7 @@
 export type { PreferredUnits } from '../shared/units.ts';
 import type { PreferredUnits } from '../shared/units.ts';
 
-export interface Workspace { id: string; name: string }
+export interface Workspace { id: string; name: string; slug: string }
 export interface Session {
   account: { id: string; username: string; has_avatar: boolean };
   workspaces: Workspace[];

@@ -26,6 +26,8 @@ The app should work for a homebrewer with one operation and for an account that 
 
 The UI calls each operation a **brewery**; APIs and database tables retain `workspace` as their internal name. An account can own several private breweries. A shared batch stays in its brewery's workspace DB. Batch sharing, follower databases, and workspace membership are **later implementation targets**; they do not block the initial whole-workspace app.
 
+The first Homebrew brewery is the default at root routes such as `/batches`. Additional breweries have stable account-scoped slugs at `/brewery/:slug/batches`. Item routes follow the same prefix. Slugs live in the auth DB and remain stable if display names change.
+
 ### Implementation phases
 
 1. **Initial:** Open account registration, one or more private workspace DBs per account, full local copies on that account's devices, authenticated whole-workspace sync, batches and plans, and the first useful event types. Add RAPT ingestion and reminders as the batch workflow matures.
@@ -94,6 +96,7 @@ If one fridge serves several batches, record the relevant temperature-control ev
 | Table | Main fields and role |
 | --- | --- |
 | `equipment` | Workspace-owned physical items: kettle, controller, chiller, fermenter, fridge, hydrometer, pH meter, etc. May retain a source catalog model ID and a copied specification. Consumable bottles belong in inventory. |
+| `equipment_archives` | Hides equipment used by events from active lists while retaining the referenced equipment and calibration rows for history. Unused equipment can be deleted outright. |
 | `equipment_calibrations` | Immutable records of calibration parameters, method, effective time, and author. Measurements link to the calibration used at capture time. |
 | `equipment_characterization_observations` | Observed power, temperatures, volumes, time, and evaporation/heat-loss data used to fit kettle behavior. |
 
