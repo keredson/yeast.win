@@ -52,7 +52,7 @@ The names below are proposed logical tables. A migration can refine names and sp
 
 | Table | Main fields and role |
 | --- | --- |
-| `batches` | `id`, name, description, status, timestamps. This is the root for the batch timeline. No separate `started` event is required merely to establish T0. |
+| `batches` | `id`, name, description, status, timestamps. This is the root for the batch timeline. The current UI uses `created_at` as the batch start time (T0); no separate `started` event is required. |
 | `recipes` | `id`, name, description, version/metadata. Reusable editable plans, independent of batches. |
 | `recipe_events` | Planned actions or milestones in a recipe, including type-specific planned details, order, and timing rule. Editing a recipe does not rewrite existing batches. |
 | `batch_planned_events` | Snapshot of recipe events copied when a batch is created with an optional recipe, plus plans added specifically to that batch. These rows are treated as immutable historical plans; a revised plan supersedes an earlier plan rather than silently editing it. |
@@ -60,7 +60,7 @@ The names below are proposed logical tables. A migration can refine names and sp
 
 An actual event can fulfill a planned event, be an unplanned action, or record that a planned event was **skipped** (`event_type = 'skipped'`, with `planned_event_id`). A skip has its own actual timestamp and creator; it is not a nullable `skipped_at` on the plan. More than one actual event may refer to the same plan. That preserves conflicting offline actions for review instead of erasing one of them.
 
-A plan timing rule is either a fixed `planned_at` timestamp or `anchor_event_id` plus `offset_seconds`. The anchor identifies a meaningful planned milestone whose corresponding actual event supplies the real-world time. `boil_finished` is such a milestone. Recipe anchors are remapped to the copied batch plans. The UI can show both the original planned time and the currently computed due time. What to do with a plan whose anchor is skipped or has conflicting actuals remains a product rule to define.
+A new plan stores `offset_seconds` from batch start, or `anchor_event_id` plus `offset_seconds` from another event. The default is zero seconds from start, so additions at the beginning group naturally. The anchor identifies a meaningful planned milestone whose corresponding actual event supplies the real-world time; `boil_finished` is one example. Until an anchor has an actual result, the UI estimates its time from the anchor's plan. Recipe anchors are remapped to copied batch plans. Legacy `planned_at` timestamps remain readable, but the UI does not create new absolute planned times. What to do with a skipped or conflicting anchor remains a product rule to define.
 
 ### Actual event payloads
 
@@ -115,7 +115,7 @@ Inventory is a ledger, not a mutable `quantity_on_hand` field. Additions and pac
 
 ### Photos
 
-`photos` stores image metadata and the full image BLOB **inside the workspace DB**, with links to batches, batch events, or inventory items. Set an ingestion limit of about 5 MB per compressed image, verify MIME/type and dimensions, and strip unneeded metadata. This keeps photo replication in the same sync and permission path as the rest of the batch. Small thumbnails are disposable device-local cache entries generated from the full image; they are not separately synced.
+`photos` stores image metadata and the full image BLOB **inside the workspace DB**, with links to batches, batch events, or inventory items. New batch photo uploads create a `photo` batch event and attach the image to it, so the image appears in the timeline. Older images without an event appear there using their photo timestamp. Set an ingestion limit of about 5 MB per compressed image, verify MIME/type and dimensions, and strip unneeded metadata. This keeps photo replication in the same sync and permission path as the rest of the batch. Small thumbnails are disposable device-local cache entries generated from the full image; they are not separately synced.
 
 ## Sync and authorization
 

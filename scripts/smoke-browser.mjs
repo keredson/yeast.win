@@ -103,20 +103,33 @@ try {
   await page.getByRole('heading', { name: batchName }).waitFor();
   console.log('Created batch:', batchName);
 
-  await page.getByRole('button', { name: 'Plan', exact: true }).click();
+  await page.getByRole('button', { name: 'Plan an action' }).click();
   await page.getByLabel('What needs to happen?').fill('Add nutrient');
   await page.getByRole('button', { name: 'Add planned event' }).click();
   await page.getByText('Add nutrient', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Plan an action' }).click();
+  await page.getByLabel('What needs to happen?').fill('Add yeast');
+  await page.getByRole('button', { name: 'Add planned event' }).click();
+  await page.getByText('Add yeast', { exact: true }).waitFor();
+  if (await page.locator('.timeline-group').count() !== 1 || await page.locator('.timeline-group .plan-card').count() !== 2) {
+    throw new Error('Actions at batch start were not grouped together');
+  }
+  await page.locator('.plan-card').filter({ hasText: 'Add nutrient' }).getByRole('button', { name: 'Record' }).click();
+  const plannedAction = page.getByRole('dialog', { name: 'Record: Add nutrient' });
+  await plannedAction.getByRole('textbox', { name: 'What was added?' }).fill('Yeast nutrient');
+  await plannedAction.getByRole('spinbutton', { name: 'Quantity' }).fill('1');
+  await plannedAction.getByRole('button', { name: 'Save event' }).click();
+  await page.locator('.plan-card').filter({ hasText: 'Add nutrient' }).locator('.event-card').getByText('1 g Yeast nutrient').waitFor();
   console.log('Added planned event');
 
-  await page.getByRole('button', { name: 'Log event' }).click();
+  await page.getByRole('button', { name: 'Record activity' }).click();
   const eventNote = `Brew day ${Date.now()}`;
   await page.getByRole('button', { name: 'Save event' }).click();
-  await page.getByRole('dialog', { name: 'Log an event' }).locator('.ant-form-item-explain-error').waitFor();
+  await page.getByRole('dialog', { name: 'Record activity' }).locator('.ant-form-item-explain-error').waitFor();
   await page.getByLabel('Notes').fill(eventNote);
   await page.getByRole('button', { name: 'Save event' }).click();
   await page.locator('.event-card').getByText(eventNote).waitFor();
-  await page.getByRole('dialog', { name: 'Log an event' }).waitFor({ state: 'hidden' });
+  await page.getByRole('dialog', { name: 'Record activity' }).waitFor({ state: 'hidden' });
   console.log('Logged actual event');
 
   await page.reload();
@@ -158,8 +171,7 @@ try {
       if (!layout.index || layout.detail) throw new Error(`${section} should be an index page`);
       if (section === 'Batches') {
         await openBatch(page, batchName);
-        const columns = await page.locator('.batch-columns').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length);
-        if (columns !== 1) throw new Error('Batch detail should have one content column');
+        if (await page.locator('.batch-timeline').count() !== 1) throw new Error('Batch detail should have one timeline');
         if (await page.getByRole('button', { name: 'All batches' }).count()) throw new Error('Batch detail has a duplicate back button');
         if (width > 720 && !await page.locator('.app-nav .ant-menu-item').filter({ hasText: batchName }).isVisible()) {
           throw new Error('Recent batch link is hidden in the desktop navigation');
@@ -214,12 +226,12 @@ try {
     throw new Error('Recent equipment disappeared when navigating to batches');
   }
   await openBatch(page, batchName);
-  await page.getByRole('button', { name: 'Log event' }).click();
-  const measurementDialog = page.getByRole('dialog', { name: 'Log an event' });
+  await page.getByRole('button', { name: 'Record activity' }).click();
+  const measurementDialog = page.getByRole('dialog', { name: 'Record activity' });
   await measurementDialog.getByRole('combobox', { name: 'Event type' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Measurement' }).click();
   await measurementDialog.getByRole('combobox', { name: 'Measurement' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'pH' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="pH"]').click();
   await measurementDialog.getByRole('spinbutton', { name: 'Corrected value' }).fill('5.2');
   await measurementDialog.getByRole('combobox', { name: 'Instrument' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke pH meter' }).click();
@@ -304,8 +316,13 @@ try {
     const id = JSON.parse(localStorage.getItem('brewlog:last-session')).workspaces[0].id;
     return localStorage.getItem(`brewlog:last-sync:${id}`);
   });
-  await page.locator('.photo-section input[type="file"]').setInputFiles({ name: 'brew.png', mimeType: 'image/png', buffer: imageBytes });
-  await page.locator('.photo-grid img').waitFor();
+  await page.getByRole('button', { name: 'Record activity' }).click();
+  const photoDialog = page.getByRole('dialog', { name: 'Record activity' });
+  await photoDialog.getByRole('combobox', { name: 'Event type' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Photo' }).click();
+  await photoDialog.locator('input[type="file"]').setInputFiles({ name: 'brew.png', mimeType: 'image/png', buffer: imageBytes });
+  await photoDialog.getByRole('button', { name: 'Save event' }).click();
+  await page.locator('.event-card .photo-grid img').waitFor();
   await page.waitForFunction(previous => {
     const id = JSON.parse(localStorage.getItem('brewlog:last-session')).workspaces[0].id;
     return Number(localStorage.getItem(`brewlog:last-sync:${id}`)) > Number(previous);
@@ -402,13 +419,13 @@ try {
   if (secondUnits !== '°F') throw new Error('Preferred units did not persist across devices');
   await navigateSection(page, 'Batches');
   await openBatch(page, batchName);
-  await page.getByRole('button', { name: 'Log event' }).click();
-  await page.getByRole('dialog', { name: 'Log an event' }).getByRole('combobox', { name: 'Event type' }).click();
+  await page.getByRole('button', { name: 'Record activity' }).click();
+  await page.getByRole('dialog', { name: 'Record activity' }).getByRole('combobox', { name: 'Event type' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Measurement' }).click();
-  if (!await page.getByRole('dialog', { name: 'Log an event' }).getByRole('combobox', { name: 'Unit' }).locator('..').getByText('°F', { exact: true }).count()) {
+  if (!await page.getByRole('dialog', { name: 'Record activity' }).getByRole('combobox', { name: 'Unit' }).locator('..').getByText('°F', { exact: true }).count()) {
     throw new Error('Preferred temperature unit was not used in the event form');
   }
-  await page.getByRole('dialog', { name: 'Log an event' }).getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('dialog', { name: 'Record activity' }).getByRole('button', { name: 'Close' }).click();
   await page.getByRole('button', { name: 'Account settings' }).click();
   await page.getByRole('heading', { name: 'Settings' }).waitFor();
   console.log('Saved preferred units and used them in an event form');

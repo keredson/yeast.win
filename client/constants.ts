@@ -6,6 +6,7 @@ export const planKinds = [
   { value: 'transfer', label: 'Transfer' },
   { value: 'packaging', label: 'Packaging' },
   { value: 'boil_finished', label: 'Boil finished' },
+  { value: 'photo', label: 'Photo' },
   { value: 'note', label: 'Notes' }
 ];
 

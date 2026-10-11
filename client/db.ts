@@ -283,16 +283,24 @@ export async function addInventoryEntry(db: DB, itemId: string, kind: 'purchase'
   }
 }
 
-export async function addPhoto(db: DB, batchId: string, file: File, accountId: string): Promise<void> {
+export async function addPhoto(db: DB, batchId: string, file: File, accountId: string,
+  actualAt = nowSeconds(), plannedEventId: string | null = null, note = ''): Promise<void> {
   if (!file.type.startsWith('image/')) throw new Error('Choose an image');
   if (file.size > 5 * 1024 * 1024) throw new Error('Image exceeds 5 MB');
   const bytes = new Uint8Array(await file.arrayBuffer());
-  await db.exec('INSERT INTO photos(id, batch_id, mime_type, byte_count, image, created_at, created_by_account_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [nanoid(), batchId, file.type, bytes.length, bytes, nowSeconds(), accountId]);
+  const eventId = nanoid();
+  await db.tx(async tx => {
+    await tx.exec(`INSERT INTO batch_events(id, batch_id, event_type, actual_at, planned_event_id, note, created_by_account_id)
+      VALUES (?, ?, 'photo', ?, ?, ?, ?)`, [eventId, batchId, actualAt, plannedEventId, note || file.name, accountId]);
+    await tx.exec(`INSERT INTO photos(id, batch_id, batch_event_id, mime_type, byte_count, image, created_at, created_by_account_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [nanoid(), batchId, eventId, file.type, bytes.length, bytes, actualAt, accountId]);
+  });
 }
 
-export async function listPhotos(db: DB, batchId: string): Promise<{ id: string; mime_type: string; image: Uint8Array }[]> {
-  return db.execO('SELECT id, mime_type, image FROM photos WHERE batch_id = ? ORDER BY created_at DESC', [batchId]);
+export async function listPhotos(db: DB, batchId: string): Promise<{
+  id: string; batch_event_id: string | null; created_at: number; mime_type: string; image: Uint8Array
+}[]> {
+  return db.execO('SELECT id, batch_event_id, created_at, mime_type, image FROM photos WHERE batch_id = ? ORDER BY created_at DESC', [batchId]);
 }
 
 function stateValue(db: DB, key: string): Promise<string> {

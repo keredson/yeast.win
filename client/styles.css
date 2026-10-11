@@ -66,8 +66,14 @@ button, input, textarea { font: inherit; }
 .eyebrow { color: #98723f; text-transform: uppercase; letter-spacing: .13em; font-weight: 750; font-size: 11px; }
 .muted { color: #728079; font-size: 13px; line-height: 1.5; }
 .heading-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: end; }
-.batch-columns { display: grid; grid-template-columns: 1fr; gap: 30px; }
-.batch-columns section { min-width: 0; }
+.batch-timeline { min-width: 0; }
+.timeline-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 24px; }
+.timeline-group .ant-card-body { padding: 0; }
+.timeline-group-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 13px 18px; border-bottom: 1px solid #e6ebe4; background: #f6f8f4; }
+.timeline-group-heading strong { font-size: 14px; }
+.timeline-entry { padding: 14px 18px; }
+.timeline-entry + .timeline-entry { border-top: 1px solid #edf0eb; }
+.timeline-entry .timeline-entry { margin: 12px 0 0 12px; padding: 10px 0 0 14px; border-top: 1px solid #edf0eb; border-left: 2px solid #c7d8cd; }
 .column-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 .column-title h3 { margin: 0; font-size: 17px; letter-spacing: -.02em; }
 .column-title > span { color: #809087; font-size: 13px; }
@@ -80,7 +86,6 @@ button, input, textarea { font: inherit; }
 .card-actions { display: flex; gap: 4px; margin: 7px -8px -4px; }
 .card-actions .ant-btn { padding-inline: 8px; }
 .event-detail { margin: 10px 0 2px; font-size: 13px; line-height: 1.45; }
-.photo-section { margin-top: 34px; }
 .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
 .photo-grid img { width: 100%; height: 140px; object-fit: cover; border-radius: 12px; background: #e1e5de; }
 .file-button { display: inline-flex; align-items: center; padding: 5px 12px; border: 1px solid #c4d7cc; border-radius: 8px; color: #1f6b5b; background: white; cursor: pointer; font-size: 13px; font-weight: 600; }

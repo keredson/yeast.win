@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Form, Input, InputNumber, Select } from 'antd';
 import { kindLabel, measurementKinds, planKinds } from './constants.ts';
 import { fromDatetimeLocal, toDatetimeLocal } from './time.ts';
-import { recordEvent, type Equipment, type EventInput, type InventoryItem, type LocalDb, type MeasurementKind, type Plan } from './db.ts';
+import { addPhoto, recordEvent, type Equipment, type EventInput, type InventoryItem, type LocalDb, type MeasurementKind, type Plan } from './db.ts';
 import type { PreferredUnits } from './api.ts';
 import { quantityUnits, unitGroups, unitOptions } from '../shared/units.ts';
 
@@ -48,6 +48,7 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
   const [calibrations, setCalibrations] = useState<{ id: string; effective_at: number }[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [photo, setPhoto] = useState<File | null>(null);
 
   useEffect(() => {
     if (!instrumentId) return setCalibrations([]);
@@ -59,6 +60,12 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
   async function submit(values: Values) {
     setBusy(true); setError('');
     try {
+      if (kind === 'photo') {
+        if (!photo) throw new Error('Choose a photo');
+        await addPhoto(db, batchId, photo, accountId, fromDatetimeLocal(values.actual_at), values.planned_event_id || null, values.note || '');
+        await onSaved();
+        return;
+      }
       let payload: EventInput['payload'];
       const input: EventInput = {
         batchId, accountId, eventType: values.event_type, actualAt: fromDatetimeLocal(values.actual_at),
@@ -176,6 +183,9 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
         <Form.Item name="container_unit" label="Unit" rules={[{ required: true }]}><Select options={unitOptions(unitGroups.volume)} /></Form.Item>
         <Form.Item name="container_count" label="Count" rules={[{ required: true }]}><InputNumber className="full-width" min={1} precision={0} /></Form.Item></div>
     </>}
+    {kind === 'photo' && <Form.Item label="Photo" required>
+      <Input type="file" accept="image/*" onChange={event => setPhoto(event.target.files?.[0] || null)} />
+    </Form.Item>}
     <Form.Item name="note" label={kind === 'note' ? 'Notes' : 'Note'} rules={kind === 'note' ? [{ required: true, whitespace: true }] : []}>
       <Input.TextArea rows={kind === 'note' ? 4 : 2} placeholder={kind === 'note' ? 'What happened?' : 'Optional context'} /></Form.Item>
     <Button type="primary" htmlType="submit" loading={busy}>Save event</Button>

@@ -5,7 +5,7 @@ import { addRecipePlan, createRecipe, listRecipePlans, startBatchFromRecipe,
   type LocalDb, type PlanInput, type Recipe } from './db.ts';
 import { PlanForm } from './PlanForm.tsx';
 import { kindLabel } from './constants.ts';
-import { formatTime } from './time.ts';
+import { planTimingLabel } from './planTiming.ts';
 
 export function RecipeSection({ db, basePath, accountId, recipes, selectedId, onSelect, onChanged, onBatchStarted }: {
   db: LocalDb; basePath: string; accountId: string; recipes: Recipe[]; selectedId: string | null; onSelect: (id: string | null) => void;
@@ -60,8 +60,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, selectedId, on
         </div>
         {plans.length === 0 ? <Card><Empty description="Add the first planned event" /></Card> :
           <div className="card-stack">{plans.map(plan => <Card key={plan.id} size="small">
-            <div className="timeline-card"><div><strong>{plan.title}</strong><div className="muted">{plan.planned_at ? formatTime(plan.planned_at) :
-              plan.anchor_event_id ? `${plan.offset_seconds || 0}s after ${plans.find(item => item.id === plan.anchor_event_id)?.title || 'anchor'}` : 'Unscheduled'}</div></div>
+            <div className="timeline-card"><div><strong>{plan.title}</strong><div className="muted">{planTimingLabel(plan, plans)}</div></div>
               <Tag>{kindLabel(plan.event_type)}</Tag></div>
           </Card>)}</div>}
       </section>}
@@ -73,7 +72,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, selectedId, on
       </Form>
     </Modal>
     <Modal title="Planned recipe event" open={newPlan} onCancel={() => setNewPlan(false)} footer={null} destroyOnHidden>
-      <PlanForm anchors={plans} submit={addPlan} includeFixed={false} />
+      <PlanForm anchors={plans} submit={addPlan} />
     </Modal>
     <Modal title="Start a batch" open={newBatch} onCancel={() => setNewBatch(false)} footer={null} destroyOnHidden>
       <Form layout="vertical" onFinish={start} initialValues={{ name: recipe ? `${recipe.name} batch` : '' }}>
