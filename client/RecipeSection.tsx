@@ -2,13 +2,15 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Empty, Form, Input, Modal, Tag } from 'antd';
 import { EditOutlined, PlusOutlined } from '@ant-design/icons';
 import { addRecipePlan, createRecipe, listRecipePlans, startBatchFromRecipe, updateRecipePlan,
-  type LocalDb, type PlanInput, type Recipe } from './db.ts';
+  type InventoryItem, type LocalDb, type PlanInput, type Recipe } from './db.ts';
 import { PlanForm } from './PlanForm.tsx';
 import { kindLabel } from './constants.ts';
 import { planDetailsLabel, planTimingLabel } from './planTiming.ts';
+import type { CatalogInventory } from '../shared/catalog.ts';
 
-export function RecipeSection({ db, basePath, accountId, recipes, selectedId, onSelect, onChanged, onBatchStarted }: {
+export function RecipeSection({ db, basePath, accountId, recipes, inventory, catalogInventory, preferredMassUnit, selectedId, onSelect, onChanged, onBatchStarted }: {
   db: LocalDb; basePath: string; accountId: string; recipes: Recipe[]; selectedId: string | null; onSelect: (id: string | null) => void;
+  inventory: InventoryItem[]; catalogInventory: CatalogInventory[]; preferredMassUnit: string;
   onChanged: () => Promise<void>; onBatchStarted: (id: string) => void;
 }) {
   const [plans, setPlans] = useState<(PlanInput & { id: string })[]>([]);
@@ -62,11 +64,11 @@ export function RecipeSection({ db, basePath, accountId, recipes, selectedId, on
         </div>
         {plans.length === 0 ? <Card><Empty description="Add the first planned event" /></Card> :
           <div className="card-stack">{plans.map(plan => <Card key={plan.id} size="small">
-            <div className="timeline-card"><div><strong>{plan.title}</strong><div className="muted">{planTimingLabel(plan, plans)}</div></div>
+            <div className="timeline-card"><div><div className="title-edit-row"><Button type="text" size="small" icon={<EditOutlined />}
+              aria-label={`Edit planned event ${plan.title}`} onClick={() => { setEditingPlan(plan); setNewPlan(true); }} />
+              <strong>{plan.title}</strong></div><div className="muted">{planTimingLabel(plan, plans)}</div></div>
               <Tag>{kindLabel(plan.event_type)}</Tag></div>
             {planDetailsLabel(plan) && <p className="event-detail">{planDetailsLabel(plan)}</p>}
-            <div className="plan-edit-action"><Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit planned event ${plan.title}`}
-              onClick={() => { setEditingPlan(plan); setNewPlan(true); }} /></div>
           </Card>)}</div>}
       </section>}
     <Modal title="New recipe" open={newRecipe} onCancel={() => setNewRecipe(false)} footer={null} destroyOnHidden>
@@ -78,7 +80,8 @@ export function RecipeSection({ db, basePath, accountId, recipes, selectedId, on
     </Modal>
     <Modal title={editingPlan ? 'Edit recipe event' : 'Planned recipe event'} open={newPlan}
       onCancel={() => { setNewPlan(false); setEditingPlan(null); }} footer={null} destroyOnHidden>
-      <PlanForm key={editingPlan?.id || 'new'} anchors={plans.filter(item => item.id !== editingPlan?.id)} initialPlan={editingPlan || undefined} submit={addPlan} />
+      <PlanForm key={editingPlan?.id || 'new'} anchors={plans.filter(item => item.id !== editingPlan?.id)} initialPlan={editingPlan || undefined}
+        inventory={inventory} catalog={catalogInventory} preferredMassUnit={preferredMassUnit} submit={addPlan} />
     </Modal>
     <Modal title="Start a batch" open={newBatch} onCancel={() => setNewBatch(false)} footer={null} destroyOnHidden>
       <Form layout="vertical" onFinish={start} initialValues={{ name: recipe ? `${recipe.name} batch` : '' }}>

@@ -8,6 +8,7 @@ import { formatTime } from './time.ts';
 import { PlanForm } from './PlanForm.tsx';
 import { EventForm } from './EventForm.tsx';
 import type { PreferredUnits } from './api.ts';
+import type { CatalogInventory } from '../shared/catalog.ts';
 import { effectivePlanTime, planDetailsLabel, planTimingLabel } from './planTiming.ts';
 
 interface TimelineGroup {
@@ -15,8 +16,9 @@ interface TimelineGroup {
   plans: Plan[]; events: ActualEvent[]; legacyPhotos: { id: string; url: string; created_at: number }[];
 }
 
-export function BatchSection({ db, basePath, accountId, batches, recipes, equipment, inventory, preferredUnits, selectedId, onSelect, onChanged }: {
+export function BatchSection({ db, basePath, accountId, batches, recipes, equipment, inventory, catalogInventory, preferredUnits, selectedId, onSelect, onChanged }: {
   db: LocalDb; basePath: string; accountId: string; batches: Batch[]; recipes: Recipe[]; equipment: Equipment[]; inventory: InventoryItem[];
+  catalogInventory: CatalogInventory[];
   preferredUnits: PreferredUnits; selectedId: string | null; onSelect: (id: string | null) => void;
   onChanged: () => Promise<void>;
 }) {
@@ -108,12 +110,13 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   function renderEvent(event: ActualEvent) {
     const images = photos.filter(photo => photo.batch_event_id === event.id);
     return <div key={event.id} className="timeline-entry event-card">
-      <div className="timeline-card"><div><strong>{event.event_type === 'skipped' ? 'Skipped' : kindLabel(event.event_type)}</strong>
+      <div className="timeline-card"><div><div className="title-edit-row">
+        <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${kindLabel(event.event_type)} event`}
+          onClick={() => void editEvent(event)} />
+        <strong>{event.event_type === 'skipped' ? 'Skipped' : kindLabel(event.event_type)}</strong></div>
         <div className="muted">{formatTime(event.actual_at)}</div></div><Tag>{event.source_id || 'Manual'}</Tag></div>
       {details[event.id] && <p className="event-detail">{details[event.id]}</p>}
       {images.length > 0 && <div className="photo-grid">{images.map(photo => <img key={photo.id} src={photo.url} alt="Batch activity" />)}</div>}
-      <div className="event-edit-action"><Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${kindLabel(event.event_type)} event`}
-        onClick={() => void editEvent(event)} /></div>
     </div>;
   }
 
@@ -144,7 +147,10 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
                 const skipped = linked.filter(item => item.event_type === 'skipped');
                 const conflicting = !!(completed.length && skipped.length || completed.length > 1);
                 return <div key={plan.id} className="timeline-entry plan-card">
-                  <div className="timeline-card"><div><strong>{plan.title}</strong>
+                  <div className="timeline-card"><div><div className="title-edit-row">
+                    <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit planned event ${plan.title}`}
+                      onClick={() => { setEditingPlan(plan); setNewPlan(true); }} />
+                    <strong>{plan.title}</strong></div>
                     <div className="plan-meta">{kindLabel(plan.event_type)} · {planTimingLabel(plan, plans)}</div>
                     <Tag color={conflicting ? 'orange' : completed.length ? 'green' : skipped.length ? 'default' : 'blue'}>
                       {conflicting ? 'Conflicting' : completed.length ? 'Done' : skipped.length ? 'Skipped' : 'Planned'}</Tag></div>
@@ -152,8 +158,6 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
                       title="Record or skip" onClick={() => { setEditingEvent(null); setEditingData(null); setEventPlan(plan); setNewEvent(true); }} />}</div>
                   {planDetailsLabel(plan) && <p className="event-detail">{planDetailsLabel(plan)}</p>}
                   {linked.map(renderEvent)}
-                  <div className="plan-edit-action"><Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit planned event ${plan.title}`}
-                    onClick={() => { setEditingPlan(plan); setNewPlan(true); }} /></div>
                 </div>;
               })}
               {group.events.map(renderEvent)}
@@ -177,7 +181,8 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
     </Modal>
     <Modal title={editingPlan ? 'Edit planned event' : 'Plan an event'} open={newPlan}
       onCancel={() => { setNewPlan(false); setEditingPlan(null); }} footer={null} destroyOnHidden>
-      <PlanForm key={editingPlan?.id || 'new'} anchors={plans.filter(item => item.id !== editingPlan?.id)} initialPlan={editingPlan || undefined} submit={plan} />
+      <PlanForm key={editingPlan?.id || 'new'} anchors={plans.filter(item => item.id !== editingPlan?.id)} initialPlan={editingPlan || undefined}
+        inventory={inventory} catalog={catalogInventory} preferredMassUnit={preferredUnits.mass} submit={plan} />
     </Modal>
     <Modal title={editingEvent ? 'Edit event' : eventPlan ? `Record: ${eventPlan.title}` : 'Record activity'} open={newEvent}
       onCancel={() => { setNewEvent(false); setEventPlan(null); setEditingEvent(null); setEditingData(null); }} footer={null} destroyOnHidden width={600}>

@@ -408,9 +408,10 @@ export function App() {
           onSignOut={signOut} /> : !workspaceId ? <Empty description="Create a brewery to begin"><Button type="primary" onClick={() => setWorkspaceDialog(true)}>New brewery</Button></Empty> :
           !db ? <div className="loading-screen"><Spin tip="Opening local database" /></div> : <>
             {section === 'batches' && <BatchSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} batches={batches} recipes={recipes}
-              equipment={equipment} inventory={inventory} preferredUnits={preferredUnits}
+              equipment={equipment} inventory={inventory} catalogInventory={catalogInventory} preferredUnits={preferredUnits}
               selectedId={route.selectedId} onSelect={id => showItem('batches', id)} onChanged={changed} />}
             {section === 'recipes' && <RecipeSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} recipes={recipes}
+              inventory={inventory} catalogInventory={catalogInventory} preferredMassUnit={preferredUnits.mass}
               selectedId={route.selectedId} onSelect={id => showItem('recipes', id)}
               onChanged={changed} onBatchStarted={id => showItem('batches', id)} />}
             {section === 'inventory' && <InventorySection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} items={inventory}

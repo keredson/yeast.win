@@ -9,13 +9,18 @@ test('plans use batch start and an actual anchor when it arrives', () => {
     planned_at: null, anchor_event_id: null, offset_seconds: 0, details_json: null };
   const boilEnd: Plan = { ...startAddition, id: 'boil', title: 'Boil finished', event_type: 'boil_finished', offset_seconds: 3600 };
   const nutrient: Plan = { ...startAddition, id: 'nutrient', title: 'Add nutrient', anchor_event_id: 'boil', offset_seconds: 600 };
-  const plans = [startAddition, boilEnd, nutrient];
+  const preparation: Plan = { ...startAddition, id: 'preparation', title: 'Prepare nutrient',
+    anchor_event_id: 'boil', offset_seconds: -300 };
+  const plans = [startAddition, boilEnd, nutrient, preparation];
   assert.equal(effectivePlanTime(startAddition, plans, [], start), start);
   assert.equal(effectivePlanTime(nutrient, plans, [], start), start + 4200);
   assert.equal(planTimingLabel(startAddition, plans), 'At batch start');
   assert.equal(planTimingLabel(nutrient, plans), '10 minutes after Boil finished');
+  assert.equal(effectivePlanTime(preparation, plans, [], start), start + 3300);
+  assert.equal(planTimingLabel(preparation, plans), '5 minutes before Boil finished');
 
   const actual: ActualEvent = { id: 'done', batch_id: 'batch', event_type: 'boil_finished',
     actual_at: start + 4800, planned_event_id: 'boil', note: null, source_id: null };
   assert.equal(effectivePlanTime(nutrient, plans, [actual], start), start + 5400);
+  assert.equal(effectivePlanTime(preparation, plans, [actual], start), start + 4500);
 });
