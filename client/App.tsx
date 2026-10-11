@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Button, Card, Empty, Form, Input, Modal, Select, Spin, Typography } from 'antd';
-import { api, type Session, type Workspace } from './api.ts';
+import { api, ApiError, type Session, type Workspace } from './api.ts';
 import { openLocalDb, syncNow, type Batch, type Equipment, type InventoryItem, type LocalDb, type Recipe,
   listBatches, listEquipment, listInventory, listRecipes } from './db.ts';
 import { BatchSection } from './BatchSection.tsx';
@@ -9,6 +9,21 @@ import { InventorySection } from './InventorySection.tsx';
 import { EquipmentSection } from './EquipmentSection.tsx';
 
 type Section = 'batches' | 'recipes' | 'inventory' | 'equipment';
+const cachedSessionKey = 'brewlog:last-session';
+const signedOutKey = 'brewlog:signed-out';
+
+function cachedSession(): Session | null {
+  try {
+    const value = JSON.parse(localStorage.getItem(cachedSessionKey) || 'null') as Session | null;
+    if (value && typeof value.account?.id === 'string' && Array.isArray(value.workspaces)
+      && value.workspaces.every(item => typeof item.id === 'string' && typeof item.name === 'string')) return value;
+  } catch { /* Ignore corrupt local metadata. */ }
+  return null;
+}
+
+function rememberSession(value: Session) {
+  localStorage.setItem(cachedSessionKey, JSON.stringify(value));
+}
 
 export function App() {
   const [loading, setLoading] = useState(true);
@@ -26,10 +41,20 @@ export function App() {
   const [workspaceName, setWorkspaceName] = useState('');
 
   useEffect(() => {
+    if (localStorage.getItem(signedOutKey) === '1') {
+      setLoading(false);
+      return;
+    }
     api<Session>('/me').then(result => {
+      rememberSession(result);
       setSession(result);
       setWorkspaceId(result.workspaces[0]?.id || null);
-    }).catch(() => setSession(null)).finally(() => setLoading(false));
+    }).catch(cause => {
+      if (cause instanceof ApiError && cause.status === 401) localStorage.removeItem(cachedSessionKey);
+      const remembered = cause instanceof ApiError && cause.status === 401 ? null : cachedSession();
+      setSession(remembered);
+      setWorkspaceId(remembered?.workspaces[0]?.id || null);
+    }).finally(() => setLoading(false));
   }, []);
 
   const refresh = useCallback(async (activeDb: LocalDb) => {
@@ -86,7 +111,9 @@ export function App() {
     if (!workspaceName.trim() || !session) return;
     try {
       const workspace = await api<Workspace>('/workspaces', 'POST', { name: workspaceName.trim() });
-      setSession({ ...session, workspaces: [...session.workspaces, workspace] });
+      const updated = { ...session, workspaces: [...session.workspaces, workspace] };
+      rememberSession(updated);
+      setSession(updated);
       setWorkspaceId(workspace.id);
       setWorkspaceDialog(false);
       setWorkspaceName('');
@@ -105,7 +132,12 @@ export function App() {
           options={session.workspaces.map(item => ({ label: item.name, value: item.id }))}
           onChange={value => { setWorkspaceId(value); setSection('batches'); }} />
         <Button onClick={() => setWorkspaceDialog(true)}>New workspace</Button>
-        <Button onClick={async () => { await api('/logout', 'POST'); setSession(null); setDb(null); }}>Sign out</Button>
+        <Button onClick={async () => {
+          try { await api('/logout', 'POST'); } catch { /* Clear local access even while offline. */ }
+          localStorage.removeItem(cachedSessionKey);
+          localStorage.setItem(signedOutKey, '1');
+          setSession(null); setDb(null);
+        }}>Sign out</Button>
       </div>
     </header>
 
@@ -145,7 +177,10 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
     setBusy(true); setError('');
     try {
       await api('/login', 'POST', values);
-      onLogin(await api<Session>('/me'));
+      const session = await api<Session>('/me');
+      localStorage.removeItem(signedOutKey);
+      rememberSession(session);
+      onLogin(session);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
   }

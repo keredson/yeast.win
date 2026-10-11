@@ -17,6 +17,7 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
   db: LocalDb; batchId: string; accountId: string; plans: Plan[]; equipment: Equipment[];
   inventory: InventoryItem[]; initialPlan?: Plan | null; onSaved: () => Promise<void>;
 }) {
+  const [form] = Form.useForm<Values>();
   const [kind, setKind] = useState(initialPlan?.event_type || 'note');
   const [measurement, setMeasurement] = useState<MeasurementKind>('temperature');
   const [instrumentId, setInstrumentId] = useState<string | undefined>();
@@ -76,13 +77,19 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
     finally { setBusy(false); }
   }
 
-  return <Form layout="vertical" onFinish={submit} initialValues={{
+  return <Form form={form} layout="vertical" onFinish={submit} initialValues={{
     event_type: kind, actual_at: toDatetimeLocal(), planned_event_id: initialPlan?.id,
-    measurement_kind: measurement, mode: 'hold', source: 'manual'
+    measurement_kind: measurement, mode: 'hold', source: 'manual',
+    unit: kind === 'measurement' ? measurementKinds[0].unit : undefined,
+    target_unit: kind === 'temperature_control' ? '°C' : undefined
   }}>
     {error && <Alert type="error" message={error} className="form-alert" />}
     <Form.Item name="event_type" label="Event type" rules={[{ required: true }]}>
-      <Select options={[...planKinds, { value: 'skipped', label: 'Skipped plan' }]} onChange={setKind} />
+      <Select options={[...planKinds, { value: 'skipped', label: 'Skipped plan' }]} onChange={(value: string) => {
+        setKind(value);
+        form.setFieldsValue({ unit: value === 'measurement' ? measurementKinds.find(item => item.value === measurement)?.unit : undefined,
+          target_unit: value === 'temperature_control' ? '°C' : undefined });
+      }} />
     </Form.Item>
     <div className="form-pair">
       <Form.Item name="actual_at" label="When" rules={[{ required: true }]}><Input type="datetime-local" /></Form.Item>
@@ -92,7 +99,10 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
     {kind === 'measurement' && <>
       <Form.Item name="measurement_kind" label="Measurement" rules={[{ required: true }]}>
         <Select options={measurementKinds.map(item => ({ value: item.value, label: item.label }))}
-          onChange={(value: MeasurementKind) => setMeasurement(value)} />
+          onChange={(value: MeasurementKind) => {
+            setMeasurement(value);
+            form.setFieldValue('unit', measurementKinds.find(item => item.value === value)?.unit);
+          }} />
       </Form.Item>
       <div className="form-pair">
         <Form.Item name="value" label="Corrected value" rules={[{ required: true }]}><InputNumber className="full-width" step="any" /></Form.Item>

@@ -12,6 +12,9 @@ bootstrapOwner(authDb);
 const workspaceDbs = new Map<string, Database.Database>();
 const distDir = resolve('dist');
 const port = Number(process.env.BREWLOG_PORT || 3001);
+const loginFailures = new Map<string, { count: number; resetAt: number }>();
+const loginWindowMs = 15 * 60 * 1000;
+const loginLimit = 10;
 
 function json(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
@@ -80,8 +83,17 @@ const server = createServer(async (req, res) => {
     if (pathname === '/api/login' && req.method === 'POST') {
       const body = await readJson(req) as { username?: unknown; password?: unknown };
       if (typeof body.username !== 'string' || typeof body.password !== 'string') return json(res, 400, { error: 'Username and password required' });
+      const loginKey = req.socket.remoteAddress || 'unknown';
+      const now = Date.now();
+      const previous = loginFailures.get(loginKey);
+      const failures = previous && previous.resetAt > now ? previous : { count: 0, resetAt: now + loginWindowMs };
+      if (failures.count >= loginLimit) return json(res, 429, { error: 'Too many login attempts. Try again later.' });
       const token = login(authDb, body.username, body.password);
-      if (!token) return json(res, 401, { error: 'Invalid username or password' });
+      if (!token) {
+        loginFailures.set(loginKey, { ...failures, count: failures.count + 1 });
+        return json(res, 401, { error: 'Invalid username or password' });
+      }
+      loginFailures.delete(loginKey);
       return json(res, 200, { ok: true }, { 'Set-Cookie': sessionCookie(token, secureRequest(req)) });
     }
 

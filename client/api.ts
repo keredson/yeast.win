@@ -4,6 +4,10 @@ export interface Session {
   workspaces: Workspace[];
 }
 
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
 export async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(`/api${path}`, {
     method,
@@ -12,6 +16,6 @@ export async function api<T>(path: string, method = 'GET', body?: unknown): Prom
     body: body === undefined ? undefined : JSON.stringify(body)
   });
   const result = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
+  if (!response.ok) throw new ApiError(result.error || `Request failed (${response.status})`, response.status);
   return result;
 }

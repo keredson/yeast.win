@@ -97,3 +97,8 @@ button, input, textarea { font: inherit; }
   .batch-columns { grid-template-columns: 1fr; gap: 26px; }
   .form-pair, .form-triple { grid-template-columns: 1fr; gap: 0; }
 }
+@media (max-width: 360px) {
+  .header-controls { flex-wrap: wrap; }
+  .workspace-select { flex: 1 1 100%; }
+  .header-controls .ant-btn { flex: 1; }
+}
