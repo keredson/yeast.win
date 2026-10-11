@@ -19,7 +19,7 @@ export function validateSyncRequest(input: unknown): input is SyncRequest {
 
 export function syncWorkspace(db: Database.Database, request: SyncRequest): SyncResponse {
   const current = BigInt((db.prepare('SELECT crsql_db_version() AS version').get() as { version: number | bigint }).version);
-  if (BigInt(request.serverCursor) > current) throw new Error('Server cursor is ahead of this workspace; local sync state must be reset');
+  if (BigInt(request.serverCursor) > current) throw new Error('Server cursor is ahead of this brewery; local sync state must be reset');
 
   const apply = db.prepare(insertChange);
   const receive = db.transaction(() => {

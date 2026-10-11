@@ -18,7 +18,19 @@ button, input, textarea { font: inherit; }
 .nav-item { border: 0; background: none; color: #64716c; padding: 10px 18px; border-radius: 10px; cursor: pointer; font-weight: 650; white-space: nowrap; }
 .nav-item:hover, .nav-item.active { background: #e3ebe3; color: #1d604f; }
 .nav-spacer { flex: 1; }
-.sync-label { font-size: 12px; color: #71807a; white-space: nowrap; }
+.app-header .ant-btn.sync-button { flex: none; color: #d6e4dc; border: 0 !important; box-shadow: none; background: transparent; }
+.app-header .sync-button.sync-synced { color: #a8d9bb; }
+.app-header .sync-button.sync-failed { color: #f2c785; }
+.app-header .sync-button:disabled { color: #839e95; border: 0; background: transparent; }
+.app-header .ant-btn.avatar-button { display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 0 !important; box-shadow: none; background: transparent; }
+.app-header .avatar-button .ant-avatar { background: #e7b464; color: #193b39; font-weight: 700; }
+.account-page { max-width: 680px; display: flex; flex-direction: column; gap: 18px; }
+.account-page .section-heading { margin-bottom: 4px; }
+.account-card .ant-card-body { display: flex; flex-direction: column; gap: 16px; }
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.setting-row > strong { text-align: right; }
+.setting-description { margin: 4px 0 0 !important; max-width: 500px; }
+.account-page > .ant-btn { align-self: flex-start; }
 .page-alert { margin-bottom: 22px; }
 .form-alert { margin-bottom: 16px; }
 .app-main { min-height: 65vh; }
@@ -87,7 +99,6 @@ button, input, textarea { font: inherit; }
   .app-body { padding: 16px 15px 50px; }
   .app-nav { margin-bottom: 18px; padding-bottom: 8px; }
   .nav-item { padding: 9px 11px; font-size: 13px; }
-  .sync-label, .app-nav > .ant-btn { display: none; }
   .section-grid { display: block; }
   .section-sidebar { margin-bottom: 26px; }
   .section-heading h1, .content-heading h2 { font-size: 29px; }
@@ -102,5 +113,5 @@ button, input, textarea { font: inherit; }
 @media (max-width: 360px) {
   .header-controls { flex-wrap: wrap; }
   .workspace-select { flex: 1 1 100%; }
-  .header-controls .ant-btn { flex: 1; }
+  .header-controls .ant-btn:not(.sync-button) { flex: 1; }
 }

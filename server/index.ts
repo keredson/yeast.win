@@ -134,14 +134,14 @@ const server = createServer(async (req, res) => {
     if (pathname === '/api/workspaces' && req.method === 'POST') {
       const body = await readJson(req) as { name?: unknown };
       if (typeof body.name !== 'string' || body.name.trim().length < 1 || body.name.length > 80) {
-        return json(res, 400, { error: 'Workspace name must be 1–80 characters' });
+        return json(res, 400, { error: 'Brewery name must be 1–80 characters' });
       }
       return json(res, 201, createWorkspace(authDb, account.id, body.name.trim()));
     }
     const syncMatch = /^\/api\/workspaces\/([^/]+)\/sync$/.exec(pathname);
     if (syncMatch && req.method === 'POST') {
       const workspaceId = syncMatch[1];
-      if (!isValidId(workspaceId) || !ownsWorkspace(account.id, workspaceId)) return json(res, 404, { error: 'Workspace not found' });
+      if (!isValidId(workspaceId) || !ownsWorkspace(account.id, workspaceId)) return json(res, 404, { error: 'Brewery not found' });
       const body = await readJson(req);
       if (!validateSyncRequest(body)) return json(res, 400, { error: 'Invalid sync request' });
       return json(res, 200, syncWorkspace(getWorkspaceDb(workspaceId), body));

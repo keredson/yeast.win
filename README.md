@@ -1,6 +1,6 @@
 # Brewlog
 
-Brewlog is a batch-first homebrewing PWA. Each workspace has its own SQLite database. The browser keeps a persistent local CR-SQLite database for offline use and syncs changes with a TypeScript server on your machine. The server also has a separate, private SQLite database for login and workspace ownership.
+Brewlog is a batch-first homebrewing PWA. Each brewery has its own SQLite database. The browser keeps a persistent local CR-SQLite database for offline use and syncs changes with a TypeScript server on your machine. The server also has a separate, private SQLite database for login and brewery ownership. APIs and database tables still use `workspace` as the internal name for a brewery.
 
 ## Run locally
 
@@ -12,7 +12,7 @@ yarn setup:sqlite
 yarn dev
 ```
 
-Open the app and choose **Create account**. Each new account gets a private Homebrew workspace and can add more workspaces. Usernames are case insensitive; passwords must be at least 8 characters. An `.env` file is optional if you want to change the data directory or port; see `.env.example`.
+Open the app and choose **Create account**. Each new account gets a private brewery named Homebrew and can add more from the brewery switcher. Usernames are case insensitive; passwords must be at least 8 characters. An `.env` file is optional if you want to change the data directory or port; see `.env.example`.
 
 This starts the API on port 3001 and Vite on port 5173. Open `http://localhost:5173`. Vite proxies API requests to the server. The browser stores its local database in IndexedDB through CR-SQLite's persistent virtual file system. After a successful sign-in, the same device can reopen its local batches while the server is unavailable.
 
@@ -27,14 +27,15 @@ The server serves the built PWA and API together on port 3001. Point your Cloudf
 
 ## Current workflow
 
-- Create separate workspaces for homebrewing and a brewery.
+- Create separate breweries for your home setup and commercial operation.
 - Create batches directly or copy a recipe's planned events into a new batch.
 - Plan fixed-time or anchored events, then record actual events or explicitly skip a plan.
 - Record additions, measurements, equipment settings, transfers, packaging, milestones, notes, inventory entries, equipment calibrations, and batch photos.
 - Continue working offline; the app syncs on reconnect and at regular intervals.
+- Use the header sync icon for a manual sync and its tooltip for the time since the last successful sync. The avatar opens `/me` for account details, the automatic sync setting, and Sign out.
 - Use the same responsive interface on phones, tablets, and desktop screens.
 
-Accounts can register and each account can own multiple private workspaces. Sync covers each full workspace; sharing, per-batch permissions and filtered sync are later targets. RAPT Pill ingestion and server Web Push reminders are specified in [DESIGN.md](DESIGN.md) but are not wired up yet. The equipment catalog is also planned; workspace-owned equipment can already be entered manually.
+Accounts can register and each account can own multiple private breweries. Sync covers each full brewery; sharing, per-batch permissions and filtered sync are later targets. RAPT Pill ingestion and server Web Push reminders are specified in [DESIGN.md](DESIGN.md) but are not wired up yet. The equipment catalog is also planned; brewery-owned equipment can already be entered manually.
 
 ## Checks
 

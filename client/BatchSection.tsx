@@ -139,7 +139,7 @@ export function BatchSection({ db, accountId, batches, equipment, inventory, onC
             const file = event.target.files?.[0]; if (file) void uploadPhoto(file); event.target.value = '';
           }} /></label></div>
           {photos.length ? <div className="photo-grid">{photos.map(photo => <img key={photo.id} src={photo.url} alt="Batch" />)}</div> :
-            <p className="muted">No photos yet. Images up to 5 MB are saved with this workspace.</p>}
+            <p className="muted">No photos yet. Images up to 5 MB are saved with this brewery.</p>}
         </section>
       </>}
     </div>

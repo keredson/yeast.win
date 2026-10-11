@@ -40,6 +40,37 @@ try {
   await signIn(page, true);
   console.log('Registered account and opened local SQLite');
 
+  const syncButton = page.getByRole('button', { name: 'Sync now' });
+  await syncButton.hover();
+  await page.getByRole('tooltip').getByText(/Last synced \d+ sec ago · Click to sync/).waitFor();
+  const syncButtonBorder = await syncButton.evaluate(button => getComputedStyle(button).borderTopWidth);
+  if (syncButtonBorder !== '0px') {
+    throw new Error(`Header sync button should be borderless (got ${syncButtonBorder})`);
+  }
+  const syncBeforeClick = await page.evaluate(() => {
+    const id = JSON.parse(localStorage.getItem('brewlog:last-session')).workspaces[0].id;
+    return localStorage.getItem(`brewlog:last-sync:${id}`);
+  });
+  await syncButton.click();
+  await page.waitForFunction(previous => {
+    const id = JSON.parse(localStorage.getItem('brewlog:last-session')).workspaces[0].id;
+    return Number(localStorage.getItem(`brewlog:last-sync:${id}`)) > Number(previous);
+  }, syncBeforeClick);
+  console.log('Header sync icon updated the last sync time');
+
+  await page.getByRole('combobox', { name: 'Brewery' }).click();
+  await page.getByText('＋ New brewery').click();
+  await page.getByRole('dialog', { name: 'New brewery' }).waitFor();
+  const secondBrewery = `Smoke brewery ${Date.now()}`;
+  await page.getByRole('textbox', { name: 'Brewery name' }).fill(secondBrewery);
+  await page.getByRole('dialog', { name: 'New brewery' }).getByRole('button', { name: 'Create' }).click();
+  await page.locator('.workspace-select').getByText(secondBrewery).waitFor();
+  await page.getByRole('combobox', { name: 'Brewery' }).click();
+  await page.getByText('Homebrew', { exact: true }).last().click();
+  await page.locator('.workspace-select').getByText('Homebrew').waitFor();
+  await page.getByRole('button', { name: 'New', exact: true }).waitFor();
+  console.log('Created and switched breweries from the header switcher');
+
   await page.getByRole('button', { name: 'New', exact: true }).click();
   await page.getByLabel('Batch name').fill(`Smoke batch ${Date.now()}`);
   const batchName = await page.getByLabel('Batch name').inputValue();
@@ -119,9 +150,16 @@ try {
   await page.getByRole('button', { name: 'Batches', exact: true }).click();
 
   const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9V+c0AAAAASUVORK5CYII=', 'base64');
+  const beforePhotoSync = await page.evaluate(() => {
+    const id = JSON.parse(localStorage.getItem('brewlog:last-session')).workspaces[0].id;
+    return localStorage.getItem(`brewlog:last-sync:${id}`);
+  });
   await page.locator('.photo-section input[type="file"]').setInputFiles({ name: 'brew.png', mimeType: 'image/png', buffer: imageBytes });
   await page.locator('.photo-grid img').waitFor();
-  await page.locator('.sync-label').getByText('Synced', { exact: false }).waitFor();
+  await page.waitForFunction(previous => {
+    const id = JSON.parse(localStorage.getItem('brewlog:last-session')).workspaces[0].id;
+    return Number(localStorage.getItem(`brewlog:last-sync:${id}`)) > Number(previous);
+  }, beforePhotoSync);
 
   const other = await browser.newContext();
   const second = await other.newPage();
@@ -152,6 +190,22 @@ try {
   })).status, firstWorkspaceId);
   if (forbiddenStatus !== 404) throw new Error(`Second account accessed first account's workspace: ${forbiddenStatus}`);
   console.log('Rejected duplicate username and isolated accounts');
+
+  await page.getByRole('button', { name: 'Account settings' }).click();
+  await page.waitForURL('**/me');
+  await page.getByRole('heading', { name: 'Settings' }).waitFor();
+  const autoSyncSwitch = page.getByRole('switch', { name: 'Automatic sync' });
+  await autoSyncSwitch.click();
+  if (await page.evaluate(() => localStorage.getItem('brewlog:auto-sync')) !== '0') {
+    throw new Error('Automatic sync setting did not persist');
+  }
+  await page.reload();
+  await page.getByRole('heading', { name: 'Settings' }).waitFor();
+  if (await autoSyncSwitch.getAttribute('aria-checked') !== 'false') throw new Error('Automatic sync setting was not restored');
+  await autoSyncSwitch.click();
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.locator('.login-card form button[type="submit"]').waitFor();
+  console.log('Opened /me, saved settings, and signed out');
 
   if (errors.length) throw new Error(`Browser errors:\n${errors.join('\n')}`);
   console.log('Browser smoke passed');
