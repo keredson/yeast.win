@@ -130,12 +130,26 @@ try {
   await measurementPlan.getByRole('spinbutton', { name: 'Time offset' }).fill('10');
   await measurementPlan.getByRole('button', { name: 'Add planned event' }).click();
   await page.locator('.plan-card').filter({ hasText: 'Check gravity' }).getByText('10 minutes after Add nutrient').waitFor();
-  await page.locator('.plan-card').filter({ has: page.getByText('Add nutrient', { exact: true }) }).getByRole('button', { name: 'Record' }).click();
-  const plannedAction = page.getByRole('dialog', { name: 'Record: Add nutrient' });
+  await page.getByRole('button', { name: 'Edit planned event Add nutrient' }).click();
+  const editBatchPlan = page.getByRole('dialog', { name: 'Edit planned event' });
+  await editBatchPlan.getByLabel('What will be added?').fill('Add nutrient dose');
+  await editBatchPlan.getByRole('button', { name: 'Save planned event' }).click();
+  await page.getByText('Add nutrient dose', { exact: true }).waitFor();
+  await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).getByRole('button', { name: 'Record Add nutrient dose' }).click();
+  const plannedAction = page.getByRole('dialog', { name: 'Record: Add nutrient dose' });
+  await plannedAction.getByRole('button', { name: 'Skip this event' }).waitFor();
   await plannedAction.getByRole('textbox', { name: 'What was added?' }).fill('Yeast nutrient');
   await plannedAction.getByRole('spinbutton', { name: 'Quantity' }).fill('1');
   await plannedAction.getByRole('button', { name: 'Save event' }).click();
-  await page.locator('.plan-card').filter({ has: page.getByText('Add nutrient', { exact: true }) }).locator('.event-card').getByText('1 g Yeast nutrient').waitFor();
+  await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).locator('.event-card').getByText('1 g Yeast nutrient').waitFor();
+  await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).getByRole('button', { name: 'Edit Addition event' }).click();
+  const editActual = page.getByRole('dialog', { name: 'Edit event' });
+  await editActual.getByRole('spinbutton', { name: 'Quantity' }).fill('2');
+  await editActual.getByRole('button', { name: 'Save event' }).click();
+  await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).locator('.event-card').getByText('2 g Yeast nutrient').waitFor();
+  await page.locator('.plan-card').filter({ hasText: 'Add yeast' }).getByRole('button', { name: 'Record Add yeast' }).click();
+  await page.getByRole('dialog', { name: 'Record: Add yeast' }).getByRole('button', { name: 'Skip this event' }).click();
+  await page.locator('.plan-card').filter({ hasText: 'Add yeast' }).locator('.ant-tag').getByText('Skipped', { exact: true }).waitFor();
   console.log('Added planned event');
 
   await page.getByRole('button', { name: 'Record activity' }).click();
@@ -151,6 +165,8 @@ try {
   await page.reload();
   await page.getByRole('heading', { name: batchName }).waitFor({ timeout: 30_000 });
   await page.locator('.event-card').getByText(eventNote).waitFor();
+  await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).locator('.event-card').getByText('2 g Yeast nutrient').waitFor();
+  await page.locator('.plan-card').filter({ hasText: 'Add yeast' }).locator('.ant-tag').getByText('Skipped', { exact: true }).waitFor();
   console.log('Reloaded persisted local data');
 
   await page.route('**/api/**', route => route.abort());
@@ -210,13 +226,15 @@ try {
     throw new Error('Desktop navigation is not an Ant Design Sider');
   }
   await page.getByRole('button', { name: 'New equipment' }).click();
-  await page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Type' }).fill('pH meter');
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'pH meter' }).last().click();
+  const equipmentType = page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Type' });
+  await equipmentType.fill('pH meter');
+  await equipmentType.press('Enter');
   if (await page.getByRole('dialog', { name: 'New equipment' }).getByLabel('Capacity (optional)').count()) {
     throw new Error('Measurement equipment was offered vessel capacity');
   }
-  await page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Find in shared equipment catalog' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'pH meter' }).last().click();
+  const phCatalog = page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Find in shared equipment catalog' });
+  await phCatalog.fill('pH meter');
+  await phCatalog.press('Enter');
   await page.getByRole('dialog', { name: 'New equipment' }).getByLabel('Name').fill('Smoke pH meter');
   await page.getByRole('dialog', { name: 'New equipment' }).getByRole('spinbutton', { name: 'Range minimum' }).fill('0');
   await page.getByRole('dialog', { name: 'New equipment' }).getByRole('spinbutton', { name: 'Range maximum' }).fill('14');
@@ -240,8 +258,9 @@ try {
   await page.getByRole('button', { name: 'New equipment' }).click();
   await page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Type' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Refractometer' }).click();
-  await page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Find in shared equipment catalog' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Refractometer' }).last().click();
+  const refractometerCatalog = page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Find in shared equipment catalog' });
+  await refractometerCatalog.fill('Refractometer');
+  await refractometerCatalog.press('Enter');
   await page.getByRole('dialog', { name: 'New equipment' }).getByRole('spinbutton', { name: 'Range minimum' }).fill('0');
   await page.getByRole('dialog', { name: 'New equipment' }).getByRole('spinbutton', { name: 'Range maximum' }).fill('32');
   await page.getByRole('button', { name: 'Create equipment' }).click();
@@ -295,6 +314,11 @@ try {
   await page.getByLabel('What will be added?').fill('Check fermentation');
   await page.getByRole('dialog', { name: 'Planned recipe event' }).getByRole('button', { name: 'Add planned event' }).click();
   await page.getByText('Check fermentation').waitFor();
+  await page.getByRole('button', { name: 'Edit planned event Check fermentation' }).click();
+  const editRecipePlan = page.getByRole('dialog', { name: 'Edit recipe event' });
+  await editRecipePlan.getByLabel('What will be added?').fill('Check fermentation progress');
+  await editRecipePlan.getByRole('button', { name: 'Save planned event' }).click();
+  await page.getByText('Check fermentation progress').waitFor();
   await navigateSection(page, 'Batches');
   await page.getByRole('button', { name: 'New batch' }).click();
   await page.getByRole('dialog', { name: 'New batch' }).getByLabel('Batch name').fill('Batch from recipe');
@@ -302,7 +326,7 @@ try {
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke recipe' }).click();
   await page.getByRole('button', { name: 'Create batch' }).click();
   await page.getByRole('heading', { name: 'Batch from recipe' }).waitFor();
-  await page.locator('.plan-card').getByText('Check fermentation').waitFor();
+  await page.locator('.plan-card').getByText('Check fermentation progress').waitFor();
   await navigateSection(page, 'Inventory');
   await page.getByRole('button', { name: 'New inventory item' }).click();
   await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Type' }).click();
@@ -398,9 +422,14 @@ try {
   await page.getByRole('button', { name: 'Account settings' }).click();
   await page.waitForURL('**/me');
   await page.getByRole('heading', { name: 'Settings' }).waitFor();
+  await page.mouse.move(0, 0);
+  await page.locator('.ant-tooltip').waitFor({ state: 'hidden' });
   await page.setViewportSize({ width: 320, height: 720 });
   if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) {
-    throw new Error('Settings page has horizontal overflow on a narrow phone');
+    const offenders = await page.evaluate(() => Array.from(document.querySelectorAll('body *'))
+      .filter(element => element.getBoundingClientRect().right > innerWidth + 1 && getComputedStyle(element).position !== 'fixed')
+      .slice(0, 12).map(element => `${element.tagName}.${element.className} ${Math.round(element.getBoundingClientRect().right)}`));
+    throw new Error(`Settings page has horizontal overflow on a narrow phone: ${offenders.join(', ')}`);
   }
   await page.screenshot({ path: '/tmp/brewlog-account-mobile.png', fullPage: true });
   await page.setViewportSize({ width: 1280, height: 900 });

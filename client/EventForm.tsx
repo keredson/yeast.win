@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Form, Input, InputNumber, Select } from 'antd';
 import { kindLabel, measurementKinds, planKinds } from './constants.ts';
 import { fromDatetimeLocal, toDatetimeLocal } from './time.ts';
-import { addPhoto, recordEvent, type Equipment, type EventInput, type InventoryItem, type LocalDb, type MeasurementKind, type Plan } from './db.ts';
+import { addPhoto, recordEvent, updateEvent, updatePhotoEvent, type ActualEvent, type Equipment, type EventInput, type InventoryItem, type LocalDb, type MeasurementKind, type Plan } from './db.ts';
 import type { PreferredUnits } from './api.ts';
 import { quantityUnits, unitGroups, unitOptions } from '../shared/units.ts';
 import { parsePlanDetails } from './planTiming.ts';
@@ -38,18 +38,20 @@ interface Values {
   container_unit?: string; container_count?: number;
 }
 
-export function EventForm({ db, batchId, accountId, plans, equipment, inventory, preferredUnits, initialPlan, onSaved }: {
+export function EventForm({ db, batchId, accountId, plans, equipment, inventory, preferredUnits, initialPlan, initialEvent, initialData, onSaved }: {
   db: LocalDb; batchId: string; accountId: string; plans: Plan[]; equipment: Equipment[];
-  inventory: InventoryItem[]; preferredUnits: PreferredUnits; initialPlan?: Plan | null; onSaved: () => Promise<void>;
+  inventory: InventoryItem[]; preferredUnits: PreferredUnits; initialPlan?: Plan | null;
+  initialEvent?: ActualEvent | null; initialData?: { measurementKind?: MeasurementKind; payload: Record<string, string | number | null> } | null;
+  onSaved: () => Promise<void>;
 }) {
   const [form] = Form.useForm<Values>();
   const planned = parsePlanDetails(initialPlan?.details_json);
   const plannedString = (key: string) => typeof planned[key] === 'string' ? planned[key] as string : undefined;
   const plannedNumber = (key: string) => typeof planned[key] === 'number' ? planned[key] as number : undefined;
   const initialMeasurement = measurementKinds.find(item => item.value === plannedString('measurement_kind'))?.value as MeasurementKind | undefined;
-  const [kind, setKind] = useState(initialPlan?.event_type || 'note');
-  const [measurement, setMeasurement] = useState<MeasurementKind>(initialMeasurement || 'temperature');
-  const [instrumentId, setInstrumentId] = useState<string | undefined>();
+  const [kind, setKind] = useState(initialEvent?.event_type || initialPlan?.event_type || 'note');
+  const [measurement, setMeasurement] = useState<MeasurementKind>(initialData?.measurementKind || initialMeasurement || 'temperature');
+  const [instrumentId, setInstrumentId] = useState<string | undefined>(String(initialData?.payload.equipment_id || '') || undefined);
   const [calibrations, setCalibrations] = useState<{ id: string; effective_at: number }[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -66,8 +68,11 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
     setBusy(true); setError('');
     try {
       if (kind === 'photo') {
-        if (!photo) throw new Error('Choose a photo');
-        await addPhoto(db, batchId, photo, accountId, fromDatetimeLocal(values.actual_at), values.planned_event_id || null, values.note || '');
+        if (initialEvent) await updatePhotoEvent(db, initialEvent, fromDatetimeLocal(values.actual_at), values.planned_event_id || null, values.note || '', photo);
+        else {
+          if (!photo) throw new Error('Choose a photo');
+          await addPhoto(db, batchId, photo, accountId, fromDatetimeLocal(values.actual_at), values.planned_event_id || null, values.note || '');
+        }
         await onSaved();
         return;
       }
@@ -107,26 +112,43 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
           inventory_item_id: values.inventory_item_id || null };
       }
       input.payload = payload;
-      await recordEvent(db, input);
+      if (initialEvent) await updateEvent(db, initialEvent, input);
+      else await recordEvent(db, input);
+      await onSaved();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setBusy(false); }
+  }
+
+  async function skipPlan() {
+    if (!initialPlan) return;
+    setBusy(true); setError('');
+    try {
+      const at = form.getFieldValue('actual_at');
+      if (!at) throw new Error('Choose when this was skipped');
+      await recordEvent(db, { batchId, accountId, eventType: 'skipped', actualAt: fromDatetimeLocal(at),
+        plannedEventId: initialPlan.id, note: form.getFieldValue('note') || '' });
       await onSaved();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
   }
 
   return <Form form={form} layout="vertical" onFinish={submit} initialValues={{
-    event_type: kind, actual_at: toDatetimeLocal(), planned_event_id: initialPlan?.id,
-    measurement_kind: plannedString('measurement_kind') || measurement, mode: plannedString('mode') || 'hold', source: 'manual',
+    event_type: kind, actual_at: initialEvent ? toDatetimeLocal(initialEvent.actual_at) : toDatetimeLocal(),
+    planned_event_id: initialEvent?.planned_event_id || initialPlan?.id, note: initialEvent?.note || undefined,
+    measurement_kind: initialData?.measurementKind || plannedString('measurement_kind') || measurement,
+    mode: initialData?.payload.mode || plannedString('mode') || 'hold', source: initialData?.payload.source || 'manual',
     item_name: plannedString('item_name'), quantity: plannedNumber('quantity'),
     container_name: plannedString('container_name'), container_size: plannedNumber('container_size'),
     container_count: plannedNumber('container_count'),
     unit: plannedString('unit') || eventUnit(kind, preferredUnits),
     target_value: kind === 'measurement' ? undefined : plannedNumber('target_value'),
     target_unit: plannedString('target_unit') || (kind === 'temperature_control' ? preferredUnits.temperature : kind === 'pressure_control' ? preferredUnits.pressure : undefined),
-    container_unit: plannedString('unit') || preferredUnits.volume
+    container_unit: plannedString('unit') || preferredUnits.volume,
+    ...initialData?.payload
   }}>
     {error && <Alert type="error" message={error} className="form-alert" />}
     <Form.Item name="event_type" label="Event type" rules={[{ required: true }]}>
-      <Select options={[...planKinds, { value: 'skipped', label: 'Skipped plan' }]} onChange={(value: string) => {
+      <Select disabled={!!initialEvent} options={initialEvent?.event_type === 'skipped' ? [{ value: 'skipped', label: 'Skipped plan' }] : planKinds} onChange={(value: string) => {
         setKind(value);
         form.setFieldsValue({ unit: eventUnit(value, preferredUnits),
           target_unit: value === 'temperature_control' ? preferredUnits.temperature : value === 'pressure_control' ? preferredUnits.pressure : undefined });
@@ -139,7 +161,7 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
     </div>
     {kind === 'measurement' && <>
       <Form.Item name="measurement_kind" label="Measurement" rules={[{ required: true }]}>
-        <Select options={measurementKinds.map(item => ({ value: item.value, label: item.label }))}
+        <Select disabled={!!initialEvent} options={measurementKinds.map(item => ({ value: item.value, label: item.label }))}
           onChange={(value: MeasurementKind) => {
             setMeasurement(value);
             form.setFieldValue('unit', measurementUnit(value, preferredUnits));
@@ -192,11 +214,12 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
         <Form.Item name="container_unit" label="Unit" rules={[{ required: true }]}><Select options={unitOptions(unitGroups.volume)} /></Form.Item>
         <Form.Item name="container_count" label="Count" rules={[{ required: true }]}><InputNumber className="full-width" min={1} precision={0} /></Form.Item></div>
     </>}
-    {kind === 'photo' && <Form.Item label="Photo" required>
+    {kind === 'photo' && <Form.Item label={initialEvent ? 'Replace photo (optional)' : 'Photo'} required={!initialEvent}>
       <Input type="file" accept="image/*" onChange={event => setPhoto(event.target.files?.[0] || null)} />
     </Form.Item>}
     <Form.Item name="note" label={kind === 'note' ? 'Notes' : 'Note'} rules={kind === 'note' ? [{ required: true, whitespace: true }] : []}>
       <Input.TextArea rows={kind === 'note' ? 4 : 2} placeholder={kind === 'note' ? 'What happened?' : 'Optional context'} /></Form.Item>
-    <Button type="primary" htmlType="submit" loading={busy}>Save event</Button>
+    <div className="event-form-actions"><Button type="primary" htmlType="submit" loading={busy}>Save event</Button>
+      {initialPlan && !initialEvent && <Button onClick={() => void skipPlan()} disabled={busy}>Skip this event</Button>}</div>
   </Form>;
 }

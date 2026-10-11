@@ -109,6 +109,30 @@ export async function listRecipePlans(db: DB, recipeId: string): Promise<(PlanIn
     [recipeId]);
 }
 
+async function validatePlanAnchor(db: DB, table: 'recipe_events' | 'batch_planned_events',
+  ownerColumn: 'recipe_id' | 'batch_id', ownerId: string, planId: string, anchorId: string | null | undefined) {
+  if (!anchorId) return;
+  const rows = await db.execO<{ id: string; anchor_event_id: string | null }>(
+    `SELECT id, anchor_event_id FROM ${table} WHERE ${ownerColumn} = ?`, [ownerId]);
+  const parent = new Map(rows.map(row => [row.id, row.anchor_event_id]));
+  let current: string | null = anchorId;
+  const seen = new Set<string>();
+  while (current) {
+    if (current === planId || seen.has(current)) throw new Error('Timing cannot create a cycle');
+    if (!parent.has(current)) throw new Error('Choose an event from this plan');
+    seen.add(current);
+    current = parent.get(current) || null;
+  }
+}
+
+export async function updateRecipePlan(db: DB, recipeId: string, planId: string, input: PlanInput): Promise<void> {
+  await validatePlanAnchor(db, 'recipe_events', 'recipe_id', recipeId, planId, input.anchor_event_id);
+  await db.exec(`UPDATE recipe_events SET event_type = ?, title = ?, planned_at = ?, anchor_event_id = ?,
+    offset_seconds = ?, details_json = ? WHERE id = ? AND recipe_id = ?`,
+  [input.event_type, input.title, input.planned_at ?? null, input.anchor_event_id ?? null,
+    input.offset_seconds ?? null, input.details_json ?? null, planId, recipeId]);
+}
+
 export async function addBatchPlan(db: DB, batchId: string, input: PlanInput, accountId: string): Promise<string> {
   const id = nanoid();
   await db.exec(`INSERT INTO batch_planned_events(id, batch_id, event_type, title, planned_at, anchor_event_id,
@@ -116,6 +140,14 @@ export async function addBatchPlan(db: DB, batchId: string, input: PlanInput, ac
     [id, batchId, input.event_type, input.title, input.planned_at ?? null, input.anchor_event_id ?? null,
       input.offset_seconds ?? null, input.details_json ?? null, nowSeconds(), accountId]);
   return id;
+}
+
+export async function updateBatchPlan(db: DB, batchId: string, planId: string, input: PlanInput): Promise<void> {
+  await validatePlanAnchor(db, 'batch_planned_events', 'batch_id', batchId, planId, input.anchor_event_id);
+  await db.exec(`UPDATE batch_planned_events SET event_type = ?, title = ?, planned_at = ?, anchor_event_id = ?,
+    offset_seconds = ?, details_json = ? WHERE id = ? AND batch_id = ?`,
+  [input.event_type, input.title, input.planned_at ?? null, input.anchor_event_id ?? null,
+    input.offset_seconds ?? null, input.details_json ?? null, planId, batchId]);
 }
 
 export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string, accountId: string,
@@ -185,6 +217,53 @@ export async function recordEvent(db: DB, input: EventInput): Promise<string> {
       [id, ...Object.values(payload)]);
   });
   return id;
+}
+
+const eventPayloadTables: Record<string, string> = {
+  addition: 'additions', temperature_control: 'temperature_control_events', pressure_control: 'pressure_control_events',
+  transfer: 'transfers', packaging: 'packaging'
+};
+
+export async function eventFormData(db: DB, event: ActualEvent): Promise<{ measurementKind?: MeasurementKind; payload: Record<string, string | number | null> }> {
+  if (event.event_type === 'measurement') {
+    for (const [kind, table] of Object.entries(measurementTables)) {
+      const rows = await db.execO<Record<string, string | number | null>>(`SELECT * FROM ${table} WHERE event_id = ?`, [event.id]);
+      if (rows.length) return { measurementKind: kind as MeasurementKind, payload: rows[0] };
+    }
+  }
+  const table = eventPayloadTables[event.event_type];
+  if (table) {
+    const rows = await db.execO<Record<string, string | number | null>>(`SELECT * FROM ${table} WHERE event_id = ?`, [event.id]);
+    if (rows.length) return { payload: rows[0] };
+  }
+  return { payload: {} };
+}
+
+export async function updateEvent(db: DB, event: ActualEvent, input: EventInput): Promise<void> {
+  if (event.batch_id !== input.batchId || event.event_type !== input.eventType) throw new Error('Event type cannot be changed');
+  await db.tx(async tx => {
+    await tx.exec('UPDATE batch_events SET actual_at = ?, planned_event_id = ?, note = ? WHERE id = ? AND batch_id = ?',
+      [input.actualAt, input.plannedEventId ?? null, input.note || null, event.id, event.batch_id]);
+    if (!input.payload) return;
+    const table = input.measurementKind ? measurementTables[input.measurementKind] : eventPayloadTables[input.eventType];
+    if (!table) throw new Error('Unsupported event payload');
+    const columns = Object.keys(input.payload);
+    await tx.exec(`UPDATE ${table} SET ${columns.map(column => `${column} = ?`).join(', ')} WHERE event_id = ?`,
+      [...Object.values(input.payload), event.id]);
+  });
+}
+
+export async function updatePhotoEvent(db: DB, event: ActualEvent, actualAt: number, plannedEventId: string | null,
+  note: string, file: File | null): Promise<void> {
+  if (event.event_type !== 'photo') throw new Error('Choose a photo event');
+  if (file && (!file.type.startsWith('image/') || file.size > 5 * 1024 * 1024)) throw new Error('Choose an image under 5 MB');
+  const bytes = file ? new Uint8Array(await file.arrayBuffer()) : null;
+  await db.tx(async tx => {
+    await tx.exec('UPDATE batch_events SET actual_at = ?, planned_event_id = ?, note = ? WHERE id = ?',
+      [actualAt, plannedEventId, note || null, event.id]);
+    if (bytes && file) await tx.exec('UPDATE photos SET mime_type = ?, byte_count = ?, image = ? WHERE batch_event_id = ?',
+      [file.type, bytes.length, bytes, event.id]);
+  });
 }
 
 export async function eventDetails(db: DB, event: ActualEvent): Promise<string> {

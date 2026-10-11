@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Empty, Form, Input, Modal, Tag } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
-import { addRecipePlan, createRecipe, listRecipePlans, startBatchFromRecipe,
+import { EditOutlined, PlusOutlined } from '@ant-design/icons';
+import { addRecipePlan, createRecipe, listRecipePlans, startBatchFromRecipe, updateRecipePlan,
   type LocalDb, type PlanInput, type Recipe } from './db.ts';
 import { PlanForm } from './PlanForm.tsx';
 import { kindLabel } from './constants.ts';
@@ -14,6 +14,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, selectedId, on
   const [plans, setPlans] = useState<(PlanInput & { id: string })[]>([]);
   const [newRecipe, setNewRecipe] = useState(false);
   const [newPlan, setNewPlan] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<(PlanInput & { id: string }) | null>(null);
   const [newBatch, setNewBatch] = useState(false);
   const [error, setError] = useState('');
   const recipe = recipes.find(item => item.id === selectedId) || null;
@@ -32,8 +33,9 @@ export function RecipeSection({ db, basePath, accountId, recipes, selectedId, on
 
   async function addPlan(input: PlanInput) {
     if (!recipe) return;
-    await addRecipePlan(db, recipe.id, input);
-    setNewPlan(false); await refreshPlans(); await onChanged();
+    if (editingPlan) await updateRecipePlan(db, recipe.id, editingPlan.id, input);
+    else await addRecipePlan(db, recipe.id, input);
+    setNewPlan(false); setEditingPlan(null); await refreshPlans(); await onChanged();
   }
 
   async function start(values: { name: string }) {
@@ -56,13 +58,15 @@ export function RecipeSection({ db, basePath, accountId, recipes, selectedId, on
         </a>)}</div>}
     </section> : !recipe ? <Empty description="Recipe not found" /> : <section className="record-detail">
         <div className="content-heading"><div><span className="eyebrow">Recipe plan</span><h2>{recipe.name}</h2><p className="muted">{recipe.description}</p></div>
-          <div className="heading-actions"><Button onClick={() => setNewPlan(true)}>Add planned event</Button><Button type="primary" onClick={() => setNewBatch(true)}>Start batch</Button></div>
+          <div className="heading-actions"><Button onClick={() => { setEditingPlan(null); setNewPlan(true); }}>Add planned event</Button><Button type="primary" onClick={() => setNewBatch(true)}>Start batch</Button></div>
         </div>
         {plans.length === 0 ? <Card><Empty description="Add the first planned event" /></Card> :
           <div className="card-stack">{plans.map(plan => <Card key={plan.id} size="small">
             <div className="timeline-card"><div><strong>{plan.title}</strong><div className="muted">{planTimingLabel(plan, plans)}</div></div>
               <Tag>{kindLabel(plan.event_type)}</Tag></div>
             {planDetailsLabel(plan) && <p className="event-detail">{planDetailsLabel(plan)}</p>}
+            <div className="plan-edit-action"><Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit planned event ${plan.title}`}
+              onClick={() => { setEditingPlan(plan); setNewPlan(true); }} /></div>
           </Card>)}</div>}
       </section>}
     <Modal title="New recipe" open={newRecipe} onCancel={() => setNewRecipe(false)} footer={null} destroyOnHidden>
@@ -72,8 +76,9 @@ export function RecipeSection({ db, basePath, accountId, recipes, selectedId, on
         <Button type="primary" htmlType="submit">Create recipe</Button>
       </Form>
     </Modal>
-    <Modal title="Planned recipe event" open={newPlan} onCancel={() => setNewPlan(false)} footer={null} destroyOnHidden>
-      <PlanForm anchors={plans} submit={addPlan} />
+    <Modal title={editingPlan ? 'Edit recipe event' : 'Planned recipe event'} open={newPlan}
+      onCancel={() => { setNewPlan(false); setEditingPlan(null); }} footer={null} destroyOnHidden>
+      <PlanForm key={editingPlan?.id || 'new'} anchors={plans.filter(item => item.id !== editingPlan?.id)} initialPlan={editingPlan || undefined} submit={addPlan} />
     </Modal>
     <Modal title="Start a batch" open={newBatch} onCancel={() => setNewBatch(false)} footer={null} destroyOnHidden>
       <Form layout="vertical" onFinish={start} initialValues={{ name: recipe ? `${recipe.name} batch` : '' }}>

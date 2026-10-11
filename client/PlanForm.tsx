@@ -3,6 +3,7 @@ import { Alert, Button, Form, Input, InputNumber, Select } from 'antd';
 import { kindLabel, measurementKinds, planKinds } from './constants.ts';
 import type { PlanInput } from './db.ts';
 import { quantityUnits, unitGroups, unitOptions } from '../shared/units.ts';
+import { parsePlanDetails } from './planTiming.ts';
 
 interface Anchor { id: string; title: string; event_type: string }
 const timeUnits = [
@@ -26,13 +27,17 @@ interface Values {
   mode?: string; container_name?: string; container_size?: number; container_count?: number;
 }
 
-export function PlanForm({ anchors, submit }: {
+export function PlanForm({ anchors, initialPlan, submit }: {
   anchors: Anchor[];
+  initialPlan?: PlanInput & { id: string };
   submit: (input: PlanInput) => Promise<void>;
 }) {
   const [form] = Form.useForm<Values>();
-  const [kind, setKind] = useState('addition');
-  const [measurementKind, setMeasurementKind] = useState('temperature');
+  const initialDetails = parsePlanDetails(initialPlan?.details_json);
+  const offset = initialPlan?.offset_seconds ?? 0;
+  const offsetUnit = offset === 0 ? timeUnits[1] : [...timeUnits].reverse().find(item => offset % item.multiplier === 0) || timeUnits[0];
+  const [kind, setKind] = useState(initialPlan?.event_type || 'addition');
+  const [measurementKind, setMeasurementKind] = useState(String(initialDetails.measurement_kind || 'temperature'));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -68,8 +73,13 @@ export function PlanForm({ anchors, submit }: {
   }
 
   return <Form form={form} layout="vertical" onFinish={save} initialValues={{
-    event_type: 'addition', timing_key: 'start', offset_value: 0, offset_unit: 'minutes',
-    measurement_kind: 'temperature', mode: 'hold', unit: 'g', target_unit: '°C'
+    event_type: kind, title: initialPlan?.title, timing_key: initialPlan?.anchor_event_id || 'start',
+    offset_value: offset / offsetUnit.multiplier, offset_unit: offsetUnit.value,
+    measurement_kind: measurementKind, mode: initialDetails.mode || 'hold',
+    unit: initialDetails.unit || 'g', target_unit: initialDetails.target_unit || '°C',
+    details: initialDetails.note, item_name: initialDetails.item_name, quantity: initialDetails.quantity,
+    target_value: initialDetails.target_value, container_name: initialDetails.container_name,
+    container_size: initialDetails.container_size, container_count: initialDetails.container_count
   }}>
     {error && <Alert type="error" message={error} className="form-alert" />}
     <Form.Item name="event_type" label="Event type" rules={[{ required: true }]}><Select options={planKinds} onChange={value => {
@@ -123,6 +133,6 @@ export function PlanForm({ anchors, submit }: {
       <Form.Item name="offset_unit" label="Unit" rules={[{ required: true }]}><Select options={timeUnits.map(({ value, label }) => ({ value, label }))} /></Form.Item>
     </div>
     <Form.Item name="details" label="Instructions"><Input.TextArea rows={2} placeholder="Optional details" /></Form.Item>
-    <Button type="primary" htmlType="submit" loading={busy}>Add planned event</Button>
+    <Button type="primary" htmlType="submit" loading={busy}>{initialPlan ? 'Save planned event' : 'Add planned event'}</Button>
   </Form>;
 }

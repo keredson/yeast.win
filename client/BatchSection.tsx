@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Empty, Form, Input, Modal, Select, Tag } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
-import { addBatchPlan, createBatch, eventDetails, listEvents, listPhotos, listPlans,
-  recordEvent, startBatchFromRecipe, type ActualEvent, type Batch, type Equipment, type InventoryItem, type LocalDb, type Plan, type Recipe } from './db.ts';
+import { CheckOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
+import { addBatchPlan, createBatch, eventDetails, eventFormData, listEvents, listPhotos, listPlans,
+  startBatchFromRecipe, updateBatchPlan, type ActualEvent, type Batch, type Equipment, type InventoryItem, type LocalDb, type MeasurementKind, type Plan, type PlanInput, type Recipe } from './db.ts';
 import { kindLabel } from './constants.ts';
 import { formatTime } from './time.ts';
 import { PlanForm } from './PlanForm.tsx';
@@ -26,8 +26,11 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   const [photos, setPhotos] = useState<{ id: string; url: string; batch_event_id: string | null; created_at: number }[]>([]);
   const [newBatch, setNewBatch] = useState(false);
   const [newPlan, setNewPlan] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
   const [newEvent, setNewEvent] = useState(false);
   const [eventPlan, setEventPlan] = useState<Plan | null>(null);
+  const [editingEvent, setEditingEvent] = useState<ActualEvent | null>(null);
+  const [editingData, setEditingData] = useState<{ measurementKind?: MeasurementKind; payload: Record<string, string | number | null> } | null>(null);
   const [error, setError] = useState('');
   const batch = batches.find(item => item.id === selectedId) || null;
 
@@ -88,18 +91,17 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  async function plan(input: Parameters<typeof addBatchPlan>[2]) {
+  async function plan(input: PlanInput) {
     if (!batch) return;
-    await addBatchPlan(db, batch.id, input, accountId);
-    setNewPlan(false); await changed();
+    if (editingPlan) await updateBatchPlan(db, batch.id, editingPlan.id, input);
+    else await addBatchPlan(db, batch.id, input, accountId);
+    setNewPlan(false); setEditingPlan(null); await changed();
   }
 
-  async function skip(plan: Plan) {
-    if (!batch) return;
+  async function editEvent(event: ActualEvent) {
     try {
-      await recordEvent(db, { batchId: batch.id, accountId, eventType: 'skipped',
-        actualAt: Math.floor(Date.now() / 1000), plannedEventId: plan.id });
-      await changed();
+      setEditingData(await eventFormData(db, event));
+      setEditingEvent(event); setEventPlan(null); setNewEvent(true);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
@@ -110,6 +112,8 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
         <div className="muted">{formatTime(event.actual_at)}</div></div><Tag>{event.source_id || 'Manual'}</Tag></div>
       {details[event.id] && <p className="event-detail">{details[event.id]}</p>}
       {images.length > 0 && <div className="photo-grid">{images.map(photo => <img key={photo.id} src={photo.url} alt="Batch activity" />)}</div>}
+      <div className="event-edit-action"><Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${kindLabel(event.event_type)} event`}
+        onClick={() => void editEvent(event)} /></div>
     </div>;
   }
 
@@ -141,13 +145,15 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
                 const conflicting = !!(completed.length && skipped.length || completed.length > 1);
                 return <div key={plan.id} className="timeline-entry plan-card">
                   <div className="timeline-card"><div><strong>{plan.title}</strong>
-                    <div className="plan-meta">{kindLabel(plan.event_type)} · {planTimingLabel(plan, plans)}</div></div>
+                    <div className="plan-meta">{kindLabel(plan.event_type)} · {planTimingLabel(plan, plans)}</div>
                     <Tag color={conflicting ? 'orange' : completed.length ? 'green' : skipped.length ? 'default' : 'blue'}>
                       {conflicting ? 'Conflicting' : completed.length ? 'Done' : skipped.length ? 'Skipped' : 'Planned'}</Tag></div>
+                    {!linked.length && <Button type="text" shape="circle" icon={<CheckOutlined />} aria-label={`Record ${plan.title}`}
+                      title="Record or skip" onClick={() => { setEditingEvent(null); setEditingData(null); setEventPlan(plan); setNewEvent(true); }} />}</div>
                   {planDetailsLabel(plan) && <p className="event-detail">{planDetailsLabel(plan)}</p>}
                   {linked.map(renderEvent)}
-                  {!linked.length && <div className="card-actions"><Button size="small" type="link" onClick={() => { setEventPlan(plan); setNewEvent(true); }}>Record</Button>
-                    <Button size="small" type="link" onClick={() => void skip(plan)}>Skip</Button></div>}
+                  <div className="plan-edit-action"><Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit planned event ${plan.title}`}
+                    onClick={() => { setEditingPlan(plan); setNewPlan(true); }} /></div>
                 </div>;
               })}
               {group.events.map(renderEvent)}
@@ -157,8 +163,8 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
               </div>)}
             </Card>)}</div>}
         </section>
-        <div className="timeline-actions"><Button onClick={() => setNewPlan(true)}>Plan an action</Button>
-          <Button type="primary" onClick={() => { setEventPlan(null); setNewEvent(true); }}>Record activity</Button></div>
+        <div className="timeline-actions"><Button onClick={() => { setEditingPlan(null); setNewPlan(true); }}>Plan an action</Button>
+          <Button type="primary" onClick={() => { setEventPlan(null); setEditingEvent(null); setEditingData(null); setNewEvent(true); }}>Record activity</Button></div>
       </section>}
     <Modal title="New batch" open={newBatch} onCancel={() => setNewBatch(false)} footer={null} destroyOnHidden>
       <Form layout="vertical" onFinish={create}>
@@ -169,13 +175,15 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
         <Button type="primary" htmlType="submit">Create batch</Button>
       </Form>
     </Modal>
-    <Modal title="Plan an event" open={newPlan} onCancel={() => setNewPlan(false)} footer={null} destroyOnHidden>
-      <PlanForm anchors={plans} submit={plan} />
+    <Modal title={editingPlan ? 'Edit planned event' : 'Plan an event'} open={newPlan}
+      onCancel={() => { setNewPlan(false); setEditingPlan(null); }} footer={null} destroyOnHidden>
+      <PlanForm key={editingPlan?.id || 'new'} anchors={plans.filter(item => item.id !== editingPlan?.id)} initialPlan={editingPlan || undefined} submit={plan} />
     </Modal>
-    <Modal title={eventPlan ? `Record: ${eventPlan.title}` : 'Record activity'} open={newEvent}
-      onCancel={() => { setNewEvent(false); setEventPlan(null); }} footer={null} destroyOnHidden width={600}>
-      {batch && <EventForm db={db} batchId={batch.id} accountId={accountId} plans={plans} equipment={equipment} inventory={inventory}
-        preferredUnits={preferredUnits} initialPlan={eventPlan} onSaved={async () => { setNewEvent(false); setEventPlan(null); await changed(); }} />}
+    <Modal title={editingEvent ? 'Edit event' : eventPlan ? `Record: ${eventPlan.title}` : 'Record activity'} open={newEvent}
+      onCancel={() => { setNewEvent(false); setEventPlan(null); setEditingEvent(null); setEditingData(null); }} footer={null} destroyOnHidden width={600}>
+      {batch && <EventForm key={editingEvent?.id || eventPlan?.id || 'new'} db={db} batchId={batch.id} accountId={accountId} plans={plans} equipment={equipment} inventory={inventory}
+        preferredUnits={preferredUnits} initialPlan={eventPlan} initialEvent={editingEvent} initialData={editingData}
+        onSaved={async () => { setNewEvent(false); setEventPlan(null); setEditingEvent(null); setEditingData(null); await changed(); }} />}
     </Modal>
   </div>;
 }
