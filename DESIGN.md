@@ -24,11 +24,11 @@ The app should work for a homebrewer with one operation and for an account that 
 | Known-equipment DB | Server and devices | Read-only to clients | Community or curated equipment models and their published specifications. A user copies a model into a workspace before customizing it. |
 | Workspace DB | Server and authorized devices | Whole-DB sync initially; filtered batch sync later | Batches, plans, actual events, equipment instances, calibrations, inventory, and photos. One DB represents an operation, not an account or a batch. |
 
-An account may eventually own or join several workspaces. A shared batch stays in its workspace DB. Batch sharing, follower databases, and workspace membership are **later implementation targets**; they do not block the initial single-owner, whole-workspace app.
+An account can own several private workspaces. A shared batch stays in its workspace DB. Batch sharing, follower databases, and workspace membership are **later implementation targets**; they do not block the initial whole-workspace app.
 
 ### Implementation phases
 
-1. **Initial:** One owner account, one or more workspace DBs, full local copies on that owner's devices, authenticated whole-workspace sync, batches and plans, and the first useful event types. Add RAPT ingestion and reminders as the batch workflow matures.
+1. **Initial:** Open account registration, one or more private workspace DBs per account, full local copies on that account's devices, authenticated whole-workspace sync, batches and plans, and the first useful event types. Add RAPT ingestion and reminders as the batch workflow matures.
 2. **Later:** Multiple accounts, workspace membership, per-batch read and read/write grants, filtered sync into following DBs, server-side enforcement of incoming writes, and revocation behavior. Complete a filtered-sync proof of concept before exposing any shared batch.
 
 Keep IDs, provenance, and batch ownership explicit from the start so the later phase has the information it needs. Initial authentication still protects a machine exposed through Cloudflare Tunnel; it does not imply a full permission system.
@@ -115,7 +115,7 @@ Inventory is a ledger, not a mutable `quantity_on_hand` field. Additions and pac
 
 ## Sync and authorization
 
-Initially, sync all CRR changes between the owner's device and each workspace DB it opens. `crsql_changes.db_version` is the replication cursor; `received_at` is for provenance and ingest ordering, not for completeness of sync. Retain source site IDs and use idempotent application/retry. Transport 64-bit SQLite cursor values as BigInt or decimal strings rather than assuming every value fits a JavaScript `number`. HTTPS request/response is sufficient for correctness; WebSockets can reduce latency. Authentication is required, but there is no per-batch permission filtering in the initial implementation.
+Initially, sync all CRR changes between an account's device and each private workspace DB it opens. `crsql_changes.db_version` is the replication cursor; `received_at` is for provenance and ingest ordering, not for completeness of sync. Retain source site IDs and use idempotent application/retry. Transport 64-bit SQLite cursor values as BigInt or decimal strings rather than assuming every value fits a JavaScript `number`. HTTPS request/response is sufficient for correctness; WebSockets can reduce latency. Authentication is required, but there is no per-batch permission filtering in the initial implementation.
 
 ### Later: sharing and filtered sync
 

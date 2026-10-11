@@ -2,32 +2,33 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import type Database from 'better-sqlite3';
-import { accountForToken, bootstrapOwner, clearSessionCookie, login, logout, readSessionCookie, sessionCookie } from './auth.ts';
+import { accountForToken, clearSessionCookie, login, logout, readSessionCookie, register, sessionCookie } from './auth.ts';
 import { closeWorkspaceDb, createWorkspace, openAuthDb, openWorkspaceDb } from './db.ts';
 import { syncWorkspace, validateSyncRequest } from './sync.ts';
 import { isValidId } from '../shared/schema.ts';
 
 const authDb = openAuthDb();
-bootstrapOwner(authDb);
 const workspaceDbs = new Map<string, Database.Database>();
 const distDir = resolve('dist');
 const port = Number(process.env.BREWLOG_PORT || 3001);
 const loginFailures = new Map<string, { count: number; resetAt: number }>();
+const registrationAttempts = new Map<string, { count: number; resetAt: number }>();
 const loginWindowMs = 15 * 60 * 1000;
 const loginLimit = 10;
+const registrationLimit = 20;
 
 function json(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
   res.end(JSON.stringify(body));
 }
 
-async function readJson(req: IncomingMessage): Promise<unknown> {
+async function readJson(req: IncomingMessage, maxBytes = 32 * 1024 * 1024): Promise<unknown> {
   if (!req.headers['content-type']?.startsWith('application/json')) throw new Error('Expected JSON request');
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 32 * 1024 * 1024) throw new Error('Request exceeds 32 MB');
+    if (size > maxBytes) throw new Error('Request is too large');
     chunks.push(chunk);
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
@@ -80,9 +81,28 @@ const server = createServer(async (req, res) => {
     const pathname = url.pathname;
     if (!pathname.startsWith('/api/')) return serveStatic(req, res, pathname);
     if (pathname === '/api/health' && req.method === 'GET') return json(res, 200, { ok: true });
+    if (pathname === '/api/register' && req.method === 'POST') {
+      const registrationKey = req.socket.remoteAddress || 'unknown';
+      const now = Date.now();
+      const previous = registrationAttempts.get(registrationKey);
+      const attempts = previous && previous.resetAt > now ? previous : { count: 0, resetAt: now + loginWindowMs };
+      if (attempts.count >= registrationLimit) return json(res, 429, { error: 'Too many registrations. Try again later.' });
+      registrationAttempts.set(registrationKey, { ...attempts, count: attempts.count + 1 });
+      const body = await readJson(req, 4 * 1024) as { username?: unknown; password?: unknown };
+      if (typeof body.username !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{2,39}$/.test(body.username.trim())) {
+        return json(res, 400, { error: 'Username must be 3–40 letters, numbers, underscores, or hyphens' });
+      }
+      if (typeof body.password !== 'string' || body.password.length < 12 || body.password.length > 256) {
+        return json(res, 400, { error: 'Password must be 12–256 characters' });
+      }
+      const token = register(authDb, body.username, body.password);
+      if (!token) return json(res, 409, { error: 'Username is already taken' });
+      return json(res, 201, { ok: true }, { 'Set-Cookie': sessionCookie(token, secureRequest(req)) });
+    }
     if (pathname === '/api/login' && req.method === 'POST') {
-      const body = await readJson(req) as { username?: unknown; password?: unknown };
-      if (typeof body.username !== 'string' || typeof body.password !== 'string') return json(res, 400, { error: 'Username and password required' });
+      const body = await readJson(req, 4 * 1024) as { username?: unknown; password?: unknown };
+      if (typeof body.username !== 'string' || body.username.length > 40 || typeof body.password !== 'string'
+        || body.password.length > 256) return json(res, 400, { error: 'Invalid username or password' });
       const loginKey = req.socket.remoteAddress || 'unknown';
       const now = Date.now();
       const previous = loginFailures.get(loginKey);

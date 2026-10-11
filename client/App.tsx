@@ -122,7 +122,7 @@ export function App() {
   }
 
   if (loading) return <div className="loading-screen"><Spin size="large" /></div>;
-  if (!session) return <Login onLogin={result => { setSession(result); setWorkspaceId(result.workspaces[0]?.id || null); }} />;
+  if (!session) return <AccountAccess onAuthenticated={result => { setSession(result); setWorkspaceId(result.workspaces[0]?.id || null); }} />;
 
   return <div className="app-shell">
     <header className="app-header">
@@ -170,28 +170,49 @@ export function App() {
   </div>;
 }
 
-function Login({ onLogin }: { onLogin: (session: Session) => void }) {
+function AccountAccess({ onAuthenticated }: { onAuthenticated: (session: Session) => void }) {
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  async function submit(values: { username: string; password: string }) {
+  async function submit(values: { username: string; password: string; confirm_password?: string }) {
     setBusy(true); setError('');
     try {
-      await api('/login', 'POST', values);
+      if (mode === 'signup' && values.password !== values.confirm_password) throw new Error('Passwords do not match');
+      await api(mode === 'signup' ? '/register' : '/login', 'POST', {
+        username: values.username.trim(), password: values.password
+      });
       const session = await api<Session>('/me');
       localStorage.removeItem(signedOutKey);
       rememberSession(session);
-      onLogin(session);
+      onAuthenticated(session);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
   }
   return <div className="login-page"><Card className="login-card">
     <div className="brand login-brand"><span className="brand-mark">B</span><div><strong>Brewlog</strong><small>Your batches, as they happened</small></div></div>
-    <Typography.Title level={3}>Sign in</Typography.Title>
+    <div className="auth-switch" role="group" aria-label="Account access">
+      <button type="button" className={mode === 'login' ? 'active' : ''} aria-pressed={mode === 'login'}
+        onClick={() => { setMode('login'); setError(''); }}>Sign in</button>
+      <button type="button" className={mode === 'signup' ? 'active' : ''} aria-pressed={mode === 'signup'}
+        onClick={() => { setMode('signup'); setError(''); }}>Create account</button>
+    </div>
+    <Typography.Title level={3}>{mode === 'signup' ? 'Create your account' : 'Sign in'}</Typography.Title>
     {error && <Alert type="error" message={error} className="form-alert" />}
-    <Form layout="vertical" onFinish={submit}>
-      <Form.Item name="username" label="Username" rules={[{ required: true }]}><Input autoComplete="username" size="large" /></Form.Item>
-      <Form.Item name="password" label="Password" rules={[{ required: true }]}><Input.Password autoComplete="current-password" size="large" /></Form.Item>
-      <Button htmlType="submit" type="primary" size="large" block loading={busy}>Sign in</Button>
+    <Form key={mode} layout="vertical" onFinish={submit}>
+      <Form.Item name="username" label="Username" rules={[{ required: true },
+        ...(mode === 'signup' ? [{ pattern: /^[A-Za-z0-9][A-Za-z0-9_-]{2,39}$/, message: 'Use 3–40 letters, numbers, _ or -' }] : [])]}>
+        <Input autoComplete="username" size="large" maxLength={40} />
+      </Form.Item>
+      <Form.Item name="password" label="Password" rules={[{ required: true },
+        ...(mode === 'signup' ? [{ min: 12, message: 'Use at least 12 characters' }] : [])]}>
+        <Input.Password autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} size="large" maxLength={256} />
+      </Form.Item>
+      {mode === 'signup' && <Form.Item name="confirm_password" label="Confirm password" rules={[{ required: true }]}>
+        <Input.Password autoComplete="new-password" size="large" maxLength={256} />
+      </Form.Item>}
+      <Button htmlType="submit" type="primary" size="large" block loading={busy}>
+        {mode === 'signup' ? 'Create my account' : 'Sign in'}
+      </Button>
     </Form>
   </Card></div>;
 }

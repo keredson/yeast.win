@@ -24,30 +24,30 @@ function tokenHash(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
-export function bootstrapOwner(db: Database.Database): void {
-  const row = db.prepare('SELECT COUNT(*) AS count FROM accounts').get() as { count: number };
-  if (row.count > 0) return;
-  const username = process.env.BREWLOG_OWNER_USERNAME?.trim();
-  const password = process.env.BREWLOG_OWNER_PASSWORD;
-  if (!username || !password || password.length < 12) {
-    console.warn('Owner setup needed: set BREWLOG_OWNER_USERNAME and BREWLOG_OWNER_PASSWORD (12+ characters) in .env, then restart.');
-    return;
-  }
-  const id = nanoid();
-  db.prepare('INSERT INTO accounts(id, username, password_hash, created_at) VALUES (?, ?, ?, ?)')
-    .run(id, username, passwordHash(password), nowSeconds());
-  createWorkspace(db, id, 'Homebrew');
-  console.log(`Created owner account ${username} and Homebrew workspace.`);
+function createSession(db: Database.Database, accountId: string): string {
+  const token = randomBytes(32).toString('base64url');
+  db.prepare('INSERT INTO sessions(token_hash, account_id, expires_at) VALUES (?, ?, ?)')
+    .run(tokenHash(token), accountId, nowSeconds() + sessionSeconds);
+  return token;
+}
+
+export function register(db: Database.Database, username: string, password: string): string | null {
+  const normalized = username.trim().toLowerCase();
+  return db.transaction(() => {
+    if (db.prepare('SELECT 1 FROM accounts WHERE lower(username) = ?').get(normalized)) return null;
+    const id = nanoid();
+    db.prepare('INSERT INTO accounts(id, username, password_hash, created_at) VALUES (?, ?, ?, ?)')
+      .run(id, normalized, passwordHash(password), nowSeconds());
+    createWorkspace(db, id, 'Homebrew');
+    return createSession(db, id);
+  })();
 }
 
 export function login(db: Database.Database, username: string, password: string): string | null {
-  const row = db.prepare('SELECT id, password_hash FROM accounts WHERE username = ?')
-    .get(username) as { id: string; password_hash: string } | undefined;
+  const row = db.prepare('SELECT id, password_hash FROM accounts WHERE lower(username) = ?')
+    .get(username.trim().toLowerCase()) as { id: string; password_hash: string } | undefined;
   if (!row || !validPassword(password, row.password_hash)) return null;
-  const token = randomBytes(32).toString('base64url');
-  db.prepare('INSERT INTO sessions(token_hash, account_id, expires_at) VALUES (?, ?, ?)')
-    .run(tokenHash(token), row.id, nowSeconds() + sessionSeconds);
-  return token;
+  return createSession(db, row.id);
 }
 
 export function accountForToken(db: Database.Database, token: string | undefined): Account | null {

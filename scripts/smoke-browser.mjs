@@ -5,16 +5,26 @@ const browser = await chromium.launch({
   headless: true, args: ['--no-sandbox']
 });
 const baseUrl = process.env.BREWLOG_TEST_URL || 'http://127.0.0.1:5173';
-const username = process.env.BREWLOG_TEST_USERNAME || 'smoke';
+const username = process.env.BREWLOG_TEST_USERNAME || `smoke-${Date.now()}`;
 const password = process.env.BREWLOG_TEST_PASSWORD || 'smoke-test-password-123';
 const errors = [];
 
-async function signIn(page) {
+async function signIn(page, createAccount = false) {
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(baseUrl);
+  if (createAccount) {
+    await page.getByRole('button', { name: 'Create account' }).click();
+    await page.setViewportSize({ width: 320, height: 720 });
+    if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) {
+      throw new Error('Signup page has horizontal overflow on a narrow phone');
+    }
+    await page.screenshot({ path: '/tmp/brewlog-signup-mobile.png', fullPage: true });
+    await page.setViewportSize({ width: 1280, height: 900 });
+  }
   await page.getByLabel('Username').fill(username);
-  await page.getByLabel('Password').fill(password);
-  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.getByLabel('Password', { exact: true }).fill(password);
+  if (createAccount) await page.getByLabel('Confirm password').fill(password);
+  await page.locator('.login-card form button[type="submit"]').click();
   await page.getByRole('heading', { name: 'Batches' }).waitFor({ timeout: 30_000 });
   await page.getByRole('button', { name: 'New', exact: true }).waitFor();
 }
@@ -22,8 +32,8 @@ async function signIn(page) {
 try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
-  await signIn(page);
-  console.log('Signed in and opened local SQLite');
+  await signIn(page, true);
+  console.log('Registered account and opened local SQLite');
 
   await page.getByRole('button', { name: 'New', exact: true }).click();
   await page.getByLabel('Batch name').fill(`Smoke batch ${Date.now()}`);
@@ -117,6 +127,26 @@ try {
     Array.from(new Uint8Array(await (await fetch(img.src)).arrayBuffer())));
   if (Buffer.compare(Buffer.from(syncedPhoto), imageBytes) !== 0) throw new Error('Photo BLOB did not survive browser sync');
   console.log('Synced batch to second device');
+
+  const firstWorkspaceId = await page.evaluate(async () => (await (await fetch('/api/me')).json()).workspaces[0].id);
+  const thirdContext = await browser.newContext();
+  const third = await thirdContext.newPage();
+  third.on('pageerror', error => errors.push(error.message));
+  await third.goto(baseUrl);
+  await third.getByRole('button', { name: 'Create account' }).click();
+  await third.getByLabel('Username').fill(username.toUpperCase());
+  await third.getByLabel('Password', { exact: true }).fill(password);
+  await third.getByLabel('Confirm password').fill(password);
+  await third.getByRole('button', { name: 'Create my account' }).click();
+  await third.getByText('Username is already taken').waitFor();
+  await third.getByLabel('Username').fill(`${username}b`);
+  await third.getByRole('button', { name: 'Create my account' }).click();
+  await third.getByRole('heading', { name: 'Batches' }).waitFor({ timeout: 30_000 });
+  const forbiddenStatus = await third.evaluate(async id => (await fetch(`/api/workspaces/${id}/sync`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverCursor: '0', localCursor: '0', changes: [] })
+  })).status, firstWorkspaceId);
+  if (forbiddenStatus !== 404) throw new Error(`Second account accessed first account's workspace: ${forbiddenStatus}`);
+  console.log('Rejected duplicate username and isolated accounts');
 
   if (errors.length) throw new Error(`Browser errors:\n${errors.join('\n')}`);
   console.log('Browser smoke passed');
