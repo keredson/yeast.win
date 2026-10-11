@@ -20,3 +20,16 @@ export const equipmentKinds = [
 export function equipmentKindLabel(kind: string): string {
   return equipmentKinds.find(item => item.value === kind)?.label || kind;
 }
+
+export const capacityKinds = new Set<string>(['kettle', 'mash_tun', 'fermenter', 'refrigerator']);
+
+export const measurementRangeUnits: Record<string, readonly string[]> = {
+  hydrometer: ['SG', '°Plato'],
+  refractometer: ['°Brix', 'SG'],
+  thermometer: ['°C', '°F'],
+  ph_meter: ['pH'],
+  pressure_gauge: ['kPa', 'psi'],
+  carbonation_meter: ['vol CO₂', 'g/L'],
+  dissolved_oxygen_meter: ['mg/L', 'ppm'],
+  scale: ['g', 'kg', 'oz', 'lb']
+};

@@ -95,7 +95,7 @@ If one fridge serves several batches, record the relevant temperature-control ev
 
 | Table | Main fields and role |
 | --- | --- |
-| `equipment` | Workspace-owned physical items: kettle, controller, chiller, fermenter, fridge, hydrometer, pH meter, etc. May retain a source catalog model ID and a copied specification, including capacity in liters. Consumable bottles belong in inventory. |
+| `equipment` | Workspace-owned physical items: kettle, controller, chiller, fermenter, fridge, hydrometer, pH meter, etc. May retain a source catalog model ID and a copied specification. Vessels may store capacity in liters; measuring instruments may store a minimum, maximum, and measurement unit instead. Consumable bottles belong in inventory. |
 | `equipment_archives` | Hides equipment used by events from active lists while retaining the referenced equipment and calibration rows for history. Unused equipment can be deleted outright. |
 | `equipment_calibrations` | Immutable records of calibration parameters, method, effective time, and author. Measurements link to the calibration used at capture time. |
 | `equipment_characterization_observations` | Observed power, temperatures, volumes, time, and evaporation/heat-loss data used to fit kettle behavior. |

@@ -1,7 +1,7 @@
 import initWasm, { type DB } from '@vlcn.io/crsqlite-wasm';
 import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { nanoid } from 'nanoid';
-import { equipmentKinds } from '../shared/equipment.ts';
+import { capacityKinds, equipmentKinds, measurementRangeUnits } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
 import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, workspaceV2Statements, workspaceV3Statements, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
@@ -216,13 +216,27 @@ export async function listEquipment(db: DB): Promise<Equipment[]> {
     WHERE id NOT IN (SELECT equipment_id FROM equipment_archives) ORDER BY name COLLATE NOCASE`);
 }
 
+export interface EquipmentSpecifications {
+  capacity_liters?: number;
+  measurement_min?: number;
+  measurement_max?: number;
+  measurement_unit?: string;
+  working_volume_liters?: number;
+}
+
 export async function createEquipment(db: DB, name: string, kind: string, catalogModel?: CatalogEquipment,
-  capacityLiters?: number | null): Promise<string> {
+  overrides: EquipmentSpecifications = {}): Promise<string> {
   if (!equipmentKinds.some(item => item.value === kind)) throw new Error('Choose a valid equipment kind');
   if (catalogModel && catalogModel.kind !== kind) throw new Error('Catalog kind does not match equipment kind');
   const id = nanoid();
   const specification = JSON.parse(catalogModel?.specification_json || '{}') as Record<string, unknown>;
-  if (capacityLiters != null) specification.capacity_liters = capacityLiters;
+  Object.assign(specification, overrides);
+  if (!capacityKinds.has(kind)) delete specification.capacity_liters;
+  if (!measurementRangeUnits[kind]) {
+    delete specification.measurement_min;
+    delete specification.measurement_max;
+    delete specification.measurement_unit;
+  }
   await db.exec('INSERT INTO equipment(id, name, kind, catalog_model_id, specification_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     [id, name, kind, catalogModel?.id || null, Object.keys(specification).length ? JSON.stringify(specification) : null, nowSeconds()]);
   return id;
@@ -232,6 +246,23 @@ export async function updateEquipmentCapacity(db: DB, item: Equipment, capacityL
   const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
   if (capacityLiters == null) delete specification.capacity_liters;
   else specification.capacity_liters = capacityLiters;
+  await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?',
+    [Object.keys(specification).length ? JSON.stringify(specification) : null, item.id]);
+}
+
+export async function updateEquipmentMeasurementRange(db: DB, item: Equipment,
+  range: { min: number; max: number; unit: string } | null): Promise<void> {
+  const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
+  if (range) {
+    specification.measurement_min = range.min;
+    specification.measurement_max = range.max;
+    specification.measurement_unit = range.unit;
+    delete specification.capacity_liters;
+  } else {
+    delete specification.measurement_min;
+    delete specification.measurement_max;
+    delete specification.measurement_unit;
+  }
   await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?',
     [Object.keys(specification).length ? JSON.stringify(specification) : null, item.id]);
 }

@@ -35,3 +35,25 @@ export function effectivePlanTime(plan: TimedPlan, plans: TimedPlan[], events: A
   if (plan.planned_at != null) return plan.planned_at;
   return startAt + (plan.offset_seconds || 0);
 }
+
+export function parsePlanDetails(detailsJson: string | null | undefined): Record<string, string | number> {
+  try {
+    const value = JSON.parse(detailsJson || '{}') as unknown;
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, string | number> : {};
+  } catch { return {}; }
+}
+
+export function planDetailsLabel(plan: Pick<Plan, 'event_type'> & { details_json?: string | null }): string {
+  const details = parsePlanDetails(plan.details_json);
+  const amount = details.quantity != null ? `${details.quantity} ${details.unit || ''}`.trim() : '';
+  const target = details.target_value != null ? `${details.target_value} ${details.target_unit || ''}`.trim() : '';
+  const parts = plan.event_type === 'addition' ? [amount, details.item_name]
+    : plan.event_type === 'measurement' ? [details.measurement_kind, target]
+      : plan.event_type === 'temperature_control' ? [details.mode, target]
+        : plan.event_type === 'pressure_control' ? [target]
+          : plan.event_type === 'transfer' ? [amount]
+            : plan.event_type === 'packaging' ? [details.container_count,
+              details.container_name, details.container_size != null ? `${details.container_size} ${details.unit || ''}`.trim() : ''] : [];
+  if (details.note) parts.push(details.note);
+  return parts.filter(Boolean).join(' · ');
+}

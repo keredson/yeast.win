@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Dropdown, Empty, Form, Input, InputNumber, Modal, Select, Table, Tag } from 'antd';
 import { DeleteOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
 import { nanoid } from 'nanoid';
-import { equipmentKindLabel, equipmentKinds } from '../shared/equipment.ts';
+import { capacityKinds, equipmentKindLabel, equipmentKinds, measurementRangeUnits } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { createEquipment, deleteEquipment, updateEquipmentCapacity, type Equipment, type LocalDb } from './db.ts';
+import { createEquipment, deleteEquipment, updateEquipmentCapacity, updateEquipmentMeasurementRange,
+  type Equipment, type EquipmentSpecifications, type LocalDb } from './db.ts';
 import { capacityInLiters, capacityLabel, capacityUnits } from '../shared/capacity.ts';
 import { fromDatetimeLocal, formatTime, toDatetimeLocal } from './time.ts';
 
@@ -48,13 +49,14 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
   const [newEquipment, setNewEquipment] = useState(false);
   const [newCalibration, setNewCalibration] = useState(false);
   const [editCapacity, setEditCapacity] = useState(false);
+  const [editRange, setEditRange] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [error, setError] = useState('');
   const [equipmentForm] = Form.useForm();
   const item = equipment.find(row => row.id === selectedId) || null;
   const selectedKind = Form.useWatch('kind', equipmentForm) as string | undefined;
   const profile = item ? calibrationProfiles[item.kind] : undefined;
-  const specs = item ? JSON.parse(item.specification_json || '{}') as { capacity_liters?: number; working_volume_liters?: number } : {};
+  const specs = item ? JSON.parse(item.specification_json || '{}') as EquipmentSpecifications : {};
   const kinds = [...equipmentKinds.map(row => row.value), ...equipment.map(row => row.kind).filter(kind =>
     !equipmentKinds.some(known => known.value === kind))].filter((kind, index, all) => all.indexOf(kind) === index);
 
@@ -64,9 +66,28 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
       .then(setCalibrations);
   }, [db, selectedId, equipment]);
 
-  async function create(values: { name: string; kind: string; catalog_id?: string; capacity?: number; capacity_unit?: string }) {
-    try { const id = await createEquipment(db, values.name.trim(), values.kind, catalog.find(row => row.id === values.catalog_id),
-      capacityInLiters(values.capacity, values.capacity_unit)); setNewEquipment(false); equipmentForm.resetFields(); onSelect(id); await onChanged(); }
+  function validRange(min: number | undefined, max: number | undefined, unit: string | undefined, kind: string) {
+    if (min == null && max == null) return null;
+    if (min == null || max == null || !Number.isFinite(min) || !Number.isFinite(max) || min >= max
+      || !unit || !measurementRangeUnits[kind]?.includes(unit)) throw new Error('Enter a valid measurement range and unit');
+    return { min, max, unit };
+  }
+
+  async function create(values: { name: string; kind: string; catalog_id?: string; capacity?: number; capacity_unit?: string;
+    measurement_min?: number; measurement_max?: number; measurement_unit?: string }) {
+    try {
+      const overrides: EquipmentSpecifications = {};
+      if (capacityKinds.has(values.kind)) {
+        const capacity = capacityInLiters(values.capacity, values.capacity_unit);
+        if (capacity != null) overrides.capacity_liters = capacity;
+      }
+      if (measurementRangeUnits[values.kind]) {
+        const range = validRange(values.measurement_min, values.measurement_max, values.measurement_unit, values.kind);
+        if (range) Object.assign(overrides, { measurement_min: range.min, measurement_max: range.max, measurement_unit: range.unit });
+      }
+      const id = await createEquipment(db, values.name.trim(), values.kind, catalog.find(row => row.id === values.catalog_id), overrides);
+      setNewEquipment(false); equipmentForm.resetFields(); onSelect(id); await onChanged();
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
@@ -74,6 +95,15 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
     if (!item) return;
     try { await updateEquipmentCapacity(db, item, capacityInLiters(values.capacity, values.capacity_unit)); setEditCapacity(false); await onChanged(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
+  async function saveRange(values: { measurement_min?: number; measurement_max?: number; measurement_unit?: string }) {
+    if (!item) return;
+    try {
+      const range = validRange(values.measurement_min, values.measurement_max, values.measurement_unit, item.kind);
+      await updateEquipmentMeasurementRange(db, item, range);
+      setEditRange(false); await onChanged();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
   async function remove() {
@@ -107,21 +137,30 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
           <Table<Equipment> dataSource={rows} rowKey="id" pagination={false} size="small"
             columns={[{ title: 'Equipment', dataIndex: 'name', render: (_, row) =>
               <a href={`${basePath}/equipment/${row.id}`} onClick={event => { event.preventDefault(); onSelect(row.id); }}>{row.name}</a> },
-              { title: 'Capacity', key: 'capacity', width: 140, responsive: ['sm'], render: (_, row) =>
-                capacityLabel((JSON.parse(row.specification_json || '{}') as { capacity_liters?: number }).capacity_liters) }]} />
+              ...(capacityKinds.has(kind) ? [{ title: 'Capacity', key: 'capacity', width: 140, responsive: ['sm' as const], render: (_: unknown, row: Equipment) =>
+                capacityLabel((JSON.parse(row.specification_json || '{}') as EquipmentSpecifications).capacity_liters) }] : []),
+              ...(measurementRangeUnits[kind] ? [{ title: 'Measurement range', key: 'range', width: 180, responsive: ['sm' as const], render: (_: unknown, row: Equipment) => {
+                const spec = JSON.parse(row.specification_json || '{}') as EquipmentSpecifications;
+                return spec.measurement_min != null && spec.measurement_max != null
+                  ? `${spec.measurement_min}–${spec.measurement_max} ${spec.measurement_unit || ''}` : '';
+              } }] : [])]} />
         </section> : null;
       })}</div> : <Empty description="No equipment yet" />}
     </section> : !item ? <Empty description="Equipment not found" /> : <section className="record-detail">
         <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(item.kind)}</span><h2>{item.name}</h2></div>
           <div className="heading-actions"><Dropdown menu={{ items: [
             ...(profile ? [{ key: 'calibrate', label: 'New calibration' }] : []),
-            { key: 'capacity', label: 'Set capacity' }, { key: 'delete', label: 'Delete equipment', icon: <DeleteOutlined />, danger: true }
+            ...(capacityKinds.has(item.kind) ? [{ key: 'capacity', label: 'Set capacity' }] : []),
+            ...(measurementRangeUnits[item.kind] ? [{ key: 'range', label: 'Set measurement range' }] : []),
+            { key: 'delete', label: 'Delete equipment', icon: <DeleteOutlined />, danger: true }
           ], onClick: ({ key }) => { if (key === 'calibrate') setNewCalibration(true);
-            else if (key === 'capacity') setEditCapacity(true); else setDeleteOpen(true); } }} trigger={['click']}>
+            else if (key === 'capacity') setEditCapacity(true); else if (key === 'range') setEditRange(true); else setDeleteOpen(true); } }} trigger={['click']}>
             <Button type="text" shape="circle" icon={<SettingOutlined />} aria-label="Equipment settings" title="Equipment settings" />
           </Dropdown></div></div>
-        {specs.capacity_liters != null && <p className="muted">Capacity: {capacityLabel(specs.capacity_liters)}
+        {capacityKinds.has(item.kind) && specs.capacity_liters != null && <p className="muted">Capacity: {capacityLabel(specs.capacity_liters)}
           {specs.working_volume_liters != null && ` · Brewing volume: ${capacityLabel(specs.working_volume_liters)}`}</p>}
+        {measurementRangeUnits[item.kind] && specs.measurement_min != null && specs.measurement_max != null &&
+          <p className="muted">Measurement range: {specs.measurement_min}–{specs.measurement_max} {specs.measurement_unit}</p>}
         <h3>{profile ? 'Calibration history' : 'Equipment details'}</h3>
         <div className="card-stack">{calibrations.length ? calibrations.map(row => <Card key={row.id} size="small">
           <div className="timeline-card"><div><strong>{row.method}</strong><div className="muted">{formatTime(row.effective_at)}</div></div><Tag>Immutable</Tag></div>
@@ -131,17 +170,26 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
     <Modal title="New equipment" open={newEquipment} onCancel={() => setNewEquipment(false)} footer={null} destroyOnHidden>
       <Form form={equipmentForm} layout="vertical" onFinish={create} initialValues={{ capacity_unit: 'L' }}>
         <Form.Item name="kind" label="Type" rules={[{ required: true }]}><Select showSearch optionFilterProp="label" placeholder="Choose equipment type" options={[...equipmentKinds]}
-          onChange={() => equipmentForm.setFieldsValue({ catalog_id: undefined, name: undefined, capacity: undefined })} /></Form.Item>
+          onChange={() => equipmentForm.setFieldsValue({ catalog_id: undefined, name: undefined, capacity: undefined,
+            measurement_min: undefined, measurement_max: undefined, measurement_unit: undefined })} /></Form.Item>
         <Form.Item name="catalog_id" label="Find in shared equipment catalog">
           <Select showSearch allowClear disabled={!selectedKind} placeholder={selectedKind ? 'Search this equipment type' : 'Choose type first'} optionFilterProp="label"
             options={catalog.filter(row => row.kind === selectedKind).map(row => ({ value: row.id, label: row.name }))}
             onChange={value => { const entry = catalog.find(row => row.id === value);
-              if (entry) { const specs = JSON.parse(entry.specification_json || '{}') as { capacity_liters?: number };
-                equipmentForm.setFieldsValue({ name: entry.name, capacity: specs.capacity_liters, capacity_unit: 'L' }); } }} />
+              if (entry) { const specs = JSON.parse(entry.specification_json || '{}') as EquipmentSpecifications;
+                equipmentForm.setFieldsValue({ name: entry.name, capacity: specs.capacity_liters, capacity_unit: 'L',
+                  measurement_min: specs.measurement_min, measurement_max: specs.measurement_max,
+                  measurement_unit: specs.measurement_unit || measurementRangeUnits[entry.kind]?.[0] }); } }} />
         </Form.Item>
         <Form.Item name="name" label="Name" rules={[{ required: true }]}><Input placeholder="e.g. pH meter #2" /></Form.Item>
-        <div className="capacity-fields"><Form.Item name="capacity" label="Capacity (optional)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
-          <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]} /></Form.Item></div>
+        {selectedKind && capacityKinds.has(selectedKind) && <div className="capacity-fields"><Form.Item name="capacity" label="Capacity (optional)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
+          <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]} /></Form.Item></div>}
+        {selectedKind && measurementRangeUnits[selectedKind] && <div className="form-triple">
+          <Form.Item name="measurement_min" label="Range minimum"><InputNumber className="full-width" step="any" /></Form.Item>
+          <Form.Item name="measurement_max" label="Range maximum"><InputNumber className="full-width" step="any" /></Form.Item>
+          <Form.Item name="measurement_unit" label="Unit" initialValue={measurementRangeUnits[selectedKind][0]}>
+            <Select options={measurementRangeUnits[selectedKind].map(value => ({ value, label: value }))} /></Form.Item>
+        </div>}
         <Button type="primary" htmlType="submit">Create equipment</Button>
       </Form>
     </Modal>
@@ -150,6 +198,15 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
         <div className="capacity-fields"><Form.Item name="capacity" label="Capacity"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
           <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]} /></Form.Item></div>
         <Button type="primary" htmlType="submit">Save capacity</Button>
+      </Form>
+    </Modal>
+    <Modal title="Set measurement range" open={editRange} onCancel={() => setEditRange(false)} footer={null} destroyOnHidden>
+      <Form layout="vertical" onFinish={saveRange} initialValues={{ measurement_min: specs.measurement_min, measurement_max: specs.measurement_max,
+        measurement_unit: specs.measurement_unit || (item && measurementRangeUnits[item.kind]?.[0]) }}>
+        <div className="form-triple"><Form.Item name="measurement_min" label="Range minimum"><InputNumber className="full-width" step="any" /></Form.Item>
+          <Form.Item name="measurement_max" label="Range maximum"><InputNumber className="full-width" step="any" /></Form.Item>
+          <Form.Item name="measurement_unit" label="Unit"><Select options={(item && measurementRangeUnits[item.kind] || []).map(value => ({ value, label: value }))} /></Form.Item></div>
+        <Button type="primary" htmlType="submit">Save range</Button>
       </Form>
     </Modal>
     <Modal title={profile ? `Calibrate ${equipmentKindLabel(item?.kind || '')}` : 'Record calibration'} open={newCalibration} onCancel={() => setNewCalibration(false)} footer={null} destroyOnHidden>

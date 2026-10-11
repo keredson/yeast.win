@@ -104,22 +104,38 @@ try {
   console.log('Created batch:', batchName);
 
   await page.getByRole('button', { name: 'Plan an action' }).click();
-  await page.getByLabel('What needs to happen?').fill('Add nutrient');
+  const firstPlan = page.getByRole('dialog', { name: 'Plan an event' });
+  await firstPlan.getByRole('combobox', { name: 'Event type' }).waitFor();
+  await firstPlan.getByLabel('What will be added?').fill('Add nutrient');
   await page.getByRole('button', { name: 'Add planned event' }).click();
   await page.getByText('Add nutrient', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Plan an action' }).click();
-  await page.getByLabel('What needs to happen?').fill('Add yeast');
+  await page.getByLabel('What will be added?').fill('Add yeast');
   await page.getByRole('button', { name: 'Add planned event' }).click();
   await page.getByText('Add yeast', { exact: true }).waitFor();
   if (await page.locator('.timeline-group').count() !== 1 || await page.locator('.timeline-group .plan-card').count() !== 2) {
     throw new Error('Actions at batch start were not grouped together');
   }
-  await page.locator('.plan-card').filter({ hasText: 'Add nutrient' }).getByRole('button', { name: 'Record' }).click();
+  await page.getByRole('button', { name: 'Plan an action' }).click();
+  const measurementPlan = page.getByRole('dialog', { name: 'Plan an event' });
+  await measurementPlan.getByRole('combobox', { name: 'Event type' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="Measurement"]').click();
+  await measurementPlan.getByLabel('What will be measured?').fill('Check gravity');
+  if (!await measurementPlan.getByRole('combobox', { name: 'Measurement' }).count()) throw new Error('Measurement planning fields did not appear');
+  await measurementPlan.getByRole('combobox', { name: 'Timing' }).click();
+  if (await page.locator('.ant-select-dropdown:visible').getByText('After another event', { exact: true }).count()) {
+    throw new Error('Timing still uses an intermediate anchor option');
+  }
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Add nutrient' }).click();
+  await measurementPlan.getByRole('spinbutton', { name: 'Time offset' }).fill('10');
+  await measurementPlan.getByRole('button', { name: 'Add planned event' }).click();
+  await page.locator('.plan-card').filter({ hasText: 'Check gravity' }).getByText('10 minutes after Add nutrient').waitFor();
+  await page.locator('.plan-card').filter({ has: page.getByText('Add nutrient', { exact: true }) }).getByRole('button', { name: 'Record' }).click();
   const plannedAction = page.getByRole('dialog', { name: 'Record: Add nutrient' });
   await plannedAction.getByRole('textbox', { name: 'What was added?' }).fill('Yeast nutrient');
   await plannedAction.getByRole('spinbutton', { name: 'Quantity' }).fill('1');
   await plannedAction.getByRole('button', { name: 'Save event' }).click();
-  await page.locator('.plan-card').filter({ hasText: 'Add nutrient' }).locator('.event-card').getByText('1 g Yeast nutrient').waitFor();
+  await page.locator('.plan-card').filter({ has: page.getByText('Add nutrient', { exact: true }) }).locator('.event-card').getByText('1 g Yeast nutrient').waitFor();
   console.log('Added planned event');
 
   await page.getByRole('button', { name: 'Record activity' }).click();
@@ -196,11 +212,23 @@ try {
   await page.getByRole('button', { name: 'New equipment' }).click();
   await page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Type' }).fill('pH meter');
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'pH meter' }).last().click();
+  if (await page.getByRole('dialog', { name: 'New equipment' }).getByLabel('Capacity (optional)').count()) {
+    throw new Error('Measurement equipment was offered vessel capacity');
+  }
   await page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Find in shared equipment catalog' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'pH meter' }).last().click();
   await page.getByRole('dialog', { name: 'New equipment' }).getByLabel('Name').fill('Smoke pH meter');
+  await page.getByRole('dialog', { name: 'New equipment' }).getByRole('spinbutton', { name: 'Range minimum' }).fill('0');
+  await page.getByRole('dialog', { name: 'New equipment' }).getByRole('spinbutton', { name: 'Range maximum' }).fill('14');
   await page.getByRole('button', { name: 'Create equipment' }).click();
   await page.getByRole('heading', { name: 'Smoke pH meter' }).waitFor();
+  await page.getByText('Measurement range: 0–14 pH').waitFor();
+  await page.getByRole('button', { name: 'Equipment settings' }).click();
+  if (await page.getByRole('menuitem', { name: 'Set capacity' }).count()) throw new Error('pH meter still offers capacity settings');
+  await page.getByRole('menuitem', { name: 'Set measurement range' }).click();
+  await page.getByRole('dialog', { name: 'Set measurement range' }).getByRole('spinbutton', { name: 'Range maximum' }).fill('15');
+  await page.getByRole('button', { name: 'Save range' }).click();
+  await page.getByText('Measurement range: 0–15 pH').waitFor();
   if (!/^\/equipment\/[A-Za-z0-9_-]{10,32}$/.test(new URL(page.url()).pathname)) throw new Error('Equipment detail URL was not set');
   await page.getByRole('button', { name: 'Equipment settings' }).click();
   await page.getByRole('menuitem', { name: 'New calibration' }).click();
@@ -211,11 +239,14 @@ try {
   await navigateSection(page, 'Equipment');
   await page.getByRole('button', { name: 'New equipment' }).click();
   await page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Type' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Thermometer' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Refractometer' }).click();
   await page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Find in shared equipment catalog' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Thermometer' }).last().click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Refractometer' }).last().click();
+  await page.getByRole('dialog', { name: 'New equipment' }).getByRole('spinbutton', { name: 'Range minimum' }).fill('0');
+  await page.getByRole('dialog', { name: 'New equipment' }).getByRole('spinbutton', { name: 'Range maximum' }).fill('32');
   await page.getByRole('button', { name: 'Create equipment' }).click();
-  await page.getByRole('heading', { name: 'Thermometer', exact: true }).waitFor();
+  await page.getByRole('heading', { name: 'Refractometer', exact: true }).waitFor();
+  await page.getByText('Measurement range: 0–32 °Brix').waitFor();
   await navigateSection(page, 'Equipment');
   if (await page.locator('.group-table').count() !== 2) throw new Error('Equipment kinds should have separate tables');
   await page.setViewportSize({ width: 320, height: 720 });
@@ -244,7 +275,7 @@ try {
   await page.getByRole('menuitem', { name: 'Delete equipment' }).click();
   await page.getByRole('dialog', { name: 'Delete equipment?' }).getByRole('button', { name: 'Delete' }).click();
   await page.waitForURL('**/equipment');
-  await page.locator('.group-table a').filter({ hasText: 'Thermometer' }).click();
+  await page.locator('.group-table a').filter({ hasText: 'Refractometer' }).click();
   await page.getByRole('button', { name: 'Equipment settings' }).click();
   await page.getByRole('menuitem', { name: 'Delete equipment' }).click();
   await page.getByRole('dialog', { name: 'Delete equipment?' }).getByRole('button', { name: 'Delete' }).click();
@@ -261,7 +292,7 @@ try {
   await page.getByRole('button', { name: 'Create recipe' }).click();
   await page.waitForURL(url => /^\/recipe\/[A-Za-z0-9_-]{10,32}$/.test(url.pathname));
   await page.getByRole('button', { name: 'Add planned event' }).click();
-  await page.getByLabel('What needs to happen?').fill('Check fermentation');
+  await page.getByLabel('What will be added?').fill('Check fermentation');
   await page.getByRole('dialog', { name: 'Planned recipe event' }).getByRole('button', { name: 'Add planned event' }).click();
   await page.getByText('Check fermentation').waitFor();
   await navigateSection(page, 'Batches');

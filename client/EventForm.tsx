@@ -5,6 +5,7 @@ import { fromDatetimeLocal, toDatetimeLocal } from './time.ts';
 import { addPhoto, recordEvent, type Equipment, type EventInput, type InventoryItem, type LocalDb, type MeasurementKind, type Plan } from './db.ts';
 import type { PreferredUnits } from './api.ts';
 import { quantityUnits, unitGroups, unitOptions } from '../shared/units.ts';
+import { parsePlanDetails } from './planTiming.ts';
 
 function measurementUnits(kind: MeasurementKind): readonly string[] {
   if (kind === 'ph') return ['pH'];
@@ -42,8 +43,12 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
   inventory: InventoryItem[]; preferredUnits: PreferredUnits; initialPlan?: Plan | null; onSaved: () => Promise<void>;
 }) {
   const [form] = Form.useForm<Values>();
+  const planned = parsePlanDetails(initialPlan?.details_json);
+  const plannedString = (key: string) => typeof planned[key] === 'string' ? planned[key] as string : undefined;
+  const plannedNumber = (key: string) => typeof planned[key] === 'number' ? planned[key] as number : undefined;
+  const initialMeasurement = measurementKinds.find(item => item.value === plannedString('measurement_kind'))?.value as MeasurementKind | undefined;
   const [kind, setKind] = useState(initialPlan?.event_type || 'note');
-  const [measurement, setMeasurement] = useState<MeasurementKind>('temperature');
+  const [measurement, setMeasurement] = useState<MeasurementKind>(initialMeasurement || 'temperature');
   const [instrumentId, setInstrumentId] = useState<string | undefined>();
   const [calibrations, setCalibrations] = useState<{ id: string; effective_at: number }[]>([]);
   const [busy, setBusy] = useState(false);
@@ -110,10 +115,14 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
 
   return <Form form={form} layout="vertical" onFinish={submit} initialValues={{
     event_type: kind, actual_at: toDatetimeLocal(), planned_event_id: initialPlan?.id,
-    measurement_kind: measurement, mode: 'hold', source: 'manual',
-    unit: eventUnit(kind, preferredUnits),
-    target_unit: kind === 'temperature_control' ? preferredUnits.temperature : kind === 'pressure_control' ? preferredUnits.pressure : undefined,
-    container_unit: preferredUnits.volume
+    measurement_kind: plannedString('measurement_kind') || measurement, mode: plannedString('mode') || 'hold', source: 'manual',
+    item_name: plannedString('item_name'), quantity: plannedNumber('quantity'),
+    container_name: plannedString('container_name'), container_size: plannedNumber('container_size'),
+    container_count: plannedNumber('container_count'),
+    unit: plannedString('unit') || eventUnit(kind, preferredUnits),
+    target_value: kind === 'measurement' ? undefined : plannedNumber('target_value'),
+    target_unit: plannedString('target_unit') || (kind === 'temperature_control' ? preferredUnits.temperature : kind === 'pressure_control' ? preferredUnits.pressure : undefined),
+    container_unit: plannedString('unit') || preferredUnits.volume
   }}>
     {error && <Alert type="error" message={error} className="form-alert" />}
     <Form.Item name="event_type" label="Event type" rules={[{ required: true }]}>

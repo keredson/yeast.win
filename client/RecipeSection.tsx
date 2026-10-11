@@ -5,7 +5,7 @@ import { addRecipePlan, createRecipe, listRecipePlans, startBatchFromRecipe,
   type LocalDb, type PlanInput, type Recipe } from './db.ts';
 import { PlanForm } from './PlanForm.tsx';
 import { kindLabel } from './constants.ts';
-import { planTimingLabel } from './planTiming.ts';
+import { planDetailsLabel, planTimingLabel } from './planTiming.ts';
 
 export function RecipeSection({ db, basePath, accountId, recipes, selectedId, onSelect, onChanged, onBatchStarted }: {
   db: LocalDb; basePath: string; accountId: string; recipes: Recipe[]; selectedId: string | null; onSelect: (id: string | null) => void;
@@ -62,6 +62,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, selectedId, on
           <div className="card-stack">{plans.map(plan => <Card key={plan.id} size="small">
             <div className="timeline-card"><div><strong>{plan.title}</strong><div className="muted">{planTimingLabel(plan, plans)}</div></div>
               <Tag>{kindLabel(plan.event_type)}</Tag></div>
+            {planDetailsLabel(plan) && <p className="event-detail">{planDetailsLabel(plan)}</p>}
           </Card>)}</div>}
       </section>}
     <Modal title="New recipe" open={newRecipe} onCancel={() => setNewRecipe(false)} footer={null} destroyOnHidden>

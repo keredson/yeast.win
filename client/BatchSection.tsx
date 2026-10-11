@@ -8,7 +8,7 @@ import { formatTime } from './time.ts';
 import { PlanForm } from './PlanForm.tsx';
 import { EventForm } from './EventForm.tsx';
 import type { PreferredUnits } from './api.ts';
-import { effectivePlanTime, planTimingLabel } from './planTiming.ts';
+import { effectivePlanTime, planDetailsLabel, planTimingLabel } from './planTiming.ts';
 
 interface TimelineGroup {
   key: string; at: number | null; label: string;
@@ -144,6 +144,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
                     <div className="plan-meta">{kindLabel(plan.event_type)} · {planTimingLabel(plan, plans)}</div></div>
                     <Tag color={conflicting ? 'orange' : completed.length ? 'green' : skipped.length ? 'default' : 'blue'}>
                       {conflicting ? 'Conflicting' : completed.length ? 'Done' : skipped.length ? 'Skipped' : 'Planned'}</Tag></div>
+                  {planDetailsLabel(plan) && <p className="event-detail">{planDetailsLabel(plan)}</p>}
                   {linked.map(renderEvent)}
                   {!linked.length && <div className="card-actions"><Button size="small" type="link" onClick={() => { setEventPlan(plan); setNewEvent(true); }}>Record</Button>
                     <Button size="small" type="link" onClick={() => void skip(plan)}>Skip</Button></div>}
