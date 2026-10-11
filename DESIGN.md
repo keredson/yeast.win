@@ -55,7 +55,7 @@ The names below are proposed logical tables. A migration can refine names and sp
 | `batches` | `id`, name, description, status, timestamps. This is the root for the batch timeline. No separate `started` event is required merely to establish T0. |
 | `recipes` | `id`, name, description, version/metadata. Reusable editable plans, independent of batches. |
 | `recipe_events` | Planned actions or milestones in a recipe, including type-specific planned details, order, and timing rule. Editing a recipe does not rewrite existing batches. |
-| `batch_planned_events` | Snapshot of recipe events copied when a batch is created, plus plans added specifically to that batch. These rows are treated as immutable historical plans; a revised plan supersedes an earlier plan rather than silently editing it. |
+| `batch_planned_events` | Snapshot of recipe events copied when a batch is created with an optional recipe, plus plans added specifically to that batch. These rows are treated as immutable historical plans; a revised plan supersedes an earlier plan rather than silently editing it. |
 | `batch_events` | Actual events: `id`, `batch_id`, `event_type`, `actual_at`, optional `planned_event_id`, creator/source, `received_at`, and optional supersession metadata. Type-specific rows below carry their payloads. |
 
 An actual event can fulfill a planned event, be an unplanned action, or record that a planned event was **skipped** (`event_type = 'skipped'`, with `planned_event_id`). A skip has its own actual timestamp and creator; it is not a nullable `skipped_at` on the plan. More than one actual event may refer to the same plan. That preserves conflicting offline actions for review instead of erasing one of them.
@@ -107,7 +107,7 @@ Measurements store **corrected values** and per-reading uncertainty. The calibra
 | Table | Main fields and role |
 | --- | --- |
 | `inventory_items` | Distinct stock identities, such as a specific grain variety, yeast, nutrient, bottle, or other supply; category and default display unit. |
-| `inventory_item_specs` | Optional capacity per inventory item, stored in liters for bottles, kegs, and other containers. This is separate from stock quantity and unit. |
+| `inventory_item_specs` | Deprecated compatibility table from schema version 3. New inventory items do not use it; capacity belongs to equipment. |
 | `inventory_purchases` | Quantity and unit added, date, supplier/lot/cost when known. |
 | `inventory_counts` | A dated assertion that a quantity of an item was physically on hand. This anchors later balance calculations. |
 

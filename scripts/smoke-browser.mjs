@@ -111,7 +111,9 @@ try {
 
   await page.getByRole('button', { name: 'Log event' }).click();
   const eventNote = `Brew day ${Date.now()}`;
-  await page.getByLabel('Note').fill(eventNote);
+  await page.getByRole('button', { name: 'Save event' }).click();
+  await page.getByRole('dialog', { name: 'Log an event' }).locator('.ant-form-item-explain-error').waitFor();
+  await page.getByLabel('Notes').fill(eventNote);
   await page.getByRole('button', { name: 'Save event' }).click();
   await page.locator('.event-card').getByText(eventNote).waitFor();
   await page.getByRole('dialog', { name: 'Log an event' }).waitFor({ state: 'hidden' });
@@ -162,6 +164,9 @@ try {
         if (width > 720 && !await page.locator('.app-nav .ant-menu-item').filter({ hasText: batchName }).isVisible()) {
           throw new Error('Recent batch link is hidden in the desktop navigation');
         }
+        if (width > 720 && await page.locator('.app-nav').getByText('Recent', { exact: true }).count()) {
+          throw new Error('Navigation still shows a Recent heading');
+        }
         if (width > 720 && !await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Batches' }).first().count()) {
           throw new Error('Batches navigation link is missing');
         }
@@ -205,6 +210,9 @@ try {
   if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw new Error('Grouped equipment tables overflow a narrow phone');
   await page.setViewportSize({ width: 1280, height: 900 });
   await navigateSection(page, 'Batches');
+  if (!await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Smoke pH meter' }).count()) {
+    throw new Error('Recent equipment disappeared when navigating to batches');
+  }
   await openBatch(page, batchName);
   await page.getByRole('button', { name: 'Log event' }).click();
   const measurementDialog = page.getByRole('dialog', { name: 'Log an event' });
@@ -240,8 +248,18 @@ try {
   await page.getByLabel('Recipe name').fill('Smoke recipe');
   await page.getByRole('button', { name: 'Create recipe' }).click();
   await page.waitForURL(url => /^\/recipe\/[A-Za-z0-9_-]{10,32}$/.test(url.pathname));
-  await page.goBack();
-  await page.waitForURL('**/recipes');
+  await page.getByRole('button', { name: 'Add planned event' }).click();
+  await page.getByLabel('What needs to happen?').fill('Check fermentation');
+  await page.getByRole('dialog', { name: 'Planned recipe event' }).getByRole('button', { name: 'Add planned event' }).click();
+  await page.getByText('Check fermentation').waitFor();
+  await navigateSection(page, 'Batches');
+  await page.getByRole('button', { name: 'New batch' }).click();
+  await page.getByRole('dialog', { name: 'New batch' }).getByLabel('Batch name').fill('Batch from recipe');
+  await page.getByRole('dialog', { name: 'New batch' }).getByRole('combobox', { name: 'Recipe (optional)' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke recipe' }).click();
+  await page.getByRole('button', { name: 'Create batch' }).click();
+  await page.getByRole('heading', { name: 'Batch from recipe' }).waitFor();
+  await page.locator('.plan-card').getByText('Check fermentation').waitFor();
   await navigateSection(page, 'Inventory');
   await page.getByRole('button', { name: 'New inventory item' }).click();
   await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Type' }).click();
@@ -249,7 +267,7 @@ try {
   await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Find in shared inventory catalog' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Maris Otter malt' }).last().click();
   await page.getByLabel('Item', { exact: true }).fill('Smoke grain');
-  if (await page.getByRole('dialog', { name: 'New inventory item' }).locator('#default_unit').inputValue() !== 'g') throw new Error('Grain unit default was not set');
+  if (!await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Unit' }).locator('..').getByText('g', { exact: true }).count()) throw new Error('Grain unit default was not set');
   await page.getByRole('button', { name: 'Create item' }).click();
   await page.waitForURL(url => /^\/inventory\/[A-Za-z0-9_-]{10,32}$/.test(url.pathname));
   await navigateSection(page, 'Inventory');
@@ -258,7 +276,7 @@ try {
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Packaging' }).click();
   await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Find in shared inventory catalog' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: '12 oz bottle' }).last().click();
-  if (await page.getByRole('dialog', { name: 'New inventory item' }).locator('#default_unit').inputValue() !== 'each') throw new Error('Packaging unit default was not set');
+  if (!await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Unit' }).locator('..').getByText('each', { exact: true }).count()) throw new Error('Packaging unit default was not set');
   await page.getByRole('button', { name: 'Create item' }).click();
   await navigateSection(page, 'Inventory');
   if (await page.locator('.group-table').count() !== 2) throw new Error('Inventory categories should have separate tables');
@@ -387,7 +405,7 @@ try {
   await page.getByRole('button', { name: 'Log event' }).click();
   await page.getByRole('dialog', { name: 'Log an event' }).getByRole('combobox', { name: 'Event type' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Measurement' }).click();
-  if (await page.getByRole('dialog', { name: 'Log an event' }).getByLabel('Unit').inputValue() !== '°F') {
+  if (!await page.getByRole('dialog', { name: 'Log an event' }).getByRole('combobox', { name: 'Unit' }).locator('..').getByText('°F', { exact: true }).count()) {
     throw new Error('Preferred temperature unit was not used in the event form');
   }
   await page.getByRole('dialog', { name: 'Log an event' }).getByRole('button', { name: 'Close' }).click();

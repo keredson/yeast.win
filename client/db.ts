@@ -18,7 +18,7 @@ export interface ActualEvent {
   note: string | null; source_id: string | null;
 }
 export interface Equipment { id: string; name: string; kind: string; specification_json: string | null }
-export interface InventoryItem { id: string; name: string; category: string; default_unit: string; capacity_liters: number | null }
+export interface InventoryItem { id: string; name: string; category: string; default_unit: string }
 
 let sqlitePromise: ReturnType<typeof initWasm> | undefined;
 const opened = new Map<string, Promise<DB>>();
@@ -118,14 +118,15 @@ export async function addBatchPlan(db: DB, batchId: string, input: PlanInput, ac
   return id;
 }
 
-export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string, accountId: string): Promise<string> {
+export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string, accountId: string,
+  description = recipe.description || ''): Promise<string> {
   const plans = await listRecipePlans(db, recipe.id);
   const batchId = nanoid();
   const now = nowSeconds();
   const ids = new Map(plans.map(plan => [plan.id, nanoid()]));
   await db.tx(async tx => {
     await tx.exec('INSERT INTO batches(id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-      [batchId, name, recipe.description, 'active', now, now]);
+      [batchId, name, description, 'active', now, now]);
     for (const plan of plans) {
       await tx.exec(`INSERT INTO batch_planned_events(id, batch_id, recipe_event_id, event_type, title, planned_at,
         anchor_event_id, offset_seconds, details_json, created_at, created_by_account_id)
@@ -261,19 +262,13 @@ export async function deleteEquipment(db: DB, id: string): Promise<void> {
 }
 
 export async function listInventory(db: DB): Promise<InventoryItem[]> {
-  return db.execO<InventoryItem>(`SELECT i.id, i.name, i.category, i.default_unit, s.capacity_liters
-    FROM inventory_items i LEFT JOIN inventory_item_specs s ON s.inventory_item_id = i.id ORDER BY i.name COLLATE NOCASE`);
+  return db.execO<InventoryItem>('SELECT id, name, category, default_unit FROM inventory_items ORDER BY name COLLATE NOCASE');
 }
 
-export async function createInventoryItem(db: DB, name: string, category: string, defaultUnit: string,
-  capacityLiters?: number | null): Promise<string> {
+export async function createInventoryItem(db: DB, name: string, category: string, defaultUnit: string): Promise<string> {
   const id = nanoid();
-  await db.tx(async tx => {
-    await tx.exec('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)',
-      [id, name, category, defaultUnit, nowSeconds()]);
-    if (capacityLiters != null) await tx.exec('INSERT INTO inventory_item_specs(id, inventory_item_id, capacity_liters) VALUES (?, ?, ?)',
-      [nanoid(), id, capacityLiters]);
-  });
+  await db.exec('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)',
+    [id, name, category, defaultUnit, nowSeconds()]);
   return id;
 }
 

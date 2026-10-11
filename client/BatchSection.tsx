@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Empty, Form, Input, Modal, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Empty, Form, Input, Modal, Select, Tag } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { addBatchPlan, addPhoto, createBatch, eventDetails, listEvents, listPhotos, listPlans,
-  recordEvent, type ActualEvent, type Batch, type Equipment, type InventoryItem, type LocalDb, type Plan } from './db.ts';
+  recordEvent, startBatchFromRecipe, type ActualEvent, type Batch, type Equipment, type InventoryItem, type LocalDb, type Plan, type Recipe } from './db.ts';
 import { kindLabel } from './constants.ts';
 import { formatTime } from './time.ts';
 import { PlanForm } from './PlanForm.tsx';
@@ -19,8 +19,8 @@ function effectivePlanTime(plan: Plan, plans: Plan[], events: ActualEvent[]): nu
   return Math.min(...actuals.map(item => item.actual_at)) + (plan.offset_seconds || 0);
 }
 
-export function BatchSection({ db, basePath, accountId, batches, equipment, inventory, preferredUnits, selectedId, onSelect, onChanged }: {
-  db: LocalDb; basePath: string; accountId: string; batches: Batch[]; equipment: Equipment[]; inventory: InventoryItem[];
+export function BatchSection({ db, basePath, accountId, batches, recipes, equipment, inventory, preferredUnits, selectedId, onSelect, onChanged }: {
+  db: LocalDb; basePath: string; accountId: string; batches: Batch[]; recipes: Recipe[]; equipment: Equipment[]; inventory: InventoryItem[];
   preferredUnits: PreferredUnits; selectedId: string | null; onSelect: (id: string | null) => void;
   onChanged: () => Promise<void>;
 }) {
@@ -58,9 +58,12 @@ export function BatchSection({ db, basePath, accountId, batches, equipment, inve
 
   async function changed() { await refreshDetail(); await onChanged(); }
 
-  async function create(values: { name: string; description?: string }) {
+  async function create(values: { name: string; description?: string; recipe_id?: string }) {
     try {
-      const id = await createBatch(db, values.name.trim(), values.description || '', accountId);
+      const recipe = recipes.find(item => item.id === values.recipe_id);
+      if (values.recipe_id && !recipe) throw new Error('Choose an available recipe');
+      const id = recipe ? await startBatchFromRecipe(db, recipe, values.name.trim(), accountId, values.description || '')
+        : await createBatch(db, values.name.trim(), values.description || '', accountId);
       onSelect(id); setNewBatch(false); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -142,6 +145,8 @@ export function BatchSection({ db, basePath, accountId, batches, equipment, inve
     <Modal title="New batch" open={newBatch} onCancel={() => setNewBatch(false)} footer={null} destroyOnHidden>
       <Form layout="vertical" onFinish={create}>
         <Form.Item name="name" label="Batch name" rules={[{ required: true }]}><Input maxLength={100} /></Form.Item>
+        <Form.Item name="recipe_id" label="Recipe (optional)"><Select allowClear showSearch optionFilterProp="label"
+          placeholder="Choose a recipe" options={recipes.map(recipe => ({ value: recipe.id, label: recipe.name }))} /></Form.Item>
         <Form.Item name="description" label="Description"><Input.TextArea rows={2} /></Form.Item>
         <Button type="primary" htmlType="submit">Create batch</Button>
       </Form>

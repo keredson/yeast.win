@@ -57,14 +57,10 @@ function SectionNavigation({ route, recent, records, onNavigate }: {
   const items = navItems.flatMap(({ key, label, icon: Icon }) => {
     const links = recent[key].map(id => records[key].find(item => item.id === id))
       .filter((item): item is { id: string; name: string } => !!item);
-    return [
-      { key, label, icon: <Icon /> },
-      ...(route.section === key && links.length ? [{
-        key: `${key}:recent`, type: 'group' as const, label: 'Recent', children: links.map(item => ({
-          key: `${key}:${item.id}`, label: <span className="nav-recent-title" title={item.name}>{item.name}</span>
-        }))
-      }] : [])
-    ];
+    return [{ key, label, icon: <Icon /> }, ...links.map(item => ({
+      key: `${key}:${item.id}`, className: 'nav-recent-item',
+      label: <span className="nav-recent-title" title={item.name}>{item.name}</span>
+    }))];
   });
   return <Menu mode="inline"
     selectedKeys={route.section === 'me' ? [] : [route.selectedId ? `${route.section}:${route.selectedId}` : route.section]}
@@ -411,7 +407,7 @@ export function App() {
           autoSync={autoSync} onAutoSyncChange={enabled => { localStorage.setItem(autoSyncKey, enabled ? '1' : '0'); setAutoSync(enabled); }}
           onSignOut={signOut} /> : !workspaceId ? <Empty description="Create a brewery to begin"><Button type="primary" onClick={() => setWorkspaceDialog(true)}>New brewery</Button></Empty> :
           !db ? <div className="loading-screen"><Spin tip="Opening local database" /></div> : <>
-            {section === 'batches' && <BatchSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} batches={batches}
+            {section === 'batches' && <BatchSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} batches={batches} recipes={recipes}
               equipment={equipment} inventory={inventory} preferredUnits={preferredUnits}
               selectedId={route.selectedId} onSelect={id => showItem('batches', id)} onChanged={changed} />}
             {section === 'recipes' && <RecipeSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} recipes={recipes}

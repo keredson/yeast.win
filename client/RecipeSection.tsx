@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Empty, Form, Input, Modal, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Empty, Form, Input, Modal, Tag } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { addRecipePlan, createRecipe, listRecipePlans, startBatchFromRecipe,
   type LocalDb, type PlanInput, type Recipe } from './db.ts';
@@ -48,7 +48,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, selectedId, on
     {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
     {!selectedId ? <section className="record-index">
       <div className="section-heading"><div><span className="eyebrow">Planning</span><h1>Recipes</h1></div><Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New recipe" title="New recipe" onClick={() => setNewRecipe(true)} /></div>
-      <p className="muted">Reusable event plans. Starting a batch copies the plan into its own history.</p>
+      <p className="muted">Reusable event plans for your batches.</p>
       {recipes.length === 0 ? <Empty description="No recipes yet" /> : <div className="record-list">{recipes.map(item =>
         <a key={item.id} className="record-link" href={`${basePath}/recipe/${item.id}`}
           onClick={event => { event.preventDefault(); onSelect(item.id); }}>
@@ -76,7 +76,6 @@ export function RecipeSection({ db, basePath, accountId, recipes, selectedId, on
       <PlanForm anchors={plans} submit={addPlan} includeFixed={false} />
     </Modal>
     <Modal title="Start a batch" open={newBatch} onCancel={() => setNewBatch(false)} footer={null} destroyOnHidden>
-      <Typography.Paragraph>The recipe events will be copied into the new batch.</Typography.Paragraph>
       <Form layout="vertical" onFinish={start} initialValues={{ name: recipe ? `${recipe.name} batch` : '' }}>
         <Form.Item name="name" label="Batch name" rules={[{ required: true }]}><Input maxLength={100} /></Form.Item>
         <Button type="primary" htmlType="submit">Create batch</Button>

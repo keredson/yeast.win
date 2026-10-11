@@ -6,7 +6,7 @@ export const planKinds = [
   { value: 'transfer', label: 'Transfer' },
   { value: 'packaging', label: 'Packaging' },
   { value: 'boil_finished', label: 'Boil finished' },
-  { value: 'note', label: 'Note or check' }
+  { value: 'note', label: 'Notes' }
 ];
 
 export function kindLabel(value: string): string {

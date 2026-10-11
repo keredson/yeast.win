@@ -1,5 +1,5 @@
 export interface CatalogEquipment { id: string; name: string; kind: string; specification_json: string | null }
-export interface CatalogInventory { id: string; name: string; category: string; unit: string; capacity_liters?: number | null }
+export interface CatalogInventory { id: string; name: string; category: string; unit: string }
 export interface CatalogSnapshot { version: number; equipment: CatalogEquipment[]; inventory: CatalogInventory[] }
 
 export const inventoryCategories = ['Grain', 'Hops', 'Yeast', 'Nutrient', 'Chemical', 'Packaging', 'Other'] as const;
@@ -7,7 +7,7 @@ export const inventoryCategories = ['Grain', 'Hops', 'Yeast', 'Nutrient', 'Chemi
 export function unitForCategory(category: string, preferredMass: string): string {
   if (category === 'Yeast') return 'packet';
   if (category === 'Packaging') return 'each';
-  if (category === 'Chemical') return 'ml';
+  if (category === 'Chemical') return 'mL';
   if (category === 'Other') return 'each';
   return preferredMass;
 }
@@ -38,14 +38,14 @@ export const initialCatalogEquipment: CatalogEquipment[] = [
 ];
 
 export const initialCatalogInventory: CatalogInventory[] = [
-  { id: 'inventory_maris_otter', name: 'Maris Otter malt', category: 'Grain', unit: 'g', capacity_liters: null },
+  { id: 'inventory_maris_otter', name: 'Maris Otter malt', category: 'Grain', unit: 'g' },
   { id: 'inventory_pilsner_malt', name: 'Pilsner malt', category: 'Grain', unit: 'g' },
   { id: 'inventory_cascade_hops', name: 'Cascade hops', category: 'Hops', unit: 'g' },
   { id: 'inventory_citra_hops', name: 'Citra hops', category: 'Hops', unit: 'g' },
   { id: 'inventory_us05', name: 'SafAle US-05', category: 'Yeast', unit: 'packet' },
   { id: 'inventory_yeast_nutrient', name: 'Yeast nutrient', category: 'Nutrient', unit: 'g' },
-  { id: 'inventory_starsan', name: 'Star San', category: 'Chemical', unit: 'ml' },
-  { id: 'inventory_bottle_12oz', name: '12 oz bottle', category: 'Packaging', unit: 'each', capacity_liters: 0.35488235475 },
+  { id: 'inventory_starsan', name: 'Star San', category: 'Chemical', unit: 'mL' },
+  { id: 'inventory_bottle_12oz', name: '12 oz bottle', category: 'Packaging', unit: 'each' },
   { id: 'inventory_crown_caps', name: 'Crown caps', category: 'Packaging', unit: 'each' },
   { id: 'inventory_two_row', name: '2-row pale malt', category: 'Grain', unit: 'g' },
   { id: 'inventory_wheat_malt', name: 'Wheat malt', category: 'Grain', unit: 'g' },
@@ -60,10 +60,10 @@ export const initialCatalogInventory: CatalogInventory[] = [
   { id: 'inventory_dap', name: 'Diammonium phosphate', category: 'Nutrient', unit: 'g' },
   { id: 'inventory_yeast_energizer', name: 'Yeast energizer', category: 'Nutrient', unit: 'g' },
   { id: 'inventory_pbw', name: 'PBW cleaner', category: 'Chemical', unit: 'g' },
-  { id: 'inventory_lactic_acid', name: 'Lactic acid', category: 'Chemical', unit: 'ml' },
-  { id: 'inventory_bottle_22oz', name: '22 oz bottle', category: 'Packaging', unit: 'each', capacity_liters: 0.650617650375 },
-  { id: 'inventory_bottle_500ml', name: '500 mL bottle', category: 'Packaging', unit: 'each', capacity_liters: 0.5 },
-  { id: 'inventory_keg_5gal', name: '5 US gal keg', category: 'Packaging', unit: 'each', capacity_liters: 18.92705892 },
+  { id: 'inventory_lactic_acid', name: 'Lactic acid', category: 'Chemical', unit: 'mL' },
+  { id: 'inventory_bottle_22oz', name: '22 oz bottle', category: 'Packaging', unit: 'each' },
+  { id: 'inventory_bottle_500ml', name: '500 mL bottle', category: 'Packaging', unit: 'each' },
+  { id: 'inventory_keg_5gal', name: '5 US gal keg', category: 'Packaging', unit: 'each' },
   { id: 'inventory_bottle_caps', name: 'Swing top bottle gaskets', category: 'Packaging', unit: 'each' },
   { id: 'inventory_priming_sugar', name: 'Priming sugar', category: 'Other', unit: 'g' }
 ];

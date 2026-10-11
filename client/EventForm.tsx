@@ -4,6 +4,15 @@ import { kindLabel, measurementKinds, planKinds } from './constants.ts';
 import { fromDatetimeLocal, toDatetimeLocal } from './time.ts';
 import { recordEvent, type Equipment, type EventInput, type InventoryItem, type LocalDb, type MeasurementKind, type Plan } from './db.ts';
 import type { PreferredUnits } from './api.ts';
+import { quantityUnits, unitGroups, unitOptions } from '../shared/units.ts';
+
+function measurementUnits(kind: MeasurementKind): readonly string[] {
+  if (kind === 'ph') return ['pH'];
+  if (kind === 'gravity') return unitGroups.gravity;
+  if (kind === 'carbonation') return unitGroups.carbonation;
+  if (kind === 'dissolved_oxygen') return unitGroups.dissolved_oxygen;
+  return unitGroups[kind];
+}
 
 function measurementUnit(kind: MeasurementKind, units: PreferredUnits): string {
   if (kind === 'temperature') return units.temperature;
@@ -122,7 +131,7 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
       </Form.Item>
       <div className="form-pair">
         <Form.Item name="value" label="Corrected value" rules={[{ required: true }]}><InputNumber className="full-width" step="any" /></Form.Item>
-        <Form.Item name="unit" label="Unit" rules={[{ required: true }]}><Input placeholder={measurementUnit(measurement, preferredUnits)} /></Form.Item>
+        <Form.Item name="unit" label="Unit" rules={[{ required: true }]}><Select options={unitOptions(measurementUnits(measurement))} /></Form.Item>
       </div>
       <div className="form-pair">
         <Form.Item name="uncertainty" label="Uncertainty (±)"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
@@ -140,7 +149,7 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
         options={inventory.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
       <Form.Item name="item_name" label="What was added?" rules={[{ required: true }]}><Input placeholder="e.g. Fermaid O, yeast, oxygen" /></Form.Item>
       <div className="form-pair"><Form.Item name="quantity" label="Quantity" rules={[{ required: true }]}><InputNumber className="full-width" step="any" /></Form.Item>
-        <Form.Item name="unit" label="Unit" rules={[{ required: true }]}><Input placeholder="g, mL, packet…" /></Form.Item></div>
+        <Form.Item name="unit" label="Unit" rules={[{ required: true }]}><Select showSearch options={unitOptions(quantityUnits)} /></Form.Item></div>
     </>}
     {(kind === 'temperature_control' || kind === 'pressure_control') && <>
       <Form.Item name="equipment_id" label="Controlled equipment" rules={[{ required: true }]}><Select
@@ -150,23 +159,25 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
       ]} /></Form.Item>}
       <div className="form-pair"><Form.Item name="target_value" label="Target" rules={kind === 'pressure_control' ? [{ required: true }] : []}>
         <InputNumber className="full-width" step="any" /></Form.Item>
-        <Form.Item name="target_unit" label="Unit" rules={kind === 'pressure_control' ? [{ required: true }] : []}><Input placeholder={kind === 'pressure_control' ? preferredUnits.pressure : preferredUnits.temperature} /></Form.Item></div>
+        <Form.Item name="target_unit" label="Unit" rules={kind === 'pressure_control' ? [{ required: true }] : []}>
+          <Select options={unitOptions(kind === 'pressure_control' ? unitGroups.pressure : unitGroups.temperature)} /></Form.Item></div>
       {kind === 'temperature_control' && <Form.Item name="power_watts" label="Power (W), if set"><InputNumber className="full-width" min={0} /></Form.Item>}
     </>}
     {kind === 'transfer' && <>
       <div className="form-pair"><Form.Item name="from_vessel_id" label="From vessel"><Select allowClear options={equipment.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
         <Form.Item name="to_vessel_id" label="To vessel"><Select allowClear options={equipment.map(item => ({ value: item.id, label: item.name }))} /></Form.Item></div>
       <div className="form-pair"><Form.Item name="quantity" label="Quantity"><InputNumber className="full-width" step="any" /></Form.Item>
-        <Form.Item name="unit" label="Unit"><Input placeholder={preferredUnits.volume} /></Form.Item></div>
+        <Form.Item name="unit" label="Unit"><Select options={unitOptions(unitGroups.volume)} /></Form.Item></div>
     </>}
     {kind === 'packaging' && <>
       <Form.Item name="inventory_item_id" label="Container inventory item"><Select allowClear options={inventory.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
       <Form.Item name="container_name" label="Container" rules={[{ required: true }]}><Input placeholder="Bottle, keg…" /></Form.Item>
       <div className="form-triple"><Form.Item name="container_size" label="Size" rules={[{ required: true }]}><InputNumber className="full-width" step="any" /></Form.Item>
-        <Form.Item name="container_unit" label="Unit" rules={[{ required: true }]}><Input placeholder={preferredUnits.volume} /></Form.Item>
+        <Form.Item name="container_unit" label="Unit" rules={[{ required: true }]}><Select options={unitOptions(unitGroups.volume)} /></Form.Item>
         <Form.Item name="container_count" label="Count" rules={[{ required: true }]}><InputNumber className="full-width" min={1} precision={0} /></Form.Item></div>
     </>}
-    <Form.Item name="note" label="Note"><Input.TextArea rows={2} placeholder="Optional context" /></Form.Item>
+    <Form.Item name="note" label={kind === 'note' ? 'Notes' : 'Note'} rules={kind === 'note' ? [{ required: true, whitespace: true }] : []}>
+      <Input.TextArea rows={kind === 'note' ? 4 : 2} placeholder={kind === 'note' ? 'What happened?' : 'Optional context'} /></Form.Item>
     <Button type="primary" htmlType="submit" loading={busy}>Save event</Button>
   </Form>;
 }
