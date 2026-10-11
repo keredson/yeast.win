@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { SyncOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Button, Card, Empty, Form, Input, Modal, Select, Spin, Tooltip, Typography } from 'antd';
-import { api, ApiError, type Session, type Workspace } from './api.ts';
+import { AppstoreOutlined, BookOutlined, InboxOutlined, MenuOutlined, ToolOutlined } from '@ant-design/icons';
+import { Alert, Avatar, Button, Card, Drawer, Empty, Form, Input, Layout, Menu, Modal, Select, Spin, Tooltip, Typography } from 'antd';
+import { api, ApiError, type PreferredUnits, type Session, type Workspace } from './api.ts';
+import { defaultPreferredUnits } from '../shared/units.ts';
 import { openLocalDb, syncNow, type Batch, type Equipment, type InventoryItem, type LocalDb, type Recipe,
   listBatches, listEquipment, listInventory, listRecipes } from './db.ts';
 import { BatchSection } from './BatchSection.tsx';
@@ -11,10 +12,42 @@ import { EquipmentSection } from './EquipmentSection.tsx';
 import { AccountSection } from './AccountSection.tsx';
 
 type Section = 'batches' | 'recipes' | 'inventory' | 'equipment' | 'me';
+interface Route { section: Section; selectedId: string | null }
+const detailPaths = { batches: 'batch', recipes: 'recipe', inventory: 'inventory', equipment: 'equipment' } as const;
+
+function routeFromPath(path: string): Route {
+  if (path === '/me') return { section: 'me', selectedId: null };
+  for (const section of ['batches', 'recipes', 'inventory', 'equipment'] as const) {
+    if (path === `/${section}`) return { section, selectedId: null };
+    const match = new RegExp(`^/${detailPaths[section]}/([A-Za-z0-9_-]{10,32})$`).exec(path);
+    if (match) return { section, selectedId: match[1] };
+  }
+  return { section: 'batches', selectedId: null };
+}
+const navItems = [
+  { key: 'batches', label: 'Batches', icon: AppstoreOutlined },
+  { key: 'recipes', label: 'Recipes', icon: BookOutlined },
+  { key: 'inventory', label: 'Inventory', icon: InboxOutlined },
+  { key: 'equipment', label: 'Equipment', icon: ToolOutlined }
+] as const;
+const menuItems = navItems.map(({ key, label, icon: Icon }) => ({ key, label, icon: <Icon /> }));
+
+function SectionNavigation({ section, onNavigate }: { section: Section; onNavigate: (section: Section) => void }) {
+  return <Menu mode="inline" selectedKeys={[section]} items={menuItems}
+    onClick={({ key }) => onNavigate(key as Section)} />;
+}
 const newBreweryOption = '~new-brewery';
 const cachedSessionKey = 'brewlog:last-session';
 const signedOutKey = 'brewlog:signed-out';
 const autoSyncKey = 'brewlog:auto-sync';
+const activeBreweryKey = 'brewlog:active-brewery';
+
+function initialBrewery(workspaces: Workspace[]): string | null {
+  const linked = new URLSearchParams(location.search).get('brewery');
+  const remembered = localStorage.getItem(activeBreweryKey);
+  return workspaces.find(item => item.id === linked)?.id
+    || workspaces.find(item => item.id === remembered)?.id || workspaces[0]?.id || null;
+}
 
 function cachedSession(): Session | null {
   try {
@@ -50,7 +83,8 @@ export function App() {
   const db = openedDb?.workspaceId === workspaceId ? openedDb.db : null;
   const activeWorkspaceId = useRef(workspaceId);
   activeWorkspaceId.current = workspaceId;
-  const [section, setSection] = useState<Section>(() => location.pathname === '/me' ? 'me' : 'batches');
+  const [route, setRoute] = useState<Route>(() => routeFromPath(location.pathname));
+  const section = route.section;
   const [autoSync, setAutoSync] = useState(() => localStorage.getItem(autoSyncKey) !== '0');
   const [batches, setBatches] = useState<Batch[]>([]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
@@ -62,6 +96,8 @@ export function App() {
   const [now, setNow] = useState(Date.now());
   const [workspaceDialog, setWorkspaceDialog] = useState(false);
   const [workspaceName, setWorkspaceName] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [avatarVersion, setAvatarVersion] = useState(Date.now());
 
   useEffect(() => {
     if (localStorage.getItem(signedOutKey) === '1') {
@@ -71,12 +107,12 @@ export function App() {
     api<Session>('/me').then(result => {
       rememberSession(result);
       setSession(result);
-      setWorkspaceId(result.workspaces[0]?.id || null);
+      setWorkspaceId(initialBrewery(result.workspaces));
     }).catch(cause => {
       if (cause instanceof ApiError && cause.status === 401) localStorage.removeItem(cachedSessionKey);
       const remembered = cause instanceof ApiError && cause.status === 401 ? null : cachedSession();
       setSession(remembered);
-      setWorkspaceId(remembered?.workspaces[0]?.id || null);
+      setWorkspaceId(remembered ? initialBrewery(remembered.workspaces) : null);
     }).finally(() => setLoading(false));
   }, []);
 
@@ -91,15 +127,23 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const onBackOrForward = () => setSection(location.pathname === '/me' ? 'me' : 'batches');
+    if (location.pathname === '/') history.replaceState(null, '', '/batches');
+    const onBackOrForward = () => setRoute(routeFromPath(location.pathname));
     window.addEventListener('popstate', onBackOrForward);
     return () => window.removeEventListener('popstate', onBackOrForward);
   }, []);
 
   function showSection(next: Section) {
-    const path = next === 'me' ? '/me' : '/';
+    const path = next === 'me' ? '/me' : `/${next}`;
     if (location.pathname !== path) history.pushState(null, '', path);
-    setSection(next);
+    setRoute({ section: next, selectedId: null });
+    setMenuOpen(false);
+  }
+
+  function showItem(next: Exclude<Section, 'me'>, id: string | null) {
+    const path = id ? `/${detailPaths[next]}/${id}${workspaceId ? `?brewery=${workspaceId}` : ''}` : `/${next}`;
+    if (location.pathname !== path) history.pushState(null, '', path);
+    setRoute({ section: next, selectedId: id });
   }
 
   async function signOut() {
@@ -109,7 +153,7 @@ export function App() {
     setSession(null);
     setOpenedDb(null);
     history.replaceState(null, '', '/');
-    setSection('batches');
+    setRoute({ section: 'batches', selectedId: null });
   }
 
   const refresh = useCallback(async (activeDb: LocalDb, targetWorkspaceId: string) => {
@@ -178,6 +222,7 @@ export function App() {
       rememberSession(updated);
       setSession(updated);
       setWorkspaceId(workspace.id);
+      localStorage.setItem(activeBreweryKey, workspace.id);
       setOpenedDb(null);
       setWorkspaceDialog(false);
       setWorkspaceName('');
@@ -185,12 +230,27 @@ export function App() {
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
+  async function updatePreferredUnits(units: PreferredUnits) {
+    if (!session) return;
+    await api('/me/preferences', 'PATCH', units);
+    const updated = { ...session, preferred_units: units };
+    rememberSession(updated);
+    setSession(updated);
+  }
+
   if (loading) return <div className="loading-screen"><Spin size="large" /></div>;
-  if (!session) return <AccountAccess onAuthenticated={result => { setSession(result); setWorkspaceId(result.workspaces[0]?.id || null); }} />;
+  if (!session) return <AccountAccess onAuthenticated={result => { setSession(result); setWorkspaceId(initialBrewery(result.workspaces));
+    if (location.pathname === '/') showSection('batches'); }} />;
+  const avatarSrc = session.account.has_avatar ? `/api/me/avatar?v=${avatarVersion}` : undefined;
+  const preferredUnits = session.preferred_units || defaultPreferredUnits;
 
   return <div className="app-shell">
     <header className="app-header">
-      <div className="brand"><span className="brand-mark">B</span><div><strong>Brewlog</strong><small>Batch-first brewing</small></div></div>
+      <div className="header-brand-row">
+        <Button className="mobile-menu-button" type="text" shape="circle" aria-label="Open navigation"
+          icon={<MenuOutlined />} onClick={() => setMenuOpen(true)} />
+        <div className="brand"><span className="brand-mark">B</span><div><strong>Brewlog</strong><small>Batch-first brewing</small></div></div>
+      </div>
       <div className="header-controls">
         <Select className="workspace-select" value={workspaceId} placeholder="Select brewery"
           aria-label="Brewery"
@@ -198,42 +258,44 @@ export function App() {
             { label: '＋ New brewery', value: newBreweryOption }]}
           onChange={value => {
             if (value === newBreweryOption) setWorkspaceDialog(true);
-            else { setWorkspaceId(value); setOpenedDb(null); showSection('batches'); }
+            else { setWorkspaceId(value); localStorage.setItem(activeBreweryKey, value); setOpenedDb(null); showSection('batches'); }
           }} />
-        <Tooltip title={`${syncPhase === 'syncing' ? 'Syncing…' : syncPhase === 'failed' ? 'Sync failed · ' : ''}${timeSinceSync(lastSyncedAt, now)} · Click to sync`}>
-          <Button className={`sync-button sync-${syncPhase}`} type="text" shape="circle" aria-label="Sync now"
-            icon={<SyncOutlined spin={syncPhase === 'syncing'} />} disabled={!db || !workspaceId}
-            onClick={() => { if (db && workspaceId) void runSync(db, workspaceId); }} />
-        </Tooltip>
         <Tooltip title="Account settings">
           <Button className="avatar-button" type="text" shape="circle" aria-label="Account settings" onClick={() => showSection('me')}>
-            <Avatar size={32}>{session.account.username[0].toUpperCase()}</Avatar>
+            <Avatar size={32} src={avatarSrc}>{session.account.username[0].toUpperCase()}</Avatar>
           </Button>
         </Tooltip>
       </div>
     </header>
 
     <div className="app-body">
-      <nav className="app-nav" aria-label="Sections">
-        {(['batches', 'recipes', 'inventory', 'equipment'] as Section[]).map(item =>
-          <button key={item} className={section === item ? 'nav-item active' : 'nav-item'} onClick={() => showSection(item)}>
-            {item[0].toUpperCase() + item.slice(1)}
-          </button>)}
-        <div className="nav-spacer" />
-      </nav>
+      <Layout.Sider className="app-nav" width={180} theme="light" aria-label="Sections">
+        <SectionNavigation section={section} onNavigate={showSection} />
+      </Layout.Sider>
+      <Drawer className="mobile-nav-drawer" title="Sections" placement="left" width={250} open={menuOpen} onClose={() => setMenuOpen(false)}>
+        <div className="drawer-nav"><SectionNavigation section={section} onNavigate={showSection} /></div>
+      </Drawer>
       <main className="app-main">
         {error && <Alert type="warning" showIcon closable onClose={() => setError('')} message={error} className="page-alert" />}
-        {section === 'me' ? <AccountSection username={session.account.username}
-          breweryName={session.workspaces.find(item => item.id === workspaceId)?.name || null}
+        {section === 'me' ? <AccountSection username={session.account.username} avatarSrc={avatarSrc}
+          onAvatarUploaded={() => { const updated = { ...session, account: { ...session.account, has_avatar: true } };
+            rememberSession(updated); setSession(updated); setAvatarVersion(Date.now()); }}
+          preferredUnits={preferredUnits} onPreferredUnitsChange={updatePreferredUnits}
+          syncPhase={syncPhase} syncStatus={timeSinceSync(lastSyncedAt, now)} canSync={!!db && !!workspaceId}
+          onManualSync={() => { if (db && workspaceId) void runSync(db, workspaceId); }}
           autoSync={autoSync} onAutoSyncChange={enabled => { localStorage.setItem(autoSyncKey, enabled ? '1' : '0'); setAutoSync(enabled); }}
           onSignOut={signOut} /> : !workspaceId ? <Empty description="Create a brewery to begin"><Button type="primary" onClick={() => setWorkspaceDialog(true)}>New brewery</Button></Empty> :
           !db ? <div className="loading-screen"><Spin tip="Opening local database" /></div> : <>
             {section === 'batches' && <BatchSection key={workspaceId} db={db} accountId={session.account.id} batches={batches}
-              equipment={equipment} inventory={inventory} onChanged={changed} />}
+              equipment={equipment} inventory={inventory} preferredUnits={preferredUnits}
+              selectedId={route.selectedId} onSelect={id => showItem('batches', id)} onChanged={changed} />}
             {section === 'recipes' && <RecipeSection key={workspaceId} db={db} accountId={session.account.id} recipes={recipes}
-              onChanged={changed} onBatchStarted={() => setSection('batches')} />}
-            {section === 'inventory' && <InventorySection key={workspaceId} db={db} accountId={session.account.id} items={inventory} onChanged={changed} />}
-            {section === 'equipment' && <EquipmentSection key={workspaceId} db={db} equipment={equipment} onChanged={changed} />}
+              selectedId={route.selectedId} onSelect={id => showItem('recipes', id)}
+              onChanged={changed} onBatchStarted={id => showItem('batches', id)} />}
+            {section === 'inventory' && <InventorySection key={workspaceId} db={db} accountId={session.account.id} items={inventory}
+              preferredUnits={preferredUnits} selectedId={route.selectedId} onSelect={id => showItem('inventory', id)} onChanged={changed} />}
+            {section === 'equipment' && <EquipmentSection key={workspaceId} db={db} equipment={equipment}
+              selectedId={route.selectedId} onSelect={id => showItem('equipment', id)} onChanged={changed} />}
           </>}
       </main>
     </div>

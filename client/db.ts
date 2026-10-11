@@ -1,6 +1,7 @@
 import initWasm, { type DB } from '@vlcn.io/crsqlite-wasm';
 import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { nanoid } from 'nanoid';
+import { equipmentKinds } from '../shared/equipment.ts';
 import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 
@@ -202,18 +203,43 @@ export async function listEquipment(db: DB): Promise<Equipment[]> {
   return db.execO<Equipment>('SELECT id, name, kind FROM equipment ORDER BY name COLLATE NOCASE');
 }
 
-export async function createEquipment(db: DB, name: string, kind: string): Promise<void> {
+export async function createEquipment(db: DB, name: string, kind: string): Promise<string> {
+  if (!equipmentKinds.some(item => item.value === kind)) throw new Error('Choose a valid equipment kind');
+  const id = nanoid();
   await db.exec('INSERT INTO equipment(id, name, kind, created_at) VALUES (?, ?, ?, ?)',
-    [nanoid(), name, kind, nowSeconds()]);
+    [id, name, kind, nowSeconds()]);
+  return id;
+}
+
+export async function deleteEquipment(db: DB, id: string): Promise<void> {
+  await db.tx(async tx => {
+    const referenced = async (table: string, where: string, binds: string[]) =>
+      (await tx.execO<{ used: number }>(`SELECT 1 AS used FROM ${table} WHERE ${where} LIMIT 1`, binds)).length > 0;
+    for (const table of Object.values(measurementTables)) {
+      if (await referenced(table, 'equipment_id = ? OR calibration_id IN (SELECT id FROM equipment_calibrations WHERE equipment_id = ?)', [id, id])) {
+        throw new Error('Equipment used by a measurement cannot be deleted');
+      }
+    }
+    if (await referenced('temperature_control_events', 'equipment_id = ?', [id])
+      || await referenced('pressure_control_events', 'equipment_id = ?', [id])
+      || await referenced('transfers', 'from_vessel_id = ? OR to_vessel_id = ?', [id, id])) {
+      throw new Error('Equipment used by a batch event cannot be deleted');
+    }
+    await tx.exec('DELETE FROM equipment_calibrations WHERE equipment_id = ?', [id]);
+    await tx.exec('DELETE FROM equipment_characterization_observations WHERE equipment_id = ?', [id]);
+    await tx.exec('DELETE FROM equipment WHERE id = ?', [id]);
+  });
 }
 
 export async function listInventory(db: DB): Promise<InventoryItem[]> {
   return db.execO<InventoryItem>('SELECT id, name, category, default_unit FROM inventory_items ORDER BY name COLLATE NOCASE');
 }
 
-export async function createInventoryItem(db: DB, name: string, category: string, defaultUnit: string): Promise<void> {
+export async function createInventoryItem(db: DB, name: string, category: string, defaultUnit: string): Promise<string> {
+  const id = nanoid();
   await db.exec('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)',
-    [nanoid(), name, category, defaultUnit, nowSeconds()]);
+    [id, name, category, defaultUnit, nowSeconds()]);
+  return id;
 }
 
 export async function addInventoryEntry(db: DB, itemId: string, kind: 'purchase' | 'count', quantity: number, unit: string, accountId: string): Promise<void> {

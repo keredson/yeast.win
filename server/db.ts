@@ -24,6 +24,18 @@ export function openAuthDb(): Database.Database {
       account_id TEXT NOT NULL,
       expires_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS account_avatars (
+      account_id TEXT PRIMARY KEY NOT NULL,
+      image_jpeg BLOB NOT NULL,
+      uploaded_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS account_preferences (
+      account_id TEXT PRIMARY KEY NOT NULL,
+      temperature_unit TEXT NOT NULL,
+      volume_unit TEXT NOT NULL,
+      mass_unit TEXT NOT NULL,
+      pressure_unit TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS workspaces (
       id TEXT PRIMARY KEY NOT NULL,
       owner_account_id TEXT NOT NULL,

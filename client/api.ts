@@ -1,7 +1,11 @@
+export type { PreferredUnits } from '../shared/units.ts';
+import type { PreferredUnits } from '../shared/units.ts';
+
 export interface Workspace { id: string; name: string }
 export interface Session {
-  account: { id: string; username: string };
+  account: { id: string; username: string; has_avatar: boolean };
   workspaces: Workspace[];
+  preferred_units: PreferredUnits;
 }
 
 export class ApiError extends Error {

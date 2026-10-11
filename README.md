@@ -30,10 +30,11 @@ The server serves the built PWA and API together on port 3001. Point your Cloudf
 - Create separate breweries for your home setup and commercial operation.
 - Create batches directly or copy a recipe's planned events into a new batch.
 - Plan fixed-time or anchored events, then record actual events or explicitly skip a plan.
-- Record additions, measurements, equipment settings, transfers, packaging, milestones, notes, inventory entries, equipment calibrations, and batch photos.
+- Record additions, measurements, equipment settings, transfers, packaging, milestones, notes, inventory entries, equipment calibrations, and batch photos. Equipment kind uses a defined picker; unused equipment can be deleted.
 - Continue working offline; the app syncs on reconnect and at regular intervals.
-- Use the header sync icon for a manual sync and its tooltip for the time since the last successful sync. The avatar opens `/me` for account details, the automatic sync setting, and Sign out.
-- Use the same responsive interface on phones, tablets, and desktop screens.
+- Use the Ant Design left sidebar to open batches, recipes, inventory, and equipment. Detail pages have shareable URLs such as `/batch/:id`; links include the brewery ID so they open the right database.
+- Open `/me` from the avatar to upload an account avatar, choose preferred units, change your password, adjust automatic sync, or sign out. The sync icon there starts a manual sync and shows when sync last succeeded.
+- Use the same navigation on phones, tablets, and desktop screens. On phones, it opens in a left Drawer.
 
 Accounts can register and each account can own multiple private breweries. Sync covers each full brewery; sharing, per-batch permissions and filtered sync are later targets. RAPT Pill ingestion and server Web Push reminders are specified in [DESIGN.md](DESIGN.md) but are not wired up yet. The equipment catalog is also planned; brewery-owned equipment can already be entered manually.
 

@@ -6,6 +6,8 @@ button, input, textarea { font: inherit; }
 .app-shell { min-height: 100vh; }
 .app-header { height: 78px; padding: 0 clamp(20px, 3vw, 52px); background: #193b39; color: white; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
 .brand { display: flex; align-items: center; gap: 12px; white-space: nowrap; }
+.header-brand-row { display: flex; align-items: center; gap: 12px; }
+.mobile-menu-button { display: none !important; }
 .brand strong { display: block; font-size: 23px; letter-spacing: -.03em; line-height: 1.05; }
 .brand small { display: block; margin-top: 4px; opacity: .72; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; }
 .brand-mark { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 13px; color: #193b39; background: #e7b464; font: 800 23px Georgia, serif; }
@@ -13,20 +15,24 @@ button, input, textarea { font: inherit; }
 .workspace-select { width: 200px; }
 .app-header .ant-btn { color: white; border-color: #56736f; background: transparent; }
 .app-header .ant-btn:hover { background: #29514a !important; color: white !important; }
-.app-body { max-width: 1580px; margin: 0 auto; padding: 28px clamp(18px, 3vw, 52px) 64px; }
-.app-nav { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid #deded3; padding-bottom: 13px; margin-bottom: 28px; overflow-x: auto; }
-.nav-item { border: 0; background: none; color: #64716c; padding: 10px 18px; border-radius: 10px; cursor: pointer; font-weight: 650; white-space: nowrap; }
-.nav-item:hover, .nav-item.active { background: #e3ebe3; color: #1d604f; }
-.nav-spacer { flex: 1; }
-.app-header .ant-btn.sync-button { flex: none; color: #d6e4dc; border: 0 !important; box-shadow: none; background: transparent; }
-.app-header .sync-button.sync-synced { color: #a8d9bb; }
-.app-header .sync-button.sync-failed { color: #f2c785; }
-.app-header .sync-button:disabled { color: #839e95; border: 0; background: transparent; }
+.app-body { max-width: 1580px; margin: 0 auto; padding: 28px clamp(18px, 3vw, 52px) 64px; display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: clamp(20px, 3vw, 48px); }
+.app-nav { align-self: start; position: sticky; top: 24px; background: transparent !important; }
+.app-nav .ant-menu, .drawer-nav .ant-menu { background: transparent; border-inline-end: 0 !important; }
+.app-nav .ant-menu-item, .drawer-nav .ant-menu-item { margin-inline: 0; width: 100%; font-weight: 650; }
+.app-nav .ant-menu-item-selected, .drawer-nav .ant-menu-item-selected { color: #1d604f; background: #e3ebe3; }
+.app-main { min-width: 0; }
+.account-page .ant-btn.sync-button { flex: none; color: #1d604f; border: 0 !important; box-shadow: none; }
 .app-header .ant-btn.avatar-button { display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 0 !important; box-shadow: none; background: transparent; }
 .app-header .avatar-button .ant-avatar { background: #e7b464; color: #193b39; font-weight: 700; }
 .account-page { max-width: 680px; display: flex; flex-direction: column; gap: 18px; }
 .account-page .section-heading { margin-bottom: 4px; }
 .account-card .ant-card-body { display: flex; flex-direction: column; gap: 16px; }
+.profile-row { display: flex; align-items: center; gap: 20px; }
+.profile-row .ant-avatar { flex: none; background: #e7b464; color: #193b39; font-weight: 700; }
+.profile-row > div:last-child { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.unit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.unit-grid label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
 .setting-row > strong { text-align: right; }
 .setting-description { margin: 4px 0 0 !important; max-width: 500px; }
@@ -93,12 +99,13 @@ button, input, textarea { font: inherit; }
   .brand strong { font-size: 20px; }
   .brand small { font-size: 9px; }
   .brand-mark { width: 36px; height: 36px; }
+  .header-brand-row { width: 100%; justify-content: flex-start; }
+  .mobile-menu-button { display: inline-flex !important; color: white !important; }
   .header-controls { width: 100%; gap: 8px; }
   .workspace-select { flex: 1; width: auto; min-width: 90px; }
   .header-controls .ant-btn { font-size: 12px; padding-inline: 9px; }
-  .app-body { padding: 16px 15px 50px; }
-  .app-nav { margin-bottom: 18px; padding-bottom: 8px; }
-  .nav-item { padding: 9px 11px; font-size: 13px; }
+  .app-body { display: block; padding: 16px 15px 50px; }
+  .app-nav { display: none !important; }
   .section-grid { display: block; }
   .section-sidebar { margin-bottom: 26px; }
   .section-heading h1, .content-heading h2 { font-size: 29px; }
@@ -109,9 +116,10 @@ button, input, textarea { font: inherit; }
   .heading-actions { justify-content: start; width: 100%; }
   .batch-columns { grid-template-columns: 1fr; gap: 26px; }
   .form-pair, .form-triple { grid-template-columns: 1fr; gap: 0; }
+  .unit-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 360px) {
   .header-controls { flex-wrap: wrap; }
   .workspace-select { flex: 1 1 100%; }
-  .header-controls .ant-btn:not(.sync-button) { flex: 1; }
+  .header-controls { justify-content: flex-end; }
 }

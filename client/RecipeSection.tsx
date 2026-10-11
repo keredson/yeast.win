@@ -6,20 +6,16 @@ import { PlanForm } from './PlanForm.tsx';
 import { kindLabel } from './constants.ts';
 import { formatTime } from './time.ts';
 
-export function RecipeSection({ db, accountId, recipes, onChanged, onBatchStarted }: {
-  db: LocalDb; accountId: string; recipes: Recipe[]; onChanged: () => Promise<void>; onBatchStarted: () => void;
+export function RecipeSection({ db, accountId, recipes, selectedId, onSelect, onChanged, onBatchStarted }: {
+  db: LocalDb; accountId: string; recipes: Recipe[]; selectedId: string | null; onSelect: (id: string) => void;
+  onChanged: () => Promise<void>; onBatchStarted: (id: string) => void;
 }) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [plans, setPlans] = useState<(PlanInput & { id: string })[]>([]);
   const [newRecipe, setNewRecipe] = useState(false);
   const [newPlan, setNewPlan] = useState(false);
   const [newBatch, setNewBatch] = useState(false);
   const [error, setError] = useState('');
   const recipe = recipes.find(item => item.id === selectedId) || null;
-
-  useEffect(() => {
-    if (!selectedId && recipes.length) setSelectedId(recipes[0].id);
-  }, [recipes, selectedId]);
 
   async function refreshPlans() {
     if (selectedId) setPlans(await listRecipePlans(db, selectedId));
@@ -29,7 +25,7 @@ export function RecipeSection({ db, accountId, recipes, onChanged, onBatchStarte
   async function addRecipe(values: { name: string; description?: string }) {
     try {
       const id = await createRecipe(db, values.name.trim(), values.description || '');
-      setSelectedId(id); setNewRecipe(false); await onChanged();
+      onSelect(id); setNewRecipe(false); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
@@ -42,8 +38,8 @@ export function RecipeSection({ db, accountId, recipes, onChanged, onBatchStarte
   async function start(values: { name: string }) {
     if (!recipe) return;
     try {
-      await startBatchFromRecipe(db, recipe, values.name.trim(), accountId);
-      setNewBatch(false); await onChanged(); onBatchStarted();
+      const id = await startBatchFromRecipe(db, recipe, values.name.trim(), accountId);
+      setNewBatch(false); await onChanged(); onBatchStarted(id);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
@@ -52,7 +48,7 @@ export function RecipeSection({ db, accountId, recipes, onChanged, onBatchStarte
       <div className="section-heading"><div><span className="eyebrow">Planning</span><h1>Recipes</h1></div><Button type="primary" onClick={() => setNewRecipe(true)}>New</Button></div>
       <p className="muted">Reusable event plans. Starting a batch copies the plan into its own history.</p>
       {recipes.length === 0 ? <Empty description="No recipes yet" /> : <List dataSource={recipes} renderItem={item =>
-        <button className={item.id === selectedId ? 'list-choice selected' : 'list-choice'} onClick={() => setSelectedId(item.id)}>
+        <button className={item.id === selectedId ? 'list-choice selected' : 'list-choice'} onClick={() => onSelect(item.id)}>
           <strong>{item.name}</strong><small>{item.description || 'No description'}</small>
         </button>} />}
     </div>

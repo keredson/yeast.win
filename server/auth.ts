@@ -3,8 +3,9 @@ import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
 import { createWorkspace } from './db.ts';
 import { nowSeconds } from '../shared/schema.ts';
+import { defaultPreferredUnits, type PreferredUnits } from '../shared/units.ts';
 
-export interface Account { id: string; username: string }
+export interface Account { id: string; username: string; has_avatar: boolean }
 const sessionSeconds = 30 * 24 * 60 * 60;
 
 function passwordHash(password: string, salt = randomBytes(16).toString('hex')): string {
@@ -52,11 +53,55 @@ export function login(db: Database.Database, username: string, password: string)
 
 export function accountForToken(db: Database.Database, token: string | undefined): Account | null {
   if (!token) return null;
-  const row = db.prepare(`SELECT a.id, a.username FROM sessions s
+  const row = db.prepare(`SELECT a.id, a.username,
+      EXISTS(SELECT 1 FROM account_avatars v WHERE v.account_id = a.id) AS has_avatar FROM sessions s
     JOIN accounts a ON a.id = s.account_id
     WHERE s.token_hash = ? AND s.expires_at > ?`)
-    .get(tokenHash(token), nowSeconds()) as Account | undefined;
-  return row || null;
+    .get(tokenHash(token), nowSeconds()) as { id: string; username: string; has_avatar: number } | undefined;
+  return row ? { ...row, has_avatar: !!row.has_avatar } : null;
+}
+
+export function changePassword(db: Database.Database, accountId: string, currentPassword: string,
+  newPassword: string, currentToken: string): boolean {
+  const row = db.prepare('SELECT password_hash FROM accounts WHERE id = ?')
+    .get(accountId) as { password_hash: string } | undefined;
+  if (!row || !validPassword(currentPassword, row.password_hash)) return false;
+  db.transaction(() => {
+    db.prepare('UPDATE accounts SET password_hash = ? WHERE id = ?').run(passwordHash(newPassword), accountId);
+    db.prepare('DELETE FROM sessions WHERE account_id = ? AND token_hash <> ?')
+      .run(accountId, tokenHash(currentToken));
+  })();
+  return true;
+}
+
+export function saveAvatar(db: Database.Database, accountId: string, image: Buffer): void {
+  db.prepare(`INSERT INTO account_avatars(account_id, image_jpeg, uploaded_at) VALUES (?, ?, ?)
+    ON CONFLICT(account_id) DO UPDATE SET image_jpeg = excluded.image_jpeg, uploaded_at = excluded.uploaded_at`)
+    .run(accountId, image, nowSeconds());
+}
+
+export function getAvatar(db: Database.Database, accountId: string): Buffer | null {
+  const row = db.prepare('SELECT image_jpeg FROM account_avatars WHERE account_id = ?')
+    .get(accountId) as { image_jpeg: Buffer } | undefined;
+  return row?.image_jpeg || null;
+}
+
+export function getPreferredUnits(db: Database.Database, accountId: string): PreferredUnits {
+  const row = db.prepare(`SELECT temperature_unit, volume_unit, mass_unit, pressure_unit
+    FROM account_preferences WHERE account_id = ?`).get(accountId) as {
+      temperature_unit: PreferredUnits['temperature']; volume_unit: PreferredUnits['volume'];
+      mass_unit: PreferredUnits['mass']; pressure_unit: PreferredUnits['pressure'];
+    } | undefined;
+  return row ? { temperature: row.temperature_unit, volume: row.volume_unit,
+    mass: row.mass_unit, pressure: row.pressure_unit } : defaultPreferredUnits;
+}
+
+export function savePreferredUnits(db: Database.Database, accountId: string, units: PreferredUnits): void {
+  db.prepare(`INSERT INTO account_preferences(account_id, temperature_unit, volume_unit, mass_unit, pressure_unit)
+    VALUES (?, ?, ?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET
+    temperature_unit = excluded.temperature_unit, volume_unit = excluded.volume_unit,
+    mass_unit = excluded.mass_unit, pressure_unit = excluded.pressure_unit`)
+    .run(accountId, units.temperature, units.volume, units.mass, units.pressure);
 }
 
 export function logout(db: Database.Database, token: string | undefined): void {

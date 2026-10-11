@@ -2,22 +2,19 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Empty, Form, Input, InputNumber, Modal, Select, Tag } from 'antd';
 import { addInventoryEntry, createInventoryItem, type InventoryItem, type LocalDb } from './db.ts';
 import { formatTime } from './time.ts';
+import type { PreferredUnits } from './api.ts';
 
 interface Movement { id: string; kind: string; quantity: number; unit: string; at: number }
 
-export function InventorySection({ db, accountId, items, onChanged }: {
-  db: LocalDb; accountId: string; items: InventoryItem[]; onChanged: () => Promise<void>;
+export function InventorySection({ db, accountId, items, preferredUnits, selectedId, onSelect, onChanged }: {
+  db: LocalDb; accountId: string; items: InventoryItem[]; preferredUnits: PreferredUnits;
+  selectedId: string | null; onSelect: (id: string) => void; onChanged: () => Promise<void>;
 }) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [movements, setMovements] = useState<Movement[]>([]);
   const [newItem, setNewItem] = useState(false);
   const [entryKind, setEntryKind] = useState<'purchase' | 'count' | null>(null);
   const [error, setError] = useState('');
   const item = items.find(row => row.id === selectedId) || null;
-
-  useEffect(() => {
-    if (!selectedId && items.length) setSelectedId(items[0].id);
-  }, [items, selectedId]);
 
   async function refreshMovements() {
     if (!selectedId) return;
@@ -41,8 +38,8 @@ export function InventorySection({ db, accountId, items, onChanged }: {
 
   async function create(values: { name: string; category: string; default_unit: string }) {
     try {
-      await createInventoryItem(db, values.name.trim(), values.category.trim(), values.default_unit.trim());
-      setNewItem(false); await onChanged();
+      const id = await createInventoryItem(db, values.name.trim(), values.category.trim(), values.default_unit.trim());
+      setNewItem(false); onSelect(id); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
@@ -59,7 +56,7 @@ export function InventorySection({ db, accountId, items, onChanged }: {
       <Button type="primary" onClick={() => setNewItem(true)}>New</Button></div>
       <p className="muted">Purchases, uses from batches, and physical counts.</p>
       {items.length ? <div className="choice-list">{items.map(row => <button key={row.id}
-        className={row.id === selectedId ? 'list-choice selected' : 'list-choice'} onClick={() => setSelectedId(row.id)}>
+        className={row.id === selectedId ? 'list-choice selected' : 'list-choice'} onClick={() => onSelect(row.id)}>
         <strong>{row.name}</strong><small>{row.category} · {row.default_unit}</small></button>)}</div> : <Empty description="No inventory items" />}
     </div>
     <div className="section-content">
@@ -75,7 +72,7 @@ export function InventorySection({ db, accountId, items, onChanged }: {
       </>}
     </div>
     <Modal title="New inventory item" open={newItem} onCancel={() => setNewItem(false)} footer={null} destroyOnHidden>
-      <Form layout="vertical" onFinish={create}>
+      <Form layout="vertical" onFinish={create} initialValues={{ default_unit: preferredUnits.mass }}>
         <Form.Item name="name" label="Item" rules={[{ required: true }]}><Input placeholder="e.g. Maris Otter, 12 oz bottles" /></Form.Item>
         <Form.Item name="category" label="Category" rules={[{ required: true }]}><Select options={[
           'Grain', 'Hops', 'Yeast', 'Nutrient', 'Chemical', 'Packaging', 'Other'

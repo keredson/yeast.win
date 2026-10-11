@@ -6,6 +6,7 @@ import { kindLabel } from './constants.ts';
 import { formatTime } from './time.ts';
 import { PlanForm } from './PlanForm.tsx';
 import { EventForm } from './EventForm.tsx';
+import type { PreferredUnits } from './api.ts';
 
 function effectivePlanTime(plan: Plan, plans: Plan[], events: ActualEvent[]): number | null {
   if (plan.planned_at != null) return plan.planned_at;
@@ -17,11 +18,11 @@ function effectivePlanTime(plan: Plan, plans: Plan[], events: ActualEvent[]): nu
   return Math.min(...actuals.map(item => item.actual_at)) + (plan.offset_seconds || 0);
 }
 
-export function BatchSection({ db, accountId, batches, equipment, inventory, onChanged }: {
+export function BatchSection({ db, accountId, batches, equipment, inventory, preferredUnits, selectedId, onSelect, onChanged }: {
   db: LocalDb; accountId: string; batches: Batch[]; equipment: Equipment[]; inventory: InventoryItem[];
+  preferredUnits: PreferredUnits; selectedId: string | null; onSelect: (id: string) => void;
   onChanged: () => Promise<void>;
 }) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [events, setEvents] = useState<ActualEvent[]>([]);
   const [details, setDetails] = useState<Record<string, string>>({});
@@ -32,10 +33,6 @@ export function BatchSection({ db, accountId, batches, equipment, inventory, onC
   const [eventPlan, setEventPlan] = useState<Plan | null>(null);
   const [error, setError] = useState('');
   const batch = batches.find(item => item.id === selectedId) || null;
-
-  useEffect(() => {
-    if (!selectedId && batches.length) setSelectedId(batches[0].id);
-  }, [batches, selectedId]);
 
   async function refreshDetail() {
     if (!selectedId) return;
@@ -63,7 +60,7 @@ export function BatchSection({ db, accountId, batches, equipment, inventory, onC
   async function create(values: { name: string; description?: string }) {
     try {
       const id = await createBatch(db, values.name.trim(), values.description || '', accountId);
-      setSelectedId(id); setNewBatch(false); await onChanged();
+      onSelect(id); setNewBatch(false); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
@@ -94,7 +91,7 @@ export function BatchSection({ db, accountId, batches, equipment, inventory, onC
         <Button type="primary" onClick={() => setNewBatch(true)}>New</Button></div>
       <p className="muted">Plans, actions and readings, all around the batch.</p>
       {batches.length === 0 ? <Empty description="No batches yet" /> : <div className="choice-list">{batches.map(item =>
-        <button key={item.id} className={item.id === selectedId ? 'list-choice selected' : 'list-choice'} onClick={() => setSelectedId(item.id)}>
+        <button key={item.id} className={item.id === selectedId ? 'list-choice selected' : 'list-choice'} onClick={() => onSelect(item.id)}>
           <strong>{item.name}</strong><small>{item.description || formatTime(item.created_at)}</small>
         </button>)}</div>}
     </div>
@@ -156,7 +153,7 @@ export function BatchSection({ db, accountId, batches, equipment, inventory, onC
     <Modal title={eventPlan ? `Record: ${eventPlan.title}` : 'Log an event'} open={newEvent}
       onCancel={() => { setNewEvent(false); setEventPlan(null); }} footer={null} destroyOnHidden width={600}>
       {batch && <EventForm db={db} batchId={batch.id} accountId={accountId} plans={plans} equipment={equipment} inventory={inventory}
-        initialPlan={eventPlan} onSaved={async () => { setNewEvent(false); setEventPlan(null); await changed(); }} />}
+        preferredUnits={preferredUnits} initialPlan={eventPlan} onSaved={async () => { setNewEvent(false); setEventPlan(null); await changed(); }} />}
     </Modal>
   </div>;
 }

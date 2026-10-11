@@ -2,10 +2,12 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import type Database from 'better-sqlite3';
-import { accountForToken, clearSessionCookie, login, logout, readSessionCookie, register, sessionCookie } from './auth.ts';
+import { accountForToken, changePassword, clearSessionCookie, getAvatar, getPreferredUnits, login, logout,
+  readSessionCookie, register, saveAvatar, savePreferredUnits, sessionCookie } from './auth.ts';
 import { closeWorkspaceDb, createWorkspace, openAuthDb, openWorkspaceDb } from './db.ts';
 import { syncWorkspace, validateSyncRequest } from './sync.ts';
 import { isValidId } from '../shared/schema.ts';
+import { validPreferredUnits } from '../shared/units.ts';
 
 const authDb = openAuthDb();
 const workspaceDbs = new Map<string, Database.Database>();
@@ -13,6 +15,7 @@ const distDir = resolve('dist');
 const port = Number(process.env.BREWLOG_PORT || 3001);
 const loginFailures = new Map<string, { count: number; resetAt: number }>();
 const registrationAttempts = new Map<string, { count: number; resetAt: number }>();
+const passwordFailures = new Map<string, { count: number; resetAt: number }>();
 const loginWindowMs = 15 * 60 * 1000;
 const loginLimit = 10;
 const registrationLimit = 20;
@@ -40,6 +43,28 @@ function sessionToken(req: IncomingMessage) {
 
 function secureRequest(req: IncomingMessage): boolean {
   return (req.socket as { encrypted?: boolean }).encrypted === true || req.headers['x-forwarded-proto'] === 'https';
+}
+
+function jpegDimensions(image: Buffer): { width: number; height: number } | null {
+  if (image.length < 16 || image[0] !== 0xff || image[1] !== 0xd8
+    || image[image.length - 2] !== 0xff || image[image.length - 1] !== 0xd9) return null;
+  let offset = 2;
+  while (offset + 4 < image.length) {
+    if (image[offset++] !== 0xff) return null;
+    while (image[offset] === 0xff) offset++;
+    const marker = image[offset++];
+    if (marker === 0xd9 || marker === 0xda) return null;
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+    if (offset + 2 > image.length) return null;
+    const length = image.readUInt16BE(offset);
+    if (length < 2 || offset + length > image.length) return null;
+    if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker)) {
+      if (length < 7) return null;
+      return { height: image.readUInt16BE(offset + 3), width: image.readUInt16BE(offset + 5) };
+    }
+    offset += length;
+  }
+  return null;
 }
 
 function ownerWorkspaces(accountId: string) {
@@ -122,7 +147,55 @@ const server = createServer(async (req, res) => {
     if (!account) return json(res, 401, { error: 'Sign in required' });
 
     if (pathname === '/api/me' && req.method === 'GET') {
-      return json(res, 200, { account, workspaces: ownerWorkspaces(account.id) });
+      return json(res, 200, { account, workspaces: ownerWorkspaces(account.id), preferred_units: getPreferredUnits(authDb, account.id) });
+    }
+    if (pathname === '/api/me/preferences' && req.method === 'PATCH') {
+      const units = await readJson(req, 4 * 1024);
+      if (!validPreferredUnits(units)) return json(res, 400, { error: 'Choose valid preferred units' });
+      savePreferredUnits(authDb, account.id, units);
+      return json(res, 200, { preferred_units: units });
+    }
+    if (pathname === '/api/me/password' && req.method === 'POST') {
+      const body = await readJson(req, 4 * 1024) as { currentPassword?: unknown; newPassword?: unknown };
+      if (!body || typeof body.currentPassword !== 'string' || body.currentPassword.length > 256
+        || typeof body.newPassword !== 'string' || body.newPassword.length < 8 || body.newPassword.length > 256) {
+        return json(res, 400, { error: 'New password must be 8–256 characters' });
+      }
+      const now = Date.now();
+      const previous = passwordFailures.get(account.id);
+      const failures = previous && previous.resetAt > now ? previous : { count: 0, resetAt: now + loginWindowMs };
+      if (failures.count >= loginLimit) return json(res, 429, { error: 'Too many password attempts. Try again later.' });
+      if (!changePassword(authDb, account.id, body.currentPassword, body.newPassword, token!)) {
+        passwordFailures.set(account.id, { ...failures, count: failures.count + 1 });
+        return json(res, 403, { error: 'Current password is incorrect' });
+      }
+      passwordFailures.delete(account.id);
+      return json(res, 200, { ok: true });
+    }
+    if (pathname === '/api/me/avatar' && req.method === 'GET') {
+      const image = getAvatar(authDb, account.id);
+      if (!image) return json(res, 404, { error: 'Avatar not found' });
+      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': image.length,
+        'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
+      return res.end(image);
+    }
+    if (pathname === '/api/me/avatar' && req.method === 'PUT') {
+      if (req.headers['content-type'] !== 'image/jpeg') return json(res, 415, { error: 'Upload a JPEG avatar' });
+      const chunks: Buffer[] = [];
+      let size = 0;
+      for await (const chunk of req) {
+        size += chunk.length;
+        if (size > 512 * 1024) return json(res, 413, { error: 'Avatar must be under 512 KB' });
+        chunks.push(chunk);
+      }
+      const image = Buffer.concat(chunks);
+      const dimensions = jpegDimensions(image);
+      if (!dimensions || dimensions.width < 1 || dimensions.height < 1
+        || dimensions.width > 512 || dimensions.height > 512) {
+        return json(res, 400, { error: 'Avatar must be a JPEG no larger than 512 × 512 pixels' });
+      }
+      saveAvatar(authDb, account.id, image);
+      return json(res, 200, { ok: true });
     }
     if (pathname === '/api/logout' && req.method === 'POST') {
       logout(authDb, token);
