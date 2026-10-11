@@ -1,0 +1,150 @@
+# Brewlog design
+
+Status: working design, 2026-10-11. This records the decisions made so far and the parts that still need validation. It is a product and data model design, not an executable SQL migration.
+
+## Purpose
+
+Brewlog is an offline-capable PWA for recording **what happened to a batch and when**. A recipe is a reusable plan for events; a batch is the actual brewing record. The primary screen is a batch timeline that shows planned work, completed work, measurements, sensor data, and photos together.
+
+The app should work for a homebrewer with one operation and for an account that also runs a separate brewery. It should support multiple contributors, selective batch sharing, equipment calibration, inventory, RAPT Pill readings, and reminders.
+
+## Architecture
+
+- **Client:** React PWA with SQLite in the browser. Reads, timelines, calculations, charts, and analysis run on the device. Writes work offline and sync later. A service worker caches the app shell; it is not the database authority.
+- **UI:** Ant Design is a candidate for desktop and tablet workflows. Prototype the phone-sized brew-day screen before choosing between Ant Design and Ant Design Mobile for the main UI. Component selection does not affect the data model.
+- **Server:** A small service on our own machine handles authentication, authorization, sync, sensor ingestion, push scheduling, and backups. It does not run UI analysis queries. SQLite is the server storage engine.
+- **Exposure:** `cloudflared` publishes the app and API on a stable HTTPS hostname through Cloudflare Tunnel. Prefer one origin for the PWA and API. No Cloudflare Worker is required for each sync request. If the machine or tunnel is down, the installed PWA remains usable locally, but sync, sensor ingestion, and server-triggered reminders pause.
+- **Replication:** Evaluate `cr-sqlite` CRRs for mergeable tables and implement the browser/server transport over HTTPS, with WebSockets if useful. The transport and authorization layer belong to Brewlog; CR-SQLite does not provide those policies.
+
+### Database boundaries
+
+| Database | Location | Sync | Purpose |
+| --- | --- | --- | --- |
+| Auth DB | Server only | Never to browsers | Accounts, sessions, workspace memberships, sharing grants, integration credentials, push subscriptions, and server jobs. |
+| Known-equipment DB | Server and devices | Read-only to clients | Community or curated equipment models and their published specifications. A user copies a model into a workspace before customizing it. |
+| Workspace DB | Server and authorized devices | Read/write for members; filtered read or write for batch followers | Batches, plans, actual events, equipment instances, calibrations, inventory, and photos. One DB represents an operation, not an account or a batch. |
+
+An account can own or join several workspaces. A shared batch remains in its workspace DB. A follower may keep a local **following DB** containing only the rows authorized for that batch rather than downloading the whole workspace. Granting full workspace access is a separate permission from sharing an individual batch.
+
+## Data conventions
+
+- Use client-generated NanoIDs for distributed row identities. IDs are opaque; no meaning or ordering is inferred from them.
+- Store timestamps as UTC Unix **seconds**. `actual_at` is when something happened according to its source or user; `received_at` is when the server first accepted it. Neither timestamp is the CR-SQLite sync cursor.
+- Record `created_by_account_id` for human actions and an integration/source identity for machine actions. Keep the raw external reading ID where available for deduplication. A manual measurement records its instrument as well as its human creator.
+- Preserve a quantity's entered numeric value and **unit**. The app converts compatible quantities to canonical values for calculations and display. This preserves distinctions such as `5 US gal`, `19 L`, `1 tablet`, and `2 packets`, and avoids forcing additions or inventory into an inappropriate universal unit. Canonical calculation units include seconds, liters, and degrees Celsius. Unit conversion and precision rules belong in shared client logic.
+- Prefer new event rows for corrections or competing real-world observations so the history and authors remain visible. A deliberately corrected measurement can point to the event it supersedes. Do not rely on CR-SQLite's cell merge to resolve competing physical facts.
+- An event's `batch_id` and identity are immutable. This also makes authorization of changes and deletions tractable.
+
+## Workspace data model
+
+The names below are proposed logical tables. A migration can refine names and split payloads without changing the relationships.
+
+### Batches and plans
+
+| Table | Main fields and role |
+| --- | --- |
+| `batches` | `id`, name, description, status, timestamps. This is the root for the batch timeline. No separate `started` event is required merely to establish T0. |
+| `recipes` | `id`, name, description, version/metadata. Reusable editable plans, independent of batches. |
+| `recipe_events` | Planned actions or milestones in a recipe, including type-specific planned details, order, and timing rule. Editing a recipe does not rewrite existing batches. |
+| `batch_planned_events` | Snapshot of recipe events copied when a batch is created, plus plans added specifically to that batch. These rows are treated as immutable historical plans; a revised plan supersedes an earlier plan rather than silently editing it. |
+| `batch_events` | Actual events: `id`, `batch_id`, `event_type`, `actual_at`, optional `planned_event_id`, creator/source, `received_at`, and optional supersession metadata. Type-specific rows below carry their payloads. |
+
+An actual event can fulfill a planned event, be an unplanned action, or record that a planned event was **skipped** (`event_type = 'skipped'`, with `planned_event_id`). A skip has its own actual timestamp and creator; it is not a nullable `skipped_at` on the plan. More than one actual event may refer to the same plan. That preserves conflicting offline actions for review instead of erasing one of them.
+
+A plan timing rule is either a fixed `planned_at` timestamp or `anchor_event_id` plus `offset_seconds`. The anchor identifies a meaningful planned milestone whose corresponding actual event supplies the real-world time. `boil_finished` is such a milestone. Recipe anchors are remapped to the copied batch plans. The UI can show both the original planned time and the currently computed due time. What to do with a plan whose anchor is skipped or has conflicting actuals remains a product rule to define.
+
+### Actual event payloads
+
+`batch_events` holds the shared event identity and provenance. Payload tables hold data specific to each action. One event can have multiple compatible payload rows: a single RAPT Pill reading creates one `batch_events` row and both gravity and temperature measurement rows.
+
+| Table / kind | Main payload |
+| --- | --- |
+| `additions` | Ingredient or inventory item, quantity, unit, and optional lot. Yeast and oxygen additions use this kind. |
+| `temperature_measurements` | Corrected value, unit, uncertainty, measuring equipment, calibration record, and source. |
+| `ph_measurements` | Corrected value, uncertainty, meter, calibration, and source. |
+| `gravity_measurements` | Corrected value, scale/unit, uncertainty, instrument, calibration, and source. |
+| `volume_measurements` | Corrected value, unit, uncertainty, instrument or method, and location/vessel when relevant. |
+| `pressure_measurements` | Corrected value, unit, uncertainty, instrument, and calibration. |
+| `carbonation_measurements` | Corrected value, unit, uncertainty, instrument or method. Planned carbonation targets can be represented separately as planned measurements/settings. |
+| `dissolved_oxygen_measurements` | Corrected value, unit, uncertainty, instrument, and calibration. Adding oxygen remains an `addition`. |
+| `temperature_control_events` | Controlled equipment, mode/context, target temperature and/or power setting, and optional `ended_at`. The same kind covers mashing, boiling, chilling, fermentation, and serving. |
+| `pressure_control_events` | Equipment and pressure setpoint. A setpoint is distinct from a pressure measurement. |
+| `transfers` | From/to vessel or destination and transferred quantity with unit. Transfer is a batch action, not a bare milestone. |
+| `packaging` | Container type/size, count, packaged quantity, and optional inventory item consumed. |
+| `boil_finished` | An actual milestone with no invented temperature-setting end anchor. Its timestamp can resolve downstream plans. |
+| `notes` | Free-text observations that do not fit a physical measurement or action. |
+
+Planned events need the fields necessary to express their intended action or target. They need not duplicate every actual-only field such as calibration, uncertainty, or receipt time. A planned measurement is valid even if no measurement is eventually taken.
+
+#### Temperature control intervals
+
+The next temperature-control event for the **same batch**, of any mode and on any equipment, implicitly ends the preceding setting. We do not model simultaneous heater and chiller settings for one batch. Keep `ended_at` null for an implicit end; set it only for an explicit stop without a replacement. Query the next setting by `(batch_id, actual_at, id)` to derive the effective end. A late or concurrent setting then changes the derived interval without rewriting a prior event. Since those keys live on `batch_events`, index that table on `(batch_id, event_type, actual_at, id)`.
+
+If one fridge serves several batches, record the relevant temperature-control event in **each batch**. These are duplicate batch observations of one physical setting, not a new shared control-session entity. Joining a batch to an already running fridge records when that batch began experiencing its setting.
+
+### Equipment and calibration
+
+| Table | Main fields and role |
+| --- | --- |
+| `equipment` | Workspace-owned physical items: kettle, controller, chiller, fermenter, fridge, hydrometer, pH meter, etc. May retain a source catalog model ID and a copied specification. Consumable bottles belong in inventory. |
+| `equipment_calibrations` | Immutable records of calibration parameters, method, effective time, and author. Measurements link to the calibration used at capture time. |
+| `equipment_characterization_observations` | Observed power, temperatures, volumes, time, and evaporation/heat-loss data used to fit kettle behavior. |
+
+Measurements store **corrected values** and per-reading uncertainty. The calibration record explains how the correction was obtained; it is not edited after use. Different instruments can therefore have different accuracy, and old readings retain the calibration that applied then. Boil-off modeling should work across wattages and account for temperature-dependent heat loss, rather than storing one boil-off rate or assuming wattage alone determines it. The exact fitting model is a later analysis decision.
+
+### Inventory
+
+| Table | Main fields and role |
+| --- | --- |
+| `inventory_items` | Distinct stock identities, such as a specific grain variety, yeast, nutrient, bottle, or other supply; category and default display unit. |
+| `inventory_purchases` | Quantity and unit added, date, supplier/lot/cost when known. |
+| `inventory_counts` | A dated assertion that a quantity of an item was physically on hand. This anchors later balance calculations. |
+
+Inventory is a ledger, not a mutable `quantity_on_hand` field. Additions and packaging can consume inventory directly via their linked item and quantity; they should not generate a second, independently editable "used" movement. Balance after a count is that count plus purchases and other receipts minus linked uses after it. Conversions require compatible dimensions; counts, packets, and mass are not silently mixed. Photos may attach to inventory items as well as batches.
+
+### Photos
+
+`photos` stores image metadata and the full image BLOB **inside the workspace DB**, with links to batches, batch events, or inventory items. Set an ingestion limit of about 5 MB per compressed image, verify MIME/type and dimensions, and strip unneeded metadata. This keeps photo replication in the same sync and permission path as the rest of the batch. Small thumbnails are disposable device-local cache entries generated from the full image; they are not separately synced.
+
+## Sync and authorization
+
+For full workspace members, sync CRR changes between the device and the workspace DB. `crsql_changes.db_version` is the replication cursor; `received_at` is for provenance and ingest ordering, not for completeness of sync. Retain source site IDs and use idempotent application/retry. HTTPS request/response is sufficient for correctness; WebSockets can reduce latency.
+
+For a batch follower, the server must authorize **each incoming and outgoing change**. It may scan a workspace changeset and filter in memory, then stream authorized changes, provided benchmarks show this is acceptable. Every child row, photo, and delete must be mapped to its batch even if a deletion change carries only an opaque row ID. Keep the mapping/tombstone information needed for that decision, and avoid syncing unrelated recipes, inventory, private equipment details, or other batches as accidental dependencies. Batch membership in a row cannot be mutable without reworking this scheme.
+
+Read-only followers get a read-only UI. The server rejects their writes regardless of what someone does to a local SQLite file. Write access to a batch requires server validation of the entire proposed change, including referenced rows. Revoking a grant stops future sync, but cannot erase data a device already downloaded while authorized; local following DBs should be purged on the next contact.
+
+**Major feasibility gate:** upstream CR-SQLite documents partial CRR sync as possible with its primitives but unsupported and not advised, and says its change indexes are not optimized for multi-tenant filtering. This architecture therefore needs a focused proof of concept before production use: two batches in one workspace, a follower for only one, updates and deletes in parent/child rows, photos, permission changes, concurrent offline edits, and reconnects. If safe filtered sync proves too fragile, revisit the replication boundary rather than assuming CR-SQLite supplies row-level security.
+
+CRR tables also cannot rely on checked foreign keys, non-primary-key uniqueness, or cross-column checks. Validate relationships on local writes and at the server sync boundary, and audit/repair orphaned data. The server-only auth DB can use ordinary SQLite constraints.
+
+## RAPT and reminders
+
+- Bind a RAPT Pill identity to a batch for a defined time range. Preserve the external reading ID and source timestamp, deduplicate retries, and record the server receipt time.
+- One Pill reading becomes one actual measurement event with linked gravity and temperature values. Other sources, including manual hydrometers and refractometers, use the same measurement model and identify their own instrument/calibration.
+- Choose callback ingestion if RAPT offers a suitable authenticated callback; otherwise poll its API from the server. Do not assume an undocumented new API feature is available. If using a callback, publish only the required authenticated endpoint through the tunnel.
+- The server evaluates planned due times and sends Web Push reminders such as a stepped nutrient feeding. The open PWA can also show local in-app reminders. Notification delivery is best effort; browser/platform support and machine availability affect it. The timeline remains the record of whether the action actually happened or was skipped.
+
+## Operational needs
+
+- Run the app/API and `cloudflared` as services on the host. Keep the SQLite files on persistent local storage; back up all workspace DBs, the auth DB, and integration credentials. Test restores.
+- Serve the app over HTTPS on a stable hostname so installation, service workers, and push can work. The domain and tunnel are routing; the host supplies the compute and disk.
+- Keep server endpoints authenticated and rate limited. Validate uploaded changes, images, and sensor readings before merging into a workspace DB.
+- Treat browser persistence as a prototype gate: verify the selected SQLite WASM build, storage backend, and recovery behavior on target browsers. Also test BLOB round trips across browser and native SQLite before relying on photo sync.
+
+## Decisions still open
+
+1. Prove CR-SQLite partial batch sync, especially delete authorization, dependent rows, photos, and revocation. Decide whether following DBs are per source workspace or per grant.
+2. Select and test browser SQLite persistence (for example OPFS versus the library's IndexedDB-backed path), including large databases and interrupted writes.
+3. Define correction/supersession UI, tie handling for same-second events, and how an anchored plan resolves if its anchor is skipped or fulfilled more than once.
+4. Finalize measurement units and uncertainty representations for gravity, carbonation, dissolved oxygen, and pressure; define dimension-safe conversion rules for inventory.
+5. Verify the current RAPT integration path and notification behavior on the browsers we intend to support.
+6. Prototype a phone-sized batch timeline and event-entry flow before settling on Ant Design or Ant Design Mobile.
+
+## References for implementation constraints
+
+- [CR-SQLite networking background and change indexing](https://vlcn.io/docs/cr-sqlite/networking/background)
+- [CR-SQLite partial CRR sync status](https://vlcn.io/docs/cr-sqlite/networking/partial-crr-sync)
+- [CR-SQLite constraint limitations](https://vlcn.io/docs/cr-sqlite/constraints)
+- [CR-SQLite change API](https://vlcn.io/docs/cr-sqlite/api-methods/crsql_changes)
+- [Cloudflare Tunnel published applications](https://developers.cloudflare.com/tunnel/concepts/routing/)
