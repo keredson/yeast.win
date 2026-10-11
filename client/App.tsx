@@ -204,7 +204,7 @@ function AccountAccess({ onAuthenticated }: { onAuthenticated: (session: Session
         <Input autoComplete="username" size="large" maxLength={40} />
       </Form.Item>
       <Form.Item name="password" label="Password" rules={[{ required: true },
-        ...(mode === 'signup' ? [{ min: 12, message: 'Use at least 12 characters' }] : [])]}>
+        ...(mode === 'signup' ? [{ min: 8, message: 'Use at least 8 characters' }] : [])]}>
         <Input.Password autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} size="large" maxLength={256} />
       </Form.Item>
       {mode === 'signup' && <Form.Item name="confirm_password" label="Confirm password" rules={[{ required: true }]}>

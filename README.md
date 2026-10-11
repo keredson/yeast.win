@@ -12,7 +12,7 @@ yarn setup:sqlite
 yarn dev
 ```
 
-Open the app and choose **Create account**. Each new account gets a private Homebrew workspace and can add more workspaces. Usernames are case insensitive; passwords must be at least 12 characters. An `.env` file is optional if you want to change the data directory or port; see `.env.example`.
+Open the app and choose **Create account**. Each new account gets a private Homebrew workspace and can add more workspaces. Usernames are case insensitive; passwords must be at least 8 characters. An `.env` file is optional if you want to change the data directory or port; see `.env.example`.
 
 This starts the API on port 3001 and Vite on port 5173. Open `http://localhost:5173`. Vite proxies API requests to the server. The browser stores its local database in IndexedDB through CR-SQLite's persistent virtual file system. After a successful sign-in, the same device can reopen its local batches while the server is unavailable.
 

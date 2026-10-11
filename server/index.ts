@@ -92,8 +92,8 @@ const server = createServer(async (req, res) => {
       if (typeof body.username !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{2,39}$/.test(body.username.trim())) {
         return json(res, 400, { error: 'Username must be 3–40 letters, numbers, underscores, or hyphens' });
       }
-      if (typeof body.password !== 'string' || body.password.length < 12 || body.password.length > 256) {
-        return json(res, 400, { error: 'Password must be 12–256 characters' });
+      if (typeof body.password !== 'string' || body.password.length < 8 || body.password.length > 256) {
+        return json(res, 400, { error: 'Password must be 8–256 characters' });
       }
       const token = register(authDb, body.username, body.password);
       if (!token) return json(res, 409, { error: 'Username is already taken' });

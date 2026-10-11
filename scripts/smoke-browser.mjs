@@ -6,7 +6,7 @@ const browser = await chromium.launch({
 });
 const baseUrl = process.env.BREWLOG_TEST_URL || 'http://127.0.0.1:5173';
 const username = process.env.BREWLOG_TEST_USERNAME || `smoke-${Date.now()}`;
-const password = process.env.BREWLOG_TEST_PASSWORD || 'smoke-test-password-123';
+const password = process.env.BREWLOG_TEST_PASSWORD || 'smoke123';
 const errors = [];
 
 async function signIn(page, createAccount = false) {
@@ -14,6 +14,11 @@ async function signIn(page, createAccount = false) {
   await page.goto(baseUrl);
   if (createAccount) {
     await page.getByRole('button', { name: 'Create account' }).click();
+    const shortPasswordStatus = await page.evaluate(async name => (await fetch('/api/register', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: name, password: 'short12' })
+    })).status, username);
+    if (shortPasswordStatus !== 400) throw new Error(`Seven-character password was accepted: ${shortPasswordStatus}`);
     await page.setViewportSize({ width: 320, height: 720 });
     if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) {
       throw new Error('Signup page has horizontal overflow on a narrow phone');
