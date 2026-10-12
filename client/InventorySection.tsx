@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, AutoComplete, Button, Checkbox, Dropdown, Empty, Form, Input, Modal, Select, Table } from 'antd';
 import { MoreOutlined, PlusOutlined } from '@ant-design/icons';
 import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
@@ -30,6 +30,8 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
   const [error, setError] = useState('');
   const [itemForm] = Form.useForm();
   const [entryForm] = Form.useForm();
+  const previousItemUnit = useRef<string | undefined>(undefined);
+  const previousEntryUnit = useRef<string | undefined>(undefined);
   const item = items.find(row => row.id === selectedId) || null;
   const entryItem = items.find(row => row.id === entryItemId) || item;
   const newItemUnit = Form.useWatch('default_unit', itemForm) as string | undefined;
@@ -47,7 +49,9 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
 
   function openCreate(category: string) {
     itemForm.resetFields();
-    itemForm.setFieldsValue({ category, default_unit: unitForCategory(category, preferredUnits.mass) });
+    const unit = unitForCategory(category, preferredUnits.mass);
+    previousItemUnit.current = unit;
+    itemForm.setFieldsValue({ category, default_unit: unit });
     setNewItemCategory(category);
   }
 
@@ -55,8 +59,10 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
     try {
       const available = kind === 'discard' ? inventoryBalance(await listInventoryMovements(db, target.id), target.default_unit) : null;
       entryForm.resetFields();
-      entryForm.setFieldsValue({ unit: target.display_unit === compoundMassUnit || target.default_unit === 'oz' && preferredUnits.mass === compoundMassUnit
-        ? compoundMassUnit : target.display_unit || target.default_unit, all: false });
+      const unit = target.display_unit === compoundMassUnit || target.default_unit === 'oz' && preferredUnits.mass === compoundMassUnit
+        ? compoundMassUnit : target.display_unit || target.default_unit;
+      previousEntryUnit.current = unit;
+      entryForm.setFieldsValue({ unit, all: false });
       setEntryAvailable(available);
       setEntryItemId(target.id);
       setEntryKind(kind);
@@ -162,12 +168,13 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
             filterOption={(input, option) => String(option?.value || '').toLowerCase().includes(input.toLowerCase())}
             onSelect={value => { const entry = catalog.find(row => row.category === newItemCategory && row.name === value);
               if (entry) { const nextUnit = ['Grain', 'Hops', 'Nutrient'].includes(entry.category) ? preferredUnits.mass : entry.unit === 'ml' ? 'mL' : entry.unit;
-                changeQuantityUnit(itemForm, itemForm.getFieldValue('default_unit'), nextUnit, 'starting_quantity');
+                changeQuantityUnit(itemForm, previousItemUnit.current, nextUnit, 'starting_quantity');
+                previousItemUnit.current = nextUnit;
                 itemForm.setFieldValue('default_unit', nextUnit); } }} />
         </Form.Item>
         <Form.Item name="default_unit" label="Unit" rules={[{ required: true }]}>
           <Select showSearch options={unitOptions(quantityUnitsForCategory(newItemCategory || 'Other'))}
-            onChange={unit => changeQuantityUnit(itemForm, newItemUnit, unit, 'starting_quantity')} /></Form.Item>
+            onChange={unit => { changeQuantityUnit(itemForm, previousItemUnit.current, unit, 'starting_quantity'); previousItemUnit.current = unit; }} /></Form.Item>
         <QuantityFields unit={newItemUnit} label="Starting quantity on hand" name="starting_quantity" optional />
         {existingItem && <p className="muted">This item is already in your inventory. The quantity will be recorded as a purchase.</p>}
         <Button type="primary" htmlType="submit">{existingItem ? 'Add stock' : 'Create item'}</Button>
@@ -183,7 +190,7 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
           {entryAvailable != null && entryAvailable > 0 && <Form.Item name="all" valuePropName="checked"><Checkbox>All available stock</Checkbox></Form.Item>}</>}
         {!discardAll && <><Form.Item name="unit" label="Unit" rules={[{ required: true }]}>
           <Select showSearch options={unitOptions(quantityUnitsForCategory(entryItem?.category || 'Other'))}
-            onChange={unit => changeQuantityUnit(entryForm, entryUnit || entryDisplayUnit, unit)} /></Form.Item>
+            onChange={unit => { changeQuantityUnit(entryForm, previousEntryUnit.current, unit); previousEntryUnit.current = unit; }} /></Form.Item>
         <QuantityFields unit={entryUnit || entryDisplayUnit} /></>}
         <Button type="primary" htmlType="submit">Save</Button>
       </Form>

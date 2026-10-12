@@ -41,27 +41,26 @@ Keep IDs, provenance, and batch ownership explicit from the start so the later p
 - Store timestamps as UTC Unix **seconds**. `actual_at` is when something happened according to its source or user; `received_at` is when the server first accepted it. Neither timestamp is the CR-SQLite sync cursor.
 - Record `created_by_account_id` for human actions and an integration/source identity for machine actions. Keep the raw external reading ID where available for deduplication. A manual measurement records its instrument as well as its human creator.
 - Preserve a quantity's entered numeric value and **unit**. The app converts compatible quantities to canonical values for calculations and display. This preserves distinctions such as `5 US gal`, `19 L`, `1 tablet`, and `2 packets`, and avoids forcing additions or inventory into an inappropriate universal unit. Canonical calculation units include seconds, liters, and degrees Celsius. Unit conversion and precision rules belong in shared client logic.
-- Prefer new event rows for corrections or competing real-world observations so the history and authors remain visible. A deliberately corrected measurement can point to the event it supersedes. Do not rely on CR-SQLite's cell merge to resolve competing physical facts.
+- A batch action is an editable working record. Correct its values in place; recipe templates remain independent. Separate readings from sensors are separate observations. A recorded `actual_at` takes precedence over `skipped_at` if offline peers set both.
 - An event's `batch_id` and identity are immutable. This also makes authorization of changes and deletions tractable.
 
 ## Workspace data model
 
 The names below are proposed logical tables. A migration can refine names and split payloads without changing the relationships.
 
-### Batches and plans
+### Batches and actions
 
 | Table | Main fields and role |
 | --- | --- |
 | `batches` | `id`, name, description, status, timestamps. This is the root for the batch timeline. The current UI uses `created_at` as the batch start time (T0); no separate `started` event is required. |
 | `recipes` / `recipe_types` | Name, description, and beer/wine/mead type. Reusable editable plans, independent of batches. New beer recipes seed mash and boil ranges plus yeast pitching; wine and mead seed yeast pitching. |
 | `recipe_events` | Planned actions or milestones in a recipe, including type-specific planned details, order, and timing rule. Editing a recipe does not rewrite existing batches. |
-| `batch_planned_events` | Snapshot of recipe events copied when a batch is created with an optional recipe, plus plans added specifically to that batch. These rows are treated as immutable historical plans; a revised plan supersedes an earlier plan rather than silently editing it. |
-| `batch_events` | Actual events: `id`, `batch_id`, `event_type`, `actual_at`, optional `planned_event_id`, creator/source, `received_at`, and optional supersession metadata. Type-specific rows below carry their payloads. |
+| `batch_events` | One row per batch action. Recipe events are copied here when a batch is created. The row has its title, kind, timing anchor and offset, editable action details, optional `actual_at` and `skipped_at`, creator/recorder/source, and optional `received_at`. Actions added during the batch use the same table. |
 | `event_ends` | Optional actual end timestamp for a ranged event, keyed by its event ID. A range can be in progress until this row exists. |
 
-An actual event can fulfill a planned event, be an unplanned action, or record that a planned event was **skipped** (`event_type = 'skipped'`, with `planned_event_id`). A skip has its own actual timestamp and creator; it is not a nullable `skipped_at` on the plan. More than one actual event may refer to the same plan. That preserves conflicting offline actions for review instead of erasing one of them.
+An action is pending until it has `actual_at` or `skipped_at`. If offline peers independently record and skip it, `actual_at` wins in the UI and inventory calculations. Editing a pending or completed action changes its current quantity, duration, target, or other details. The batch does not preserve earlier versions of its plan. A recipe retains its own template values.
 
-A new plan stores `offset_seconds` from batch start, or `anchor_event_id` plus `offset_seconds` from another event. A planned range stores `duration_seconds` in its details. Anchored plans can refer to the start or end of a range with `anchor_point`. Until an anchor has an actual result, the UI estimates its time from the anchor's plan; an actual end supersedes the estimated end. Recipe anchors are remapped to copied batch plans. Legacy `planned_at` timestamps remain readable, but the UI does not create new absolute planned times. What to do with a skipped or conflicting anchor remains a product rule to define.
+An action stores `offset_seconds` from batch start, or `anchor_event_id` plus `offset_seconds` from another action. A pending range stores its target `duration_seconds` in its details. Anchored actions can refer to the start or end of a range with `anchor_point`. Until an anchor happens, the UI estimates its time from that action's timing rule; a recorded start or end supersedes the estimate. Recipe anchors are remapped to copied batch actions. New actions do not use absolute planned times. A skipped anchor still supplies its estimated time.
 
 ### Actual event payloads
 
@@ -84,7 +83,7 @@ A new plan stores `offset_seconds` from batch start, or `anchor_event_id` plus `
 | `boil_finished` | Legacy milestone retained for existing data. New plans use a timed boil range and anchor to its start or end. |
 | `notes` | Free-text observations that do not fit a physical measurement or action. |
 
-Planned events need the fields necessary to express their intended action or target. They need not duplicate every actual-only field such as calibration, uncertainty, or receipt time. A planned measurement is valid even if no measurement is eventually taken.
+Action details are a single editable set of values. Pending additions keep their quantity in `details_json`; recording moves it to the `additions` row used for inventory and later corrections. The quantity is not retained as a separate planned value. A pending measurement can exist without a measured value; its value, uncertainty, and instrument are filled in when recorded.
 
 #### Temperature control intervals
 
@@ -150,7 +149,7 @@ CRR tables also cannot rely on checked foreign keys, non-primary-key uniqueness,
 
 1. **Later sharing phase:** Prove CR-SQLite partial batch sync, especially delete authorization, dependent rows, photos, and revocation. Decide whether following DBs are per source workspace or per grant.
 2. Select and test browser SQLite persistence (for example OPFS versus the library's IndexedDB-backed path), including large databases and interrupted writes.
-3. Define correction/supersession UI, tie handling for same-second events, and how an anchored plan resolves if its anchor is skipped or fulfilled more than once.
+3. Define tie handling for same-second events and the reminder behavior for actions anchored to skipped actions.
 4. Finalize measurement units and uncertainty representations for gravity, carbonation, dissolved oxygen, and pressure; define dimension-safe conversion rules for inventory.
 5. Verify the current RAPT integration path and notification behavior on the browsers we intend to support.
 6. Test the batch timeline and event-entry flow at mobile, tablet, and desktop widths, including touch use and keyboard use.

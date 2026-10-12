@@ -46,9 +46,8 @@ export function effectivePlanTime(plan: TimedPlan, plans: TimedPlan[], events: A
   if (plan.anchor_event_id) {
     const anchor = plans.find(item => item.id === plan.anchor_event_id);
     if (!anchor) return null;
-    const actuals = events.filter(item => item.planned_event_id === anchor.id && item.event_type !== 'skipped');
-    const actual = actuals.sort((a, b) => a.actual_at - b.actual_at)[0];
-    const start = actual ? actual.actual_at : effectivePlanTime(anchor, plans, events, startAt, visited);
+    const actual = events.find(item => item.id === anchor.id);
+    const start = actual?.actual_at ?? effectivePlanTime(anchor, plans, events, startAt, visited);
     const base = anchorPoint(plan) === 'end' ? actual?.ended_at ?? (start == null ? null : start + planDuration(anchor)) : start;
     return base == null ? null : base + (plan.offset_seconds || 0);
   }
@@ -75,7 +74,7 @@ export function planDetailsLabel(plan: Pick<Plan, 'event_type'> & { title?: stri
         : plan.event_type === 'pressure_control' ? [target]
           : plan.event_type === 'transfer' ? [amount]
             : plan.event_type === 'packaging' ? [details.container_count,
-              details.container_name, details.container_size != null ? `${details.container_size} ${details.unit || ''}`.trim() : ''] : [];
+              details.container_name, details.container_size != null ? `${details.container_size} ${details.container_unit || details.unit || ''}`.trim() : ''] : [];
   if (duration) parts.push(duration);
   if (details.note) parts.push(details.note);
   return parts.filter(Boolean).join(' · ');

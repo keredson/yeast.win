@@ -3,7 +3,7 @@ import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { nanoid } from 'nanoid';
 import { capacityKinds, equipmentKinds, measurementRangeUnits } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, workspaceV2Statements, workspaceV3Statements, workspaceV4Statements, workspaceV5Statements, workspaceV6Statements, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
+import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 import { convertUnit, formatQuantity } from '../shared/units.ts';
 
@@ -11,14 +11,14 @@ export type LocalDb = DB;
 export interface Batch { id: string; name: string; description: string | null; status: string; created_at: number }
 export type RecipeType = 'beer' | 'wine' | 'mead';
 export interface Recipe { id: string; name: string; description: string | null; recipe_type: RecipeType | null }
-export interface Plan {
+export interface BatchEvent {
   id: string; batch_id: string; event_type: string; title: string; planned_at: number | null;
   anchor_event_id: string | null; offset_seconds: number | null; details_json: string | null;
+  actual_at: number | null; skipped_at: number | null; note: string | null;
+  source_id: string | null; ended_at?: number | null;
 }
-export interface ActualEvent {
-  id: string; batch_id: string; event_type: string; actual_at: number; planned_event_id: string | null;
-  note: string | null; source_id: string | null; ended_at?: number | null;
-}
+export type Plan = BatchEvent;
+export type ActualEvent = BatchEvent;
 export interface Equipment { id: string; name: string; kind: string; specification_json: string | null }
 export interface InventoryItem { id: string; name: string; category: string; default_unit: string; display_unit: string }
 export interface InventoryMovement { id: string; kind: 'Purchased' | 'Counted' | 'Used' | 'Discarded'; quantity: number; unit: string; at: number }
@@ -54,30 +54,8 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
           await tx.exec('CREATE TABLE sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
           await tx.exec('INSERT INTO schema_meta(version) VALUES (?)', [workspaceSchemaVersion]);
         });
-      } else if (version[0].version >= 1 && version[0].version < workspaceSchemaVersion) {
-        await db.tx(async tx => {
-          if (version[0].version < 2) {
-            for (const statement of workspaceV2Statements) await tx.exec(statement);
-            await tx.exec('SELECT crsql_as_crr(?)', ['equipment_archives']);
-          }
-          if (version[0].version < 3) {
-            for (const statement of workspaceV3Statements) await tx.exec(statement);
-            await tx.exec('SELECT crsql_as_crr(?)', ['inventory_item_specs']);
-          }
-          if (version[0].version < 4) {
-            for (const statement of workspaceV4Statements) await tx.exec(statement);
-            await tx.exec('SELECT crsql_as_crr(?)', ['inventory_display_units']);
-          }
-          if (version[0].version < 5) {
-            for (const statement of workspaceV5Statements) await tx.exec(statement);
-            for (const table of ['recipe_types', 'event_ends']) await tx.exec('SELECT crsql_as_crr(?)', [table]);
-          }
-          for (const statement of workspaceV6Statements) await tx.exec(statement);
-          await tx.exec('SELECT crsql_as_crr(?)', ['inventory_discards']);
-          await tx.exec('UPDATE schema_meta SET version = ?', [workspaceSchemaVersion]);
-        });
       } else if (version[0].version !== workspaceSchemaVersion) {
-        throw new Error(`Unsupported local schema ${version[0].version}`);
+        throw new Error(`This proof-of-concept database uses schema ${version[0].version}; create a fresh database for schema ${workspaceSchemaVersion}`);
       }
       return db;
     })();
@@ -156,7 +134,7 @@ export async function listRecipePlans(db: DB, recipeId: string): Promise<(PlanIn
     [recipeId]);
 }
 
-async function validatePlanAnchor(db: DB, table: 'recipe_events' | 'batch_planned_events',
+async function validatePlanAnchor(db: DB, table: 'recipe_events' | 'batch_events',
   ownerColumn: 'recipe_id' | 'batch_id', ownerId: string, planId: string, anchorId: string | null | undefined) {
   if (!anchorId) return;
   const rows = await db.execO<{ id: string; anchor_event_id: string | null }>(
@@ -196,7 +174,7 @@ export async function deleteRecipePlan(db: DB, recipeId: string, planId: string)
 
 export async function addBatchPlan(db: DB, batchId: string, input: PlanInput, accountId: string): Promise<string> {
   const id = nanoid();
-  await db.exec(`INSERT INTO batch_planned_events(id, batch_id, event_type, title, planned_at, anchor_event_id,
+  await db.exec(`INSERT INTO batch_events(id, batch_id, event_type, title, planned_at, anchor_event_id,
     offset_seconds, details_json, created_at, created_by_account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [id, batchId, input.event_type, input.title, input.planned_at ?? null, input.anchor_event_id ?? null,
       input.offset_seconds ?? null, input.details_json ?? null, nowSeconds(), accountId]);
@@ -204,8 +182,8 @@ export async function addBatchPlan(db: DB, batchId: string, input: PlanInput, ac
 }
 
 export async function updateBatchPlan(db: DB, batchId: string, planId: string, input: PlanInput): Promise<void> {
-  await validatePlanAnchor(db, 'batch_planned_events', 'batch_id', batchId, planId, input.anchor_event_id);
-  await db.exec(`UPDATE batch_planned_events SET event_type = ?, title = ?, planned_at = ?, anchor_event_id = ?,
+  await validatePlanAnchor(db, 'batch_events', 'batch_id', batchId, planId, input.anchor_event_id);
+  await db.exec(`UPDATE batch_events SET event_type = ?, title = ?, planned_at = ?, anchor_event_id = ?,
     offset_seconds = ?, details_json = ? WHERE id = ? AND batch_id = ?`,
   [input.event_type, input.title, input.planned_at ?? null, input.anchor_event_id ?? null,
     input.offset_seconds ?? null, input.details_json ?? null, planId, batchId]);
@@ -221,7 +199,7 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
     await tx.exec('INSERT INTO batches(id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
       [batchId, name, description, 'active', now, now]);
     for (const plan of plans) {
-      await tx.exec(`INSERT INTO batch_planned_events(id, batch_id, recipe_event_id, event_type, title, planned_at,
+      await tx.exec(`INSERT INTO batch_events(id, batch_id, recipe_event_id, event_type, title, planned_at,
         anchor_event_id, offset_seconds, details_json, created_at, created_by_account_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [ids.get(plan.id)!, batchId, plan.id, plan.event_type, plan.title, plan.planned_at ?? null,
@@ -233,14 +211,14 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
 }
 
 export async function listPlans(db: DB, batchId: string): Promise<Plan[]> {
-  return db.execO<Plan>(`SELECT id, batch_id, event_type, title, planned_at, anchor_event_id, offset_seconds, details_json
-    FROM batch_planned_events WHERE batch_id = ? ORDER BY created_at, id`, [batchId]);
+  return listEvents(db, batchId);
 }
 
 export async function listEvents(db: DB, batchId: string): Promise<ActualEvent[]> {
-  return db.execO<ActualEvent>(`SELECT e.id, e.batch_id, e.event_type, e.actual_at, e.planned_event_id, e.note,
-    e.source_id, x.ended_at FROM batch_events e LEFT JOIN event_ends x ON x.id = e.id
-    WHERE e.batch_id = ? ORDER BY e.actual_at DESC, e.id DESC`, [batchId]);
+  return db.execO<ActualEvent>(`SELECT e.id, e.batch_id, e.event_type, e.title, e.planned_at, e.anchor_event_id,
+    e.offset_seconds, e.details_json, e.actual_at, e.skipped_at, e.note, e.source_id, x.ended_at
+    FROM batch_events e LEFT JOIN event_ends x ON x.id = e.id
+    WHERE e.batch_id = ? ORDER BY e.created_at, e.id`, [batchId]);
 }
 
 export const measurementTables = {
@@ -255,7 +233,7 @@ export interface EventInput {
   eventType: string;
   actualAt: number;
   endedAt?: number | null;
-  plannedEventId?: string | null;
+  eventId?: string | null;
   note?: string;
   accountId: string;
   payload?: Record<string, string | number | null>;
@@ -263,13 +241,19 @@ export interface EventInput {
 }
 
 export async function recordEvent(db: DB, input: EventInput): Promise<string> {
-  const id = nanoid();
+  const id = input.eventId || nanoid();
   if (input.endedAt != null && input.endedAt < input.actualAt) throw new Error('End must be after start');
   await db.tx(async tx => {
-    await tx.exec(`INSERT INTO batch_events(id, batch_id, event_type, actual_at, planned_event_id, note, created_by_account_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [id, input.batchId, input.eventType, input.actualAt, input.plannedEventId ?? null, input.note || null, input.accountId]);
+    if (input.eventId) {
+      await tx.exec(`UPDATE batch_events SET actual_at = ?, note = ?, recorded_by_account_id = ? WHERE id = ? AND batch_id = ?`,
+        [input.actualAt, input.note || null, input.accountId, id, input.batchId]);
+    } else {
+      await tx.exec(`INSERT INTO batch_events(id, batch_id, event_type, title, actual_at, note, created_at, created_by_account_id, recorded_by_account_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, input.batchId, input.eventType, input.eventType, input.actualAt, input.note || null, nowSeconds(), input.accountId, input.accountId]);
+    }
     if (input.endedAt != null) await tx.exec('INSERT INTO event_ends(id, ended_at) VALUES (?, ?)', [id, input.endedAt]);
+    if (input.payload) await updateEventDetails(tx, id, input.payload, input.endedAt);
     const payload = input.payload;
     if (!payload) return;
     const table = input.measurementKind ? measurementTables[input.measurementKind] : {
@@ -308,12 +292,13 @@ export async function updateEvent(db: DB, event: ActualEvent, input: EventInput)
   if (event.batch_id !== input.batchId || event.event_type !== input.eventType) throw new Error('Event type cannot be changed');
   if (input.endedAt != null && input.endedAt < input.actualAt) throw new Error('End must be after start');
   await db.tx(async tx => {
-    await tx.exec('UPDATE batch_events SET actual_at = ?, planned_event_id = ?, note = ? WHERE id = ? AND batch_id = ?',
-      [input.actualAt, input.plannedEventId ?? null, input.note || null, event.id, event.batch_id]);
+    await tx.exec('UPDATE batch_events SET actual_at = ?, note = ?, recorded_by_account_id = ? WHERE id = ? AND batch_id = ?',
+      [input.actualAt, input.note || null, input.accountId, event.id, event.batch_id]);
     if (input.endedAt == null) await tx.exec('DELETE FROM event_ends WHERE id = ?', [event.id]);
     else await tx.exec('INSERT INTO event_ends(id, ended_at) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET ended_at = excluded.ended_at',
       [event.id, input.endedAt]);
     if (!input.payload) return;
+    await updateEventDetails(tx, event.id, input.payload, input.endedAt);
     const table = input.measurementKind ? measurementTables[input.measurementKind] : eventPayloadTables[input.eventType];
     if (!table) throw new Error('Unsupported event payload');
     const columns = Object.keys(input.payload);
@@ -322,14 +307,36 @@ export async function updateEvent(db: DB, event: ActualEvent, input: EventInput)
   });
 }
 
-export async function updatePhotoEvent(db: DB, event: ActualEvent, actualAt: number, plannedEventId: string | null,
+async function updateEventDetails(db: Pick<DB, 'execO' | 'exec'>, id: string, payload: Record<string, string | number | null>, endedAt?: number | null): Promise<void> {
+  const rows = await db.execO<{ details_json: string | null; event_type: string }>('SELECT details_json, event_type FROM batch_events WHERE id = ?', [id]);
+  const details = JSON.parse(rows[0]?.details_json || '{}') as Record<string, string | number | null>;
+  for (const [key, value] of Object.entries(payload)) {
+    if (key !== 'event_id') details[key] = value;
+  }
+  if (endedAt != null) delete details.duration_seconds;
+  // Once an addition happened, its typed payload is the single source for the
+  // quantity and item. Pending actions keep those values in details_json.
+  if (rows[0]?.event_type === 'addition') {
+    for (const key of ['item_name', 'inventory_item_id', 'quantity', 'unit', 'display_unit']) delete details[key];
+  }
+  await db.exec('UPDATE batch_events SET details_json = ? WHERE id = ?', [JSON.stringify(details), id]);
+  if (rows[0]?.event_type === 'addition' && typeof payload.item_name === 'string') {
+    await db.exec('UPDATE batch_events SET title = ? WHERE id = ?', [payload.item_name, id]);
+  }
+}
+
+export async function skipBatchEvent(db: DB, eventId: string, at: number, accountId: string): Promise<void> {
+  await db.exec('UPDATE batch_events SET skipped_at = ?, recorded_by_account_id = ? WHERE id = ?', [at, accountId, eventId]);
+}
+
+export async function updatePhotoEvent(db: DB, event: ActualEvent, actualAt: number,
   note: string, file: File | null): Promise<void> {
   if (event.event_type !== 'photo') throw new Error('Choose a photo event');
   if (file && (!file.type.startsWith('image/') || file.size > 5 * 1024 * 1024)) throw new Error('Choose an image under 5 MB');
   const bytes = file ? new Uint8Array(await file.arrayBuffer()) : null;
   await db.tx(async tx => {
-    await tx.exec('UPDATE batch_events SET actual_at = ?, planned_event_id = ?, note = ? WHERE id = ?',
-      [actualAt, plannedEventId, note || null, event.id]);
+    await tx.exec('UPDATE batch_events SET actual_at = ?, note = ? WHERE id = ?',
+      [actualAt, note || null, event.id]);
     if (bytes && file) await tx.exec('UPDATE photos SET mime_type = ?, byte_count = ?, image = ? WHERE batch_event_id = ?',
       [file.type, bytes.length, bytes, event.id]);
   });
@@ -452,7 +459,7 @@ export async function listInventoryMovements(db: DB, itemId: string): Promise<In
     UNION ALL SELECT id, 'Counted' AS kind, quantity, unit, counted_at AS at FROM inventory_counts WHERE inventory_item_id = ?
     UNION ALL SELECT id, 'Discarded' AS kind, quantity, unit, discarded_at AS at FROM inventory_discards WHERE inventory_item_id = ?
     UNION ALL SELECT a.event_id AS id, 'Used' AS kind, a.quantity, a.unit, e.actual_at AS at
-      FROM additions a JOIN batch_events e ON e.id = a.event_id WHERE a.inventory_item_id = ?
+      FROM additions a JOIN batch_events e ON e.id = a.event_id WHERE a.inventory_item_id = ? AND e.actual_at IS NOT NULL
     ORDER BY at DESC, id DESC`, [itemId, itemId, itemId, itemId]);
 }
 
@@ -463,7 +470,7 @@ export async function listInventoryBalances(db: DB, items: InventoryItem[]): Pro
     UNION ALL SELECT id, inventory_item_id, 'Counted' AS kind, quantity, unit, counted_at AS at FROM inventory_counts
     UNION ALL SELECT id, inventory_item_id, 'Discarded' AS kind, quantity, unit, discarded_at AS at FROM inventory_discards
     UNION ALL SELECT a.event_id AS id, a.inventory_item_id, 'Used' AS kind, a.quantity, a.unit, e.actual_at AS at
-      FROM additions a JOIN batch_events e ON e.id = a.event_id WHERE a.inventory_item_id IS NOT NULL
+      FROM additions a JOIN batch_events e ON e.id = a.event_id WHERE a.inventory_item_id IS NOT NULL AND e.actual_at IS NOT NULL
     ORDER BY inventory_item_id, at DESC, id DESC`);
   const byItem = new Map<string, InventoryMovement[]>();
   for (const row of rows) {
@@ -524,14 +531,17 @@ export async function addInventoryEntry(db: DB, itemId: string, kind: 'purchase'
 }
 
 export async function addPhoto(db: DB, batchId: string, file: File, accountId: string,
-  actualAt = nowSeconds(), plannedEventId: string | null = null, note = ''): Promise<void> {
+  actualAt = nowSeconds(), eventId: string | null = null, note = ''): Promise<void> {
   if (!file.type.startsWith('image/')) throw new Error('Choose an image');
   if (file.size > 5 * 1024 * 1024) throw new Error('Image exceeds 5 MB');
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const eventId = nanoid();
+  eventId ||= nanoid();
   await db.tx(async tx => {
-    await tx.exec(`INSERT INTO batch_events(id, batch_id, event_type, actual_at, planned_event_id, note, created_by_account_id)
-      VALUES (?, ?, 'photo', ?, ?, ?, ?)`, [eventId, batchId, actualAt, plannedEventId, note || file.name, accountId]);
+    const existing = await tx.execO<{ id: string }>('SELECT id FROM batch_events WHERE id = ?', [eventId]);
+    if (existing.length) await tx.exec('UPDATE batch_events SET actual_at = ?, note = ?, recorded_by_account_id = ? WHERE id = ?',
+      [actualAt, note || file.name, accountId, eventId]);
+    else await tx.exec(`INSERT INTO batch_events(id, batch_id, event_type, title, actual_at, note, created_at, created_by_account_id, recorded_by_account_id)
+      VALUES (?, ?, 'photo', 'Photo', ?, ?, ?, ?, ?)`, [eventId, batchId, actualAt, note || file.name, actualAt, accountId, accountId]);
     await tx.exec(`INSERT INTO photos(id, batch_id, batch_event_id, mime_type, byte_count, image, created_at, created_by_account_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [nanoid(), batchId, eventId, file.type, bytes.length, bytes, actualAt, accountId]);
   });

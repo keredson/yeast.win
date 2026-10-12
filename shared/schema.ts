@@ -5,8 +5,7 @@ const definitions: Record<string, string> = {
   recipes: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, description TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL`,
   recipe_types: `id TEXT PRIMARY KEY NOT NULL, recipe_type TEXT NOT NULL`,
   recipe_events: `id TEXT PRIMARY KEY NOT NULL, recipe_id TEXT NOT NULL, event_type TEXT NOT NULL, title TEXT NOT NULL, planned_at INTEGER, anchor_event_id TEXT, offset_seconds INTEGER, details_json TEXT, sort_order INTEGER NOT NULL`,
-  batch_planned_events: `id TEXT PRIMARY KEY NOT NULL, batch_id TEXT NOT NULL, recipe_event_id TEXT, event_type TEXT NOT NULL, title TEXT NOT NULL, planned_at INTEGER, anchor_event_id TEXT, offset_seconds INTEGER, details_json TEXT, supersedes_event_id TEXT, created_at INTEGER NOT NULL, created_by_account_id TEXT`,
-  batch_events: `id TEXT PRIMARY KEY NOT NULL, batch_id TEXT NOT NULL, event_type TEXT NOT NULL, actual_at INTEGER NOT NULL, planned_event_id TEXT, note TEXT, created_by_account_id TEXT, source_id TEXT, external_id TEXT, received_at INTEGER, supersedes_event_id TEXT`,
+  batch_events: `id TEXT PRIMARY KEY NOT NULL, batch_id TEXT NOT NULL, recipe_event_id TEXT, event_type TEXT NOT NULL, title TEXT, planned_at INTEGER, anchor_event_id TEXT, offset_seconds INTEGER, details_json TEXT, actual_at INTEGER, skipped_at INTEGER, note TEXT, created_at INTEGER NOT NULL, created_by_account_id TEXT, recorded_by_account_id TEXT, source_id TEXT, external_id TEXT, received_at INTEGER`,
   event_ends: `id TEXT PRIMARY KEY NOT NULL, ended_at INTEGER NOT NULL`,
   additions: `event_id TEXT PRIMARY KEY NOT NULL, inventory_item_id TEXT, item_name TEXT NOT NULL, quantity REAL NOT NULL, unit TEXT NOT NULL, lot TEXT`,
   temperature_measurements: measurementColumns(),
@@ -48,7 +47,7 @@ export const schemaStatements = Object.entries(definitions).map(
 export const indexStatements = [
   `CREATE INDEX IF NOT EXISTS batch_events_timeline ON batch_events(batch_id, actual_at, id)`,
   `CREATE INDEX IF NOT EXISTS batch_events_type_time ON batch_events(batch_id, event_type, actual_at, id)`,
-  `CREATE INDEX IF NOT EXISTS batch_plans_by_batch ON batch_planned_events(batch_id, created_at, id)`,
+  `CREATE INDEX IF NOT EXISTS batch_events_by_batch ON batch_events(batch_id, created_at, id)`,
   `CREATE INDEX IF NOT EXISTS recipe_events_by_recipe ON recipe_events(recipe_id, sort_order, id)`,
   `CREATE INDEX IF NOT EXISTS pill_bindings_by_pill ON pill_bindings(pill_id, valid_from)`
 ];
@@ -86,23 +85,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 6;
-export const workspaceV2Statements = [
-  schemaStatements.find(statement => statement.includes('equipment_archives'))!
-];
-export const workspaceV3Statements = [
-  schemaStatements.find(statement => statement.includes('inventory_item_specs'))!
-];
-export const workspaceV4Statements = [
-  schemaStatements.find(statement => statement.includes('inventory_display_units'))!
-];
-export const workspaceV5Statements = [
-  schemaStatements.find(statement => statement.includes('recipe_types'))!,
-  schemaStatements.find(statement => statement.includes('event_ends'))!
-];
-export const workspaceV6Statements = [
-  schemaStatements.find(statement => statement.includes('inventory_discards'))!
-];
+export const workspaceSchemaVersion = 7;
 
 export function isValidId(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{10,32}$/.test(value);

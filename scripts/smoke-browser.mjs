@@ -114,99 +114,78 @@ try {
   await page.getByRole('heading', { name: batchName }).waitFor();
   console.log('Created batch:', batchName);
 
-  await choosePlanKind(page, 'Plan an action', 'Addition');
-  const firstPlan = page.getByRole('dialog', { name: 'Add addition' });
-  if (await firstPlan.getByRole('combobox', { name: 'Event type' }).count()) throw new Error('Addition modal contains event type selector');
-  await choosePlanCategory(page, firstPlan, 'Nutrient');
-  await firstPlan.getByLabel('What will be added?').fill('Add nutrient');
-  await firstPlan.getByRole('button', { name: 'Add addition' }).click();
-  await firstPlan.waitFor({ state: 'hidden' });
-  await page.getByText('Add nutrient', { exact: true }).waitFor();
-  await choosePlanKind(page, 'Plan an action', 'Addition');
-  await choosePlanCategory(page, page.getByRole('dialog', { name: 'Add addition' }), 'Yeast');
-  await page.getByLabel('What will be added?').fill('Add yeast');
-  await page.getByRole('dialog', { name: 'Add addition' }).getByRole('button', { name: 'Add addition' }).click();
-  await page.getByRole('dialog', { name: 'Add addition' }).waitFor({ state: 'hidden' });
-  await page.getByText('Add yeast', { exact: true }).waitFor();
+  await choosePlanKind(page, 'Add action', 'Addition');
+  const firstAction = page.getByRole('dialog', { name: 'Add addition' });
+  await choosePlanCategory(page, firstAction, 'Nutrient');
+  await firstAction.getByLabel('What will be added?').fill('Add nutrient');
+  await firstAction.getByRole('spinbutton', { name: 'Quantity' }).fill('1');
+  await firstAction.getByRole('button', { name: 'Add addition' }).click();
+  await firstAction.waitFor({ state: 'hidden' });
+  await choosePlanKind(page, 'Add action', 'Addition');
+  const yeastAction = page.getByRole('dialog', { name: 'Add addition' });
+  await choosePlanCategory(page, yeastAction, 'Yeast');
+  await yeastAction.getByLabel('What will be added?').fill('Add yeast');
+  await yeastAction.getByRole('button', { name: 'Add addition' }).click();
+  await yeastAction.waitFor({ state: 'hidden' });
   if (await page.locator('.timeline-group').count() !== 1 || await page.locator('.timeline-group .plan-card').count() !== 2) {
-    throw new Error(`Actions at batch start were not grouped together: groups=${await page.locator('.timeline-group').count()}, plans=${await page.locator('.timeline-group .plan-card').count()}, errors=${JSON.stringify(await page.locator('.ant-form-item-explain-error').allTextContents())}`);
+    throw new Error('Actions at batch start were not grouped together');
   }
-  await choosePlanKind(page, 'Plan an action', 'Measurement');
-  const measurementPlan = page.getByRole('dialog', { name: 'Add measurement' });
-  await measurementPlan.getByLabel('What will be measured?').fill('Check gravity');
-  if (!await measurementPlan.getByRole('combobox', { name: 'Measurement' }).count()) throw new Error('Measurement planning fields did not appear');
-  await measurementPlan.getByRole('combobox', { name: 'Timing' }).click();
-  if (await page.locator('.ant-select-dropdown:visible').getByText('After another event', { exact: true }).count()) {
-    throw new Error('Timing still uses an intermediate anchor option');
-  }
+  await choosePlanKind(page, 'Add action', 'Measurement');
+  const measurementAction = page.getByRole('dialog', { name: 'Add measurement' });
+  await measurementAction.getByLabel('What will be measured?').fill('Check gravity');
+  await measurementAction.getByRole('combobox', { name: 'Timing' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'After Add nutrient' }).click();
-  await measurementPlan.getByRole('spinbutton', { name: 'Time offset' }).fill('10');
-  await measurementPlan.getByRole('button', { name: 'Add measurement' }).click();
+  await measurementAction.getByRole('spinbutton', { name: 'Time offset' }).fill('10');
+  await measurementAction.getByRole('button', { name: 'Add measurement' }).click();
   await page.locator('.plan-card').filter({ hasText: 'Check gravity' }).getByText('10 minutes after Add nutrient').waitFor();
-  await choosePlanKind(page, 'Plan an action', 'Notes');
-  const beforePlan = page.getByRole('dialog', { name: 'Add notes' });
-  await beforePlan.getByLabel('Reminder').fill('Prepare gravity sample');
-  await beforePlan.getByRole('combobox', { name: 'Timing' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Before Check gravity' }).click();
-  await beforePlan.getByRole('spinbutton', { name: 'Time offset' }).fill('5');
-  await beforePlan.getByRole('button', { name: 'Add notes' }).click();
-  await page.locator('.plan-card').filter({ hasText: 'Prepare gravity sample' }).getByText('5 minutes before Check gravity').waitFor();
-  await page.getByRole('button', { name: 'Edit planned event Add nutrient' }).click();
-  const editBatchPlan = page.getByRole('dialog', { name: 'Edit addition' });
-  await editBatchPlan.getByLabel('What will be added?').fill('Add nutrient dose');
-  await editBatchPlan.getByRole('button', { name: 'Save event' }).click();
-  await page.getByText('Add nutrient dose', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Edit Add nutrient' }).click();
+  const editAction = page.getByRole('dialog', { name: 'Edit addition' });
+  await editAction.getByLabel('What will be added?').fill('Add nutrient dose');
+  await editAction.getByRole('button', { name: 'Save event' }).click();
   await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).getByRole('button', { name: 'Record Add nutrient dose' }).click();
-  const plannedAction = page.getByRole('dialog', { name: 'Record: Add nutrient dose' });
-  await plannedAction.getByRole('button', { name: 'Skip this event' }).waitFor();
-  for (const field of ['Event type', 'Related plan', 'Inventory item', 'What was added?']) {
-    if (await plannedAction.getByLabel(field).count()) throw new Error(`${field} should be hidden when recording a planned event`);
-  }
-  await plannedAction.getByRole('spinbutton', { name: 'Quantity' }).fill('1');
-  await plannedAction.getByRole('button', { name: 'Save event' }).click();
-  await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).locator('.event-card').getByText('1 g Add nutrient dose').waitFor();
-  await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).getByRole('button', { name: 'Edit Addition event' }).click();
-  const editActual = page.getByRole('dialog', { name: 'Edit event' });
-  await editActual.getByRole('spinbutton', { name: 'Quantity' }).fill('2');
-  await editActual.getByRole('button', { name: 'Save event' }).click();
-  await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).locator('.event-card').getByText('2 g Add nutrient dose').waitFor();
+  const recordAction = page.getByRole('dialog', { name: 'Record: Add nutrient dose' });
+  await recordAction.getByRole('spinbutton', { name: 'Quantity' }).fill('2');
+  await recordAction.getByRole('button', { name: 'Save event' }).click();
+  await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).getByText('2 g Add nutrient dose').waitFor();
+  await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).getByRole('button', { name: 'Edit Add nutrient dose' }).click();
+  const editRecorded = page.getByRole('dialog', { name: 'Edit: Add nutrient dose' });
+  await editRecorded.getByRole('spinbutton', { name: 'Quantity' }).fill('3');
+  await editRecorded.getByRole('button', { name: 'Save event' }).click();
+  await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).getByText('3 g Add nutrient dose').waitFor();
   await page.locator('.plan-card').filter({ hasText: 'Add yeast' }).getByRole('button', { name: 'Record Add yeast' }).click();
   await page.getByRole('dialog', { name: 'Record: Add yeast' }).getByRole('button', { name: 'Skip this event' }).click();
-  await page.locator('.plan-card').filter({ hasText: 'Add yeast' }).locator('.ant-tag').getByText('Skipped', { exact: true }).waitFor();
-  console.log('Added planned event');
-
-  await page.getByRole('button', { name: 'Record activity' }).click();
+  await page.locator('.plan-card').filter({ hasText: 'Add yeast' }).getByText('Skipped', { exact: true }).waitFor();
+  await page.locator('.plan-card').filter({ hasText: 'Add yeast' }).getByRole('button', { name: 'Record Add yeast' }).click();
+  const doneAfterSkip = page.getByRole('dialog', { name: 'Record: Add yeast' });
+  await doneAfterSkip.getByRole('spinbutton', { name: 'Quantity' }).fill('1');
+  await doneAfterSkip.getByRole('button', { name: 'Save event' }).click();
+  await page.locator('.plan-card').filter({ hasText: 'Add yeast' }).getByText('Done', { exact: true }).waitFor();
   const eventNote = `Brew day ${Date.now()}`;
-  await page.getByRole('button', { name: 'Save event' }).click();
-  await page.getByRole('dialog', { name: 'Record activity' }).locator('.ant-form-item-explain-error').waitFor();
-  await page.getByLabel('Notes').fill(eventNote);
-  await page.getByRole('button', { name: 'Save event' }).click();
-  await page.locator('.event-card').getByText(eventNote).waitFor();
-  await page.getByRole('dialog', { name: 'Record activity' }).waitFor({ state: 'hidden' });
-  console.log('Logged actual event');
-
+  await choosePlanKind(page, 'Add action', 'Notes');
+  const noteAction = page.getByRole('dialog', { name: 'Add notes' });
+  await noteAction.getByLabel('Reminder').fill('Brew day note');
+  await noteAction.getByRole('checkbox', { name: 'Record this now' }).check();
+  await noteAction.getByRole('button', { name: 'Add notes' }).click();
+  const noteRecord = page.getByRole('dialog', { name: 'Record: Brew day note' });
+  await noteRecord.getByLabel('Notes').fill(eventNote);
+  await noteRecord.getByRole('button', { name: 'Save event' }).click();
+  await page.locator('.plan-card').getByText(eventNote).waitFor();
   await page.reload();
   await page.getByRole('heading', { name: batchName }).waitFor({ timeout: 30_000 });
-  await page.locator('.event-card').getByText(eventNote).waitFor();
-  await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).locator('.event-card').getByText('2 g Add nutrient dose').waitFor();
-  await page.locator('.plan-card').filter({ hasText: 'Add yeast' }).locator('.ant-tag').getByText('Skipped', { exact: true }).waitFor();
-  console.log('Reloaded persisted local data');
-
+  await page.locator('.plan-card').getByText(eventNote).waitFor();
+  await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).getByText('3 g Add nutrient dose').waitFor();
   await page.route('**/api/**', route => route.abort());
   await page.reload();
   await page.getByRole('heading', { name: batchName }).waitFor({ timeout: 30_000 });
-  await page.locator('.event-card').getByText(eventNote).waitFor();
+  await page.locator('.plan-card').getByText(eventNote).waitFor();
   await page.unroute('**/api/**');
-  console.log('Opened batch offline after reload');
-
   if (process.env.BREWLOG_TEST_PWA_OFFLINE === '1') {
     await page.waitForFunction(() => !!navigator.serviceWorker?.controller, null, { timeout: 30_000 });
     await context.setOffline(true);
     await page.reload();
     await page.getByRole('heading', { name: batchName }).waitFor({ timeout: 30_000 });
-    await page.locator('.event-card').getByText(eventNote).waitFor();
+    await page.locator('.plan-card').getByText(eventNote).waitFor();
     await context.setOffline(false);
-    console.log('Opened installed PWA without network');
   }
 
   for (const [name, width, height] of [['small-mobile', 320, 720], ['mobile', 390, 844], ['tablet', 820, 1024], ['desktop', 1280, 900]]) {
@@ -300,10 +279,12 @@ try {
     throw new Error('Equipment still has child links in the navigation');
   }
   await openBatch(page, batchName);
-  await page.getByRole('button', { name: 'Record activity' }).click();
-  const measurementDialog = page.getByRole('dialog', { name: 'Record activity' });
-  await measurementDialog.getByRole('combobox', { name: 'Event type' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Measurement' }).click();
+  await choosePlanKind(page, 'Add action', 'Measurement');
+  const measurementPlan = page.getByRole('dialog', { name: 'Add measurement' });
+  await measurementPlan.getByLabel('What will be measured?').fill('Check pH');
+  await measurementPlan.getByRole('checkbox', { name: 'Record this now' }).check();
+  await measurementPlan.getByRole('button', { name: 'Add measurement' }).click();
+  const measurementDialog = page.getByRole('dialog', { name: 'Record: Check pH' });
   await measurementDialog.getByRole('combobox', { name: 'Measurement' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="pH"]').click();
   await measurementDialog.getByRole('spinbutton', { name: 'Corrected value' }).fill('5.2');
@@ -373,7 +354,7 @@ try {
   if (!await recipePlan.getByText('At or after start of Boil').count()) throw new Error('Ingredient did not default to boil start');
   await recipePlan.getByLabel('What will be added?').fill('2-row');
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: '2-row pale malt' }).click();
-  await recipePlan.getByRole('spinbutton', { name: 'Planned quantity' }).fill('5');
+  await recipePlan.getByRole('spinbutton', { name: 'Quantity' }).fill('5');
   if (!await recipePlan.getByRole('combobox', { name: 'Unit' }).locator('..').getByText('oz', { exact: true }).count()) {
     throw new Error('Shared grain suggestion replaced preferred ounces');
   }
@@ -433,8 +414,11 @@ try {
   await newGrain.getByRole('spinbutton', { name: 'Ounces' }).fill('5');
   await newGrain.getByRole('combobox', { name: 'Unit' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="oz"]').click();
-  if (Number(await newGrain.getByRole('spinbutton', { name: 'Starting quantity on hand' }).inputValue()) !== 37) {
-    throw new Error('Changing from pounds and ounces did not convert the amount');
+  await newGrain.getByRole('spinbutton', { name: 'Starting quantity on hand', exact: true }).waitFor();
+  await page.waitForFunction(() => document.querySelector('.ant-modal input[id="starting_quantity"]')?.value === '37');
+  const convertedGrainQuantity = await newGrain.getByRole('spinbutton', { name: 'Starting quantity on hand' }).inputValue();
+  if (Number(convertedGrainQuantity) !== 37) {
+    throw new Error(`Changing from pounds and ounces did not convert the amount: ${convertedGrainQuantity}; ${JSON.stringify(await newGrain.locator('input').evaluateAll(inputs => inputs.map(input => ({ name: input.getAttribute('id'), value: input.value }))))}`);
   }
   await newGrain.getByRole('combobox', { name: 'Unit' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="lb + oz"]').click();
@@ -517,13 +501,15 @@ try {
     const id = JSON.parse(localStorage.getItem('brewlog:last-session')).workspaces[0].id;
     return localStorage.getItem(`brewlog:last-sync:${id}`);
   });
-  await page.getByRole('button', { name: 'Record activity' }).click();
-  const photoDialog = page.getByRole('dialog', { name: 'Record activity' });
-  await photoDialog.getByRole('combobox', { name: 'Event type' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Photo' }).click();
+  await choosePlanKind(page, 'Add action', 'Photo');
+  const photoPlan = page.getByRole('dialog', { name: 'Add photo' });
+  await photoPlan.getByLabel('Photo reminder').fill('Brew photo');
+  await photoPlan.getByRole('checkbox', { name: 'Record this now' }).check();
+  await photoPlan.getByRole('button', { name: 'Add photo' }).click();
+  const photoDialog = page.getByRole('dialog', { name: 'Record: Brew photo' });
   await photoDialog.locator('input[type="file"]').setInputFiles({ name: 'brew.png', mimeType: 'image/png', buffer: imageBytes });
   await photoDialog.getByRole('button', { name: 'Save event' }).click();
-  await page.locator('.event-card .photo-grid img').waitFor();
+  await page.locator('.plan-card .photo-grid img').waitFor();
   await page.waitForFunction(previous => {
     const id = JSON.parse(localStorage.getItem('brewlog:last-session')).workspaces[0].id;
     return Number(localStorage.getItem(`brewlog:last-sync:${id}`)) > Number(previous);
@@ -625,13 +611,16 @@ try {
   if (secondUnits !== '°F') throw new Error('Preferred units did not persist across devices');
   await navigateSection(page, 'Batches');
   await openBatch(page, batchName);
-  await page.getByRole('button', { name: 'Record activity' }).click();
-  await page.getByRole('dialog', { name: 'Record activity' }).getByRole('combobox', { name: 'Event type' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Measurement' }).click();
-  if (!await page.getByRole('dialog', { name: 'Record activity' }).getByRole('combobox', { name: 'Unit' }).locator('..').getByText('°F', { exact: true }).count()) {
-    throw new Error('Preferred temperature unit was not used in the event form');
+  await choosePlanKind(page, 'Add action', 'Measurement');
+  const preferredMeasurement = page.getByRole('dialog', { name: 'Add measurement' });
+  await preferredMeasurement.getByLabel('What will be measured?').fill('Check temperature');
+  await preferredMeasurement.getByRole('checkbox', { name: 'Record this now' }).check();
+  await preferredMeasurement.getByRole('button', { name: 'Add measurement' }).click();
+  const preferredUnitText = await page.getByRole('dialog', { name: 'Record: Check temperature' }).getByRole('combobox', { name: 'Unit' }).locator('..').innerText();
+  if (!preferredUnitText.includes('°F')) {
+    throw new Error(`Preferred temperature unit was not used in the event form: ${preferredUnitText}`);
   }
-  await page.getByRole('dialog', { name: 'Record activity' }).getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('dialog', { name: 'Record: Check temperature' }).getByRole('button', { name: 'Close' }).click();
   await page.getByRole('button', { name: 'Account settings' }).click();
   await page.getByRole('heading', { name: 'Settings' }).waitFor();
   console.log('Saved preferred units and used them in an event form');

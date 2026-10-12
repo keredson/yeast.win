@@ -5,8 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { nanoid } from 'nanoid';
 import Database from 'better-sqlite3';
-import { resolve } from 'node:path';
-import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, type SyncRequest, validateChange, } from '../shared/schema.ts';
+import { changeColumns, nowSeconds, type SyncRequest, validateChange, } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 
 process.env.BREWLOG_DATA_DIR = mkdtempSync(join(tmpdir(), 'brewlog-sync-'));
@@ -60,41 +59,45 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
   }
 });
 
-for (const version of [1, 2, 3, 4, 5]) test(`existing version ${version} workspace gains replicated inventory discards`, () => {
+test('recording an action wins over a concurrent skip', () => {
+  const first = openWorkspaceDb(nanoid());
+  const second = openWorkspaceDb(nanoid());
+  try {
+    const id = nanoid();
+    const batchId = nanoid();
+    const at = nowSeconds();
+    first.prepare('INSERT INTO batches(id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+      .run(batchId, 'Test', 'active', at, at);
+    first.prepare('INSERT INTO batch_events(id, batch_id, event_type, title, offset_seconds, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(id, batchId, 'addition', 'Hops', 0, JSON.stringify({ quantity: 6, unit: 'oz' }), at);
+    const changes = () => (first.prepare(selectChanges).all(0) as SqlChangeRow[]).map(encodeChange);
+    for (const change of changes()) second.prepare(insertChange).run(...decodeChange(change));
+
+    first.prepare('UPDATE batch_events SET skipped_at = ? WHERE id = ?').run(at + 60, id);
+    second.prepare('UPDATE batch_events SET actual_at = ?, details_json = ? WHERE id = ?')
+      .run(at + 70, JSON.stringify({ quantity: 5, unit: 'oz' }), id);
+    const secondChanges = (second.prepare(selectChanges).all(0) as SqlChangeRow[]).map(encodeChange);
+    for (const change of changes()) second.prepare(insertChange).run(...decodeChange(change));
+    for (const change of secondChanges) first.prepare(insertChange).run(...decodeChange(change));
+
+    for (const db of [first, second]) {
+      const row = db.prepare('SELECT actual_at, skipped_at, details_json FROM batch_events WHERE id = ?')
+        .get(id) as { actual_at: number; skipped_at: number; details_json: string };
+      assert.equal(row.actual_at, at + 70);
+      assert.equal(row.skipped_at, at + 60);
+      assert.equal(JSON.parse(row.details_json).quantity, 5);
+    }
+  } finally {
+    closeWorkspaceDb(first);
+    closeWorkspaceDb(second);
+  }
+});
+
+test('older proof-of-concept databases require a fresh schema', () => {
   const id = nanoid();
   const file = join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`);
   const old = new Database(file);
-  old.loadExtension(resolve('vendor/crsqlite.so'));
-  old.exec(`CREATE TABLE schema_meta(version INTEGER NOT NULL); INSERT INTO schema_meta VALUES (${version})`);
-  const existing = replicatedTables.filter(name => name !== 'inventory_discards'
-    && (version >= 5 || !['recipe_types', 'event_ends'].includes(name))
-    && (version >= 4 || name !== 'inventory_display_units')
-    && (version >= 3 || name !== 'inventory_item_specs') && (version > 1 || name !== 'equipment_archives'));
-  for (const statement of schemaStatements.filter(sql => existing.some(name => sql.startsWith(`CREATE TABLE IF NOT EXISTS ${name} `)))) old.exec(statement);
-  for (const table of existing) old.prepare('SELECT crsql_as_crr(?)').get(table);
-  for (const statement of indexStatements) old.exec(statement);
+  old.exec('CREATE TABLE schema_meta(version INTEGER NOT NULL); INSERT INTO schema_meta VALUES (6)');
   old.close();
-
-  const migrated = openWorkspaceDb(id);
-  try {
-    assert.equal((migrated.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 6);
-    migrated.prepare('INSERT INTO equipment_archives(id, equipment_id, archived_at) VALUES (?, ?, ?)')
-      .run(nanoid(), nanoid(), nowSeconds());
-    assert.ok((migrated.prepare("SELECT 1 FROM crsql_changes WHERE \"table\" = 'equipment_archives' LIMIT 1").get()));
-    migrated.prepare('INSERT INTO inventory_item_specs(id, inventory_item_id, capacity_liters) VALUES (?, ?, ?)')
-      .run(nanoid(), nanoid(), 0.5);
-    assert.ok((migrated.prepare("SELECT 1 FROM crsql_changes WHERE \"table\" = 'inventory_item_specs' LIMIT 1").get()));
-    migrated.prepare('INSERT INTO inventory_display_units(id, display_unit) VALUES (?, ?)').run(nanoid(), 'lb + oz');
-    assert.ok((migrated.prepare("SELECT 1 FROM crsql_changes WHERE \"table\" = 'inventory_display_units' LIMIT 1").get()));
-    migrated.prepare('INSERT INTO recipe_types(id, recipe_type) VALUES (?, ?)').run(nanoid(), 'beer');
-    migrated.prepare('INSERT INTO event_ends(id, ended_at) VALUES (?, ?)').run(nanoid(), nowSeconds());
-    for (const table of ['recipe_types', 'event_ends']) {
-      assert.ok(migrated.prepare('SELECT 1 FROM crsql_changes WHERE "table" = ? LIMIT 1').get(table));
-    }
-    migrated.prepare('INSERT INTO inventory_discards(id, inventory_item_id, quantity, unit, discarded_at) VALUES (?, ?, ?, ?, ?)')
-      .run(nanoid(), nanoid(), 2, 'g', nowSeconds());
-    assert.ok(migrated.prepare("SELECT 1 FROM crsql_changes WHERE \"table\" = 'inventory_discards' LIMIT 1").get());
-  } finally {
-    closeWorkspaceDb(migrated);
-  }
+  assert.throws(() => openWorkspaceDb(id), /create a fresh database/);
 });

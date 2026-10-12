@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Form, Input, InputNumber, Select } from 'antd';
 import { kindLabel, measurementKinds, planKinds } from './constants.ts';
 import { fromDatetimeLocal, toDatetimeLocal } from './time.ts';
-import { addPhoto, recordEvent, updateEvent, updatePhotoEvent, type ActualEvent, type Equipment, type EventInput, type InventoryItem, type LocalDb, type MeasurementKind, type Plan } from './db.ts';
+import { addPhoto, recordEvent, skipBatchEvent, updateEvent, updatePhotoEvent, type ActualEvent, type Equipment, type EventInput, type InventoryItem, type LocalDb, type MeasurementKind, type Plan } from './db.ts';
 import type { PreferredUnits } from './api.ts';
 import { compoundMassUnit, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions } from '../shared/units.ts';
 import { parsePlanDetails } from './planTiming.ts';
@@ -33,7 +33,7 @@ function eventUnit(kind: string, units: PreferredUnits): string | undefined {
 }
 
 interface Values {
-  event_type: string; measurement_kind?: MeasurementKind; actual_at: string; ended_at?: string; planned_event_id?: string;
+  event_type: string; measurement_kind?: MeasurementKind; actual_at: string; ended_at?: string;
   note?: string; value?: number; unit?: string; uncertainty?: number; equipment_id?: string;
   calibration_id?: string; source?: string; item_name?: string; inventory_item_id?: string;
   item_category?: string; quantity?: number; pounds?: number; ounces?: number;
@@ -42,8 +42,8 @@ interface Values {
   container_unit?: string; container_count?: number;
 }
 
-export function EventForm({ db, batchId, accountId, plans, equipment, inventory, preferredUnits, initialPlan, initialEvent, initialData, onSaved }: {
-  db: LocalDb; batchId: string; accountId: string; plans: Plan[]; equipment: Equipment[];
+export function EventForm({ db, batchId, accountId, equipment, inventory, preferredUnits, initialPlan, initialEvent, initialData, onSaved }: {
+  db: LocalDb; batchId: string; accountId: string; equipment: Equipment[];
   inventory: InventoryItem[]; preferredUnits: PreferredUnits; initialPlan?: Plan | null;
   initialEvent?: ActualEvent | null; initialData?: { measurementKind?: MeasurementKind; payload: Record<string, string | number | null> } | null;
   onSaved: () => Promise<void>;
@@ -93,21 +93,20 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
     setBusy(true); setError('');
     try {
       if (kind === 'photo') {
-        const relatedId = completingPlan ? initialPlan.id : values.planned_event_id || null;
-        if (initialEvent) await updatePhotoEvent(db, initialEvent, fromDatetimeLocal(values.actual_at), relatedId, values.note || '', photo);
+        if (initialEvent) await updatePhotoEvent(db, initialEvent, fromDatetimeLocal(values.actual_at), values.note || '', photo);
         else {
           if (!photo) throw new Error('Choose a photo');
-          await addPhoto(db, batchId, photo, accountId, fromDatetimeLocal(values.actual_at), relatedId, values.note || '');
+          await addPhoto(db, batchId, photo, accountId, fromDatetimeLocal(values.actual_at), initialPlan?.id || null, values.note || '');
         }
         await onSaved();
         return;
       }
       let payload: EventInput['payload'];
       const input: EventInput = {
-        batchId, accountId, eventType: completingPlan ? initialPlan.event_type : values.event_type,
+        batchId, accountId, eventType: initialPlan?.event_type || values.event_type,
         actualAt: fromDatetimeLocal(values.actual_at),
         endedAt: values.ended_at ? fromDatetimeLocal(values.ended_at) : null,
-        plannedEventId: completingPlan ? initialPlan.id : values.planned_event_id || null, note: values.note || '',
+        eventId: initialPlan?.id || null, note: values.note || '',
       };
       if (kind === 'measurement') {
         if (values.value == null) throw new Error('Enter the measured value');
@@ -116,8 +115,8 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
           equipment_id: values.equipment_id || null, calibration_id: values.calibration_id || null,
           source: values.source || 'manual' };
       } else if (kind === 'addition') {
-        const itemName = completingPlan ? plannedString('item_name') || initialPlan.title : values.item_name;
-        const itemId = completingPlan ? plannedString('inventory_item_id') : values.inventory_item_id;
+        const itemName = values.item_name || plannedString('item_name') || initialPlan?.title;
+        const itemId = values.inventory_item_id || plannedString('inventory_item_id');
         const amount = quantityForStorage(values.unit || '', values.quantity, values.pounds, values.ounces);
         if (!itemName || !amount) throw new Error('Enter an item and quantity');
         payload = { item_name: itemName, inventory_item_id: itemId || null,
@@ -156,17 +155,16 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
     try {
       const at = form.getFieldValue('actual_at');
       if (!at) throw new Error('Choose when this was skipped');
-      await recordEvent(db, { batchId, accountId, eventType: 'skipped', actualAt: fromDatetimeLocal(at),
-        plannedEventId: initialPlan.id, note: form.getFieldValue('note') || '' });
+      await skipBatchEvent(db, initialPlan.id, fromDatetimeLocal(at), accountId);
       await onSaved();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
   }
 
   return <Form form={form} layout="vertical" onFinish={submit} initialValues={{
-    event_type: kind, actual_at: initialEvent ? toDatetimeLocal(initialEvent.actual_at) : toDatetimeLocal(),
+    event_type: kind, actual_at: initialEvent?.actual_at != null ? toDatetimeLocal(initialEvent.actual_at) : toDatetimeLocal(),
     ended_at: initialEvent?.ended_at ? toDatetimeLocal(initialEvent.ended_at) : undefined,
-    planned_event_id: initialEvent?.planned_event_id || initialPlan?.id, note: initialEvent?.note || undefined,
+    note: initialEvent?.note || undefined,
     measurement_kind: initialData?.measurementKind || plannedString('measurement_kind') || measurement,
     mode: initialData?.payload.mode || plannedString('mode') || 'hold', source: initialData?.payload.source || 'manual',
     item_name: plannedString('item_name'), item_category: initialCategory,
@@ -181,18 +179,15 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
     pounds: initialSplit?.pounds, ounces: initialSplit?.ounces
   }}>
     {error && <Alert type="error" message={error} className="form-alert" />}
-    {!completingPlan && <Form.Item name="event_type" label="Event type" rules={[{ required: true }]}>
+    {!initialPlan && <Form.Item name="event_type" label="Event type" rules={[{ required: true }]}>
       <Select disabled={!!initialEvent} options={initialEvent?.event_type === 'skipped' ? [{ value: 'skipped', label: 'Skipped plan' }] : planKinds} onChange={(value: string) => {
         setKind(value);
         form.setFieldsValue({ unit: eventUnit(value, preferredUnits),
           target_unit: value === 'temperature_control' ? preferredUnits.temperature : value === 'pressure_control' ? preferredUnits.pressure : undefined });
       }} />
     </Form.Item>}
-    <div className={completingPlan ? '' : 'form-pair'}>
+    <div>
       <Form.Item name="actual_at" label={plannedNumber('duration_seconds') || initialEvent?.ended_at ? 'Started' : 'When'} rules={[{ required: true }]}><Input type="datetime-local" /></Form.Item>
-      {!completingPlan && <Form.Item name="planned_event_id" label="Related plan"><Select allowClear placeholder="Unplanned"
-        options={plans.map(plan => ({ label: `${plan.title} · ${kindLabel(plan.event_type)}`, value: plan.id }))} /></Form.Item>
-      }
     </div>
     {(!!plannedNumber('duration_seconds') || !!initialEvent?.ended_at || kind === 'temperature_control') &&
       <Form.Item name="ended_at" label="Ended (optional)"><Input type="datetime-local" /></Form.Item>}
@@ -221,7 +216,7 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
       </div>
     </>}
     {kind === 'addition' && <>
-      {!completingPlan && <>
+      <>
         <Form.Item name="item_category" label="Type"><Select options={inventoryCategories.map(value => ({ value, label: value }))}
           onChange={() => form.setFieldsValue({ inventory_item_id: undefined, item_name: undefined, unit: preferredUnits.mass,
             quantity: undefined, pounds: undefined, ounces: undefined })} /></Form.Item>
@@ -231,7 +226,7 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
             if (item) { changeQuantityUnit(form, selectedUnit || initialUnit, item.display_unit);
               form.setFieldsValue({ item_name: item.name, item_category: item.category, unit: item.display_unit }); } }} /></Form.Item>
         <Form.Item name="item_name" label="What was added?" rules={[{ required: true }]}><Input placeholder="e.g. Fermaid O, yeast, oxygen" /></Form.Item>
-      </>}
+      </>
       <Form.Item name="unit" label="Unit" rules={[{ required: true }]}>
         <Select showSearch options={unitOptions(quantityUnitsForCategory(selectedCategory || initialCategory))}
           onChange={changeMainUnit} /></Form.Item>

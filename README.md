@@ -28,13 +28,15 @@ The server serves the built PWA and API together on port 3001. Point your Cloudf
 ## Current workflow
 
 - Create separate breweries for your home setup and commercial operation.
-- Create batches directly or copy a recipe's planned events into a new batch.
-- Plan fixed-time or anchored events, then record actual events or explicitly skip a plan.
+- Create batches directly or copy a recipe's actions into a new batch.
+- Add one batch action with optional timing, then record it or mark it skipped. Recording updates the action's current quantity and other details; there is no separate planned-versus-actual action.
 - Record additions, measurements, equipment settings, transfers, packaging, milestones, notes, inventory entries, equipment calibrations, and batch photos. Search the shared catalog when adding equipment or inventory, or create a custom item. Equipment calibration fields match the instrument type. Deleting used equipment hides it from active lists while preserving historical event references.
 - Continue working offline; the app syncs on reconnect and at regular intervals.
 - Use the Ant Design left sidebar to open batches, recipes, inventory, and equipment, with recent item links under each section. Each section URL shows an index and each item has its own detail page. Equipment and inventory indexes use separate tables per type. The default Homebrew brewery uses root URLs such as `/equipment` and `/batch/:id`; other breweries use `/brewery/:slug/equipment` and `/brewery/:slug/batch/:id`.
 - Open `/me` from the avatar to upload an account avatar, choose preferred units, change your password, adjust automatic sync, or sign out. The sync icon there starts a manual sync and shows when sync last succeeded.
 - Use the same navigation on phones, tablets, and desktop screens. On phones, it opens in a left Drawer.
+
+This proof of concept does not migrate brewery databases from older schemas. Schema 7 needs a fresh brewery database and fresh browser storage; existing schema 6 databases are left untouched and rejected with an explanatory error.
 
 Accounts can register and each account can own multiple private breweries. Sync covers each full brewery; sharing, per-batch permissions and filtered sync are later targets. RAPT Pill ingestion and server Web Push reminders are specified in [DESIGN.md](DESIGN.md) but are not wired up yet. A separate read-only `data/catalog.sqlite` holds example equipment and inventory entries. Signed-in devices keep a separate local SQLite copy for offline search; copying an entry creates an independent brewery-owned item. Catalog edits on the server require incrementing `catalog_meta.version` so devices download the new snapshot.
 

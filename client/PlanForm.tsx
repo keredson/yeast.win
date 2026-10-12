@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, AutoComplete, Button, Form, Input, InputNumber, Select } from 'antd';
+import { Alert, AutoComplete, Button, Checkbox, Form, Input, InputNumber, Select } from 'antd';
 import { kindLabel, measurementKinds } from './constants.ts';
 import type { InventoryItem, PlanInput } from './db.ts';
 import { compoundMassUnit, convertUnit, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions } from '../shared/units.ts';
@@ -25,6 +25,7 @@ const titleLabels: Record<string, string> = {
 };
 
 interface Values {
+  record_now?: boolean;
   title: string; timing_key: string; offset_value: number;
   offset_unit: typeof timeUnits[number]['value']; details?: string;
   item_category?: string; quantity?: number; unit?: string; pounds?: number; ounces?: number;
@@ -33,13 +34,14 @@ interface Values {
   duration_value?: number; duration_unit?: typeof timeUnits[number]['value'];
 }
 
-export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, preferredUnits, preset, submit }: {
+export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, preferredUnits, preset, allowRecordNow = false, submit }: {
   anchors: Anchor[];
   eventType: string;
   initialPlan?: PlanInput & { id: string };
   inventory: InventoryItem[]; catalog: CatalogInventory[]; preferredUnits: PreferredUnits;
   preset?: PlanPreset;
-  submit: (input: PlanInput) => Promise<void>;
+  allowRecordNow?: boolean;
+  submit: (input: PlanInput, recordNow?: boolean) => Promise<void>;
 }) {
   const [form] = Form.useForm<Values>();
   const initialDetails = parsePlanDetails(initialPlan?.details_json);
@@ -126,7 +128,7 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
         planned_at: null, anchor_event_id: anchorId,
         offset_seconds: Math.round(values.offset_value * unit.multiplier) * (direction === 'before' ? -1 : 1),
         details_json: Object.keys(details).length ? JSON.stringify(details) : null
-      });
+      }, values.record_now);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
   }
@@ -174,7 +176,7 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
       </Form.Item>
       <Form.Item name="unit" label="Unit"><Select showSearch options={unitOptions(quantityUnitsForCategory(itemCategory))}
         onChange={changeMainUnit} /></Form.Item>
-      <QuantityFields unit={selectedUnit || initialUnit} label="Planned quantity" optional />
+      <QuantityFields unit={selectedUnit || initialUnit} label="Quantity" optional />
     </>}
     {kind !== 'addition' && <Form.Item name="title" label={titleLabels[kind] || 'Action title'} rules={[{ required: true }]}>
       <Input placeholder={`Describe the ${kindLabel(kind).toLowerCase()}`} maxLength={120} />
@@ -185,7 +187,7 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
           target_unit: value === 'temperature' ? preferredUnits.temperature : value === 'volume' ? preferredUnits.volume
             : value === 'pressure' ? preferredUnits.pressure : measurementKinds.find(item => item.value === value)?.unit }); }} /></Form.Item>
       }
-      <div className="form-pair"><Form.Item name="target_value" label="Planned target (optional)"><InputNumber className="full-width" step="any" /></Form.Item>
+      <div className="form-pair"><Form.Item name="target_value" label="Target (optional)"><InputNumber className="full-width" step="any" /></Form.Item>
         <Form.Item name="target_unit" label="Unit"><Select options={unitOptions(
           measurementKind === 'ph' ? ['pH'] : measurementKind === 'gravity' ? unitGroups.gravity
             : measurementKind === 'carbonation' ? unitGroups.carbonation
@@ -204,7 +206,7 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
     {kind === 'pressure_control' && <div className="form-pair"><Form.Item name="target_value" label="Target pressure"><InputNumber className="full-width" step="any" /></Form.Item>
       <Form.Item name="target_unit" label="Unit"><Select options={unitOptions(unitGroups.pressure)}
         onChange={unit => changeNumberUnit(form, ['target_value'], selectedTargetUnit, unit)} /></Form.Item></div>}
-    {kind === 'transfer' && <div className="form-pair"><Form.Item name="quantity" label="Planned volume"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
+    {kind === 'transfer' && <div className="form-pair"><Form.Item name="quantity" label="Volume"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
       <Form.Item name="unit" label="Unit"><Select options={unitOptions(unitGroups.volume)} onChange={changeMainUnit} /></Form.Item></div>}
     {kind === 'packaging' && <>
       <Form.Item name="container_name" label="Container"><Input placeholder="Bottle, keg…" /></Form.Item>
@@ -233,6 +235,9 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
         onChange={unit => changeTimeUnit('offset_value', selectedOffsetUnit, unit)} /></Form.Item>
     </div>
     <Form.Item name="details" label="Instructions"><Input.TextArea rows={2} placeholder="Optional details" /></Form.Item>
+    {allowRecordNow && !initialPlan && <Form.Item name="record_now" valuePropName="checked" initialValue={false}>
+      <Checkbox>Record this now</Checkbox>
+    </Form.Item>}
     <Button type="primary" htmlType="submit" loading={busy}>{initialPlan ? 'Save event' : `Add ${kindLabel(kind).toLowerCase()}`}</Button>
   </Form>;
 }
