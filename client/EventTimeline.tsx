@@ -23,8 +23,9 @@ export function actionForMenu(key: string, plans: TimelineEvent[]): { kind: stri
 }
 
 const actionItems = [
+  { key: 'ingredient', label: 'Ingredient' },
   { key: 'mash', label: 'Mash' }, { key: 'boil', label: 'Boil' },
-  { key: 'ingredient', label: 'Ingredient' }, { key: 'chill', label: 'Chill' },
+  { key: 'chill', label: 'Chill' },
   { key: 'yeast', label: 'Pitch yeast' },
   { key: 'measurement', label: 'Measurement', children: measurementKinds.map(kind => ({ key: `measurement:${kind.value}`, label: kind.label })) },
   { key: 'temperature_control', label: 'Temperature setting' }, { key: 'pressure_control', label: 'Pressure setting' },
