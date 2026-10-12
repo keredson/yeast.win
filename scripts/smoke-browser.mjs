@@ -424,6 +424,14 @@ try {
   await page.getByRole('button', { name: 'Edit planned event Boil' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Check the mash' }).waitFor();
   await page.locator('.plan-card').filter({ hasText: 'Check the mash' }).getByText(/batch start/).waitFor();
+  await page.getByRole('button', { name: 'Delete recipe Smoke recipe' }).click();
+  await page.getByText('Batches already started from it keep their actions.').waitFor();
+  await page.getByRole('button', { name: 'Delete recipe', exact: true }).last().click();
+  await page.waitForURL(url => url.pathname === '/recipes');
+  await page.locator('.record-link').filter({ hasText: 'Smoke recipe' }).waitFor({ state: 'hidden' });
+  await page.reload();
+  await page.getByRole('heading', { name: 'Recipes', exact: true }).waitFor();
+  if (await page.locator('.record-link').filter({ hasText: 'Smoke recipe' }).count()) throw new Error('Deleted recipe returned after reload');
   await navigateSection(page, 'Batches');
   await openBatch(page, 'Batch from recipe');
   await page.locator('.plan-card').getByText('2-row pale malt extra').waitFor();

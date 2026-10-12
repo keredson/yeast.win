@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Empty, Form, Input, Modal, Select } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
-import { addRecipePlan, createRecipe, deleteRecipePlan, listRecipePlans, startBatchFromRecipe, updateRecipePlan,
+import { Alert, Button, Empty, Form, Input, Modal, Popconfirm, Select } from 'antd';
+import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import { addRecipePlan, createRecipe, deleteRecipe, deleteRecipePlan, listRecipePlans, startBatchFromRecipe, updateRecipePlan,
   type InventoryItem, type LocalDb, type PlanInput, type Recipe, type RecipeType } from './db.ts';
 import { PlanForm, type PlanPreset } from './PlanForm.tsx';
 import { kindLabel } from './constants.ts';
@@ -21,6 +21,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
   const [preset, setPreset] = useState<PlanPreset>({});
   const [editingPlan, setEditingPlan] = useState<(PlanInput & { id: string }) | null>(null);
   const [newBatch, setNewBatch] = useState(false);
+  const [deletingRecipe, setDeletingRecipe] = useState(false);
   const [error, setError] = useState('');
   const recipe = recipes.find(item => item.id === selectedId) || null;
 
@@ -51,6 +52,17 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
+  async function removeRecipe() {
+    if (!recipe || deletingRecipe) return;
+    setDeletingRecipe(true); setError('');
+    try {
+      await deleteRecipe(db, recipe.id);
+      onSelect(null);
+      await onChanged();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setDeletingRecipe(false); }
+  }
+
   async function start(values: { name: string }) {
     if (!recipe) return;
     try {
@@ -71,7 +83,14 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
         </a>)}</div>}
     </section> : !recipe ? <Empty description="Recipe not found" /> : <section className="record-detail">
         <div className="content-heading"><div><span className="eyebrow">Recipe plan · {recipe.recipe_type || 'Unspecified'}</span><h2>{recipe.name}</h2><p className="muted">{recipe.description}</p></div>
-          <div className="heading-actions"><Button type="primary" onClick={() => setNewBatch(true)}>Start batch</Button></div>
+          <div className="heading-actions"><Button type="primary" onClick={() => setNewBatch(true)}>Start batch</Button>
+            <Popconfirm title={`Delete ${recipe.name}?`}
+              description="The recipe and its planned actions will be deleted. Batches already started from it keep their actions."
+              okText="Delete recipe" okButtonProps={{ danger: true, loading: deletingRecipe }}
+              onConfirm={() => void removeRecipe()}>
+              <Button type="text" danger shape="circle" icon={<DeleteOutlined />} aria-label={`Delete recipe ${recipe.name}`}
+                title="Delete recipe" disabled={deletingRecipe} />
+            </Popconfirm></div>
         </div>
         <EventTimeline events={plans} onEdit={plan => setEditingPlan(plan)} onDelete={plan => removePlan(plan.id)}
           onAdd={(kind, settings) => { setEditingPlan(null); setPreset(settings); setCreatingKind(kind); }} />

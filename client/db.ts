@@ -123,6 +123,16 @@ export async function listRecipes(db: DB): Promise<Recipe[]> {
     LEFT JOIN recipe_types t ON t.id = r.id ORDER BY r.name COLLATE NOCASE`);
 }
 
+export async function deleteRecipe(db: DB, recipeId: string): Promise<void> {
+  await db.tx(async tx => {
+    const recipes = await tx.execO<{ id: string }>('SELECT id FROM recipes WHERE id = ?', [recipeId]);
+    if (!recipes.length) throw new Error('Recipe not found');
+    await tx.exec('DELETE FROM recipe_events WHERE recipe_id = ?', [recipeId]);
+    await tx.exec('DELETE FROM recipe_types WHERE id = ?', [recipeId]);
+    await tx.exec('DELETE FROM recipes WHERE id = ?', [recipeId]);
+  });
+}
+
 export async function createRecipe(db: DB, name: string, description: string, recipeType: RecipeType,
   temperatureUnit: '°C' | '°F' = '°C'): Promise<string> {
   const id = nanoid();
