@@ -12,7 +12,8 @@ import type { CatalogInventory } from '../shared/catalog.ts';
 import type { PreferredUnits } from './api.ts';
 
 const recipeTypeOptions = [
-  { value: 'beer', label: 'Beer' }, { value: 'wine', label: 'Wine' }, { value: 'mead', label: 'Mead' }
+  { value: 'beer', label: 'Beer' }, { value: 'wine', label: 'Wine' },
+  { value: 'mead', label: 'Mead' }, { value: 'cider', label: 'Cider' }
 ];
 
 export function RecipeSection({ db, basePath, accountId, recipes, inventory, catalogInventory, preferredUnits, selectedId, onSelect, onChanged, onBatchStarted }: {

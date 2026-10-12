@@ -790,7 +790,7 @@ try {
   await page.getByRole('heading', { name: 'Batches' }).waitFor();
   console.log('Changed password, revoked other sessions, and signed back in');
 
-  for (const type of ['Wine', 'Mead']) {
+  for (const type of ['Wine', 'Mead', 'Cider']) {
     await navigateSection(page, 'Recipes');
     await page.getByRole('button', { name: 'New recipe' }).click();
     const dialog = page.getByRole('dialog', { name: 'New recipe' });
@@ -800,6 +800,8 @@ try {
     await dialog.getByRole('button', { name: 'Create recipe' }).click();
     await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
     await page.locator(`.recipe-detail-heading .recipe-type-icon[data-recipe-type="${type.toLowerCase()}"]`).waitFor();
+    await page.locator('.app-nav .nav-recent-item').filter({ hasText: `${type} smoke recipe` })
+      .locator(`.recipe-type-icon[data-recipe-type="${type.toLowerCase()}"]`).waitFor();
     if (await page.getByRole('button', { name: 'Edit planned event Boil' }).count()) throw new Error(`${type} recipe got a beer boil`);
     await navigateSection(page, 'Recipes');
     await page.locator('.record-link').filter({ hasText: `${type} smoke recipe` })

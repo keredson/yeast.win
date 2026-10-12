@@ -53,7 +53,7 @@ The names below are proposed logical tables. A migration can refine names and sp
 | Table | Main fields and role |
 | --- | --- |
 | `batches` | `id`, name, description, status, timestamps. This is the root for the batch timeline. The current UI uses `created_at` as the batch start time (T0); no separate `started` event is required. |
-| `recipes` / `recipe_types` | Name, description, and beer/wine/mead type. Reusable editable plans, independent of batches. New beer recipes seed mash, boil, and chill ranges, transfer to fermenter, and yeast pitching; wine and mead seed yeast pitching. |
+| `recipes` / `recipe_types` | Name, description, and beer/wine/mead/cider type. Reusable editable plans, independent of batches. New beer recipes seed mash, boil, and chill ranges, transfer to fermenter, and yeast pitching; wine, mead, and cider seed yeast pitching. |
 | `recipe_events` | Planned actions or milestones in a recipe, including type-specific planned details, order, and timing rule. Editing or deleting a recipe does not rewrite existing batches. Deleting a recipe also deletes its type and template actions. |
 | `batch_events` | One row per batch action. Recipe events are copied here when a batch is created. The row has its title, kind, timing anchor and offset, editable action details, optional `actual_at` and `skipped_at`, creator/recorder/source, and optional `received_at`. Actions added during the batch use the same table. |
 | `event_ends` | Optional actual end timestamp for a ranged event, keyed by its event ID. A range can be in progress until this row exists. |

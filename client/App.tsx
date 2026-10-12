@@ -3,10 +3,11 @@ import { AppstoreOutlined, BookOutlined, DisconnectOutlined, InboxOutlined, Menu
 import { Alert, Avatar, Button, Card, Drawer, Empty, Form, Input, Layout, Menu, Popover, Select, Spin, Tooltip, Typography } from 'antd';
 import { api, ApiError, ApiUnavailableError, type PreferredUnits, type Session, type Workspace } from './api.ts';
 import { defaultPreferredUnits } from '../shared/units.ts';
-import { forgetLocalDb, openLocalDb, syncNow, type Batch, type Equipment, type InventoryItem, type LocalDb, type Recipe,
+import { forgetLocalDb, openLocalDb, syncNow, type Batch, type Equipment, type InventoryItem, type LocalDb, type Recipe, type RecipeType,
   listBatches, listEquipment, listInventory, listRecipes } from './db.ts';
 import { BatchSection } from './BatchSection.tsx';
 import { RecipeSection } from './RecipeSection.tsx';
+import { RecipeTypeIcon } from './RecipeTypeIcon.tsx';
 import { InventorySection } from './InventorySection.tsx';
 import { inventoryItemForPath, inventoryPathSegment } from './inventoryRoutes.ts';
 import { EquipmentSection } from './EquipmentSection.tsx';
@@ -48,20 +49,24 @@ const navItems = [
   { key: 'equipment', label: 'Equipment', icon: ToolOutlined }
 ] as const;
 type RecordSection = Exclude<Section, 'me'>;
+type NavRecord = { id: string; name: string; recipe_type?: RecipeType | null };
 type RecentItems = Record<RecordSection, string[]>;
 const recordSections: RecordSection[] = ['batches', 'recipes', 'inventory', 'equipment'];
 const emptyRecents = (): RecentItems => ({ batches: [], recipes: [], inventory: [], equipment: [] });
 
 function SectionNavigation({ route, recent, records, onNavigate }: {
-  route: Route; recent: RecentItems; records: Record<RecordSection, { id: string; name: string }[]>;
+  route: Route; recent: RecentItems; records: Record<RecordSection, NavRecord[]>;
   onNavigate: (section: RecordSection, id: string | null) => void;
 }) {
   const items = navItems.flatMap(({ key, label, icon: Icon }) => {
     const links = (key === 'inventory' || key === 'equipment' ? [] : recent[key]).map(id => records[key].find(item => item.id === id))
-      .filter((item): item is { id: string; name: string } => !!item);
+      .filter((item): item is NavRecord => !!item);
     return [{ key, label, icon: <Icon /> }, ...links.map(item => ({
       key: `${key}:${item.id}`, className: 'nav-recent-item',
-      label: <span className="nav-recent-title" title={item.name}>{item.name}</span>
+      label: <span className="nav-recent-label">
+        {key === 'recipes' && <RecipeTypeIcon type={item.recipe_type || null} compact />}
+        <span className="nav-recent-title" title={item.name}>{item.name}</span>
+      </span>
     }))];
   });
   return <Menu mode="inline"

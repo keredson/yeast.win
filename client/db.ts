@@ -10,7 +10,7 @@ import { convertUnit, formatQuantity } from '../shared/units.ts';
 
 export type LocalDb = DB;
 export interface Batch { id: string; name: string; description: string | null; status: string; created_at: number }
-export type RecipeType = 'beer' | 'wine' | 'mead';
+export type RecipeType = 'beer' | 'wine' | 'mead' | 'cider';
 export interface Recipe { id: string; name: string; description: string | null; recipe_type: RecipeType | null }
 export interface BatchEvent {
   id: string; batch_id: string; event_type: string; title: string; planned_at: number | null;
@@ -126,7 +126,7 @@ export async function listRecipes(db: DB): Promise<Recipe[]> {
 
 export async function updateRecipe(db: DB, recipeId: string, name: string, description: string, recipeType: RecipeType): Promise<void> {
   if (!name.trim() || name.trim().length > 100) throw new Error('Recipe name must be 1–100 characters');
-  if (!['beer', 'wine', 'mead'].includes(recipeType)) throw new Error('Choose a recipe type');
+  if (!['beer', 'wine', 'mead', 'cider'].includes(recipeType)) throw new Error('Choose a recipe type');
   await db.tx(async tx => {
     const recipes = await tx.execO<{ id: string }>('SELECT id FROM recipes WHERE id = ?', [recipeId]);
     if (!recipes.length) throw new Error('Recipe not found');
@@ -152,7 +152,7 @@ export async function createRecipe(db: DB, name: string, description: string, re
   temperatureUnit: '°C' | '°F' = '°C'): Promise<string> {
   const id = nanoid();
   const now = nowSeconds();
-  if (!['beer', 'wine', 'mead'].includes(recipeType)) throw new Error('Choose a recipe type');
+  if (!['beer', 'wine', 'mead', 'cider'].includes(recipeType)) throw new Error('Choose a recipe type');
   await db.tx(async tx => {
     await tx.exec('INSERT INTO recipes(id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
       [id, name, description || null, now, now]);
