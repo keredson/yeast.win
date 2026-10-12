@@ -56,7 +56,8 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
   const completingPlan = !!initialPlan && !initialEvent;
   const initialMeasurement = measurementKinds.find(item => item.value === plannedString('measurement_kind'))?.value as MeasurementKind | undefined;
   const [kind, setKind] = useState(initialEvent?.event_type || initialPlan?.event_type || 'note');
-  const timedControl = supportsDuration(kind);
+  const chillToTarget = kind === 'temperature_control' && plannedString('phase') === 'chill';
+  const timedControl = supportsDuration(kind, plannedString('phase'));
   const [measurement, setMeasurement] = useState<MeasurementKind>(initialData?.measurementKind || initialMeasurement || 'temperature');
   const [instrumentId, setInstrumentId] = useState<string | undefined>(String(initialData?.payload.equipment_id || '') || undefined);
   const [calibrations, setCalibrations] = useState<{ id: string; effective_at: number }[]>([]);
@@ -130,6 +131,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
           quantity: amount.quantity, unit: amount.unit };
       } else if (kind === 'temperature_control') {
         if (!values.equipment_id) throw new Error('Choose controlled equipment');
+        if (chillToTarget && values.target_value == null) throw new Error('Enter a target temperature');
         if (values.target_value == null && values.power_watts == null) throw new Error('Enter a target or power');
         payload = { equipment_id: values.equipment_id, mode: values.mode || 'hold',
           target_value: values.target_value ?? null, target_unit: values.target_unit || null,
@@ -194,7 +196,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
       }} />
     </Form.Item>}
     <div>
-      <Form.Item name="actual_at" label={timedControl ? 'Started' : 'When'} rules={[{ required: true }]}><Input type="datetime-local" /></Form.Item>
+      <Form.Item name="actual_at" label={chillToTarget ? 'Reached target' : timedControl ? 'Started' : 'When'} rules={[{ required: true }]}><Input type="datetime-local" /></Form.Item>
     </div>
     {timedControl &&
       <Form.Item name="ended_at" label="Ended (optional)"><Input type="datetime-local" /></Form.Item>}
@@ -246,9 +248,9 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
       {kind === 'temperature_control' && <Form.Item name="mode" label="Mode"><Select options={[
         { value: 'heat', label: 'Heat' }, { value: 'chill', label: 'Chill' }, { value: 'hold', label: 'Hold' }
       ]} /></Form.Item>}
-      <div className="form-pair"><Form.Item name="target_value" label="Target" rules={kind === 'pressure_control' ? [{ required: true }] : []}>
+      <div className="form-pair"><Form.Item name="target_value" label="Target" rules={kind === 'pressure_control' || chillToTarget ? [{ required: true }] : []}>
         <InputNumber className="full-width" step="any" /></Form.Item>
-        <Form.Item name="target_unit" label="Unit" rules={kind === 'pressure_control' ? [{ required: true }] : []}>
+        <Form.Item name="target_unit" label="Unit" rules={kind === 'pressure_control' || chillToTarget ? [{ required: true }] : []}>
           <Select options={unitOptions(kind === 'pressure_control' ? unitGroups.pressure : unitGroups.temperature)}
             onChange={unit => changeNumberUnit(form, ['target_value'], selectedTargetUnit, unit)} /></Form.Item></div>
       {kind === 'temperature_control' && <Form.Item name="power_watts" label="Power (W), if set"><InputNumber className="full-width" min={0} /></Form.Item>}

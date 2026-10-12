@@ -398,8 +398,9 @@ try {
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="°F"]').click();
   await page.waitForFunction(async () => (await (await fetch('/api/me')).json()).preferred_units.temperature === '°F');
   await navigateSection(page, 'Equipment');
-  for (const [index, [kind, name]] of [['Kettle', 'Smoke kettle'], ['Fermenter', 'Smoke fermenter'], ['Chiller', 'Smoke chiller']].entries()) {
-    await chooseEquipmentType(page, index === 0 ? 'Add equipment' : 'New equipment', 'Brewing', kind);
+  for (const [group, kind, name] of [['Passive vessels', 'Kettle', 'Smoke kettle'],
+    ['Passive vessels', 'Fermenter', 'Smoke fermenter'], ['Control', 'Wort chiller', 'Smoke chiller']]) {
+    await chooseEquipmentType(page, 'Add equipment', group, kind);
     const vesselDialog = page.getByRole('dialog', { name: `Add ${kind.toLowerCase()}` });
     await vesselDialog.getByRole('combobox', { name: 'Name' }).fill(name);
     await vesselDialog.getByRole('button', { name: 'Create equipment' }).click();
@@ -417,6 +418,22 @@ try {
   await page.getByRole('button', { name: 'Edit planned event Mash' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Boil' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Chill' }).waitFor();
+  const recipeAdd = page.getByRole('button', { name: 'Add recipe event' });
+  if (await recipeAdd.textContent() !== 'Add event'
+    || !await recipeAdd.evaluate(element => element.classList.contains('ant-btn-text'))
+    || !await recipeAdd.locator('svg').count()
+    || await recipeAdd.evaluate(element => getComputedStyle(element.parentElement).justifyContent) !== 'flex-start') {
+    throw new Error('Recipe add button should be a left-aligned, borderless icon and text');
+  }
+  await page.getByRole('button', { name: 'Edit planned event Chill' }).click();
+  const chillPlan = page.getByRole('dialog', { name: 'Edit Chill' });
+  if (await chillPlan.getByRole('spinbutton', { name: 'Duration (optional)' }).count()) {
+    throw new Error('Chill plan still asks for a duration');
+  }
+  if (await chillPlan.getByRole('spinbutton', { name: 'Target temperature' }).inputValue() !== '68') {
+    throw new Error('Chill plan should default to a 68°F target');
+  }
+  await chillPlan.locator('.ant-modal-close').click();
   await page.getByRole('button', { name: 'Edit planned event Transfer to fermenter' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Transfer to fermenter' }).click();
   const transferPlan = page.getByRole('dialog', { name: 'Edit Transfer to fermenter' });

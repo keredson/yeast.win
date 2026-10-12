@@ -4,13 +4,14 @@ import { kindLabel } from './constants.ts';
 
 type TimedPlan = Pick<Plan, 'id' | 'title'> & Partial<Pick<Plan, 'event_type' | 'planned_at' | 'anchor_event_id' | 'offset_seconds' | 'details_json'>>;
 
-export function supportsDuration(eventType: string): boolean {
-  return eventType === 'temperature_control' || eventType === 'pressure_control';
+export function supportsDuration(eventType: string, phase?: string): boolean {
+  return eventType === 'pressure_control' || eventType === 'temperature_control' && phase !== 'chill';
 }
 
 export function planDuration(plan: TimedPlan): number {
-  if (!plan.event_type || !supportsDuration(plan.event_type)) return 0;
-  const value = parsePlanDetails(plan.details_json).duration_seconds;
+  const details = parsePlanDetails(plan.details_json);
+  if (!plan.event_type || !supportsDuration(plan.event_type, String(details.phase || ''))) return 0;
+  const value = details.duration_seconds;
   return typeof value === 'number' && value > 0 ? value : 0;
 }
 
@@ -74,7 +75,7 @@ export function planDetailsLabel(plan: Pick<Plan, 'event_type'> & { title?: stri
     || String(details.to_vessel_name || 'Archived vessel');
   const amount = typeof details.quantity === 'number' ? formatQuantity(details.quantity, String(details.unit || ''), String(details.display_unit || '')) : '';
   const target = details.target_value != null ? `${details.target_value} ${details.target_unit || ''}`.trim() : '';
-  const duration = supportsDuration(plan.event_type) && typeof details.duration_seconds === 'number' && details.duration_seconds > 0
+  const duration = supportsDuration(plan.event_type, String(details.phase || '')) && typeof details.duration_seconds === 'number' && details.duration_seconds > 0
     ? `For ${formatOffset(details.duration_seconds)}` : '';
   const parts = plan.event_type === 'addition' ? [amount, details.item_name === plan.title ? '' : details.item_name]
     : plan.event_type === 'measurement' ? [details.measurement_kind, target]

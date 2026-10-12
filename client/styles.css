@@ -104,6 +104,7 @@ button, input, textarea { font: inherit; }
 .plan-form-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .batch-timeline { min-width: 0; }
 .timeline-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 24px; }
+.timeline-actions-recipe { justify-content: flex-start; }
 .timeline-track { position: relative; }
 .timeline-track::before { content: ''; position: absolute; top: 21px; bottom: 21px; left: 2rem;
   border-left: 2px dashed #b8cfc1; pointer-events: none; }

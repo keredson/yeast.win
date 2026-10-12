@@ -172,9 +172,9 @@ export async function createRecipe(db: DB, name: string, description: string, re
         { phase: 'boil', mode: 'heat', target_value: convertUnit(100, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 3600, anchor_point: 'end' }, 2);
       await insert(chillId, 'temperature_control', 'Chill', boilId,
         { phase: 'chill', mode: 'chill', target_value: convertUnit(20, '°C', temperatureUnit)!, target_unit: temperatureUnit,
-          duration_seconds: 1200, anchor_point: 'end' }, 3);
+          anchor_point: 'end' }, 3);
       await insert(transferId, 'transfer', 'Transfer to fermenter', chillId,
-        { anchor_point: 'end' }, 4);
+        {}, 4);
     }
     const pitchId = nanoid();
     await insert(pitchId, 'addition', 'Pitch yeast', recipeType === 'beer' ? transferId : null,

@@ -50,4 +50,6 @@ test('packaging does not become a range even if old plan details contain a durat
     details_json: JSON.stringify({ duration_seconds: 3600 }), actual_at: null, skipped_at: null, note: null, source_id: null };
   assert.equal(planDuration(packaging), 0);
   assert.equal(planDuration({ ...packaging, event_type: 'pressure_control' }), 3600);
+  assert.equal(planDuration({ ...packaging, event_type: 'temperature_control',
+    details_json: JSON.stringify({ phase: 'chill', duration_seconds: 3600 }) }), 0);
 });
