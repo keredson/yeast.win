@@ -14,7 +14,15 @@ yarn dev
 
 Open the app and choose **Create account**. Each new account gets a private brewery named Homebrew. Create, rename, change the URL slug, or delete breweries in **Settings**; the header switches between them. Usernames are case insensitive; passwords must be at least 8 characters. An `.env` file is optional if you want to change the data directory or port; see `.env.example`.
 
-This starts the API on port 3001 and Vite on port 5173. Open `http://localhost:5173`. Vite proxies API requests to the server. The browser stores its local database in IndexedDB through CR-SQLite's persistent virtual file system. After a successful sign-in, the same device can reopen its local batches while the server is unavailable.
+This starts the API on the first free port from 3001 and Vite on the first free port from 5173. Open the URL printed by Vite. Vite proxies API requests to the matching server port. The browser stores its local database in IndexedDB through CR-SQLite's persistent virtual file system. After a successful sign-in, the same device can reopen its local batches while the server is unavailable.
+
+To run a second development copy, run `yarn dev` in another terminal. Both ports are chosen automatically. For separate accounts and breweries, give the second copy its own data directory:
+
+```sh
+BREWLOG_DATA_DIR=./data-second yarn dev
+```
+
+You can still set `BREWLOG_PORT` to pin an API port. Without a separate `BREWLOG_DATA_DIR`, both copies use the same server databases.
 
 For a production build:
 
