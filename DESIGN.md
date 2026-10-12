@@ -64,6 +64,24 @@ An action stores `offset_seconds` from batch start, or `anchor_event_id` plus `o
 
 Recipes and batches use the same event timeline and add menu. The batch view adds recording, skipping, actual readings, and photos. Both timelines show a batch-start group even when it has no additions. Deleting a recipe event leaves its dependents intact: direct dependents lose their anchor and keep their calculated offset from batch start; later descendants retain their anchors.
 
+### Recipe import and future calculations
+
+Import BeerXML or Brewfather JSON on the device. Keep the original file bytes, format, filename, import time, and hash in the brewery database; link each created recipe to its source record. A file with multiple recipes prompts for which recipes to import. No general recipe preview is needed. Before writing, show the distinct imported ingredients and let the user map each to an existing inventory item, create a new item, or leave it unlinked. A newly created inventory item has no stock balance: recipe quantity is not a purchase or count. Write the selected recipes, actions, mappings, and source links together, without the normal new-recipe seed actions.
+
+Persist source inputs used by the recipe, not calculated predictions. These include ingredient amounts and properties at the time of import (for example hop alpha acid and grain yield/color), water and salt additions or water-profile inputs, process times and temperatures, target volumes, equipment assumptions, and the efficiency assumption. An inventory link identifies a product; it must not make a recipe's calculation inputs change when the inventory item is edited. Copy relevant inputs into a batch when the recipe is used. The original file retains unmapped fields and is the source for a future reimport. A measured OG or FG belongs to a batch measurement if importing actual batch history; an exported estimated OG or FG is a calculated result and is not stored as recipe source data.
+
+Calculate results on the device from stored inputs. Initial calculation list, in approximate implementation order:
+
+1. Volume progression: mash/strike/sparge water, pre-boil and post-boil volume, boil-off, and vessel losses.
+2. Predicted original gravity from fermentable yield, amounts, efficiency, and volume.
+3. Predicted final gravity and ABV from gravity and yeast attenuation assumptions; label FG as an estimate.
+4. Bitterness from hop alpha acid, use, timing, wort conditions, and a selected utilization method.
+5. Color from fermentable color, amount, and volume.
+6. Mash pH and water adjustments from water composition, grist, and salt/acid additions.
+7. Carbonation/priming from target CO₂, temperature, volume, and packaging method.
+
+Do not persist these predicted values. Store chosen calculation methods and user-supplied assumptions as inputs; recompute when inputs change. A result may be cached locally for display but is disposable. Imported source-only fields need explicit schema or UI support before they become editable: the current event form reconstructs `details_json` on save and can discard unknown keys.
+
 ### Actual event payloads
 
 `batch_events` holds the shared event identity and provenance. Payload tables hold data specific to each action. One event can have multiple compatible payload rows: a single RAPT Pill reading creates one `batch_events` row and both gravity and temperature measurement rows.
