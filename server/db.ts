@@ -1,13 +1,30 @@
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { nanoid } from 'nanoid';
 import { indexStatements, inventoryLocationTables, nowSeconds, recategorizeLacticAcid, removeEmptyDuplicateInventory, replicatedTables, schemaStatements, workspaceSchemaVersion } from '../shared/schema.ts';
 
-if (existsSync('.env')) process.loadEnvFile('.env');
-export const dataDir = resolve(process.env.BREWLOG_DATA_DIR || './data');
-const extensionPath = resolve('vendor/crsqlite.so');
+export const projectRoot = fileURLToPath(new URL('..', import.meta.url));
+const envPath = resolve(projectRoot, '.env');
+if (existsSync(envPath)) process.loadEnvFile(envPath);
+export const dataDir = resolve(projectRoot, process.env.BREWLOG_DATA_DIR || './data');
+const extensionPath = resolve(projectRoot, 'vendor/crsqlite.so');
 mkdirSync(dataDir, { recursive: true });
+
+export function assertCrSqliteAvailable(): void {
+  if (!existsSync(extensionPath)) {
+    throw new Error('CR-SQLite extension missing. Run yarn setup:sqlite first.');
+  }
+  const db = new Database(':memory:');
+  try {
+    db.loadExtension(extensionPath);
+  } catch (cause) {
+    throw new Error('Could not load CR-SQLite. Run yarn setup:sqlite first.', { cause });
+  } finally {
+    db.close();
+  }
+}
 
 export function openAuthDb(): Database.Database {
   const db = new Database(join(dataDir, 'auth.sqlite'));
@@ -115,9 +132,6 @@ export function deleteWorkspace(auth: Database.Database, ownerId: string, id: st
 
 export function openWorkspaceDb(id: string): Database.Database {
   if (!/^[A-Za-z0-9_-]{10,32}$/.test(id)) throw new Error('Invalid workspace ID');
-  if (!existsSync(extensionPath)) {
-    throw new Error('CR-SQLite extension missing. Run yarn setup:sqlite first.');
-  }
   const db = new Database(join(dataDir, `${id}.sqlite`));
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');

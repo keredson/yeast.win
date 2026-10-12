@@ -1,4 +1,5 @@
 import initWasm, { type DB } from '@vlcn.io/crsqlite-wasm';
+import { fetchApi } from './api.ts';
 import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { nanoid } from 'nanoid';
 import { capacityKinds, equipmentKinds, measurementRangeUnits } from '../shared/equipment.ts';
@@ -768,7 +769,7 @@ async function performSync(db: DB, workspaceId: string): Promise<number> {
     COALESCE(site_id, crsql_site_id()) AS site_id, cl, seq FROM crsql_changes
     WHERE db_version > ? AND site_id = crsql_site_id() ORDER BY db_version, seq`, [BigInt(localCursor)]);
   const request: SyncRequest = { serverCursor, localCursor, changes: rows.map(encodeChange) };
-  const response = await fetch(`/api/workspaces/${workspaceId}/sync`, {
+  const response = await fetchApi(`/api/workspaces/${workspaceId}/sync`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(request)
   });
   if (!response.ok) throw new Error((await response.json() as { error?: string }).error || 'Sync failed');

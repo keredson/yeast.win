@@ -108,15 +108,19 @@ export function logout(db: Database.Database, token: string | undefined): void {
   if (token) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash(token));
 }
 
-export function readSessionCookie(cookie: string | undefined): string | undefined {
-  return cookie?.split(';').map(part => part.trim()).find(part => part.startsWith('brewlog_session='))
-    ?.slice('brewlog_session='.length);
+export function sessionCookieName(port: number): string {
+  return `brewlog_session_${port}`;
 }
 
-export function sessionCookie(token: string, secure: boolean): string {
-  return `brewlog_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${sessionSeconds}${secure ? '; Secure' : ''}`;
+export function readSessionCookie(cookie: string | undefined, name: string): string | undefined {
+  return cookie?.split(';').map(part => part.trim()).find(part => part.startsWith(`${name}=`))
+    ?.slice(name.length + 1);
 }
 
-export function clearSessionCookie(secure: boolean): string {
-  return `brewlog_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secure ? '; Secure' : ''}`;
+export function sessionCookie(token: string, secure: boolean, name: string): string {
+  return `${name}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${sessionSeconds}${secure ? '; Secure' : ''}`;
+}
+
+export function clearSessionCookie(secure: boolean, name: string): string {
+  return `${name}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secure ? '; Secure' : ''}`;
 }

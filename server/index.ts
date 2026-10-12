@@ -3,18 +3,20 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import type Database from 'better-sqlite3';
 import { accountForToken, changePassword, clearSessionCookie, getAvatar, getPreferredUnits, login, logout,
-  readSessionCookie, register, saveAvatar, savePreferredUnits, sessionCookie } from './auth.ts';
-import { closeWorkspaceDb, createWorkspace, dataDir, deleteWorkspace, openAuthDb, openWorkspaceDb, updateWorkspace } from './db.ts';
+  readSessionCookie, register, saveAvatar, savePreferredUnits, sessionCookie, sessionCookieName } from './auth.ts';
+import { assertCrSqliteAvailable, closeWorkspaceDb, createWorkspace, dataDir, deleteWorkspace, openAuthDb, openWorkspaceDb, projectRoot, updateWorkspace } from './db.ts';
 import { catalogSnapshot, openCatalogDb } from './catalog.ts';
 import { syncWorkspace, validateSyncRequest } from './sync.ts';
 import { isValidId } from '../shared/schema.ts';
 import { validPreferredUnits } from '../shared/units.ts';
 
+assertCrSqliteAvailable();
 const authDb = openAuthDb();
 const catalogDb = openCatalogDb(dataDir);
 const workspaceDbs = new Map<string, Database.Database>();
-const distDir = resolve('dist');
+const distDir = resolve(projectRoot, 'dist');
 const port = Number(process.env.BREWLOG_PORT || 3001);
+const cookieName = sessionCookieName(port);
 const loginFailures = new Map<string, { count: number; resetAt: number }>();
 const registrationAttempts = new Map<string, { count: number; resetAt: number }>();
 const passwordFailures = new Map<string, { count: number; resetAt: number }>();
@@ -40,7 +42,7 @@ async function readJson(req: IncomingMessage, maxBytes = 32 * 1024 * 1024): Prom
 }
 
 function sessionToken(req: IncomingMessage) {
-  return readSessionCookie(req.headers.cookie);
+  return readSessionCookie(req.headers.cookie, cookieName);
 }
 
 function secureRequest(req: IncomingMessage): boolean {
@@ -124,7 +126,7 @@ const server = createServer(async (req, res) => {
       }
       const token = register(authDb, body.username, body.password);
       if (!token) return json(res, 409, { error: 'Username is already taken' });
-      return json(res, 201, { ok: true }, { 'Set-Cookie': sessionCookie(token, secureRequest(req)) });
+      return json(res, 201, { ok: true }, { 'Set-Cookie': sessionCookie(token, secureRequest(req), cookieName) });
     }
     if (pathname === '/api/login' && req.method === 'POST') {
       const body = await readJson(req, 4 * 1024) as { username?: unknown; password?: unknown };
@@ -141,7 +143,7 @@ const server = createServer(async (req, res) => {
         return json(res, 401, { error: 'Invalid username or password' });
       }
       loginFailures.delete(loginKey);
-      return json(res, 200, { ok: true }, { 'Set-Cookie': sessionCookie(token, secureRequest(req)) });
+      return json(res, 200, { ok: true }, { 'Set-Cookie': sessionCookie(token, secureRequest(req), cookieName) });
     }
 
     const token = sessionToken(req);
@@ -205,7 +207,7 @@ const server = createServer(async (req, res) => {
     }
     if (pathname === '/api/logout' && req.method === 'POST') {
       logout(authDb, token);
-      return json(res, 200, { ok: true }, { 'Set-Cookie': clearSessionCookie(secureRequest(req)) });
+      return json(res, 200, { ok: true }, { 'Set-Cookie': clearSessionCookie(secureRequest(req), cookieName) });
     }
     if (pathname === '/api/workspaces' && req.method === 'GET') {
       return json(res, 200, { workspaces: ownerWorkspaces(account.id) });
@@ -256,7 +258,7 @@ const server = createServer(async (req, res) => {
     return json(res, 404, { error: 'Not found' });
   } catch (error) {
     console.error(error);
-    return json(res, 500, { error: error instanceof Error ? error.message : 'Internal error' });
+    return json(res, 500, { error: 'Internal server error' });
   }
 });
 

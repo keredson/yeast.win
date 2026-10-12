@@ -105,7 +105,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
     {!selectedId ? <section className="record-index">
       <div className="section-heading"><div><span className="eyebrow">Planning</span><h1>Recipes</h1></div><Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New recipe" title="New recipe" onClick={() => setNewRecipe(true)} /></div>
       <p className="muted">Reusable event plans for your batches.</p>
-      {recipes.length === 0 ? <Empty description="No recipes yet" /> : <div className="record-list">{recipes.map(item =>
+      {recipes.length > 0 && <div className="record-list">{recipes.map(item =>
         <a key={item.id} className="record-link" href={`${basePath}/recipe/${item.id}`}
           onClick={event => { event.preventDefault(); onSelect(item.id); }}>
           <strong>{item.name}</strong><small>{item.description || 'No description'}</small>

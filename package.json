@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k 'yarn dev:server' 'yarn dev:web'",
+    "dev": "node scripts/dev.mjs",
     "dev:server": "node --watch --import tsx server/index.ts",
     "dev:web": "vite --host 0.0.0.0",
     "build": "tsc --noEmit && vite build",

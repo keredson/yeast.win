@@ -15,6 +15,10 @@ button, input, textarea { font: inherit; }
 .workspace-select { width: 200px; }
 .app-header .ant-btn { color: white; border-color: #56736f; background: transparent; }
 .app-header .ant-btn:hover { background: #29514a !important; color: white !important; }
+.app-header .ant-btn.connection-button { color: #f1c375; border: 0 !important; font-size: 20px; }
+.connection-popover { max-width: 260px; }
+.connection-popover p { margin: 0; }
+.connection-popover p + p { margin-top: 8px; }
 .app-body { max-width: 1580px; margin: 0 auto; padding: 28px clamp(18px, 3vw, 52px) 64px; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: clamp(20px, 3vw, 48px); }
 .app-nav { align-self: start; position: sticky; top: 24px; background: transparent !important; }
 .app-nav .ant-menu, .drawer-nav .ant-menu { background: transparent; border-inline-end: 0 !important; }
