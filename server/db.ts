@@ -151,17 +151,25 @@ export function openWorkspaceDb(id: string): Database.Database {
       db.close();
       throw error;
     }
-  } else if (row.version === 7) {
+  } else if (row.version === 7 || row.version === 8) {
     db.exec('BEGIN');
     try {
-      for (const table of inventoryLocationTables) {
-        db.exec(schemaStatements[replicatedTables.indexOf(table)]);
-        db.prepare('SELECT crsql_as_crr(?)').get(table);
+      if (row.version === 7) {
+        for (const table of inventoryLocationTables) {
+          db.exec(schemaStatements[replicatedTables.indexOf(table)]);
+          db.prepare('SELECT crsql_as_crr(?)').get(table);
+        }
+        db.exec(removeEmptyDuplicateInventory);
+        db.exec(recategorizeLacticAcid);
       }
-      // A legacy zero row may precede a second row with purchases. Remove only
-      // the row that has no history or references, preserving every real ledger.
-      db.exec(removeEmptyDuplicateInventory);
-      db.exec(recategorizeLacticAcid);
+      const legacy = db.prepare("SELECT id, specification_json FROM equipment WHERE kind = 'controlled_fermenter'")
+        .all() as { id: string; specification_json: string | null }[];
+      const update = db.prepare('UPDATE equipment SET kind = ?, specification_json = ? WHERE id = ?');
+      for (const item of legacy) {
+        const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
+        specification.built_in_temperature_control = true;
+        update.run('fermenter', JSON.stringify(specification), item.id);
+      }
       db.prepare('UPDATE schema_meta SET version = ?').run(workspaceSchemaVersion);
       db.exec('COMMIT');
     } catch (error) {

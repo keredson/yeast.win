@@ -1,7 +1,6 @@
 export const equipmentKinds = [
   { value: 'electric_kettle', label: 'Electric kettle' },
   { value: 'all_in_one', label: 'All-in-one brewing system' },
-  { value: 'controlled_fermenter', label: 'Temperature-controlled fermenter' },
   { value: 'fermentation_temperature_control', label: 'Fermentation temperature control' },
   { value: 'glycol_chiller', label: 'Glycol chiller' },
   { value: 'kettle', label: 'Kettle' },
@@ -24,7 +23,7 @@ export const equipmentKinds = [
 ] as const;
 
 export const equipmentGroups = [
-  { key: 'control', label: 'Control', kinds: ['electric_kettle', 'all_in_one', 'controlled_fermenter',
+  { key: 'control', label: 'Control', kinds: ['electric_kettle', 'all_in_one',
     'fermentation_temperature_control', 'chiller'] },
   { key: 'measurement', label: 'Measurement', kinds: ['hydrometer', 'thermometer', 'refractometer',
     'ph_meter', 'pressure_gauge', 'carbonation_meter', 'dissolved_oxygen_meter', 'scale'] },
@@ -35,15 +34,15 @@ export function equipmentKindLabel(kind: string): string {
   return equipmentKinds.find(item => item.value === kind)?.label || kind;
 }
 
-export const capacityKinds = new Set<string>(['electric_kettle', 'all_in_one', 'controlled_fermenter',
+export const capacityKinds = new Set<string>(['electric_kettle', 'all_in_one',
   'kettle', 'mash_tun', 'fermenter', 'keg', 'refrigerator']);
 
-export const vesselKinds = new Set<string>(['electric_kettle', 'all_in_one', 'controlled_fermenter',
+export const vesselKinds = new Set<string>(['electric_kettle', 'all_in_one',
   'kettle', 'mash_tun', 'fermenter', 'keg']);
 
 export const boilOffKinds = new Set<string>(['electric_kettle', 'all_in_one']);
 
-export const temperatureCalibrationKinds = new Set<string>(['electric_kettle', 'all_in_one', 'controlled_fermenter',
+export const temperatureCalibrationKinds = new Set<string>(['electric_kettle', 'all_in_one',
   'temperature_controller', 'fermentation_temperature_control', 'thermometer']);
 
 export const measurementRangeUnits: Record<string, readonly string[]> = {

@@ -88,7 +88,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 8;
+export const workspaceSchemaVersion = 9;
 
 export const inventoryLocationTables = ['inventory_locations', 'inventory_item_locations', 'inventory_moves'] as const;
 

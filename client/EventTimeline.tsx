@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { Button, Card, Dropdown, Empty, Tag } from 'antd';
 import { CheckOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ActualEvent, Equipment, PlanInput } from './db.ts';
 import { kindLabel, measurementKinds } from './constants.ts';
 import { formatTime } from './time.ts';
-import { effectivePlanTime, parsePlanDetails, planDetailsLabel, planDuration, planKindLabel, planTimingLabel } from './planTiming.ts';
+import { effectivePlanTime, formatOffset, parsePlanDetails, planDetailsLabel, planDuration, planKindLabel } from './planTiming.ts';
 import type { PlanPreset } from './PlanForm.tsx';
 
 export type TimelineEvent = PlanInput & { id: string; actual_at?: number | null; skipped_at?: number | null; ended_at?: number | null };
@@ -53,9 +53,10 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
       let group = grouped.get(key);
       if (!group) {
         group = { key, at, label: isBatch && (item.actual_at != null || item.skipped_at != null)
-          ? formatTime(at!) : planTimingLabel(item, events), events: [] };
+          ? formatTime(at!) : '', events: [] };
         grouped.set(key, group);
       }
+      if (isBatch && !group.label && (item.actual_at != null || item.skipped_at != null)) group.label = formatTime(at!);
       group.events.push(item);
     }
     for (const group of grouped.values()) group.events.sort((a, b) => {
@@ -66,25 +67,32 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
     return [...grouped.values()].sort((a, b) => (a.at ?? Number.MAX_SAFE_INTEGER) - (b.at ?? Number.MAX_SAFE_INTEGER) || a.key.localeCompare(b.key));
   }, [events, batchStartAt, isBatch]);
 
-  return <section className="batch-timeline"><div className="column-title"><h3>Timeline</h3><span>{events.length} actions</span></div>
-    <div className="card-stack timeline-track">{groups.map(group => <Card key={group.key} size="small" className="timeline-group">
-      <div className="timeline-group-heading"><strong>{group.label}</strong>
-        {isBatch && group.at != null && <span className="muted">{formatTime(group.at)}</span>}</div>
+  return <section className={`batch-timeline${isBatch ? '' : ' recipe-timeline'}`}><div className="column-title"><h3>Timeline</h3>{isBatch && <span>{events.length} actions</span>}</div>
+    <div className="card-stack timeline-track">{groups.map((group, index) => {
+      const previous = groups[index - 1];
+      const previousAt = previous?.at;
+      const gapSeconds = group.at != null && previousAt != null ? group.at - previousAt : 0;
+      const gapAlreadyShown = previous?.events.some(item => planDuration(item) === gapSeconds);
+      return <Fragment key={group.key}>
+      {gapSeconds > 0 && !gapAlreadyShown && (!isBatch || !group.label)
+        && <div className="timeline-gap">{formatOffset(gapSeconds)}</div>}
+      <Card size="small" className="timeline-group">
+      {group.label && <div className="timeline-group-heading"><strong>{group.label}</strong>
+        {isBatch && group.label === 'Batch start' && group.at != null && <span className="muted">{formatTime(group.at)}</span>}</div>}
       {group.events.length === 0 && <div className="timeline-empty"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No actions at the start yet" /></div>}
       {group.events.map(item => {
         const happened = item.actual_at != null;
         const skipped = !happened && item.skipped_at != null;
         const detail = happened && ['addition', 'measurement', 'temperature_control', 'note', 'photo'].includes(item.event_type)
           ? details[item.id] : planDetailsLabel(item, equipmentNames) || details[item.id];
-        const timing = planTimingLabel(item, events);
-        const metadata = item.ended_at != null ? `Ended ${formatTime(item.ended_at)}`
-          : !isBatch && timing !== group.label && !(group.label === 'Batch start' && timing === 'At batch start') ? timing : '';
+        const metadata = item.ended_at != null ? `Ended ${formatTime(item.ended_at)}` : '';
         const images = photos.filter(photo => photo.batch_event_id === item.id);
         return <div key={item.id} className="timeline-entry plan-card">
-          <div className="timeline-card"><div><div className="title-edit-row">
+          <div className="timeline-card"><div><div className={`title-edit-row${isBatch ? '' : ' recipe-title-detail'}`}>
             {isBatch && <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${item.title || kindLabel(item.event_type)}`}
               onClick={() => onEdit(item)} />}
-            <strong>{item.title || planKindLabel(item)}</strong></div>
+            <strong>{item.title || planKindLabel(item)}</strong>
+            {!isBatch && detail && <span className="recipe-event-detail">{detail}</span>}</div>
             {metadata && <div className="plan-meta">{metadata}</div>}
             {isBatch && <Tag color={happened ? planDuration(item) && !item.ended_at ? 'cyan' : 'green' : skipped ? 'default' : 'blue'}>
               {happened ? planDuration(item) && !item.ended_at ? 'In progress' : 'Done' : skipped ? 'Skipped' : 'Pending'}</Tag>}</div>
@@ -93,11 +101,12 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
             {!isBatch && <Button type="text" shape="circle" size="small" icon={<EditOutlined />}
               aria-label={`Edit planned event ${item.title || kindLabel(item.event_type)}`}
               title="Edit event" onClick={() => onEdit(item)} />}</div>
-          {detail && <p className="event-detail">{detail}</p>}
+          {isBatch && detail && <p className="event-detail">{detail}</p>}
           {images.length > 0 && <div className="photo-grid">{images.map(photo => <img key={photo.id} src={photo.url} alt="Batch activity" />)}</div>}
         </div>;
       })}
-    </Card>)}</div>
+      </Card></Fragment>;
+    })}</div>
     <div className={`timeline-actions${isBatch ? '' : ' timeline-actions-recipe'}`}><Dropdown trigger={['click']} placement="topLeft" open={menuOpen} onOpenChange={setMenuOpen}
       menu={{ items: actionItems, triggerSubMenuAction: 'click', onClick: ({ key }) => {
         const action = actionForMenu(key, events); setMenuOpen(false); onAdd(action.kind, action.preset);

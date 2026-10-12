@@ -57,14 +57,24 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
           await tx.exec('CREATE TABLE sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
           await tx.exec('INSERT INTO schema_meta(version) VALUES (?)', [workspaceSchemaVersion]);
         });
-      } else if (version[0].version === 7) {
+      } else if (version[0].version === 7 || version[0].version === 8) {
         await db.tx(async tx => {
-          for (const table of inventoryLocationTables) {
-            await tx.exec(schemaStatements[replicatedTables.indexOf(table)]);
-            await tx.exec('SELECT crsql_as_crr(?)', [table]);
+          if (version[0].version === 7) {
+            for (const table of inventoryLocationTables) {
+              await tx.exec(schemaStatements[replicatedTables.indexOf(table)]);
+              await tx.exec('SELECT crsql_as_crr(?)', [table]);
+            }
+            await tx.exec(removeEmptyDuplicateInventory);
+            await tx.exec(recategorizeLacticAcid);
           }
-          await tx.exec(removeEmptyDuplicateInventory);
-          await tx.exec(recategorizeLacticAcid);
+          const legacy = await tx.execO<{ id: string; specification_json: string | null }>(
+            "SELECT id, specification_json FROM equipment WHERE kind = 'controlled_fermenter'");
+          for (const item of legacy) {
+            const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
+            specification.built_in_temperature_control = true;
+            await tx.exec('UPDATE equipment SET kind = ?, specification_json = ? WHERE id = ?',
+              ['fermenter', JSON.stringify(specification), item.id]);
+          }
           await tx.exec('UPDATE schema_meta SET version = ?', [workspaceSchemaVersion]);
         });
       } else if (version[0].version !== workspaceSchemaVersion) {
@@ -482,6 +492,8 @@ export async function listEquipment(db: DB): Promise<Equipment[]> {
 export interface EquipmentSpecifications {
   slug?: string;
   capacity_liters?: number;
+  built_in_temperature_control?: boolean;
+  max_pressure_kpa?: number;
   measurement_min?: number;
   measurement_max?: number;
   measurement_unit?: string;
@@ -514,9 +526,15 @@ export async function createEquipment(db: DB, name: string, kind: string, catalo
   Object.assign(specification, overrides);
   delete specification.working_volume_liters;
   if (!capacityKinds.has(kind)) delete specification.capacity_liters;
+  if (kind !== 'fermenter') {
+    delete specification.built_in_temperature_control;
+    delete specification.max_pressure_kpa;
+  }
   delete specification.boil_off_liters_per_hour;
   if (!boilOffKinds.has(kind)) delete specification.boil_heat_loss_watts;
-  if (!temperatureCalibrationKinds.has(kind)) delete specification.temperature_offset_c;
+  if (!temperatureCalibrationKinds.has(kind) && !(kind === 'fermenter' && specification.built_in_temperature_control)) {
+    delete specification.temperature_offset_c;
+  }
   if (!measurementRangeUnits[kind]) {
     delete specification.measurement_min;
     delete specification.measurement_max;
@@ -525,6 +543,21 @@ export async function createEquipment(db: DB, name: string, kind: string, catalo
   await db.exec('INSERT INTO equipment(id, name, kind, catalog_model_id, specification_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     [id, name, kind, catalogModel?.id || null, Object.keys(specification).length ? JSON.stringify(specification) : null, nowSeconds()]);
   return id;
+}
+
+export async function updateFermenterCapabilities(db: DB, item: Equipment,
+  builtInTemperatureControl: boolean, maxPressureKpa: number | null): Promise<void> {
+  if (item.kind !== 'fermenter') throw new Error('These settings apply only to fermenters');
+  if (maxPressureKpa != null && (!Number.isFinite(maxPressureKpa) || maxPressureKpa <= 0)) {
+    throw new Error('Enter a positive pressure rating');
+  }
+  const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
+  if (builtInTemperatureControl) specification.built_in_temperature_control = true;
+  else delete specification.built_in_temperature_control;
+  if (maxPressureKpa == null) delete specification.max_pressure_kpa;
+  else specification.max_pressure_kpa = maxPressureKpa;
+  await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?',
+    [Object.keys(specification).length ? JSON.stringify(specification) : null, item.id]);
 }
 
 export async function updateEquipmentCapacity(db: DB, item: Equipment, capacityLiters: number | null): Promise<void> {
@@ -546,7 +579,10 @@ export async function updateEquipmentBoilHeatLoss(db: DB, item: Equipment, watts
 }
 
 export async function updateEquipmentTemperatureOffset(db: DB, item: Equipment, offsetC: number): Promise<void> {
-  if (!temperatureCalibrationKinds.has(item.kind)) throw new Error('This equipment has no temperature reading to calibrate');
+  const current = JSON.parse(item.specification_json || '{}') as EquipmentSpecifications;
+  if (!temperatureCalibrationKinds.has(item.kind) && !(item.kind === 'fermenter' && current.built_in_temperature_control)) {
+    throw new Error('This equipment has no temperature reading to calibrate');
+  }
   if (!Number.isFinite(offsetC)) throw new Error('Enter valid temperatures');
   const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
   specification.temperature_offset_c = offsetC;
