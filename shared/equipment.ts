@@ -28,8 +28,7 @@ export const equipmentGroups = [
     'fermentation_temperature_control', 'chiller'] },
   { key: 'measurement', label: 'Measurement', kinds: ['hydrometer', 'thermometer', 'refractometer',
     'ph_meter', 'pressure_gauge', 'carbonation_meter', 'dissolved_oxygen_meter', 'scale'] },
-  { key: 'passive', label: 'Passive vessels', kinds: ['kettle', 'mash_tun', 'fermenter', 'keg'] },
-  { key: 'other', label: 'Other', kinds: ['pump', 'refrigerator', 'temperature_controller', 'other'] }
+  { key: 'passive', label: 'Passive vessels', kinds: ['kettle', 'mash_tun', 'fermenter', 'keg'] }
 ] as const;
 
 export function equipmentKindLabel(kind: string): string {
