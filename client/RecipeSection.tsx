@@ -7,6 +7,7 @@ import { PlanForm, type PlanPreset } from './PlanForm.tsx';
 import { kindLabel } from './constants.ts';
 import { parsePlanDetails } from './planTiming.ts';
 import { EventTimeline } from './EventTimeline.tsx';
+import { RecipeTypeIcon } from './RecipeTypeIcon.tsx';
 import type { CatalogInventory } from '../shared/catalog.ts';
 import type { PreferredUnits } from './api.ts';
 
@@ -106,12 +107,15 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
       <div className="section-heading"><div><span className="eyebrow">Planning</span><h1>Recipes</h1></div><Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New recipe" title="New recipe" onClick={() => setNewRecipe(true)} /></div>
       <p className="muted">Reusable event plans for your batches.</p>
       {recipes.length > 0 && <div className="record-list">{recipes.map(item =>
-        <a key={item.id} className="record-link" href={`${basePath}/recipe/${item.id}`}
+        <a key={item.id} className="record-link recipe-link" href={`${basePath}/recipe/${item.id}`}
           onClick={event => { event.preventDefault(); onSelect(item.id); }}>
-          <strong>{item.name}</strong><small>{item.description || 'No description'}</small>
+          <RecipeTypeIcon type={item.recipe_type} />
+          <span className="recipe-link-copy"><strong>{item.name}</strong><small>{item.description || 'No description'}</small></span>
         </a>)}</div>}
     </section> : !recipe ? <Empty description="Recipe not found" /> : <section className="record-detail">
-        <div className="content-heading"><div><span className="eyebrow">Recipe plan · {recipe.recipe_type || 'Unspecified'}</span><h2>{recipe.name}</h2><p className="muted">{recipe.description}</p></div>
+        <div className="content-heading"><div className="recipe-detail-heading"><RecipeTypeIcon type={recipe.recipe_type} large />
+          <div><span className="eyebrow">Recipe plan · {recipe.recipe_type || 'Unspecified'}</span><h2>{recipe.name}</h2>
+            <p className="muted">{recipe.description}</p></div></div>
           <div className="heading-actions"><Button type="primary" onClick={() => setNewBatch(true)}>Start batch</Button>
             <Button type="text" shape="circle" icon={<SettingOutlined />} aria-label="Recipe settings"
               title="Recipe settings" onClick={openSettings} /></div>

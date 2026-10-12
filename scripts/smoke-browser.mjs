@@ -369,6 +369,7 @@ try {
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Beer' }).click();
   await page.getByRole('button', { name: 'Create recipe' }).click();
   await page.waitForURL(url => /^\/recipe\/[A-Za-z0-9_-]{10,32}$/.test(url.pathname));
+  await page.locator('.recipe-detail-heading .recipe-type-icon[data-recipe-type="beer"]').waitFor();
   await page.getByRole('button', { name: 'Edit planned event Mash' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Boil' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Chill' }).waitFor();
@@ -456,6 +457,7 @@ try {
   await page.getByRole('heading', { name: 'Smoke recipe revised' }).waitFor();
   await page.getByText('Edited recipe description').waitFor();
   await page.getByText('Recipe plan · wine').waitFor();
+  await page.locator('.recipe-detail-heading .recipe-type-icon[data-recipe-type="wine"]').waitFor();
   await page.getByRole('button', { name: 'Recipe settings' }).click();
   await recipeSettings.getByRole('button', { name: 'Delete recipe' }).click();
   await page.getByText('Batches already started from it keep their actions.').waitFor();
@@ -797,7 +799,11 @@ try {
     await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: type }).click();
     await dialog.getByRole('button', { name: 'Create recipe' }).click();
     await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
+    await page.locator(`.recipe-detail-heading .recipe-type-icon[data-recipe-type="${type.toLowerCase()}"]`).waitFor();
     if (await page.getByRole('button', { name: 'Edit planned event Boil' }).count()) throw new Error(`${type} recipe got a beer boil`);
+    await navigateSection(page, 'Recipes');
+    await page.locator('.record-link').filter({ hasText: `${type} smoke recipe` })
+      .locator(`.recipe-type-icon[data-recipe-type="${type.toLowerCase()}"]`).waitFor();
   }
 
   await page.getByRole('button', { name: 'Account settings' }).click();
