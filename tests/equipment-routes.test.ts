@@ -20,3 +20,9 @@ test('matching equipment names get distinct links', () => {
   assert.equal(equipmentPathSegment(second, items), 'brewzilla-35l-ijklmnop1234567890123');
   assert.equal(equipmentItemForPath(equipmentPathSegment(second, items), items)?.id, second.id);
 });
+
+test('an edited slug is independent of the display name', () => {
+  const vevor = { ...item('27I0Kppqfmadgy4Ymv-Ze', 'My VEVOR'), specification_json: '{"slug":"vevor-35l"}' };
+  assert.equal(equipmentPathSegment(vevor, [vevor]), 'vevor-35l');
+  assert.equal(equipmentItemForPath('vevor-35l', [vevor])?.id, vevor.id);
+});

@@ -2,9 +2,14 @@ import type { Equipment } from './db.ts';
 import { recordSlug } from './recordSlug.ts';
 
 export function equipmentPathSegment(item: Equipment, items: Equipment[]): string {
-  const name = recordSlug(item.name);
-  return items.filter(row => recordSlug(row.name) === name).length === 1
+  const name = equipmentSlug(item);
+  return items.filter(row => equipmentSlug(row) === name).length === 1
     ? name : `${name}-${item.id.toLowerCase()}`;
+}
+
+export function equipmentSlug(item: Equipment): string {
+  const specification = JSON.parse(item.specification_json || '{}') as { slug?: string };
+  return specification.slug || recordSlug(item.name);
 }
 
 export function equipmentItemForPath(segment: string, items: Equipment[]): Equipment | undefined {

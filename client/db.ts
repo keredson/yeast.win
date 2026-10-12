@@ -3,6 +3,7 @@ import { fetchApi } from './api.ts';
 import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { nanoid } from 'nanoid';
 import { boilOffKinds, capacityKinds, equipmentKinds, measurementRangeUnits } from '../shared/equipment.ts';
+import { equipmentSlug } from './equipmentRoutes.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
 import { changeColumns, indexStatements, inventoryLocationTables, nowSeconds, recategorizeLacticAcid, removeEmptyDuplicateInventory, replicatedTables, schemaStatements, workspaceSchemaVersion, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
@@ -473,12 +474,28 @@ export async function listEquipment(db: DB): Promise<Equipment[]> {
 }
 
 export interface EquipmentSpecifications {
+  slug?: string;
   capacity_liters?: number;
   measurement_min?: number;
   measurement_max?: number;
   measurement_unit?: string;
   working_volume_liters?: number;
   boil_off_liters_per_hour?: number;
+  rated_power_watts?: number;
+}
+
+export async function updateEquipmentIdentity(db: DB, item: Equipment, name: string, slug: string,
+  equipment: Equipment[]): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed || trimmed.length > 120) throw new Error('Enter an equipment name');
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) || slug.length > 80) throw new Error('Enter a valid slug');
+  if (equipment.some(row => row.id !== item.id && (equipmentSlug(row) === slug || row.id === slug))) {
+    throw new Error('That slug is already used by another equipment item');
+  }
+  const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
+  specification.slug = slug;
+  await db.exec('UPDATE equipment SET name = ?, specification_json = ? WHERE id = ?',
+    [trimmed, JSON.stringify(specification), item.id]);
 }
 
 export async function createEquipment(db: DB, name: string, kind: string, catalogModel?: CatalogEquipment,
@@ -526,6 +543,15 @@ export async function updateEquipmentBoilOffRate(db: DB, item: Equipment, liters
   else specification.boil_off_liters_per_hour = litersPerHour;
   await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?',
     [Object.keys(specification).length ? JSON.stringify(specification) : null, item.id]);
+}
+
+export async function updateEquipmentRatedPower(db: DB, item: Equipment, watts: number | null): Promise<void> {
+  if (!boilOffKinds.has(item.kind)) throw new Error('Rated power applies to electric kettles and all-in-one systems');
+  if (watts != null && (!Number.isFinite(watts) || watts <= 0)) throw new Error('Enter a positive power');
+  const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
+  if (watts == null) delete specification.rated_power_watts;
+  else specification.rated_power_watts = watts;
+  await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?', [JSON.stringify(specification), item.id]);
 }
 
 export async function updateEquipmentMeasurementRange(db: DB, item: Equipment,
