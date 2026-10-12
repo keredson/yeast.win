@@ -136,8 +136,10 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
   return <div className="section-page">
     {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
     {!selectedId ? <section className="record-index equipment-index"><div className="section-heading"><div><span className="eyebrow">Your gear</span><h1>Equipment</h1></div>
-      <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New equipment" title="New equipment" onClick={() => setNewEquipment(true)} /></div>
+      {equipment.length > 0 && <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New equipment" title="New equipment"
+        onClick={() => setNewEquipment(true)} />}</div>
       <p className="muted">Measurements and control settings can reference a specific item.</p>
+      {equipment.length === 0 && <Button icon={<PlusOutlined />} onClick={() => setNewEquipment(true)}>Add equipment</Button>}
       {equipment.length > 0 && <div className="group-tables">{kinds.map(kind => {
         const rows = equipment.filter(row => row.kind === kind);
         return rows.length ? <section key={kind} className="group-table"><h2>{equipmentKindLabel(kind)}</h2>
