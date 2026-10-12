@@ -456,6 +456,24 @@ export async function listInventoryMovements(db: DB, itemId: string): Promise<In
     ORDER BY at DESC, id DESC`, [itemId, itemId, itemId, itemId]);
 }
 
+export async function listInventoryBalances(db: DB, items: InventoryItem[]): Promise<Record<string, number | null>> {
+  if (!items.length) return {};
+  const rows = await db.execO<InventoryMovement & { inventory_item_id: string }>(`
+    SELECT id, inventory_item_id, 'Purchased' AS kind, quantity, unit, purchased_at AS at FROM inventory_purchases
+    UNION ALL SELECT id, inventory_item_id, 'Counted' AS kind, quantity, unit, counted_at AS at FROM inventory_counts
+    UNION ALL SELECT id, inventory_item_id, 'Discarded' AS kind, quantity, unit, discarded_at AS at FROM inventory_discards
+    UNION ALL SELECT a.event_id AS id, a.inventory_item_id, 'Used' AS kind, a.quantity, a.unit, e.actual_at AS at
+      FROM additions a JOIN batch_events e ON e.id = a.event_id WHERE a.inventory_item_id IS NOT NULL
+    ORDER BY inventory_item_id, at DESC, id DESC`);
+  const byItem = new Map<string, InventoryMovement[]>();
+  for (const row of rows) {
+    const movements = byItem.get(row.inventory_item_id) || [];
+    movements.push(row);
+    byItem.set(row.inventory_item_id, movements);
+  }
+  return Object.fromEntries(items.map(item => [item.id, inventoryBalance(byItem.get(item.id) || [], item.default_unit)]));
+}
+
 export function inventoryBalance(rows: InventoryMovement[], unit: string): number | null {
   const currentCount = rows.find(row => row.kind === 'Counted');
   const afterAnchor = currentCount ? rows.filter(row => row.at > currentCount.at) : rows;

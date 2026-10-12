@@ -442,6 +442,12 @@ try {
   await newGrain.waitFor({ state: 'hidden' });
   await page.waitForURL(url => url.pathname === '/inventory');
   await page.getByRole('button', { name: 'Add grain' }).waitFor();
+  const grainRow = page.locator('.group-table').getByRole('row').filter({ has: page.getByRole('link', { name: 'Smoke grain' }) });
+  await page.getByRole('columnheader', { name: 'On hand' }).waitFor();
+  await grainRow.getByText('2 lb 5 oz').waitFor();
+  if (!String(await grainRow.getByRole('link', { name: 'Smoke grain' }).getAttribute('href')).endsWith('/inventory/smoke-grain')) {
+    throw new Error('Inventory link still uses an item ID');
+  }
   await page.getByRole('button', { name: 'Add grain' }).click();
   const moreGrain = page.getByRole('dialog', { name: 'New grain item' });
   await moreGrain.getByRole('combobox', { name: 'Item' }).fill('Smoke grain');
@@ -458,8 +464,15 @@ try {
   await bought.getByRole('spinbutton', { name: 'Quantity · pounds' }).fill('1');
   await bought.getByRole('button', { name: 'Save' }).click();
   await bought.waitFor({ state: 'hidden' });
+  await grainRow.getByText('4 lb 5 oz').waitFor();
   await page.locator('.group-table').getByRole('link', { name: 'Smoke grain' }).click();
+  await page.waitForURL(url => url.pathname === '/inventory/smoke-grain');
   await page.getByText('4 lb 5 oz estimated on hand').waitFor();
+  await page.getByRole('heading', { name: 'Stock history' }).waitFor();
+  await page.locator('.inventory-history').getByRole('columnheader', { name: 'Activity' }).waitFor();
+  await page.setViewportSize({ width: 320, height: 720 });
+  if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw new Error('Inventory history overflows a narrow phone');
+  await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole('button', { name: 'Discard' }).click();
   const discard = page.getByRole('dialog', { name: 'Discard Smoke grain' });
   await discard.getByRole('spinbutton', { name: 'Ounces' }).fill('5');

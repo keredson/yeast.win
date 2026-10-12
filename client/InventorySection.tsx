@@ -1,20 +1,28 @@
 import { useEffect, useState } from 'react';
-import { Alert, AutoComplete, Button, Card, Checkbox, Dropdown, Empty, Form, Input, Modal, Select, Table, Tag } from 'antd';
+import { Alert, AutoComplete, Button, Checkbox, Dropdown, Empty, Form, Input, Modal, Select, Table } from 'antd';
 import { MoreOutlined, PlusOutlined } from '@ant-design/icons';
 import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
-import { addInventoryEntry, convertInventoryUnit, createInventoryItem, inventoryBalance, listInventoryMovements,
+import { addInventoryEntry, convertInventoryUnit, createInventoryItem, inventoryBalance, listInventoryBalances, listInventoryMovements,
   type InventoryItem, type InventoryMovement, type LocalDb } from './db.ts';
 import { formatTime } from './time.ts';
 import type { PreferredUnits } from './api.ts';
 import { compoundMassUnit, formatQuantity, quantityForStorage, quantityUnitsForCategory, storageUnit, unitOptions } from '../shared/units.ts';
 import { QuantityFields } from './QuantityFields.tsx';
 import { changeQuantityUnit } from './unitFields.ts';
+import { inventoryPathSegment } from './inventoryRoutes.ts';
+
+function onHandQuantity(item: InventoryItem, balance: number): string {
+  if (item.display_unit === compoundMassUnit) return formatQuantity(balance, item.default_unit, compoundMassUnit);
+  const amount = convertInventoryUnit(balance, item.default_unit, item.display_unit);
+  return amount == null ? 'Needs conversion' : String(Number(amount.toFixed(6)));
+}
 
 export function InventorySection({ db, basePath, accountId, items, catalog, preferredUnits, selectedId, onSelect, onChanged }: {
   db: LocalDb; basePath: string; accountId: string; items: InventoryItem[]; catalog: CatalogInventory[]; preferredUnits: PreferredUnits;
   selectedId: string | null; onSelect: (id: string | null) => void; onChanged: () => Promise<void>;
 }) {
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
+  const [onHand, setOnHand] = useState<Record<string, number | null>>({});
   const [newItemCategory, setNewItemCategory] = useState<string | null>(null);
   const [entryKind, setEntryKind] = useState<'purchase' | 'count' | 'discard' | null>(null);
   const [entryItemId, setEntryItemId] = useState<string | null>(null);
@@ -60,6 +68,12 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
     setMovements(await listInventoryMovements(db, selectedId));
   }
   useEffect(() => { void refreshMovements(); }, [db, selectedId, items]);
+  useEffect(() => {
+    let cancelled = false;
+    void listInventoryBalances(db, items).then(balances => { if (!cancelled) setOnHand(balances); })
+      .catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => { cancelled = true; };
+  }, [db, items]);
 
   const balance = item ? inventoryBalance(movements, item.default_unit) : null;
 
@@ -109,7 +123,10 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
             onClick={() => openCreate(category)} /></div>
           <Table<InventoryItem> dataSource={rows} rowKey="id" pagination={false} size="small"
             columns={[{ title: 'Item', dataIndex: 'name', render: (_, row) =>
-              <a href={`${basePath}/inventory/${row.id}`} onClick={event => { event.preventDefault(); onSelect(row.id); }}>{row.name}</a> },
+              <a href={`${basePath}/inventory/${inventoryPathSegment(row, items)}`} onClick={event => { event.preventDefault(); onSelect(row.id); }}>{row.name}</a> },
+            { title: 'On hand', key: 'on_hand', width: 140, render: (_, row) => onHand[row.id] === undefined ? '—'
+              : onHand[row.id] === null ? 'Needs conversion'
+                : onHandQuantity(row, onHand[row.id]!) },
             { title: 'Unit', dataIndex: 'display_unit', width: 100 },
             { title: '', key: 'actions', width: 48, align: 'right', render: (_, row) => <Dropdown trigger={['click']}
               menu={{ items: [{ key: 'purchase', label: 'Bought' }, { key: 'count', label: 'Counted' }, { key: 'discard', label: 'Discard' }],
@@ -127,10 +144,13 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
           <div className="heading-actions"><Button onClick={() => void openEntry(item, 'purchase')}>Bought some</Button>
             <Button onClick={() => void openEntry(item, 'discard')}>Discard</Button>
             <Button type="primary" onClick={() => void openEntry(item, 'count')}>Count stock</Button></div></div>
-        <div className="card-stack">{movements.length ? movements.map(row => <Card size="small" key={`${row.kind}-${row.id}`}>
-          <div className="timeline-card"><div><strong>{formatQuantity(row.quantity, row.unit, itemDisplayUnit)}</strong>
-            <div className="muted">{formatTime(row.at)}</div></div><Tag>{row.kind}</Tag></div>
-        </Card>) : <Card><Empty description="No movements yet" /></Card>}</div>
+        <h3>Stock history</h3>
+        <Table<InventoryMovement> className="inventory-history" dataSource={movements} rowKey={row => `${row.kind}-${row.id}`}
+          pagination={false} size="small" scroll={{ x: 480 }} locale={{ emptyText: 'No stock history yet' }}
+          columns={[{ title: 'When', dataIndex: 'at', width: 190, render: at => formatTime(at) },
+            { title: 'Activity', dataIndex: 'kind', width: 120 },
+            { title: 'Quantity', key: 'quantity', align: 'right', render: (_, row) =>
+              `${row.kind === 'Purchased' ? '+' : row.kind === 'Used' || row.kind === 'Discarded' ? '−' : 'Set to '}${formatQuantity(row.quantity, row.unit, itemDisplayUnit)}` }]} />
       </section>}
     <Modal title={newItemCategory ? `New ${newItemCategory.toLowerCase()} item` : 'New inventory item'} open={!!newItemCategory}
       onCancel={() => setNewItemCategory(null)} footer={null} destroyOnHidden>
