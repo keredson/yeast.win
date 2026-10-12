@@ -397,6 +397,15 @@ try {
   await page.getByRole('combobox', { name: 'Preferred temperature unit' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="°F"]').click();
   await page.waitForFunction(async () => (await (await fetch('/api/me')).json()).preferred_units.temperature === '°F');
+  await navigateSection(page, 'Equipment');
+  for (const [index, [kind, name]] of [['Kettle', 'Smoke kettle'], ['Fermenter', 'Smoke fermenter'], ['Chiller', 'Smoke chiller']].entries()) {
+    await chooseEquipmentType(page, index === 0 ? 'Add equipment' : 'New equipment', 'Brewing', kind);
+    const vesselDialog = page.getByRole('dialog', { name: `Add ${kind.toLowerCase()}` });
+    await vesselDialog.getByRole('combobox', { name: 'Name' }).fill(name);
+    await vesselDialog.getByRole('button', { name: 'Create equipment' }).click();
+    await page.getByRole('heading', { name, exact: true }).waitFor();
+    await navigateSection(page, 'Equipment');
+  }
   await navigateSection(page, 'Recipes');
   await page.getByRole('button', { name: 'New recipe' }).click();
   await page.getByLabel('Recipe name').fill('Smoke recipe');
@@ -404,11 +413,38 @@ try {
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Beer' }).click();
   await page.getByRole('button', { name: 'Create recipe' }).click();
   await page.waitForURL(url => /^\/recipe\/[A-Za-z0-9_-]{10,32}$/.test(url.pathname));
+  await page.locator('.recipe-detail-heading .recipe-type-icon[data-recipe-type="beer"]').waitFor();
   await page.getByRole('button', { name: 'Edit planned event Mash' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Boil' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Chill' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Transfer to fermenter' }).waitFor();
+  await page.getByRole('button', { name: 'Edit planned event Transfer to fermenter' }).click();
+  const transferPlan = page.getByRole('dialog', { name: 'Edit Transfer to fermenter' });
+  if (await transferPlan.getByRole('combobox', { name: /From vessel/ }).count()
+    || await transferPlan.getByRole('spinbutton', { name: 'Duration (optional)' }).count()) {
+    throw new Error('Transfer plan still asks for a source vessel or duration');
+  }
+  await transferPlan.getByRole('combobox', { name: 'To vessel (optional)' }).click();
+  if (await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke chiller' }).count()) {
+    throw new Error('Transfer plan offered a chiller as a vessel');
+  }
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke fermenter' }).click();
+  await transferPlan.getByRole('button', { name: 'Save event' }).click();
+  await page.locator('.plan-card').filter({ hasText: 'Transfer to fermenter' }).getByText('To Smoke fermenter').waitFor();
   await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
+  await page.getByRole('button', { name: 'Edit planned event Package batch' }).click();
+  const beerPackaging = page.getByRole('dialog', { name: 'Edit Package batch' });
+  if (await beerPackaging.getByRole('textbox', { name: 'Container' }).inputValue()) {
+    throw new Error('New recipe chose a packaging container in advance');
+  }
+  if (await beerPackaging.getByRole('spinbutton', { name: 'Duration (optional)' }).count()) {
+    throw new Error('Packaging plan still has a duration');
+  }
+  if (Number(await beerPackaging.getByRole('spinbutton', { name: 'Time offset' }).inputValue()) !== 21
+    || !await beerPackaging.getByRole('combobox', { name: 'Timing' }).locator('..').getByText('At or after Pitch yeast').count()) {
+    throw new Error('Beer packaging was not planned 21 days after pitching yeast');
+  }
+  await beerPackaging.locator('.ant-modal-close').click();
   if (await page.locator('.plan-card').filter({ hasText: 'Pitch yeast' }).first()
     .locator('.title-edit-row').getByRole('button', { name: 'Edit planned event Pitch yeast' }).count()) {
     throw new Error('Recipe edit button is still beside the event title');
@@ -460,6 +496,29 @@ try {
   await page.getByRole('button', { name: 'Create batch' }).click();
   await page.getByRole('heading', { name: 'Batch from recipe' }).waitFor();
   await page.locator('.plan-card').getByText('2-row pale malt extra').waitFor();
+  await page.getByRole('button', { name: 'Record Transfer to fermenter' }).click();
+  const recordTransfer = page.getByRole('dialog', { name: 'Record: Transfer to fermenter' });
+  if (await recordTransfer.getByRole('combobox', { name: 'From vessel' }).count()
+    || await recordTransfer.getByLabel('Ended (optional)').count()) {
+    throw new Error('Transfer recording still asks for a source vessel or end time');
+  }
+  await recordTransfer.getByRole('combobox', { name: 'To vessel' }).locator('..').getByText('Smoke fermenter').waitFor();
+  await recordTransfer.getByRole('button', { name: 'Save event' }).click();
+  await recordTransfer.waitFor({ state: 'hidden' });
+  await page.locator('.plan-card').filter({ hasText: 'Transfer to fermenter' }).getByText('To Smoke fermenter').waitFor();
+  await page.locator('.plan-card').filter({ hasText: 'Package batch' }).getByText('21 days after Pitch yeast').waitFor();
+  await page.getByRole('button', { name: 'Record Package batch' }).click();
+  const recordPackaging = page.getByRole('dialog', { name: 'Record: Package batch' });
+  await recordPackaging.getByRole('button', { name: 'Save event' }).click();
+  await recordPackaging.locator('.ant-form-item-explain-error').filter({ hasText: 'Container' }).waitFor();
+  await recordPackaging.getByRole('textbox', { name: 'Container' }).fill('Bottle');
+  await recordPackaging.getByRole('combobox', { name: 'Unit' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="US fl oz"]').click();
+  await recordPackaging.getByRole('spinbutton', { name: 'Size' }).fill('12');
+  await recordPackaging.getByRole('spinbutton', { name: 'Count' }).fill('48');
+  await recordPackaging.getByRole('button', { name: 'Save event' }).click();
+  await recordPackaging.waitFor({ state: 'hidden' });
+  await page.locator('.plan-card').filter({ hasText: 'Package batch' }).getByText('Done').waitFor();
   await navigateSection(page, 'Recipes');
   await page.locator('.record-link').filter({ hasText: 'Smoke recipe' }).click();
   await choosePlanKind(page, 'Add recipe event', 'Notes');
@@ -490,7 +549,8 @@ try {
   await recipeSettings.waitFor({ state: 'hidden' });
   await page.getByRole('heading', { name: 'Smoke recipe revised' }).waitFor();
   await page.getByText('Edited recipe description').waitFor();
-  await page.getByText('Recipe plan · wine').waitFor();
+  if (await page.getByText('Recipe plan · wine').count()) throw new Error('Recipe header still repeats its type');
+  await page.locator('.recipe-detail-heading .recipe-type-icon[data-recipe-type="wine"]').waitFor();
   await page.getByRole('button', { name: 'Recipe settings' }).click();
   await recipeSettings.getByRole('button', { name: 'Delete recipe' }).click();
   await page.getByText('Batches already started from it keep their actions.').waitFor();
@@ -823,7 +883,7 @@ try {
   await page.getByRole('heading', { name: 'Batches' }).waitFor();
   console.log('Changed password, revoked other sessions, and signed back in');
 
-  for (const type of ['Wine', 'Mead']) {
+  for (const type of ['Wine', 'Mead', 'Cider']) {
     await navigateSection(page, 'Recipes');
     await page.getByRole('button', { name: 'New recipe' }).click();
     const dialog = page.getByRole('dialog', { name: 'New recipe' });
@@ -832,7 +892,21 @@ try {
     await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: type }).click();
     await dialog.getByRole('button', { name: 'Create recipe' }).click();
     await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
+    await page.getByRole('button', { name: 'Edit planned event Package batch' }).click();
+    const packaging = page.getByRole('dialog', { name: 'Edit Package batch' });
+    const days = type === 'Cider' ? 28 : 60;
+    if (Number(await packaging.getByRole('spinbutton', { name: 'Time offset' }).inputValue()) !== days
+      || !await packaging.getByRole('combobox', { name: 'Timing' }).locator('..').getByText('At or after Pitch yeast').count()) {
+      throw new Error(`${type} packaging was not planned ${days} days after pitching yeast`);
+    }
+    await packaging.locator('.ant-modal-close').click();
+    await page.locator(`.recipe-detail-heading .recipe-type-icon[data-recipe-type="${type.toLowerCase()}"]`).waitFor();
+    await page.locator('.app-nav .nav-recent-item').filter({ hasText: `${type} smoke recipe` })
+      .locator(`.recipe-type-icon[data-recipe-type="${type.toLowerCase()}"]`).waitFor();
     if (await page.getByRole('button', { name: 'Edit planned event Boil' }).count()) throw new Error(`${type} recipe got a beer boil`);
+    await navigateSection(page, 'Recipes');
+    await page.locator('.record-link').filter({ hasText: `${type} smoke recipe` })
+      .locator(`.recipe-type-icon[data-recipe-type="${type.toLowerCase()}"]`).waitFor();
   }
 
   await page.getByRole('button', { name: 'Account settings' }).click();

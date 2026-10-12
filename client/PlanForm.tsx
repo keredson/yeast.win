@@ -2,9 +2,10 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Alert, AutoComplete, Button, Checkbox, Form, Input, InputNumber, Select } from 'antd';
 import { kindLabel, measurementKinds } from './constants.ts';
-import type { InventoryItem, PlanInput } from './db.ts';
+import type { Equipment, InventoryItem, PlanInput } from './db.ts';
+import { vesselKinds } from '../shared/equipment.ts';
 import { compoundMassUnit, convertUnit, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions } from '../shared/units.ts';
-import { parsePlanDetails, planDuration } from './planTiming.ts';
+import { parsePlanDetails, planDuration, supportsDuration } from './planTiming.ts';
 import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
 import { QuantityFields } from './QuantityFields.tsx';
 import type { PreferredUnits } from './api.ts';
@@ -32,14 +33,15 @@ interface Values {
   item_category?: string; quantity?: number; unit?: string; pounds?: number; ounces?: number;
   measurement_kind?: string; target_value?: number; target_unit?: string;
   mode?: string; container_name?: string; container_size?: number; container_count?: number;
+  to_vessel_id?: string;
   duration_value?: number; duration_unit?: typeof timeUnits[number]['value'];
 }
 
-export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, preferredUnits, preset, allowRecordNow = false, extraAction, submit }: {
+export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory, catalog, preferredUnits, preset, allowRecordNow = false, extraAction, submit }: {
   anchors: Anchor[];
   eventType: string;
   initialPlan?: PlanInput & { id: string };
-  inventory: InventoryItem[]; catalog: CatalogInventory[]; preferredUnits: PreferredUnits;
+  equipment: Equipment[]; inventory: InventoryItem[]; catalog: CatalogInventory[]; preferredUnits: PreferredUnits;
   preset?: PlanPreset;
   allowRecordNow?: boolean;
   extraAction?: ReactNode;
@@ -48,6 +50,7 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
   const [form] = Form.useForm<Values>();
   const initialDetails = parsePlanDetails(initialPlan?.details_json);
   const kind = initialPlan?.event_type || eventType;
+  const timedControl = supportsDuration(kind);
   const offset = initialPlan?.offset_seconds ?? 0;
   const offsetUnit = offset === 0 ? timeUnits[1] : [...timeUnits].reverse().find(item => Math.abs(offset) % item.multiplier === 0) || timeUnits[0];
   const initialItem = String(initialDetails.item_name || initialPlan?.title || preset?.title || '');
@@ -69,6 +72,11 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
   const selectedTargetUnit = Form.useWatch('target_unit', form) as string | undefined;
   const selectedOffsetUnit = Form.useWatch('offset_unit', form) as string | undefined;
   const selectedDurationUnit = Form.useWatch('duration_unit', form) as string | undefined;
+  const vesselOptions = equipment.filter(item => vesselKinds.has(item.kind)).map(item => ({ value: item.id, label: item.name }));
+  const destinationId = initialDetails.to_vessel_id;
+  if (typeof destinationId === 'string' && !vesselOptions.some(item => item.value === destinationId)) {
+    vesselOptions.push({ value: destinationId, label: String(initialDetails.to_vessel_name || 'Archived vessel') });
+  }
 
   function changeTimeUnit(field: 'offset_value' | 'duration_value', from: string | undefined, to: string) {
     const oldUnit = timeUnits.find(item => item.value === from);
@@ -94,7 +102,7 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
       if (values.details) details.note = values.details;
       if (phase) details.phase = phase;
       if (anchorId) details.anchor_point = point === 'end' ? 'end' : 'start';
-      if (values.duration_value != null) {
+      if (timedControl && values.duration_value != null) {
         const durationUnit = timeUnits.find(item => item.value === values.duration_unit);
         if (!durationUnit || values.duration_value <= 0) throw new Error('Choose a positive duration');
         details.duration_seconds = Math.round(values.duration_value * durationUnit.multiplier);
@@ -104,12 +112,19 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
         measurement: ['measurement_kind', 'target_value', 'target_unit'],
         temperature_control: ['mode', 'target_value', 'target_unit'],
         pressure_control: ['target_value', 'target_unit'],
-        transfer: ['quantity', 'unit'],
+        transfer: ['to_vessel_id', 'quantity', 'unit'],
         packaging: ['container_name', 'container_size', 'container_count', 'unit']
       };
       for (const key of keysByKind[kind] || []) {
         const value = values[key];
         if (typeof value === 'string' && value || typeof value === 'number') details[key] = value;
+      }
+      if (kind === 'transfer') {
+        const vessel = equipment.find(item => item.id === values.to_vessel_id);
+        if (vessel) details.to_vessel_name = vessel.name;
+        else if (values.to_vessel_id === initialDetails.to_vessel_id && initialDetails.to_vessel_name) {
+          details.to_vessel_name = initialDetails.to_vessel_name;
+        }
       }
       if (kind === 'addition') {
         details.item_name = values.title.trim();
@@ -153,7 +168,8 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
     pounds: initialSplit?.pounds, ounces: initialSplit?.ounces,
     target_value: initialDetails.target_value ?? (phase === 'mash' ? convertUnit(67, '°C', preferredUnits.temperature)
       : phase === 'boil' ? convertUnit(100, '°C', preferredUnits.temperature) : undefined), container_name: initialDetails.container_name,
-    container_size: initialDetails.container_size, container_count: initialDetails.container_count
+    container_size: initialDetails.container_size, container_count: initialDetails.container_count,
+    to_vessel_id: initialDetails.to_vessel_id
   }}>
     {error && <Alert type="error" message={error} className="form-alert" />}
     {kind === 'addition' && <>
@@ -210,17 +226,20 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
     {kind === 'pressure_control' && <div className="form-pair"><Form.Item name="target_value" label="Target pressure"><InputNumber className="full-width" step="any" /></Form.Item>
       <Form.Item name="target_unit" label="Unit"><Select options={unitOptions(unitGroups.pressure)}
         onChange={unit => changeNumberUnit(form, ['target_value'], selectedTargetUnit, unit)} /></Form.Item></div>}
-    {kind === 'transfer' && <div className="form-pair"><Form.Item name="quantity" label="Volume"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
-      <Form.Item name="unit" label="Unit"><Select options={unitOptions(unitGroups.volume)} onChange={changeMainUnit} /></Form.Item></div>}
+    {kind === 'transfer' && <>
+      <Form.Item name="to_vessel_id" label="To vessel (optional)"><Select allowClear showSearch optionFilterProp="label" options={vesselOptions} /></Form.Item>
+      <div className="form-pair"><Form.Item name="quantity" label="Volume"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
+        <Form.Item name="unit" label="Unit"><Select options={unitOptions(unitGroups.volume)} onChange={changeMainUnit} /></Form.Item></div>
+    </>}
     {kind === 'packaging' && <>
       <Form.Item name="container_name" label="Container"><Input placeholder="Bottle, keg…" /></Form.Item>
       <div className="form-triple"><Form.Item name="container_size" label="Container size"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
         <Form.Item name="unit" label="Unit"><Select options={unitOptions(unitGroups.volume)} onChange={changeMainUnit} /></Form.Item>
         <Form.Item name="container_count" label="Count"><InputNumber className="full-width" min={1} precision={0} /></Form.Item></div>
     </>}
-    <div className="form-pair"><Form.Item name="duration_value" label="Duration (optional)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
+    {timedControl && <div className="form-pair"><Form.Item name="duration_value" label="Duration (optional)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
       <Form.Item name="duration_unit" label="Duration unit"><Select options={timeUnits.map(({ value, label }) => ({ value, label }))}
-        onChange={unit => changeTimeUnit('duration_value', selectedDurationUnit, unit)} /></Form.Item></div>
+        onChange={unit => changeTimeUnit('duration_value', selectedDurationUnit, unit)} /></Form.Item></div>}
     <Form.Item name="timing_key" label="Timing" rules={[{ required: true }]}><Select showSearch optionFilterProp="label" options={[
       { value: 'start', label: 'Batch start' },
       ...anchors.flatMap(anchor => (planDuration(anchor) ? [

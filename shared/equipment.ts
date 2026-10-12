@@ -7,6 +7,7 @@ export const equipmentKinds = [
   { value: 'kettle', label: 'Kettle' },
   { value: 'mash_tun', label: 'Mash tun' },
   { value: 'fermenter', label: 'Fermenter' },
+  { value: 'keg', label: 'Keg' },
   { value: 'chiller', label: 'Wort chiller' },
   { value: 'refrigerator', label: 'Fermentation fridge or freezer' },
   { value: 'temperature_controller', label: 'Temperature controller' },
@@ -27,7 +28,7 @@ export const equipmentGroups = [
     'fermentation_temperature_control', 'chiller'] },
   { key: 'measurement', label: 'Measurement', kinds: ['hydrometer', 'thermometer', 'refractometer',
     'ph_meter', 'pressure_gauge', 'carbonation_meter', 'dissolved_oxygen_meter', 'scale'] },
-  { key: 'passive', label: 'Passive vessels', kinds: ['kettle', 'mash_tun', 'fermenter'] }
+  { key: 'passive', label: 'Passive vessels', kinds: ['kettle', 'mash_tun', 'fermenter', 'keg'] }
 ] as const;
 
 export function equipmentKindLabel(kind: string): string {
@@ -35,10 +36,10 @@ export function equipmentKindLabel(kind: string): string {
 }
 
 export const capacityKinds = new Set<string>(['electric_kettle', 'all_in_one', 'controlled_fermenter',
-  'kettle', 'mash_tun', 'fermenter', 'refrigerator']);
+  'kettle', 'mash_tun', 'fermenter', 'keg', 'refrigerator']);
 
 export const vesselKinds = new Set<string>(['electric_kettle', 'all_in_one', 'controlled_fermenter',
-  'kettle', 'mash_tun', 'fermenter']);
+  'kettle', 'mash_tun', 'fermenter', 'keg']);
 
 export const boilOffKinds = new Set<string>(['electric_kettle', 'all_in_one']);
 

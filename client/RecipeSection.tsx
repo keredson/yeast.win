@@ -2,21 +2,23 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Empty, Form, Input, Modal, Popconfirm, Select } from 'antd';
 import { DeleteOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
 import { addRecipePlan, createRecipe, deleteRecipe, deleteRecipePlan, listRecipePlans, startBatchFromRecipe, updateRecipe, updateRecipePlan,
-  type InventoryItem, type LocalDb, type PlanInput, type Recipe, type RecipeType } from './db.ts';
+  type Equipment, type InventoryItem, type LocalDb, type PlanInput, type Recipe, type RecipeType } from './db.ts';
 import { PlanForm, type PlanPreset } from './PlanForm.tsx';
 import { kindLabel } from './constants.ts';
 import { parsePlanDetails } from './planTiming.ts';
 import { EventTimeline } from './EventTimeline.tsx';
+import { RecipeTypeIcon } from './RecipeTypeIcon.tsx';
 import type { CatalogInventory } from '../shared/catalog.ts';
 import type { PreferredUnits } from './api.ts';
 
 const recipeTypeOptions = [
-  { value: 'beer', label: 'Beer' }, { value: 'wine', label: 'Wine' }, { value: 'mead', label: 'Mead' }
+  { value: 'beer', label: 'Beer' }, { value: 'wine', label: 'Wine' },
+  { value: 'mead', label: 'Mead' }, { value: 'cider', label: 'Cider' }
 ];
 
-export function RecipeSection({ db, basePath, accountId, recipes, inventory, catalogInventory, preferredUnits, selectedId, onSelect, onChanged, onBatchStarted }: {
+export function RecipeSection({ db, basePath, accountId, recipes, equipment, inventory, catalogInventory, preferredUnits, selectedId, onSelect, onChanged, onBatchStarted }: {
   db: LocalDb; basePath: string; accountId: string; recipes: Recipe[]; selectedId: string | null; onSelect: (id: string | null) => void;
-  inventory: InventoryItem[]; catalogInventory: CatalogInventory[]; preferredUnits: PreferredUnits;
+  equipment: Equipment[]; inventory: InventoryItem[]; catalogInventory: CatalogInventory[]; preferredUnits: PreferredUnits;
   onChanged: () => Promise<void>; onBatchStarted: (id: string) => void;
 }) {
   const [settingsForm] = Form.useForm<{ name: string; description?: string; recipe_type: RecipeType }>();
@@ -106,17 +108,20 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
       <div className="section-heading"><div><span className="eyebrow">Planning</span><h1>Recipes</h1></div><Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New recipe" title="New recipe" onClick={() => setNewRecipe(true)} /></div>
       <p className="muted">Reusable event plans for your batches.</p>
       {recipes.length > 0 && <div className="record-list">{recipes.map(item =>
-        <a key={item.id} className="record-link" href={`${basePath}/recipe/${item.id}`}
+        <a key={item.id} className="record-link recipe-link" href={`${basePath}/recipe/${item.id}`}
           onClick={event => { event.preventDefault(); onSelect(item.id); }}>
-          <strong>{item.name}</strong><small>{item.description || 'No description'}</small>
+          <RecipeTypeIcon type={item.recipe_type} />
+          <span className="recipe-link-copy"><strong>{item.name}</strong><small>{item.description || 'No description'}</small></span>
         </a>)}</div>}
     </section> : !recipe ? <Empty description="Recipe not found" /> : <section className="record-detail">
-        <div className="content-heading"><div><span className="eyebrow">Recipe plan · {recipe.recipe_type || 'Unspecified'}</span><h2>{recipe.name}</h2><p className="muted">{recipe.description}</p></div>
+        <div className="content-heading"><div className="recipe-detail-heading"><RecipeTypeIcon type={recipe.recipe_type} large />
+          <div><h2>{recipe.name}</h2>
+            <p className="muted">{recipe.description}</p></div></div>
           <div className="heading-actions"><Button type="primary" onClick={() => setNewBatch(true)}>Start batch</Button>
             <Button type="text" shape="circle" icon={<SettingOutlined />} aria-label="Recipe settings"
               title="Recipe settings" onClick={openSettings} /></div>
         </div>
-        <EventTimeline events={plans} onEdit={plan => { setPlanDeleteError(''); setEditingPlan(plan); }}
+        <EventTimeline events={plans} equipment={equipment} onEdit={plan => { setPlanDeleteError(''); setEditingPlan(plan); }}
           onAdd={(kind, settings) => { setEditingPlan(null); setPreset(settings); setCreatingKind(kind); }} />
       </section>}
     <Modal title="New recipe" open={newRecipe} onCancel={() => setNewRecipe(false)} footer={null} destroyOnHidden>
@@ -131,8 +136,8 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
       <Form form={settingsForm} layout="vertical" onFinish={saveSettings}>
         <Form.Item name="name" label="Recipe name" rules={[{ required: true, whitespace: true }, { max: 100 }]}>
           <Input maxLength={100} /></Form.Item>
-        <Form.Item name="recipe_type" label="Type" extra="Changing the type does not change planned actions."
-          rules={[{ required: true }]}><Select options={recipeTypeOptions} /></Form.Item>
+        <Form.Item name="recipe_type" label="Type" rules={[{ required: true }]}>
+          <Select options={recipeTypeOptions} /></Form.Item>
         <Form.Item name="description" label="Description"><Input.TextArea rows={3} /></Form.Item>
         {settingsError && <Alert type="error" message={settingsError} className="form-alert" />}
         <div className="recipe-settings-actions"><Button type="primary" htmlType="submit" loading={settingsBusy}>Save changes</Button>
@@ -151,7 +156,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
       {planDeleteError && <Alert type="error" message={planDeleteError} className="form-alert" />}
       {(editingPlan || creatingKind) && <PlanForm key={editingPlan?.id || creatingKind || 'new'} eventType={editingPlan?.event_type || creatingKind || 'addition'}
         anchors={plans.filter(item => item.id !== editingPlan?.id)} initialPlan={editingPlan || undefined}
-        inventory={inventory} catalog={catalogInventory} preferredUnits={preferredUnits} preset={editingPlan ? undefined : preset} submit={addPlan}
+        equipment={equipment} inventory={inventory} catalog={catalogInventory} preferredUnits={preferredUnits} preset={editingPlan ? undefined : preset} submit={addPlan}
         extraAction={editingPlan && <Popconfirm title={`Delete ${editingPlan.title}?`}
           description="Actions timed from this one will become relative to batch start. Existing batches keep their copies."
           okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => void removePlan(editingPlan.id)}>

@@ -5,7 +5,7 @@ import { fromDatetimeLocal, toDatetimeLocal } from './time.ts';
 import { addPhoto, recordEvent, skipBatchEvent, updateEvent, updatePhotoEvent, type ActualEvent, type Equipment, type EventInput, type InventoryItem, type LocalDb, type MeasurementKind, type Plan } from './db.ts';
 import type { PreferredUnits } from './api.ts';
 import { compoundMassUnit, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions } from '../shared/units.ts';
-import { parsePlanDetails } from './planTiming.ts';
+import { parsePlanDetails, supportsDuration } from './planTiming.ts';
 import { inventoryCategories } from '../shared/catalog.ts';
 import { QuantityFields } from './QuantityFields.tsx';
 import { changeNumberUnit, changeQuantityUnit } from './unitFields.ts';
@@ -39,7 +39,7 @@ interface Values {
   calibration_id?: string; source?: string; item_name?: string; inventory_item_id?: string;
   item_category?: string; quantity?: number; pounds?: number; ounces?: number;
   mode?: string; target_value?: number; target_unit?: string; power_watts?: number;
-  from_vessel_id?: string; to_vessel_id?: string; container_name?: string; container_size?: number;
+  to_vessel_id?: string; container_name?: string; container_size?: number;
   container_unit?: string; container_count?: number;
 }
 
@@ -56,6 +56,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
   const completingPlan = !!initialPlan && !initialEvent;
   const initialMeasurement = measurementKinds.find(item => item.value === plannedString('measurement_kind'))?.value as MeasurementKind | undefined;
   const [kind, setKind] = useState(initialEvent?.event_type || initialPlan?.event_type || 'note');
+  const timedControl = supportsDuration(kind);
   const [measurement, setMeasurement] = useState<MeasurementKind>(initialData?.measurementKind || initialMeasurement || 'temperature');
   const [instrumentId, setInstrumentId] = useState<string | undefined>(String(initialData?.payload.equipment_id || '') || undefined);
   const [calibrations, setCalibrations] = useState<{ id: string; effective_at: number }[]>([]);
@@ -75,8 +76,11 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
   const selectedTargetUnit = Form.useWatch('target_unit', form) as string | undefined;
   const selectedContainerUnit = Form.useWatch('container_unit', form) as string | undefined;
   const selectedCategory = Form.useWatch('item_category', form) as string | undefined;
-  const transferVessels = equipment.filter(item => vesselKinds.has(item.kind)
-    || item.id === initialData?.payload.from_vessel_id || item.id === initialData?.payload.to_vessel_id);
+  const vesselOptions = equipment.filter(item => vesselKinds.has(item.kind)).map(item => ({ value: item.id, label: item.name }));
+  const destinationId = initialData?.payload.to_vessel_id || plannedString('to_vessel_id');
+  if (typeof destinationId === 'string' && !vesselOptions.some(item => item.value === destinationId)) {
+    vesselOptions.push({ value: destinationId, label: plannedString('to_vessel_name') || 'Archived vessel' });
+  }
 
   function changeMainUnit(next: string) {
     const from = selectedUnit || initialUnit;
@@ -134,8 +138,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
         if (!values.equipment_id || values.target_value == null || !values.target_unit) throw new Error('Choose equipment and a pressure target');
         payload = { equipment_id: values.equipment_id, target_value: values.target_value, target_unit: values.target_unit };
       } else if (kind === 'transfer') {
-        payload = { from_vessel_id: values.from_vessel_id || null, to_vessel_id: values.to_vessel_id || null,
-          quantity: values.quantity ?? null, unit: values.unit || null };
+        payload = { to_vessel_id: values.to_vessel_id || null, quantity: values.quantity ?? null, unit: values.unit || null };
       } else if (kind === 'packaging') {
         if (!values.container_name || values.container_size == null || !values.container_unit || values.container_count == null) {
           throw new Error('Enter container, size, unit, and count');
@@ -172,6 +175,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
     mode: initialData?.payload.mode || plannedString('mode') || 'hold', source: initialData?.payload.source || 'manual',
     item_name: plannedString('item_name'), item_category: initialCategory,
     inventory_item_id: plannedString('inventory_item_id'),
+    to_vessel_id: plannedString('to_vessel_id'),
     container_name: plannedString('container_name'), container_size: plannedNumber('container_size'),
     container_count: plannedNumber('container_count'),
     target_value: kind === 'measurement' ? undefined : plannedNumber('target_value'),
@@ -190,9 +194,9 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
       }} />
     </Form.Item>}
     <div>
-      <Form.Item name="actual_at" label={plannedNumber('duration_seconds') || initialEvent?.ended_at ? 'Started' : 'When'} rules={[{ required: true }]}><Input type="datetime-local" /></Form.Item>
+      <Form.Item name="actual_at" label={timedControl ? 'Started' : 'When'} rules={[{ required: true }]}><Input type="datetime-local" /></Form.Item>
     </div>
-    {(!!plannedNumber('duration_seconds') || !!initialEvent?.ended_at || kind === 'temperature_control') &&
+    {timedControl &&
       <Form.Item name="ended_at" label="Ended (optional)"><Input type="datetime-local" /></Form.Item>}
     {kind === 'measurement' && <>
       <Form.Item name="measurement_kind" label="Measurement" rules={[{ required: true }]}>
@@ -250,8 +254,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
       {kind === 'temperature_control' && <Form.Item name="power_watts" label="Power (W), if set"><InputNumber className="full-width" min={0} /></Form.Item>}
     </>}
     {kind === 'transfer' && <>
-      <div className="form-pair"><Form.Item name="from_vessel_id" label="From vessel"><Select allowClear options={transferVessels.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
-        <Form.Item name="to_vessel_id" label="To vessel"><Select allowClear options={transferVessels.map(item => ({ value: item.id, label: item.name }))} /></Form.Item></div>
+      <Form.Item name="to_vessel_id" label="To vessel"><Select allowClear showSearch optionFilterProp="label" options={vesselOptions} /></Form.Item>
       <div className="form-pair"><Form.Item name="quantity" label="Quantity"><InputNumber className="full-width" step="any" /></Form.Item>
         <Form.Item name="unit" label="Unit"><Select options={unitOptions(unitGroups.volume)} onChange={changeMainUnit} /></Form.Item></div>
     </>}

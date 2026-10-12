@@ -10,7 +10,7 @@ import { convertUnit, formatQuantity } from '../shared/units.ts';
 
 export type LocalDb = DB;
 export interface Batch { id: string; name: string; description: string | null; status: string; created_at: number }
-export type RecipeType = 'beer' | 'wine' | 'mead';
+export type RecipeType = 'beer' | 'wine' | 'mead' | 'cider';
 export interface Recipe { id: string; name: string; description: string | null; recipe_type: RecipeType | null }
 export interface BatchEvent {
   id: string; batch_id: string; event_type: string; title: string; planned_at: number | null;
@@ -126,7 +126,7 @@ export async function listRecipes(db: DB): Promise<Recipe[]> {
 
 export async function updateRecipe(db: DB, recipeId: string, name: string, description: string, recipeType: RecipeType): Promise<void> {
   if (!name.trim() || name.trim().length > 100) throw new Error('Recipe name must be 1–100 characters');
-  if (!['beer', 'wine', 'mead'].includes(recipeType)) throw new Error('Choose a recipe type');
+  if (!['beer', 'wine', 'mead', 'cider'].includes(recipeType)) throw new Error('Choose a recipe type');
   await db.tx(async tx => {
     const recipes = await tx.execO<{ id: string }>('SELECT id FROM recipes WHERE id = ?', [recipeId]);
     if (!recipes.length) throw new Error('Recipe not found');
@@ -152,7 +152,7 @@ export async function createRecipe(db: DB, name: string, description: string, re
   temperatureUnit: '°C' | '°F' = '°C'): Promise<string> {
   const id = nanoid();
   const now = nowSeconds();
-  if (!['beer', 'wine', 'mead'].includes(recipeType)) throw new Error('Choose a recipe type');
+  if (!['beer', 'wine', 'mead', 'cider'].includes(recipeType)) throw new Error('Choose a recipe type');
   await db.tx(async tx => {
     await tx.exec('INSERT INTO recipes(id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
       [id, name, description || null, now, now]);
@@ -162,9 +162,9 @@ export async function createRecipe(db: DB, name: string, description: string, re
     const chillId = nanoid();
     const transferId = nanoid();
     const insert = async (eventId: string, eventType: string, title: string, anchorId: string | null,
-      details: Record<string, string | number>, order: number) => tx.exec(`INSERT INTO recipe_events
+      details: Record<string, string | number>, order: number, offsetSeconds = 0) => tx.exec(`INSERT INTO recipe_events
       (id, recipe_id, event_type, title, planned_at, anchor_event_id, offset_seconds, details_json, sort_order)
-      VALUES (?, ?, ?, ?, NULL, ?, 0, ?, ?)`, [eventId, id, eventType, title, anchorId, JSON.stringify(details), order]);
+      VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)`, [eventId, id, eventType, title, anchorId, offsetSeconds, JSON.stringify(details), order]);
     if (recipeType === 'beer') {
       await insert(mashId, 'temperature_control', 'Mash', null,
         { phase: 'mash', mode: 'hold', target_value: convertUnit(67, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 1800 }, 1);
@@ -176,8 +176,12 @@ export async function createRecipe(db: DB, name: string, description: string, re
       await insert(transferId, 'transfer', 'Transfer to fermenter', chillId,
         { anchor_point: 'end' }, 4);
     }
-    await insert(nanoid(), 'addition', 'Pitch yeast', recipeType === 'beer' ? transferId : null,
+    const pitchId = nanoid();
+    await insert(pitchId, 'addition', 'Pitch yeast', recipeType === 'beer' ? transferId : null,
       { item_category: 'Yeast', item_name: 'Yeast' }, recipeType === 'beer' ? 5 : 1);
+    const packagingDays: Record<RecipeType, number> = { beer: 21, cider: 28, wine: 60, mead: 60 };
+    await insert(nanoid(), 'packaging', 'Package batch', pitchId,
+      {}, recipeType === 'beer' ? 6 : 2, packagingDays[recipeType] * 86400);
   });
   return id;
 }
@@ -390,6 +394,7 @@ export async function updateEvent(db: DB, event: ActualEvent, input: EventInput)
     const columns = Object.keys(input.payload);
     await tx.exec(`UPDATE ${table} SET ${columns.map(column => `${column} = ?`).join(', ')} WHERE event_id = ?`,
       [...Object.values(input.payload), event.id]);
+    if (input.eventType === 'transfer') await tx.exec('UPDATE transfers SET from_vessel_id = NULL WHERE event_id = ?', [event.id]);
   });
 }
 
@@ -398,6 +403,16 @@ async function updateEventDetails(db: Pick<DB, 'execO' | 'exec'>, id: string, pa
   const details = JSON.parse(rows[0]?.details_json || '{}') as Record<string, string | number | null>;
   for (const [key, value] of Object.entries(payload)) {
     if (key !== 'event_id') details[key] = value;
+  }
+  if (rows[0]?.event_type === 'transfer') {
+    delete details.from_vessel_id;
+    delete details.from_vessel_name;
+    const equipmentId = payload.to_vessel_id;
+    if (typeof equipmentId !== 'string') delete details.to_vessel_name;
+    else {
+      const equipment = await db.execO<{ name: string }>('SELECT name FROM equipment WHERE id = ?', [equipmentId]);
+      if (equipment.length) details.to_vessel_name = equipment[0].name;
+    }
   }
   if (endedAt != null) delete details.duration_seconds;
   // Once an addition happened, its typed payload is the single source for the
@@ -544,6 +559,19 @@ export async function deleteEquipment(db: DB, id: string): Promise<void> {
     used ||= await referenced('temperature_control_events', 'equipment_id = ?', [id])
       || await referenced('pressure_control_events', 'equipment_id = ?', [id])
       || await referenced('transfers', 'from_vessel_id = ? OR to_vessel_id = ?', [id, id]);
+    if (!used) {
+      for (const table of ['recipe_events', 'batch_events']) {
+        const plans = await tx.execO<{ details_json: string | null }>(
+          `SELECT details_json FROM ${table} WHERE event_type = 'transfer' AND details_json IS NOT NULL`);
+        used = plans.some(plan => {
+          try {
+            const details = JSON.parse(plan.details_json || '{}') as Record<string, unknown>;
+            return details.from_vessel_id === id || details.to_vessel_id === id;
+          } catch { return false; }
+        });
+        if (used) break;
+      }
+    }
     if (used) {
       await tx.exec('INSERT INTO equipment_archives(id, equipment_id, archived_at) VALUES (?, ?, ?)',
         [nanoid(), id, nowSeconds()]);
