@@ -170,6 +170,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
     mode: initialData?.payload.mode || plannedString('mode') || 'hold', source: initialData?.payload.source || 'manual',
     item_name: plannedString('item_name'), item_category: initialCategory,
     inventory_item_id: plannedString('inventory_item_id'),
+    equipment_id: plannedString('equipment_id'),
     to_vessel_id: plannedString('to_vessel_id'),
     container_name: plannedString('container_name'), container_size: plannedNumber('container_size'),
     container_count: plannedNumber('container_count'),

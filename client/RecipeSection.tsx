@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
-import { Alert, Button, Empty, Form, Input, Modal, Popconfirm, Select } from 'antd';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select } from 'antd';
 import { DeleteOutlined, DownloadOutlined, PlusOutlined, SettingOutlined, UploadOutlined } from '@ant-design/icons';
 import { addRecipePlan, createRecipe, deleteRecipe, deleteRecipePlan, hasRecipeImport, listRecipePlans, startBatchFromRecipe, updateRecipe, updateRecipePlan,
-  recipeImportSource,
+  recipeImportSource, recipeTargetVolume, updateRecipeTargetVolume,
   type Equipment, type InventoryItem, type LocalDb, type PlanInput, type Recipe, type RecipeType } from './db.ts';
 import { RecipeImportModal } from './RecipeImportModal.tsx';
 import { PlanForm, type PlanPreset } from './PlanForm.tsx';
@@ -12,6 +12,8 @@ import { EventTimeline } from './EventTimeline.tsx';
 import { RecipeTypeIcon } from './RecipeTypeIcon.tsx';
 import type { CatalogInventory } from '../shared/catalog.ts';
 import type { PreferredUnits } from './api.ts';
+import { convertUnit, unitGroups, unitOptions } from '../shared/units.ts';
+import { changeNumberUnit } from './unitFields.ts';
 
 const recipeTypeOptions = [
   { value: 'beer', label: 'Beer' }, { value: 'wine', label: 'Wine' },
@@ -23,7 +25,9 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
   equipment: Equipment[]; inventory: InventoryItem[]; catalogInventory: CatalogInventory[]; preferredUnits: PreferredUnits;
   onChanged: () => Promise<void>; onBatchStarted: (id: string) => void;
 }) {
-  const [settingsForm] = Form.useForm<{ name: string; description?: string; recipe_type: RecipeType }>();
+  const [settingsForm] = Form.useForm<{ name: string; description?: string; recipe_type: RecipeType;
+    target_volume?: number; target_volume_unit: string }>();
+  const targetVolumeUnit = useRef<string>(preferredUnits.volume);
   const [plans, setPlans] = useState<(PlanInput & { id: string })[]>([]);
   const [importedRecipe, setImportedRecipe] = useState(false);
   const [newRecipe, setNewRecipe] = useState(false);
@@ -83,21 +87,28 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
     finally { setDeletingRecipe(false); }
   }
 
-  async function saveSettings(values: { name: string; description?: string; recipe_type: RecipeType }) {
+  async function saveSettings(values: { name: string; description?: string; recipe_type: RecipeType;
+    target_volume?: number; target_volume_unit: string }) {
     if (!recipe) return;
     setSettingsBusy(true); setSettingsError('');
     try {
       await updateRecipe(db, recipe.id, values.name, values.description || '', values.recipe_type);
+      await updateRecipeTargetVolume(db, recipe.id, values.target_volume == null ? null
+        : convertUnit(values.target_volume, values.target_volume_unit, 'L'));
       await onChanged();
       setSettingsOpen(false);
     } catch (cause) { setSettingsError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setSettingsBusy(false); }
   }
 
-  function openSettings() {
+  async function openSettings() {
     if (!recipe) return;
     setSettingsError('');
-    settingsForm.setFieldsValue({ name: recipe.name, description: recipe.description || '', recipe_type: recipe.recipe_type || 'beer' });
+    const liters = await recipeTargetVolume(db, recipe.id);
+    targetVolumeUnit.current = preferredUnits.volume;
+    settingsForm.setFieldsValue({ name: recipe.name, description: recipe.description || '', recipe_type: recipe.recipe_type || 'beer',
+      target_volume: liters == null ? undefined : convertUnit(liters, 'L', preferredUnits.volume) ?? undefined,
+      target_volume_unit: preferredUnits.volume });
     setSettingsOpen(true);
   }
 
@@ -141,7 +152,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
             <p className="muted">{recipe.description}</p></div></div>
           <div className="heading-actions"><Button type="primary" onClick={() => setNewBatch(true)}>Start batch</Button>
             <Button type="text" shape="circle" icon={<SettingOutlined />} aria-label="Recipe settings"
-              title="Recipe settings" onClick={openSettings} /></div>
+              title="Recipe settings" onClick={() => void openSettings()} /></div>
         </div>
         <EventTimeline events={plans} equipment={equipment} onEdit={plan => { setPlanDeleteError(''); setEditingPlan(plan); }}
           onAdd={(kind, settings) => { setEditingPlan(null); setPreset(settings); setCreatingKind(kind); }} />
@@ -161,6 +172,11 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
         <Form.Item name="recipe_type" label="Type" rules={[{ required: true }]}>
           <Select options={recipeTypeOptions} /></Form.Item>
         <Form.Item name="description" label="Description"><Input.TextArea rows={3} /></Form.Item>
+        <div className="form-pair"><Form.Item name="target_volume" label="Target volume into fermenter (optional)">
+          <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
+          <Form.Item name="target_volume_unit" label="Unit"><Select options={unitOptions(unitGroups.volume)}
+            onChange={unit => { changeNumberUnit(settingsForm, ['target_volume'], targetVolumeUnit.current, unit);
+              targetVolumeUnit.current = unit; }} /></Form.Item></div>
         {settingsError && <Alert type="error" message={settingsError} className="form-alert" />}
         <div className="recipe-settings-actions"><Button type="primary" htmlType="submit" loading={settingsBusy}>Save changes</Button>
           {importedRecipe && <Button type="text" htmlType="button" icon={<DownloadOutlined />}

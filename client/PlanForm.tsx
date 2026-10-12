@@ -12,7 +12,8 @@ import type { PreferredUnits } from './api.ts';
 import { changeNumberUnit, changeQuantityUnit } from './unitFields.ts';
 
 interface Anchor { id: string; title: string; event_type: string; details_json?: string | null }
-export interface PlanPreset { phase?: 'mash' | 'boil' | 'chill'; measurementKind?: string; itemCategory?: string; title?: string; timingKey?: string }
+export interface PlanPreset { phase?: 'mash' | 'boil' | 'chill'; measurementKind?: string; itemCategory?: string; title?: string;
+  timingKey?: string; purpose?: 'drain_grain' }
 const timeUnits = [
   { value: 'seconds', label: 'Seconds', multiplier: 1 },
   { value: 'minutes', label: 'Minutes', multiplier: 60 },
@@ -34,6 +35,8 @@ interface Values {
   measurement_kind?: string; target_value?: number; target_unit?: string;
   mode?: string; container_name?: string; container_size?: number; container_count?: number;
   to_vessel_id?: string;
+  mash_equipment_id?: string;
+  equipment_id?: string;
   duration_value?: number; duration_unit?: typeof timeUnits[number]['value'];
 }
 
@@ -114,6 +117,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
       const details: Record<string, string | number> = {};
       if (values.details) details.note = values.details;
       if (phase) details.phase = phase;
+      if (kind === 'transfer' && (preset?.purpose || initialDetails.purpose)) details.purpose = preset?.purpose || initialDetails.purpose;
       if (anchorId) details.anchor_point = point === 'end' ? 'end' : 'start';
       if (timedControl && values.duration_value != null) {
         const durationUnit = timeUnits.find(item => item.value === values.duration_unit);
@@ -123,9 +127,9 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
       const keysByKind: Record<string, (keyof Values)[]> = {
         addition: ['item_category'],
         measurement: ['measurement_kind', 'target_value', 'target_unit'],
-        temperature_control: ['mode', 'target_value', 'target_unit'],
-        pressure_control: ['target_value', 'target_unit'],
-        transfer: ['to_vessel_id', 'quantity', 'unit'],
+        temperature_control: ['mode', 'target_value', 'target_unit', 'equipment_id'],
+        pressure_control: ['target_value', 'target_unit', 'equipment_id'],
+        transfer: ['to_vessel_id', 'mash_equipment_id', 'quantity', 'unit'],
         packaging: ['container_name', 'container_size', 'container_count', 'unit']
       };
       for (const key of keysByKind[kind] || []) {
@@ -184,7 +188,8 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
       : phase === 'boil' ? convertUnit(100, '°C', preferredUnits.temperature)
         : phase === 'chill' ? convertUnit(20, '°C', preferredUnits.temperature) : undefined), container_name: initialDetails.container_name,
     container_size: initialDetails.container_size, container_count: initialDetails.container_count,
-    to_vessel_id: initialDetails.to_vessel_id
+    to_vessel_id: initialDetails.to_vessel_id, mash_equipment_id: initialDetails.mash_equipment_id,
+    equipment_id: initialDetails.equipment_id
   }}>
     {error && <Alert type="error" message={error} className="form-alert" />}
     {kind === 'addition' && <>
@@ -232,6 +237,9 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
         )} onChange={unit => changeNumberUnit(form, ['target_value'], selectedTargetUnit, unit)} /></Form.Item></div>
     </>}
     {kind === 'temperature_control' && <>
+      <Form.Item name="equipment_id" label="Equipment (optional)"><Select allowClear showSearch optionFilterProp="label"
+        options={equipment.filter(item => phase !== 'mash' || ['all_in_one', 'mash_tun', 'kettle', 'electric_kettle'].includes(item.kind))
+          .map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
       <Form.Item name="mode" label="Mode"><Select options={[
         { value: 'heat', label: 'Heat' }, { value: 'chill', label: 'Chill' }, { value: 'hold', label: 'Hold' }
       ]} /></Form.Item>
@@ -239,11 +247,20 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
         <Form.Item name="target_unit" label="Unit" rules={phase === 'chill' ? [{ required: true }] : []}><Select options={unitOptions(unitGroups.temperature)}
           onChange={unit => changeNumberUnit(form, ['target_value'], selectedTargetUnit, unit)} /></Form.Item></div>
     </>}
-    {kind === 'pressure_control' && <div className="form-pair"><Form.Item name="target_value" label="Target pressure"><InputNumber className="full-width" step="any" /></Form.Item>
-      <Form.Item name="target_unit" label="Unit"><Select options={unitOptions(unitGroups.pressure)}
-        onChange={unit => changeNumberUnit(form, ['target_value'], selectedTargetUnit, unit)} /></Form.Item></div>}
+    {kind === 'pressure_control' && <><Form.Item name="equipment_id" label="Equipment (optional)"><Select allowClear showSearch optionFilterProp="label"
+      options={equipment.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
+      <div className="form-pair"><Form.Item name="target_value" label="Target pressure"><InputNumber className="full-width" step="any" /></Form.Item>
+        <Form.Item name="target_unit" label="Unit"><Select options={unitOptions(unitGroups.pressure)}
+          onChange={unit => changeNumberUnit(form, ['target_value'], selectedTargetUnit, unit)} /></Form.Item></div></>}
     {kind === 'transfer' && <>
-      <Form.Item name="to_vessel_id" label="To vessel (optional)"><Select allowClear showSearch optionFilterProp="label" options={vesselOptions} /></Form.Item>
+      {(preset?.purpose === 'drain_grain' || initialDetails.purpose === 'drain_grain') &&
+        <Form.Item name="mash_equipment_id" label="Mash equipment"><Select allowClear showSearch optionFilterProp="label"
+          options={equipment.filter(item => ['all_in_one', 'mash_tun', 'kettle', 'electric_kettle'].includes(item.kind))
+            .map(item => ({ value: item.id, label: item.name }))}
+          onChange={id => { const item = equipment.find(row => row.id === id);
+            if (item?.kind === 'all_in_one' && !form.getFieldValue('to_vessel_id')) form.setFieldValue('to_vessel_id', id); }} /></Form.Item>}
+      <Form.Item name="to_vessel_id" label={preset?.purpose === 'drain_grain' || initialDetails.purpose === 'drain_grain'
+        ? 'Collecting vessel (optional)' : 'To vessel (optional)'}><Select allowClear showSearch optionFilterProp="label" options={vesselOptions} /></Form.Item>
       <div className="form-pair"><Form.Item name="quantity" label="Volume"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
         <Form.Item name="unit" label="Unit"><Select options={unitOptions(unitGroups.volume)} onChange={changeMainUnit} /></Form.Item></div>
     </>}

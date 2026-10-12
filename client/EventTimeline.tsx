@@ -14,17 +14,20 @@ interface Group { key: string; at: number | null; step: number; label: string; e
 export function actionForMenu(key: string, plans: TimelineEvent[]): { kind: string; preset: PlanPreset } {
   const [action, measurementKind] = key.split(':');
   const boil = plans.find(plan => parsePlanDetails(plan.details_json).phase === 'boil');
+  const mash = plans.find(plan => parsePlanDetails(plan.details_json).phase === 'mash');
   const preset: PlanPreset = action === 'ingredient' ? { itemCategory: 'Grain', timingKey: boil ? `after:start:${boil.id}` : 'start' }
     : action === 'yeast' ? { itemCategory: 'Yeast', title: 'Yeast' }
+      : action === 'drain_grain' ? { purpose: 'drain_grain', title: 'Drain grain',
+        timingKey: mash ? `after:end:${mash.id}` : 'start' }
       : action === 'measurement' ? { measurementKind, title: `Measure ${measurementKinds.find(item => item.value === measurementKind)?.label.toLowerCase() || measurementKind}` }
         : ['mash', 'boil', 'chill'].includes(action) ? { phase: action as PlanPreset['phase'], title: action[0].toUpperCase() + action.slice(1) } : {};
   return { kind: ['mash', 'boil', 'chill'].includes(action) ? 'temperature_control'
-    : ['ingredient', 'yeast'].includes(action) ? 'addition' : action, preset };
+    : ['ingredient', 'yeast'].includes(action) ? 'addition' : action === 'drain_grain' ? 'transfer' : action, preset };
 }
 
 const actionItems = [
   { key: 'ingredient', label: 'Ingredient' },
-  { key: 'mash', label: 'Mash' }, { key: 'boil', label: 'Boil' },
+  { key: 'mash', label: 'Mash' }, { key: 'drain_grain', label: 'Drain grain' }, { key: 'boil', label: 'Boil' },
   { key: 'chill', label: 'Chill' },
   { key: 'yeast', label: 'Pitch yeast' },
   { key: 'measurement', label: 'Measurement', children: measurementKinds.map(kind => ({ key: `measurement:${kind.value}`, label: kind.label })) },

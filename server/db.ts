@@ -151,7 +151,7 @@ export function openWorkspaceDb(id: string): Database.Database {
       db.close();
       throw error;
     }
-  } else if ([7, 8, 9].includes(row.version)) {
+  } else if ([7, 8, 9, 10].includes(row.version)) {
     db.exec('BEGIN');
     try {
       if (row.version === 7) {
@@ -172,11 +172,15 @@ export function openWorkspaceDb(id: string): Database.Database {
           update.run('fermenter', JSON.stringify(specification), item.id);
         }
       }
-      for (const table of recipeImportTables) {
-        db.exec(schemaStatements[replicatedTables.indexOf(table)]);
-        db.prepare('SELECT crsql_as_crr(?)').get(table);
+      if (row.version < 10) {
+        for (const table of recipeImportTables) {
+          db.exec(schemaStatements[replicatedTables.indexOf(table)]);
+          db.prepare('SELECT crsql_as_crr(?)').get(table);
+        }
+        db.exec(indexStatements.find(statement => statement.includes('recipe_import_links_by_source'))!);
       }
-      db.exec(indexStatements.find(statement => statement.includes('recipe_import_links_by_source'))!);
+      db.exec(schemaStatements[replicatedTables.indexOf('inventory_ingredient_properties')]);
+      db.prepare("SELECT crsql_as_crr('inventory_ingredient_properties')").get();
       db.prepare('UPDATE schema_meta SET version = ?').run(workspaceSchemaVersion);
       db.exec('COMMIT');
     } catch (error) {

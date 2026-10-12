@@ -145,7 +145,7 @@ test('schema 7 inventory upgrades and removes an unused duplicate without losing
 
   const db = openWorkspaceDb(id);
   try {
-    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 10);
+    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 11);
     assert.deepEqual(db.prepare("SELECT id FROM inventory_items WHERE name = 'SafAle US-05'").all(), [{ id: stockedId }]);
     assert.equal((db.prepare('SELECT category FROM inventory_items WHERE id = ?').get(acidId) as { category: string }).category, 'Adjunct');
     assert.equal((db.prepare('SELECT quantity FROM inventory_purchases WHERE inventory_item_id = ?').get(stockedId) as { quantity: number }).quantity, 10);
@@ -177,6 +177,32 @@ test('schema 8 consolidates controlled fermenters without losing their specifica
     assert.deepEqual(JSON.parse(row.specification_json), {
       capacity_liters: 30, temperature_offset_c: 0.5, built_in_temperature_control: true
     });
-    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 10);
+    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 11);
+  } finally { closeWorkspaceDb(db); }
+});
+
+test('schema 10 adds ingredient properties without losing imported recipes', () => {
+  const id = nanoid();
+  const file = join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`);
+  const old = new Database(file);
+  old.loadExtension('vendor/crsqlite.so');
+  old.exec('CREATE TABLE schema_meta(version INTEGER NOT NULL); INSERT INTO schema_meta VALUES (10)');
+  for (const [index, table] of replicatedTables.entries()) {
+    if (table === 'inventory_ingredient_properties') continue;
+    old.exec(schemaStatements[index]);
+    old.prepare('SELECT crsql_as_crr(?)').get(table);
+  }
+  old.prepare('INSERT INTO recipes(id, name, created_at, updated_at) VALUES (?, ?, ?, ?)')
+    .run('recipe-before-upgrade', 'Old recipe', 1, 1);
+  old.close();
+  const db = openWorkspaceDb(id);
+  try {
+    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 11);
+    assert.equal((db.prepare('SELECT name FROM recipes WHERE id = ?').get('recipe-before-upgrade') as { name: string }).name,
+      'Old recipe');
+    db.prepare('INSERT INTO inventory_ingredient_properties(id, properties_json) VALUES (?, ?)')
+      .run('grain', '{"yield_pct":80}');
+    assert.deepEqual(JSON.parse((db.prepare('SELECT properties_json FROM inventory_ingredient_properties WHERE id = ?')
+      .get('grain') as { properties_json: string }).properties_json), { yield_pct: 80 });
   } finally { closeWorkspaceDb(db); }
 });
