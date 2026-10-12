@@ -5,7 +5,7 @@ import { capacityKinds, equipmentKinds, measurementRangeUnits } from '../shared/
 import type { CatalogEquipment } from '../shared/catalog.ts';
 import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, workspaceV2Statements, workspaceV3Statements, workspaceV4Statements, workspaceV5Statements, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
-import { formatQuantity } from '../shared/units.ts';
+import { convertUnit, formatQuantity } from '../shared/units.ts';
 
 export type LocalDb = DB;
 export interface Batch { id: string; name: string; description: string | null; status: string; created_at: number }
@@ -86,7 +86,8 @@ export async function listRecipes(db: DB): Promise<Recipe[]> {
     LEFT JOIN recipe_types t ON t.id = r.id ORDER BY r.name COLLATE NOCASE`);
 }
 
-export async function createRecipe(db: DB, name: string, description: string, recipeType: RecipeType): Promise<string> {
+export async function createRecipe(db: DB, name: string, description: string, recipeType: RecipeType,
+  temperatureUnit: '°C' | '°F' = '°C'): Promise<string> {
   const id = nanoid();
   const now = nowSeconds();
   if (!['beer', 'wine', 'mead'].includes(recipeType)) throw new Error('Choose a recipe type');
@@ -102,9 +103,9 @@ export async function createRecipe(db: DB, name: string, description: string, re
       VALUES (?, ?, ?, ?, NULL, ?, 0, ?, ?)`, [eventId, id, eventType, title, anchorId, JSON.stringify(details), order]);
     if (recipeType === 'beer') {
       await insert(mashId, 'temperature_control', 'Mash', null,
-        { phase: 'mash', mode: 'hold', target_value: 67, target_unit: '°C', duration_seconds: 1800 }, 1);
+        { phase: 'mash', mode: 'hold', target_value: convertUnit(67, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 1800 }, 1);
       await insert(boilId, 'temperature_control', 'Boil', mashId,
-        { phase: 'boil', mode: 'heat', target_value: 100, target_unit: '°C', duration_seconds: 3600, anchor_point: 'end' }, 2);
+        { phase: 'boil', mode: 'heat', target_value: convertUnit(100, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 3600, anchor_point: 'end' }, 2);
     }
     await insert(nanoid(), 'addition', 'Pitch yeast', recipeType === 'beer' ? boilId : null,
       { item_category: 'Yeast', item_name: 'Yeast', ...(recipeType === 'beer' ? { anchor_point: 'end' } : {}) }, recipeType === 'beer' ? 3 : 1);
