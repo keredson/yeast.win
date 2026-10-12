@@ -43,6 +43,8 @@ Keep IDs, provenance, and batch ownership explicit from the start so the later p
 - Preserve a quantity's entered numeric value and **unit**. The app converts compatible quantities to canonical values for calculations and display. This preserves distinctions such as `5 US gal`, `19 L`, `1 tablet`, and `2 packets`, and avoids forcing additions or inventory into an inappropriate universal unit. Canonical calculation units include seconds, liters, and degrees Celsius. Unit conversion and precision rules belong in shared client logic.
 - A batch action is an editable working record. Correct its values in place; recipe templates remain independent. Separate readings from sensors are separate observations. A recorded `actual_at` takes precedence over `skipped_at` if offline peers set both.
 - An event's `batch_id` and identity are immutable. This also makes authorization of changes and deletions tractable.
+- This is pre-release software. Schema changes do not need to migrate or preserve existing development data; development databases may be reset when the schema changes.
+- Prefer explicit columns and related tables for application data. Columns holding arbitrary JSON are discouraged and require explicit user approval before they are added. Existing JSON columns are implementation details to revisit, not a precedent for new ones.
 
 ## Workspace data model
 
@@ -103,7 +105,7 @@ Do not persist these predicted values. Store chosen calculation methods and user
 | `boil_finished` | Legacy milestone retained for existing data. New plans use a timed boil range and anchor to its start or end. |
 | `notes` | Free-text observations that do not fit a physical measurement or action. |
 
-Action details are a single editable set of values. Pending additions keep their quantity in `details_json`; recording moves it to the `additions` row used for inventory and later corrections. The quantity is not retained as a separate planned value. A pending measurement can exist without a measured value; its value, uncertainty, and instrument are filled in when recorded.
+Action details are a single editable set of values. The current implementation keeps pending additions in `details_json` and moves their quantity to the `additions` row when recorded. This JSON storage is not the intended long-term model: planned and recorded action fields should use explicit columns in type-specific tables. A pending measurement can exist without a measured value; its value, uncertainty, and instrument are filled in when recorded.
 
 #### Temperature control intervals
 
