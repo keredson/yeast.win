@@ -7,7 +7,6 @@ import { addRecipePlan, createRecipe, deleteRecipe, deleteRecipePlan, hasRecipeI
 import { RecipeImportModal } from './RecipeImportModal.tsx';
 import { PlanForm, type PlanPreset } from './PlanForm.tsx';
 import { kindLabel } from './constants.ts';
-import { parsePlanDetails } from './planTiming.ts';
 import { EventTimeline } from './EventTimeline.tsx';
 import { RecipeTypeIcon } from './RecipeTypeIcon.tsx';
 import type { CatalogInventory } from '../shared/catalog.ts';
@@ -176,7 +175,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
     <RecipeImportModal open={importOpen} db={db} inventory={inventory} preferredUnits={preferredUnits}
       onClose={() => setImportOpen(false)} onImported={async ids => { await onChanged(); if (ids.length === 1) onSelect(ids[0]); }} />
     <Modal title={editingPlan ? editingPlan.event_type === 'measurement'
-      ? `Edit ${String(parsePlanDetails(editingPlan.details_json).measurement_kind || 'measurement').replaceAll('_', ' ')} measurement`
+      ? `Edit ${String(editingPlan.details.measurement_kind || 'measurement').replaceAll('_', ' ')} measurement`
       : `Edit ${editingPlan.title}` : `Add ${preset.phase || (preset.measurementKind ? `${preset.measurementKind.replaceAll('_', ' ')} measurement` : creatingKind === 'addition' ? 'ingredient' : kindLabel(creatingKind || '').toLowerCase())}`}
       open={!!(editingPlan || creatingKind)} onCancel={() => { setCreatingKind(null); setEditingPlan(null); setPlanDeleteError(''); }} footer={null} destroyOnHidden>
       {planDeleteError && <Alert type="error" message={planDeleteError} className="form-alert" />}

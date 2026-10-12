@@ -2,16 +2,16 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Alert, AutoComplete, Button, Checkbox, Form, Input, InputNumber, Select } from 'antd';
 import { kindLabel, measurementKinds } from './constants.ts';
-import type { Equipment, InventoryItem, PlanInput } from './db.ts';
+import type { Equipment, InventoryItem, PlanDetails, PlanInput } from './db.ts';
 import { vesselKinds } from '../shared/equipment.ts';
 import { compoundMassUnit, convertUnit, gravityScales, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions } from '../shared/units.ts';
-import { parsePlanDetails, planDuration, supportsDuration } from './planTiming.ts';
+import { planDuration, supportsDuration } from './planTiming.ts';
 import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
 import { QuantityFields } from './QuantityFields.tsx';
 import type { PreferredUnits } from './api.ts';
 import { changeNumberUnit, changeQuantityUnit } from './unitFields.ts';
 
-interface Anchor { id: string; title: string; event_type: string; details_json?: string | null }
+interface Anchor { id: string; title: string; event_type: string; details?: PlanDetails }
 export interface PlanPreset { phase?: 'mash' | 'boil' | 'chill'; measurementKind?: string; itemCategory?: string; title?: string; timingKey?: string }
 const timeUnits = [
   { value: 'seconds', label: 'Seconds', multiplier: 1 },
@@ -48,7 +48,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
   submit: (input: PlanInput, recordNow?: boolean) => Promise<void>;
 }) {
   const [form] = Form.useForm<Values>();
-  const initialDetails = parsePlanDetails(initialPlan?.details_json);
+  const initialDetails = initialPlan?.details || {};
   const kind = initialPlan?.event_type || eventType;
   const offset = initialPlan?.offset_seconds ?? 0;
   const offsetUnit = offset === 0 ? timeUnits[1] : [...timeUnits].reverse().find(item => Math.abs(offset) % item.multiplier === 0) || timeUnits[0];
@@ -60,7 +60,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
   const initialItem = genericPitch || unspecifiedAddition ? '' : String(initialDetails.item_name || initialPlan?.title || preset?.title || '');
   const initialCategory = String(initialDetails.item_category || inventory.find(item => item.id === initialDetails.inventory_item_id)?.category
     || catalog.find(item => item.id === initialDetails.catalog_item_id || item.name === initialItem)?.category || preset?.itemCategory || '');
-  const initialUnit = String(initialDetails.display_unit || initialDetails.unit ||
+  const initialUnit = String(initialDetails.display_unit || initialDetails.container_unit || initialDetails.unit ||
     (kind === 'transfer' || kind === 'packaging' ? preferredUnits.volume
       : initialCategory ? unitForCategory(initialCategory, preferredUnits.mass) : preferredUnits.mass));
   const initialSplit = initialUnit === compoundMassUnit && typeof initialDetails.quantity === 'number'
@@ -111,7 +111,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
       }
       const [direction, point, anchorId] = values.timing_key === 'start' ? ['start', 'start', null] : values.timing_key.split(':', 3);
       if (anchorId && !anchors.some(item => item.id === anchorId)) throw new Error('Choose an available timing event');
-      const details: Record<string, string | number> = {};
+      const details: PlanDetails = {};
       if (values.details) details.note = values.details;
       if (phase) details.phase = phase;
       if (anchorId) details.anchor_point = point === 'end' ? 'end' : 'start';
@@ -126,12 +126,15 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
         temperature_control: ['mode', 'target_value', 'target_unit'],
         pressure_control: ['target_value', 'target_unit'],
         transfer: ['to_vessel_id', 'quantity', 'unit'],
-        packaging: ['container_name', 'container_size', 'container_count', 'unit']
+        packaging: ['container_name', 'container_size', 'container_count']
       };
       for (const key of keysByKind[kind] || []) {
         const value = values[key];
-        if (typeof value === 'string' && value || typeof value === 'number') details[key] = value;
+        if (typeof value === 'string' && value || typeof value === 'number') {
+          (details as Record<string, string | number>)[key] = value;
+        }
       }
+      if (kind === 'packaging' && values.unit) details.container_unit = values.unit;
       if (kind === 'transfer') {
         const vessel = equipment.find(item => item.id === values.to_vessel_id);
         if (vessel) details.to_vessel_name = vessel.name;
@@ -157,7 +160,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
         title, event_type: kind,
         planned_at: null, anchor_event_id: anchorId,
         offset_seconds: hasOffset ? Math.round(values.offset_value! * unit!.multiplier) * (direction === 'before' ? -1 : 1) : 0,
-        details_json: Object.keys(details).length ? JSON.stringify(details) : null
+        details
       }, values.record_now);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
@@ -263,7 +266,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
         { value: `after:start:${anchor.id}`, label: `At or after start of ${anchor.title}` },
         { value: `before:end:${anchor.id}`, label: `Before end of ${anchor.title}` },
         { value: `after:end:${anchor.id}`, label: `At or after end of ${anchor.title}` }
-      ] : parsePlanDetails(anchor.details_json).phase === 'chill' ? [
+      ] : anchor.details?.phase === 'chill' ? [
         { value: `before:start:${anchor.id}`, label: `Before ${anchor.title} · ${kindLabel(anchor.event_type)}` },
         { value: `after:start:${anchor.id}`, label: `At or after ${anchor.title}` },
         { value: `after:end:${anchor.id}`, label: `After ${anchor.title}` }

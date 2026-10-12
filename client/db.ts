@@ -5,7 +5,7 @@ import { nanoid } from 'nanoid';
 import { boilOffKinds, capacityKinds, equipmentKinds, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import { equipmentSlug } from './equipmentRoutes.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { changeColumns, indexStatements, inventoryLocationTables, nowSeconds, recipeImportTables, recategorizeLacticAcid, removeEmptyDuplicateInventory, replicatedTables, schemaStatements, workspaceSchemaVersion, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
+import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 import { convertUnit, formatQuantity, storageUnit } from '../shared/units.ts';
 import type { ImportedRecipe } from './recipeImport.ts';
@@ -16,12 +16,20 @@ export type RecipeType = 'beer' | 'wine' | 'mead' | 'cider';
 export interface Recipe { id: string; name: string; description: string | null; recipe_type: RecipeType | null }
 export interface BatchEvent {
   id: string; batch_id: string; event_type: string; title: string; planned_at: number | null;
-  anchor_event_id: string | null; offset_seconds: number | null; details_json: string | null;
+  anchor_event_id: string | null; offset_seconds: number | null; details: PlanDetails;
   actual_at: number | null; skipped_at: number | null; note: string | null;
   source_id: string | null; ended_at?: number | null;
 }
 export type Plan = BatchEvent;
 export type ActualEvent = BatchEvent;
+export interface PlanDetails {
+  anchor_point?: string; duration_seconds?: number; note?: string;
+  phase?: string; mode?: string; target_value?: number; target_unit?: string;
+  item_category?: string; item_name?: string; catalog_item_id?: string; inventory_item_id?: string;
+  quantity?: number; unit?: string; display_unit?: string;
+  measurement_kind?: string; to_vessel_id?: string; to_vessel_name?: string;
+  container_name?: string; container_size?: number; container_count?: number; container_unit?: string;
+}
 export interface Equipment { id: string; name: string; kind: string; specification_json: string | null }
 export interface InventoryItem { id: string; name: string; category: string; default_unit: string; display_unit: string; location_id: string | null; location_name?: string | null }
 export interface InventoryLocation { id: string; name: string; parent_id: string | null }
@@ -58,35 +66,24 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
           await tx.exec('CREATE TABLE sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
           await tx.exec('INSERT INTO schema_meta(version) VALUES (?)', [workspaceSchemaVersion]);
         });
-      } else if ([7, 8, 9].includes(version[0].version)) {
+      } else if (version[0].version < workspaceSchemaVersion) {
         await db.tx(async tx => {
-          if (version[0].version === 7) {
-            for (const table of inventoryLocationTables) {
-              await tx.exec(schemaStatements[replicatedTables.indexOf(table)]);
-              await tx.exec('SELECT crsql_as_crr(?)', [table]);
-            }
-            await tx.exec(removeEmptyDuplicateInventory);
-            await tx.exec(recategorizeLacticAcid);
+          for (const table of replicatedTables) {
+            const exists = await tx.execO<{ name: string }>(
+              "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [table]);
+            if (!exists.length) continue;
+            await tx.exec('SELECT crsql_as_table(?)', [table]);
+            await tx.exec(`DROP TABLE "${table}"`);
           }
-          if (version[0].version < 9) {
-            const legacy = await tx.execO<{ id: string; specification_json: string | null }>(
-              "SELECT id, specification_json FROM equipment WHERE kind = 'controlled_fermenter'");
-            for (const item of legacy) {
-              const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
-              specification.built_in_temperature_control = true;
-              await tx.exec('UPDATE equipment SET kind = ?, specification_json = ? WHERE id = ?',
-                ['fermenter', JSON.stringify(specification), item.id]);
-            }
-          }
-          for (const table of recipeImportTables) {
-            await tx.exec(schemaStatements[replicatedTables.indexOf(table)]);
-            await tx.exec('SELECT crsql_as_crr(?)', [table]);
-          }
-          await tx.exec(indexStatements.find(statement => statement.includes('recipe_import_links_by_source'))!);
+          for (const statement of schemaStatements) await tx.exec(statement);
+          for (const table of replicatedTables) await tx.exec('SELECT crsql_as_crr(?)', [table]);
+          for (const statement of indexStatements) await tx.exec(statement);
+          await tx.exec('CREATE TABLE IF NOT EXISTS sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
+          await tx.exec('DELETE FROM sync_state');
           await tx.exec('UPDATE schema_meta SET version = ?', [workspaceSchemaVersion]);
         });
-      } else if (version[0].version !== workspaceSchemaVersion) {
-        throw new Error(`This proof-of-concept database uses schema ${version[0].version}; create a fresh database for schema ${workspaceSchemaVersion}`);
+      } else if (version[0].version > workspaceSchemaVersion) {
+        throw new Error(`This app cannot open workspace schema ${version[0].version}; update Brewlog first.`);
       }
       return db;
     })();
@@ -162,7 +159,10 @@ export async function deleteRecipe(db: DB, recipeId: string): Promise<void> {
     const recipes = await tx.execO<{ id: string }>('SELECT id FROM recipes WHERE id = ?', [recipeId]);
     if (!recipes.length) throw new Error('Recipe not found');
     const events = await tx.execO<{ id: string }>('SELECT id FROM recipe_events WHERE recipe_id = ?', [recipeId]);
-    for (const event of events) await tx.exec('DELETE FROM recipe_event_inputs WHERE id = ?', [event.id]);
+    for (const event of events) {
+      await tx.exec('DELETE FROM recipe_event_inputs WHERE id = ?', [event.id]);
+      for (const [table] of Object.values(planPayloads.recipe)) await tx.exec(`DELETE FROM ${table} WHERE event_id = ?`, [event.id]);
+    }
     await tx.exec('DELETE FROM recipe_events WHERE recipe_id = ?', [recipeId]);
     await tx.exec('DELETE FROM recipe_inputs WHERE id = ?', [recipeId]);
     const links = await tx.execO<{ source_id: string }>('SELECT source_id FROM recipe_import_links WHERE id = ?', [recipeId]);
@@ -178,6 +178,74 @@ export async function deleteRecipe(db: DB, recipeId: string): Promise<void> {
 
 export type IngredientImportChoice = { mode: 'unlinked' } | { mode: 'existing'; inventoryItemId: string }
   | { mode: 'create'; unit: string };
+
+const planPayloads = {
+  recipe: {
+    addition: ['recipe_additions', ['item_category', 'item_name', 'catalog_item_id', 'inventory_item_id', 'quantity', 'unit', 'display_unit']],
+    temperature_control: ['recipe_temperature_control_events', ['phase', 'mode', 'target_value', 'target_unit']],
+    pressure_control: ['recipe_pressure_control_events', ['target_value', 'target_unit']],
+    measurement: ['recipe_measurement_targets', ['measurement_kind', 'target_value', 'target_unit']],
+    transfer: ['recipe_transfers', ['to_vessel_id', 'to_vessel_name', 'quantity', 'unit']],
+    packaging: ['recipe_packaging', ['container_name', 'container_size', 'container_count', 'container_unit']]
+  },
+  batch: {
+    addition: ['additions', ['item_category', 'item_name', 'catalog_item_id', 'inventory_item_id', 'quantity', 'unit', 'display_unit']],
+    temperature_control: ['temperature_control_events', ['phase', 'mode', 'target_value', 'target_unit']],
+    pressure_control: ['pressure_control_events', ['target_value', 'target_unit']],
+    measurement: ['batch_measurement_targets', ['measurement_kind', 'target_value', 'target_unit']],
+    transfer: ['transfers', ['to_vessel_id', 'to_vessel_name', 'quantity', 'unit']],
+    packaging: ['packaging', ['container_name', 'container_size', 'container_count', 'container_unit']]
+  }
+} as const;
+type PlanScope = keyof typeof planPayloads;
+
+function payloadFor(scope: PlanScope, eventType: string): readonly [string, readonly string[]] | undefined {
+  return (planPayloads[scope] as Record<string, readonly [string, readonly string[]]>)[eventType];
+}
+
+async function writePlanPayload(db: Pick<DB, 'exec'>, scope: PlanScope, id: string, eventType: string, details: PlanDetails): Promise<void> {
+  const payload = payloadFor(scope, eventType);
+  for (const [kind, [table]] of Object.entries(planPayloads[scope])) {
+    if (kind !== eventType) await db.exec(`DELETE FROM ${table} WHERE event_id = ?`, [id]);
+  }
+  if (!payload) return;
+  const [table, columns] = payload;
+  const values = columns.map(column => details[column as keyof PlanDetails] ?? null);
+  await db.exec(`INSERT INTO ${table}(event_id, ${columns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')})
+    ON CONFLICT(event_id) DO UPDATE SET ${columns.map(column => `${column} = excluded.${column}`).join(', ')}`,
+  [id, ...values]);
+}
+
+type StoredPlan = { id: string; event_type: string; anchor_point: string | null;
+  duration_seconds: number | null; instructions: string | null; details: PlanDetails };
+
+async function fillPlanDetails<T extends StoredPlan>(db: Pick<DB, 'execO'>, scope: PlanScope, rows: T[]): Promise<T[]> {
+  for (const row of rows) {
+    row.details = {
+      ...(row.anchor_point ? { anchor_point: row.anchor_point } : {}),
+      ...(row.duration_seconds != null ? { duration_seconds: row.duration_seconds } : {}),
+      ...(row.instructions ? { note: row.instructions } : {})
+    };
+  }
+  for (const [kind, [table]] of Object.entries(planPayloads[scope])) {
+    const selected = rows.filter(row => row.event_type === kind);
+    if (!selected.length) continue;
+    const payloads = await db.execO<Record<string, string | number | null>>(
+      `SELECT * FROM ${table} WHERE event_id IN (${selected.map(() => '?').join(', ')})`, selected.map(row => row.id));
+    const byId = new Map(payloads.map(payload => [payload.event_id, payload]));
+    for (const row of selected) {
+      const payload = byId.get(row.id);
+      if (!payload) continue;
+      for (const [key, value] of Object.entries(payload)) {
+        // Only the columns declared for this plan kind belong to its editable details.
+        if (value != null && payloadFor(scope, kind)?.[1].includes(key)) {
+          (row.details as Record<string, string | number>)[key] = value;
+        }
+      }
+    }
+  }
+  return rows;
+}
 
 export async function importRecipes(db: DB, source: {
   filename: string; format: 'beerxml' | 'brewfather_json'; bytes: Uint8Array; sha256: string;
@@ -227,9 +295,10 @@ export async function importRecipes(db: DB, source: {
         const inventoryId = action.ingredientKey && ingredientIds.get(action.ingredientKey);
         if (inventoryId) details.inventory_item_id = inventoryId;
         await tx.exec(`INSERT INTO recipe_events(id, recipe_id, event_type, title, planned_at, anchor_event_id,
-          offset_seconds, details_json, sort_order) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+          offset_seconds, anchor_point, duration_seconds, instructions, sort_order) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
         [eventId, recipeId, action.eventType, action.title, action.anchorKey ? eventIds.get(action.anchorKey) || null : null,
-          action.offsetSeconds, Object.keys(details).length ? JSON.stringify(details) : null, order + 1]);
+          action.offsetSeconds, details.anchor_point ?? null, details.duration_seconds ?? null, details.note ?? null, order + 1]);
+        await writePlanPayload(tx, 'recipe', eventId, action.eventType, details as PlanDetails);
         if (Object.keys(action.inputs).length) await tx.exec('INSERT INTO recipe_event_inputs(id, inputs_json) VALUES (?, ?)',
           [eventId, JSON.stringify(action.inputs)]);
       }
@@ -265,9 +334,14 @@ export async function createRecipe(db: DB, name: string, description: string, re
     const chillId = nanoid();
     const transferId = nanoid();
     const insert = async (eventId: string, eventType: string, title: string, anchorId: string | null,
-      details: Record<string, string | number>, order: number, offsetSeconds = 0) => tx.exec(`INSERT INTO recipe_events
-      (id, recipe_id, event_type, title, planned_at, anchor_event_id, offset_seconds, details_json, sort_order)
-      VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)`, [eventId, id, eventType, title, anchorId, offsetSeconds, JSON.stringify(details), order]);
+      details: PlanDetails, order: number, offsetSeconds = 0) => {
+      await tx.exec(`INSERT INTO recipe_events
+        (id, recipe_id, event_type, title, planned_at, anchor_event_id, offset_seconds, anchor_point, duration_seconds, instructions, sort_order)
+        VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+      [eventId, id, eventType, title, anchorId, offsetSeconds, details.anchor_point ?? null,
+        details.duration_seconds ?? null, details.note ?? null, order]);
+      await writePlanPayload(tx, 'recipe', eventId, eventType, details);
+    };
     if (recipeType === 'beer') {
       await insert(mashId, 'temperature_control', 'Mash', null,
         { phase: 'mash', mode: 'hold', target_value: convertUnit(67, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 1800 }, 2);
@@ -300,24 +374,29 @@ export interface PlanInput {
   planned_at?: number | null;
   anchor_event_id?: string | null;
   offset_seconds?: number | null;
-  details_json?: string | null;
+  details: PlanDetails;
 }
 
 export async function addRecipePlan(db: DB, recipeId: string, input: PlanInput): Promise<string> {
   const id = nanoid();
   const order = await db.execO<{ next_order: number }>(
     'SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_order FROM recipe_events WHERE recipe_id = ?', [recipeId]);
-  await db.exec(`INSERT INTO recipe_events(id, recipe_id, event_type, title, planned_at, anchor_event_id, offset_seconds, details_json, sort_order)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, recipeId, input.event_type, input.title, input.planned_at ?? null, input.anchor_event_id ?? null,
-      input.offset_seconds ?? null, input.details_json ?? null, order[0].next_order]);
+  await db.tx(async tx => {
+    await tx.exec(`INSERT INTO recipe_events(id, recipe_id, event_type, title, planned_at, anchor_event_id, offset_seconds,
+      anchor_point, duration_seconds, instructions, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, recipeId, input.event_type, input.title, input.planned_at ?? null, input.anchor_event_id ?? null,
+        input.offset_seconds ?? null, input.details.anchor_point ?? null, input.details.duration_seconds ?? null,
+        input.details.note ?? null, order[0].next_order]);
+    await writePlanPayload(tx, 'recipe', id, input.event_type, input.details);
+  });
   return id;
 }
 
 export async function listRecipePlans(db: DB, recipeId: string): Promise<(PlanInput & { id: string })[]> {
-  return db.execO<(PlanInput & { id: string })>(
-    'SELECT id, event_type, title, planned_at, anchor_event_id, offset_seconds, details_json FROM recipe_events WHERE recipe_id = ? ORDER BY sort_order, id',
-    [recipeId]);
+  const rows = await db.execO<(PlanInput & StoredPlan)>(
+    `SELECT id, event_type, title, planned_at, anchor_event_id, offset_seconds, anchor_point,
+      duration_seconds, instructions FROM recipe_events WHERE recipe_id = ? ORDER BY sort_order, id`, [recipeId]);
+  return fillPlanDetails(db, 'recipe', rows);
 }
 
 async function validatePlanAnchor(db: DB, table: 'recipe_events' | 'batch_events',
@@ -338,10 +417,14 @@ async function validatePlanAnchor(db: DB, table: 'recipe_events' | 'batch_events
 
 export async function updateRecipePlan(db: DB, recipeId: string, planId: string, input: PlanInput): Promise<void> {
   await validatePlanAnchor(db, 'recipe_events', 'recipe_id', recipeId, planId, input.anchor_event_id);
-  await db.exec(`UPDATE recipe_events SET event_type = ?, title = ?, planned_at = ?, anchor_event_id = ?,
-    offset_seconds = ?, details_json = ? WHERE id = ? AND recipe_id = ?`,
-  [input.event_type, input.title, input.planned_at ?? null, input.anchor_event_id ?? null,
-    input.offset_seconds ?? null, input.details_json ?? null, planId, recipeId]);
+  await db.tx(async tx => {
+    await tx.exec(`UPDATE recipe_events SET event_type = ?, title = ?, planned_at = ?, anchor_event_id = ?,
+      offset_seconds = ?, anchor_point = ?, duration_seconds = ?, instructions = ? WHERE id = ? AND recipe_id = ?`,
+    [input.event_type, input.title, input.planned_at ?? null, input.anchor_event_id ?? null,
+      input.offset_seconds ?? null, input.details.anchor_point ?? null, input.details.duration_seconds ?? null,
+      input.details.note ?? null, planId, recipeId]);
+    await writePlanPayload(tx, 'recipe', planId, input.event_type, input.details);
+  });
 }
 
 export async function deleteRecipePlan(db: DB, recipeId: string, planId: string): Promise<void> {
@@ -354,38 +437,44 @@ export async function deleteRecipePlan(db: DB, recipeId: string, planId: string)
     if (!plan.anchor_event_id) return plan.offset_seconds || 0;
     const anchor = plans.find(item => item.id === plan.anchor_event_id);
     if (!anchor) return plan.offset_seconds || 0;
-    const details = JSON.parse(plan.details_json || '{}') as { anchor_point?: string };
-    const anchorDetails = JSON.parse(anchor.details_json || '{}') as { duration_seconds?: number };
-    return effectiveOffset(anchor, visited) + (details.anchor_point === 'end' ? anchorDetails.duration_seconds || 0 : 0)
+    return effectiveOffset(anchor, visited) + (plan.details.anchor_point === 'end' ? anchor.details.duration_seconds || 0 : 0)
       + (plan.offset_seconds || 0);
   };
   await db.tx(async tx => {
     for (const child of children) {
-      const details = JSON.parse(child.details_json || '{}') as Record<string, string | number>;
-      delete details.anchor_point;
-      await tx.exec(`UPDATE recipe_events SET anchor_event_id = NULL, offset_seconds = ?, details_json = ?
-        WHERE id = ? AND recipe_id = ?`, [effectiveOffset(child), Object.keys(details).length ? JSON.stringify(details) : null, child.id, recipeId]);
+      await tx.exec(`UPDATE recipe_events SET anchor_event_id = NULL, offset_seconds = ?, anchor_point = NULL
+        WHERE id = ? AND recipe_id = ?`, [effectiveOffset(child), child.id, recipeId]);
     }
     await tx.exec('DELETE FROM recipe_event_inputs WHERE id = ?', [planId]);
+    for (const [table] of Object.values(planPayloads.recipe)) await tx.exec(`DELETE FROM ${table} WHERE event_id = ?`, [planId]);
     await tx.exec('DELETE FROM recipe_events WHERE id = ? AND recipe_id = ?', [planId, recipeId]);
   });
 }
 
 export async function addBatchPlan(db: DB, batchId: string, input: PlanInput, accountId: string): Promise<string> {
   const id = nanoid();
-  await db.exec(`INSERT INTO batch_events(id, batch_id, event_type, title, planned_at, anchor_event_id,
-    offset_seconds, details_json, created_at, created_by_account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, batchId, input.event_type, input.title, input.planned_at ?? null, input.anchor_event_id ?? null,
-      input.offset_seconds ?? null, input.details_json ?? null, nowSeconds(), accountId]);
+  await db.tx(async tx => {
+    await tx.exec(`INSERT INTO batch_events(id, batch_id, event_type, title, planned_at, anchor_event_id,
+      offset_seconds, anchor_point, duration_seconds, instructions, created_at, created_by_account_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, batchId, input.event_type, input.title, input.planned_at ?? null, input.anchor_event_id ?? null,
+        input.offset_seconds ?? null, input.details.anchor_point ?? null, input.details.duration_seconds ?? null,
+        input.details.note ?? null, nowSeconds(), accountId]);
+    await writePlanPayload(tx, 'batch', id, input.event_type, input.details);
+  });
   return id;
 }
 
 export async function updateBatchPlan(db: DB, batchId: string, planId: string, input: PlanInput): Promise<void> {
   await validatePlanAnchor(db, 'batch_events', 'batch_id', batchId, planId, input.anchor_event_id);
-  await db.exec(`UPDATE batch_events SET event_type = ?, title = ?, planned_at = ?, anchor_event_id = ?,
-    offset_seconds = ?, details_json = ? WHERE id = ? AND batch_id = ?`,
-  [input.event_type, input.title, input.planned_at ?? null, input.anchor_event_id ?? null,
-    input.offset_seconds ?? null, input.details_json ?? null, planId, batchId]);
+  await db.tx(async tx => {
+    await tx.exec(`UPDATE batch_events SET event_type = ?, title = ?, planned_at = ?, anchor_event_id = ?,
+      offset_seconds = ?, anchor_point = ?, duration_seconds = ?, instructions = ? WHERE id = ? AND batch_id = ?`,
+    [input.event_type, input.title, input.planned_at ?? null, input.anchor_event_id ?? null,
+      input.offset_seconds ?? null, input.details.anchor_point ?? null, input.details.duration_seconds ?? null,
+      input.details.note ?? null, planId, batchId]);
+    await writePlanPayload(tx, 'batch', planId, input.event_type, input.details);
+  });
 }
 
 export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string, accountId: string,
@@ -402,11 +491,13 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
       [batchId, recipeInputs[0].inputs_json]);
     for (const plan of plans) {
       await tx.exec(`INSERT INTO batch_events(id, batch_id, recipe_event_id, event_type, title, planned_at,
-        anchor_event_id, offset_seconds, details_json, created_at, created_by_account_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        anchor_event_id, offset_seconds, anchor_point, duration_seconds, instructions, created_at, created_by_account_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [ids.get(plan.id)!, batchId, plan.id, plan.event_type, plan.title, plan.planned_at ?? null,
           plan.anchor_event_id ? ids.get(plan.anchor_event_id) ?? null : null,
-          plan.offset_seconds ?? null, plan.details_json ?? null, now, accountId]);
+          plan.offset_seconds ?? null, plan.details.anchor_point ?? null, plan.details.duration_seconds ?? null,
+          plan.details.note ?? null, now, accountId]);
+      await writePlanPayload(tx, 'batch', ids.get(plan.id)!, plan.event_type, plan.details);
       const eventInputs = await tx.execO<{ inputs_json: string }>('SELECT inputs_json FROM recipe_event_inputs WHERE id = ?', [plan.id]);
       if (eventInputs.length) await tx.exec('INSERT INTO batch_event_inputs(id, inputs_json) VALUES (?, ?)',
         [ids.get(plan.id)!, eventInputs[0].inputs_json]);
@@ -420,10 +511,11 @@ export async function listPlans(db: DB, batchId: string): Promise<Plan[]> {
 }
 
 export async function listEvents(db: DB, batchId: string): Promise<ActualEvent[]> {
-  return db.execO<ActualEvent>(`SELECT e.id, e.batch_id, e.event_type, e.title, e.planned_at, e.anchor_event_id,
-    e.offset_seconds, e.details_json, e.actual_at, e.skipped_at, e.note, e.source_id, x.ended_at
+  const rows = await db.execO<ActualEvent & StoredPlan>(`SELECT e.id, e.batch_id, e.event_type, e.title, e.planned_at, e.anchor_event_id,
+    e.offset_seconds, e.anchor_point, e.duration_seconds, e.instructions, e.actual_at, e.skipped_at, e.note, e.source_id, x.ended_at
     FROM batch_events e LEFT JOIN event_ends x ON x.id = e.id
     WHERE e.batch_id = ? ORDER BY e.created_at, e.id`, [batchId]);
+  return fillPlanDetails(db, 'batch', rows);
 }
 
 export const measurementTables = {
@@ -458,7 +550,7 @@ export async function recordEvent(db: DB, input: EventInput): Promise<string> {
         [id, input.batchId, input.eventType, input.eventType, input.actualAt, input.note || null, nowSeconds(), input.accountId, input.accountId]);
     }
     if (input.endedAt != null) await tx.exec('INSERT INTO event_ends(id, ended_at) VALUES (?, ?)', [id, input.endedAt]);
-    if (input.payload) await updateEventDetails(tx, id, input.payload, input.endedAt);
+    if (input.endedAt != null) await tx.exec('UPDATE batch_events SET duration_seconds = NULL WHERE id = ?', [id]);
     const payload = input.payload;
     if (!payload) return;
     const table = input.measurementKind ? measurementTables[input.measurementKind] : {
@@ -467,8 +559,13 @@ export async function recordEvent(db: DB, input: EventInput): Promise<string> {
     }[input.eventType];
     if (!table) throw new Error('Unsupported event payload');
     const columns = Object.keys(payload);
-    await tx.exec(`INSERT INTO ${table}(event_id, ${columns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')})`,
+    await tx.exec(`INSERT INTO ${table}(event_id, ${columns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')})
+      ON CONFLICT(event_id) DO UPDATE SET ${columns.map(column => `${column} = excluded.${column}`).join(', ')}`,
       [id, ...Object.values(payload)]);
+    if (input.eventType === 'addition' && typeof payload.item_name === 'string') {
+      await tx.exec('UPDATE batch_events SET title = ? WHERE id = ?', [payload.item_name, id]);
+    }
+    if (input.eventType === 'transfer') await updateTransferName(tx, id, payload.to_vessel_id);
   });
   return id;
 }
@@ -503,42 +600,26 @@ export async function updateEvent(db: DB, event: ActualEvent, input: EventInput)
     else await tx.exec('INSERT INTO event_ends(id, ended_at) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET ended_at = excluded.ended_at',
       [event.id, input.endedAt]);
     if (!input.payload) return;
-    await updateEventDetails(tx, event.id, input.payload, input.endedAt);
+    if (input.endedAt != null) await tx.exec('UPDATE batch_events SET duration_seconds = NULL WHERE id = ?', [event.id]);
     const table = input.measurementKind ? measurementTables[input.measurementKind] : eventPayloadTables[input.eventType];
     if (!table) throw new Error('Unsupported event payload');
     const columns = Object.keys(input.payload);
     await tx.exec(`UPDATE ${table} SET ${columns.map(column => `${column} = ?`).join(', ')} WHERE event_id = ?`,
       [...Object.values(input.payload), event.id]);
-    if (input.eventType === 'transfer') await tx.exec('UPDATE transfers SET from_vessel_id = NULL WHERE event_id = ?', [event.id]);
+    if (input.eventType === 'addition' && typeof input.payload.item_name === 'string') {
+      await tx.exec('UPDATE batch_events SET title = ? WHERE id = ?', [input.payload.item_name, event.id]);
+    }
+    if (input.eventType === 'transfer') {
+      await tx.exec('UPDATE transfers SET from_vessel_id = NULL WHERE event_id = ?', [event.id]);
+      await updateTransferName(tx, event.id, input.payload.to_vessel_id);
+    }
   });
 }
 
-async function updateEventDetails(db: Pick<DB, 'execO' | 'exec'>, id: string, payload: Record<string, string | number | null>, endedAt?: number | null): Promise<void> {
-  const rows = await db.execO<{ details_json: string | null; event_type: string }>('SELECT details_json, event_type FROM batch_events WHERE id = ?', [id]);
-  const details = JSON.parse(rows[0]?.details_json || '{}') as Record<string, string | number | null>;
-  for (const [key, value] of Object.entries(payload)) {
-    if (key !== 'event_id') details[key] = value;
-  }
-  if (rows[0]?.event_type === 'transfer') {
-    delete details.from_vessel_id;
-    delete details.from_vessel_name;
-    const equipmentId = payload.to_vessel_id;
-    if (typeof equipmentId !== 'string') delete details.to_vessel_name;
-    else {
-      const equipment = await db.execO<{ name: string }>('SELECT name FROM equipment WHERE id = ?', [equipmentId]);
-      if (equipment.length) details.to_vessel_name = equipment[0].name;
-    }
-  }
-  if (endedAt != null) delete details.duration_seconds;
-  // Once an addition happened, its typed payload is the single source for the
-  // quantity and item. Pending actions keep those values in details_json.
-  if (rows[0]?.event_type === 'addition') {
-    for (const key of ['item_name', 'inventory_item_id', 'quantity', 'unit', 'display_unit']) delete details[key];
-  }
-  await db.exec('UPDATE batch_events SET details_json = ? WHERE id = ?', [JSON.stringify(details), id]);
-  if (rows[0]?.event_type === 'addition' && typeof payload.item_name === 'string') {
-    await db.exec('UPDATE batch_events SET title = ? WHERE id = ?', [payload.item_name, id]);
-  }
+async function updateTransferName(db: Pick<DB, 'execO' | 'exec'>, id: string, destination: unknown): Promise<void> {
+  const equipment = typeof destination === 'string'
+    ? await db.execO<{ name: string }>('SELECT name FROM equipment WHERE id = ?', [destination]) : [];
+  await db.exec('UPDATE transfers SET to_vessel_name = ? WHERE event_id = ?', [equipment[0]?.name ?? null, id]);
 }
 
 export async function skipBatchEvent(db: DB, eventId: string, at: number, accountId: string): Promise<void> {
@@ -739,19 +820,7 @@ export async function deleteEquipment(db: DB, id: string): Promise<void> {
     used ||= await referenced('temperature_control_events', 'equipment_id = ?', [id])
       || await referenced('pressure_control_events', 'equipment_id = ?', [id])
       || await referenced('transfers', 'from_vessel_id = ? OR to_vessel_id = ?', [id, id]);
-    if (!used) {
-      for (const table of ['recipe_events', 'batch_events']) {
-        const plans = await tx.execO<{ details_json: string | null }>(
-          `SELECT details_json FROM ${table} WHERE event_type = 'transfer' AND details_json IS NOT NULL`);
-        used = plans.some(plan => {
-          try {
-            const details = JSON.parse(plan.details_json || '{}') as Record<string, unknown>;
-            return details.from_vessel_id === id || details.to_vessel_id === id;
-          } catch { return false; }
-        });
-        if (used) break;
-      }
-    }
+    used ||= await referenced('recipe_transfers', 'to_vessel_id = ?', [id]);
     if (used) {
       await tx.exec('INSERT INTO equipment_archives(id, equipment_id, archived_at) VALUES (?, ?, ?)',
         [nanoid(), id, nowSeconds()]);

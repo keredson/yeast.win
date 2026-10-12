@@ -4,16 +4,23 @@ const definitions: Record<string, string> = {
   batches: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, description TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL`,
   recipes: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, description TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL`,
   recipe_types: `id TEXT PRIMARY KEY NOT NULL, recipe_type TEXT NOT NULL`,
-  recipe_events: `id TEXT PRIMARY KEY NOT NULL, recipe_id TEXT NOT NULL, event_type TEXT NOT NULL, title TEXT NOT NULL, planned_at INTEGER, anchor_event_id TEXT, offset_seconds INTEGER, details_json TEXT, sort_order INTEGER NOT NULL`,
+  recipe_events: `id TEXT PRIMARY KEY NOT NULL, recipe_id TEXT NOT NULL, event_type TEXT NOT NULL, title TEXT NOT NULL, planned_at INTEGER, anchor_event_id TEXT, offset_seconds INTEGER, anchor_point TEXT, duration_seconds INTEGER, instructions TEXT, sort_order INTEGER NOT NULL`,
+  recipe_additions: `event_id TEXT PRIMARY KEY NOT NULL, item_category TEXT, item_name TEXT, catalog_item_id TEXT, inventory_item_id TEXT, quantity REAL, unit TEXT, display_unit TEXT`,
+  recipe_temperature_control_events: `event_id TEXT PRIMARY KEY NOT NULL, phase TEXT, mode TEXT, target_value REAL, target_unit TEXT`,
+  recipe_pressure_control_events: `event_id TEXT PRIMARY KEY NOT NULL, target_value REAL, target_unit TEXT`,
+  recipe_measurement_targets: `event_id TEXT PRIMARY KEY NOT NULL, measurement_kind TEXT, target_value REAL, target_unit TEXT`,
+  recipe_transfers: `event_id TEXT PRIMARY KEY NOT NULL, to_vessel_id TEXT, to_vessel_name TEXT, quantity REAL, unit TEXT`,
+  recipe_packaging: `event_id TEXT PRIMARY KEY NOT NULL, container_name TEXT, container_size REAL, container_count INTEGER, container_unit TEXT`,
   recipe_import_sources: `id TEXT PRIMARY KEY NOT NULL, filename TEXT NOT NULL, format TEXT NOT NULL, sha256 TEXT NOT NULL, byte_count INTEGER NOT NULL, content BLOB NOT NULL, imported_at INTEGER NOT NULL`,
   recipe_import_links: `id TEXT PRIMARY KEY NOT NULL, source_id TEXT NOT NULL, source_index INTEGER NOT NULL, external_id TEXT`,
   recipe_inputs: `id TEXT PRIMARY KEY NOT NULL, inputs_json TEXT NOT NULL`,
   recipe_event_inputs: `id TEXT PRIMARY KEY NOT NULL, inputs_json TEXT NOT NULL`,
-  batch_events: `id TEXT PRIMARY KEY NOT NULL, batch_id TEXT NOT NULL, recipe_event_id TEXT, event_type TEXT NOT NULL, title TEXT, planned_at INTEGER, anchor_event_id TEXT, offset_seconds INTEGER, details_json TEXT, actual_at INTEGER, skipped_at INTEGER, note TEXT, created_at INTEGER NOT NULL, created_by_account_id TEXT, recorded_by_account_id TEXT, source_id TEXT, external_id TEXT, received_at INTEGER`,
+  batch_events: `id TEXT PRIMARY KEY NOT NULL, batch_id TEXT NOT NULL, recipe_event_id TEXT, event_type TEXT NOT NULL, title TEXT, planned_at INTEGER, anchor_event_id TEXT, offset_seconds INTEGER, anchor_point TEXT, duration_seconds INTEGER, instructions TEXT, actual_at INTEGER, skipped_at INTEGER, note TEXT, created_at INTEGER NOT NULL, created_by_account_id TEXT, recorded_by_account_id TEXT, source_id TEXT, external_id TEXT, received_at INTEGER`,
   batch_recipe_inputs: `id TEXT PRIMARY KEY NOT NULL, inputs_json TEXT NOT NULL`,
   batch_event_inputs: `id TEXT PRIMARY KEY NOT NULL, inputs_json TEXT NOT NULL`,
   event_ends: `id TEXT PRIMARY KEY NOT NULL, ended_at INTEGER NOT NULL`,
-  additions: `event_id TEXT PRIMARY KEY NOT NULL, inventory_item_id TEXT, item_name TEXT NOT NULL, quantity REAL NOT NULL, unit TEXT NOT NULL, lot TEXT`,
+  additions: `event_id TEXT PRIMARY KEY NOT NULL, item_category TEXT, catalog_item_id TEXT, inventory_item_id TEXT, item_name TEXT, quantity REAL, unit TEXT, display_unit TEXT, lot TEXT`,
+  batch_measurement_targets: `event_id TEXT PRIMARY KEY NOT NULL, measurement_kind TEXT, target_value REAL, target_unit TEXT`,
   temperature_measurements: measurementColumns(),
   ph_measurements: measurementColumns(),
   gravity_measurements: measurementColumns(),
@@ -21,9 +28,9 @@ const definitions: Record<string, string> = {
   pressure_measurements: measurementColumns(),
   carbonation_measurements: measurementColumns(),
   dissolved_oxygen_measurements: measurementColumns(),
-  temperature_control_events: `event_id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, mode TEXT NOT NULL, target_value REAL, target_unit TEXT, power_watts REAL, ended_at INTEGER`,
+  temperature_control_events: `event_id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT, phase TEXT, mode TEXT, target_value REAL, target_unit TEXT, power_watts REAL, ended_at INTEGER`,
   pressure_control_events: `event_id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, target_value REAL NOT NULL, target_unit TEXT NOT NULL`,
-  transfers: `event_id TEXT PRIMARY KEY NOT NULL, from_vessel_id TEXT, to_vessel_id TEXT, quantity REAL, unit TEXT`,
+  transfers: `event_id TEXT PRIMARY KEY NOT NULL, from_vessel_id TEXT, to_vessel_id TEXT, to_vessel_name TEXT, quantity REAL, unit TEXT`,
   packaging: `event_id TEXT PRIMARY KEY NOT NULL, container_name TEXT NOT NULL, container_size REAL NOT NULL, container_unit TEXT NOT NULL, container_count INTEGER NOT NULL, inventory_item_id TEXT`,
   equipment: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, catalog_model_id TEXT, specification_json TEXT, created_at INTEGER NOT NULL`,
   equipment_archives: `id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, archived_at INTEGER NOT NULL`,
@@ -95,32 +102,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 10;
-
-export const recipeImportTables = [
-  'recipe_import_sources', 'recipe_import_links', 'recipe_inputs', 'recipe_event_inputs',
-  'batch_recipe_inputs', 'batch_event_inputs'
-] as const;
-
-export const inventoryLocationTables = ['inventory_locations', 'inventory_item_locations', 'inventory_moves'] as const;
-
-export const removeEmptyDuplicateInventory = `DELETE FROM inventory_items WHERE id IN (
-  SELECT empty.id FROM inventory_items empty WHERE EXISTS (
-    SELECT 1 FROM inventory_items other WHERE other.id <> empty.id
-      AND lower(trim(other.name)) = lower(trim(empty.name)) AND other.category = empty.category
-      AND (other.created_at > empty.created_at OR other.created_at = empty.created_at AND other.id > empty.id
-        OR EXISTS (SELECT 1 FROM inventory_purchases WHERE inventory_item_id = other.id)
-        OR EXISTS (SELECT 1 FROM inventory_counts WHERE inventory_item_id = other.id)
-        OR EXISTS (SELECT 1 FROM inventory_discards WHERE inventory_item_id = other.id)))
-  AND NOT EXISTS (SELECT 1 FROM inventory_purchases WHERE inventory_item_id = empty.id)
-  AND NOT EXISTS (SELECT 1 FROM inventory_counts WHERE inventory_item_id = empty.id)
-  AND NOT EXISTS (SELECT 1 FROM inventory_discards WHERE inventory_item_id = empty.id)
-  AND NOT EXISTS (SELECT 1 FROM additions WHERE inventory_item_id = empty.id)
-  AND NOT EXISTS (SELECT 1 FROM packaging WHERE inventory_item_id = empty.id)
-  AND NOT EXISTS (SELECT 1 FROM photos WHERE inventory_item_id = empty.id)
-  AND NOT EXISTS (SELECT 1 FROM inventory_item_specs WHERE inventory_item_id = empty.id)
-)`;
-export const recategorizeLacticAcid = "UPDATE inventory_items SET category = 'Adjunct' WHERE category = 'Chemical' AND lower(trim(name)) = 'lactic acid'";
+export const workspaceSchemaVersion = 11;
 
 export function isValidId(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{10,32}$/.test(value);

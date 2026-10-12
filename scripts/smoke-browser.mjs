@@ -898,7 +898,7 @@ try {
   });
   await choosePlanKind(page, 'Add action', 'Photo');
   const photoPlan = page.getByRole('dialog', { name: 'Add photo' });
-  await photoPlan.getByLabel('Photo reminder').fill('Brew photo');
+  await photoPlan.getByLabel('Description (optional)').fill('Brew photo');
   await photoPlan.getByRole('checkbox', { name: 'Record this now' }).check();
   await photoPlan.getByRole('button', { name: 'Add photo' }).click();
   const photoDialog = page.getByRole('dialog', { name: 'Record: Brew photo' });

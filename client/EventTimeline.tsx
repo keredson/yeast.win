@@ -4,7 +4,7 @@ import { CheckOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ActualEvent, Equipment, PlanInput } from './db.ts';
 import { kindLabel, measurementKinds } from './constants.ts';
 import { formatTime } from './time.ts';
-import { effectivePlanTime, formatOffset, orderTimelineGroup, parsePlanDetails, planDetailsLabel, planDuration, planKindLabel, timelineGroupKey, timelineGroupStep } from './planTiming.ts';
+import { effectivePlanTime, formatOffset, orderTimelineGroup, planDetailsLabel, planDuration, planKindLabel, timelineGroupKey, timelineGroupStep } from './planTiming.ts';
 import type { PlanPreset } from './PlanForm.tsx';
 
 export type TimelineEvent = PlanInput & { id: string; actual_at?: number | null; skipped_at?: number | null; ended_at?: number | null };
@@ -13,7 +13,7 @@ interface Group { key: string; at: number | null; step: number; label: string; e
 
 export function actionForMenu(key: string, plans: TimelineEvent[]): { kind: string; preset: PlanPreset } {
   const [action, measurementKind] = key.split(':');
-  const boil = plans.find(plan => parsePlanDetails(plan.details_json).phase === 'boil');
+  const boil = plans.find(plan => plan.details?.phase === 'boil');
   const preset: PlanPreset = action === 'ingredient' ? { itemCategory: 'Grain', timingKey: boil ? `after:start:${boil.id}` : 'start' }
     : action === 'yeast' ? { itemCategory: 'Yeast', title: 'Yeast' }
       : action === 'measurement' ? { measurementKind, title: `Measure ${measurementKinds.find(item => item.value === measurementKind)?.label.toLowerCase() || measurementKind}` }

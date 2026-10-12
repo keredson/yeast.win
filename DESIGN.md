@@ -56,13 +56,13 @@ The names below are proposed logical tables. A migration can refine names and sp
 | --- | --- |
 | `batches` | `id`, name, description, status, timestamps. This is the root for the batch timeline. The current UI uses `created_at` as the batch start time (T0); no separate `started` event is required. |
 | `recipes` / `recipe_types` | Name, description, and beer/wine/mead/cider type. Reusable editable plans, independent of batches. New beer recipes seed mash and boil ranges, chill to a target temperature, transfer to fermenter, yeast pitching, and packaging. Wine, mead, and cider seed yeast pitching and packaging. Packaging is anchored to yeast pitching with an editable estimated interval (21 days for beer, 28 for cider, 60 for wine and mead). Container details are optional in a plan and required when packaging is recorded. |
-| `recipe_events` | Planned actions or milestones in a recipe, including type-specific planned details, order, and timing rule. Editing or deleting a recipe does not rewrite existing batches. Deleting a recipe also deletes its type and template actions. |
-| `batch_events` | One row per batch action. Recipe events are copied here when a batch is created. The row has its title, kind, timing anchor and offset, editable action details, optional `actual_at` and `skipped_at`, creator/recorder/source, and optional `received_at`. Actions added during the batch use the same table. |
+| `recipe_events` | Planned actions or milestones in a recipe, with shared timing columns and order. Type-specific values live in recipe payload tables. Editing or deleting a recipe does not rewrite existing batches. Deleting a recipe also deletes its type and template actions. |
+| `batch_events` | One row per batch action. Recipe events are copied here when a batch is created. The row has its title, kind, timing columns, optional `actual_at` and `skipped_at`, creator/recorder/source, and optional `received_at`. Type-specific values live in batch payload tables. Actions added during the batch use the same tables. |
 | `event_ends` | Optional actual end timestamp for a ranged event, keyed by its event ID. A range can be in progress until this row exists. |
 
 An action is pending until it has `actual_at` or `skipped_at`. If offline peers independently record and skip it, `actual_at` wins in the UI and inventory calculations. Editing a pending or completed action changes its current quantity, duration, target, or other details. The batch does not preserve earlier versions of its plan. A recipe retains its own template values.
 
-An action stores `offset_seconds` from batch start, or `anchor_event_id` plus `offset_seconds` from another action. Temperature and pressure control actions can be timed ranges, except post boil chill, which has a target temperature and records when the target is reached. A pending range stores its target `duration_seconds` in its details. Anchored actions can refer to the start or end of a range with `anchor_point`. Until an anchor happens, the UI estimates its time from that action's timing rule; a recorded start or end supersedes the estimate. Recipe anchors are remapped to copied batch actions. New actions do not use absolute planned times. A skipped anchor still supplies its estimated time.
+An action stores `offset_seconds` from batch start, or `anchor_event_id` plus `offset_seconds` from another action. Temperature and pressure control actions can be timed ranges, except post boil chill, which has a target temperature and records when the target is reached. A pending range stores its target `duration_seconds` in an event column. Anchored actions can refer to the start or end of a range with `anchor_point`. Until an anchor happens, the UI estimates its time from that action's timing rule; a recorded start or end supersedes the estimate. Recipe anchors are remapped to copied batch actions. New actions do not use absolute planned times. A skipped anchor still supplies its estimated time.
 
 Recipes and batches use the same event timeline and add menu. The batch view adds recording, skipping, actual readings, and photos. Both timelines show a batch-start group even when it has no additions. Deleting a recipe event leaves its dependents intact: direct dependents lose their anchor and keep their calculated offset from batch start; later descendants retain their anchors.
 
@@ -82,7 +82,7 @@ Calculate results on the device from stored inputs. Initial calculation list, in
 6. Mash pH and water adjustments from water composition, grist, and salt/acid additions.
 7. Carbonation/priming from target CO₂, temperature, volume, and packaging method.
 
-Do not persist these predicted values. Store chosen calculation methods and user-supplied assumptions as inputs; recompute when inputs change. A result may be cached locally for display but is disposable. Imported source-only fields need explicit schema or UI support before they become editable: the current event form reconstructs `details_json` on save and can discard unknown keys.
+Do not persist these predicted values. Store chosen calculation methods and user-supplied assumptions as inputs; recompute when inputs change. A result may be cached locally for display but is disposable. Imported source-only fields need explicit schema or UI support before they become editable; the event form edits only fields represented in the typed action tables.
 
 ### Actual event payloads
 
@@ -105,7 +105,7 @@ Do not persist these predicted values. Store chosen calculation methods and user
 | `boil_finished` | Legacy milestone retained for existing data. New plans use a timed boil range and anchor to its start or end. |
 | `notes` | Free-text observations that do not fit a physical measurement or action. |
 
-Action details are a single editable set of values. The current implementation keeps pending additions in `details_json` and moves their quantity to the `additions` row when recorded. This JSON storage is not the intended long-term model: planned and recorded action fields should use explicit columns in type-specific tables. A pending measurement can exist without a measured value; its value, uncertainty, and instrument are filled in when recorded.
+Action details are a single editable set of values. Recipe actions have type-specific planned payload tables. Batch actions use their type-specific payload tables while pending and when recorded; recording fills in or corrects the same row. Shared timing fields and instructions are columns on `recipe_events` and `batch_events`. A pending measurement can exist without a measured value; its target is stored separately from the observed value, uncertainty, and instrument filled in when recorded. Event `details_json` columns have been removed. The pre-release schema reset discards old workspace data instead of backfilling it.
 
 #### Temperature control intervals
 

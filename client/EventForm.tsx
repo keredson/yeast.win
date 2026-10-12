@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { Alert, Button, Form, Input, InputNumber, Select } from 'antd';
 import { kindLabel, measurementKinds, planKinds } from './constants.ts';
 import { fromDatetimeLocal, toDatetimeLocal } from './time.ts';
-import { addPhoto, recordEvent, skipBatchEvent, updateEvent, updatePhotoEvent, type ActualEvent, type Equipment, type EventInput, type InventoryItem, type LocalDb, type MeasurementKind, type Plan } from './db.ts';
+import { addPhoto, recordEvent, skipBatchEvent, updateEvent, updatePhotoEvent, type ActualEvent, type Equipment, type EventInput, type InventoryItem, type LocalDb, type MeasurementKind, type Plan, type PlanDetails } from './db.ts';
 import type { PreferredUnits } from './api.ts';
 import { compoundMassUnit, gravityScales, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions } from '../shared/units.ts';
-import { parsePlanDetails, supportsDuration } from './planTiming.ts';
+import { supportsDuration } from './planTiming.ts';
 import { inventoryCategories } from '../shared/catalog.ts';
 import { QuantityFields } from './QuantityFields.tsx';
 import { changeNumberUnit, changeQuantityUnit } from './unitFields.ts';
@@ -50,9 +50,9 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
   onSaved: () => Promise<void>;
 }) {
   const [form] = Form.useForm<Values>();
-  const planned = parsePlanDetails(initialPlan?.details_json);
-  const plannedString = (key: string) => typeof planned[key] === 'string' ? planned[key] as string : undefined;
-  const plannedNumber = (key: string) => typeof planned[key] === 'number' ? planned[key] as number : undefined;
+  const planned = initialPlan?.details || {};
+  const plannedString = (key: keyof PlanDetails) => typeof planned[key] === 'string' ? planned[key] as string : undefined;
+  const plannedNumber = (key: keyof PlanDetails) => typeof planned[key] === 'number' ? planned[key] as number : undefined;
   const completingPlan = !!initialPlan && !initialEvent;
   const initialMeasurement = measurementKinds.find(item => item.value === plannedString('measurement_kind'))?.value as MeasurementKind | undefined;
   const [kind, setKind] = useState(initialEvent?.event_type || initialPlan?.event_type || 'note');
@@ -175,7 +175,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
     container_count: plannedNumber('container_count'),
     target_value: kind === 'measurement' ? undefined : plannedNumber('target_value'),
     target_unit: plannedString('target_unit') || (kind === 'temperature_control' ? preferredUnits.temperature : kind === 'pressure_control' ? preferredUnits.pressure : undefined),
-    container_unit: plannedString('unit') || preferredUnits.volume,
+    container_unit: plannedString('container_unit') || preferredUnits.volume,
     ...initialData?.payload,
     unit: initialUnit, quantity: initialUnit === compoundMassUnit ? undefined : initialQuantity,
     pounds: initialSplit?.pounds, ounces: initialSplit?.ounces

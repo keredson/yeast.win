@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nanoid } from 'nanoid';
-import { indexStatements, inventoryLocationTables, nowSeconds, recipeImportTables, recategorizeLacticAcid, removeEmptyDuplicateInventory, replicatedTables, schemaStatements, workspaceSchemaVersion } from '../shared/schema.ts';
+import { indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion } from '../shared/schema.ts';
 
 export const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const envPath = resolve(projectRoot, '.env');
@@ -151,32 +151,18 @@ export function openWorkspaceDb(id: string): Database.Database {
       db.close();
       throw error;
     }
-  } else if ([7, 8, 9].includes(row.version)) {
+  } else if (row.version < workspaceSchemaVersion) {
     db.exec('BEGIN');
     try {
-      if (row.version === 7) {
-        for (const table of inventoryLocationTables) {
-          db.exec(schemaStatements[replicatedTables.indexOf(table)]);
-          db.prepare('SELECT crsql_as_crr(?)').get(table);
-        }
-        db.exec(removeEmptyDuplicateInventory);
-        db.exec(recategorizeLacticAcid);
+      for (const table of replicatedTables) {
+        const exists = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+        if (!exists) continue;
+        db.prepare('SELECT crsql_as_table(?)').get(table);
+        db.exec(`DROP TABLE "${table}"`);
       }
-      if (row.version < 9) {
-        const legacy = db.prepare("SELECT id, specification_json FROM equipment WHERE kind = 'controlled_fermenter'")
-          .all() as { id: string; specification_json: string | null }[];
-        const update = db.prepare('UPDATE equipment SET kind = ?, specification_json = ? WHERE id = ?');
-        for (const item of legacy) {
-          const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
-          specification.built_in_temperature_control = true;
-          update.run('fermenter', JSON.stringify(specification), item.id);
-        }
-      }
-      for (const table of recipeImportTables) {
-        db.exec(schemaStatements[replicatedTables.indexOf(table)]);
-        db.prepare('SELECT crsql_as_crr(?)').get(table);
-      }
-      db.exec(indexStatements.find(statement => statement.includes('recipe_import_links_by_source'))!);
+      for (const statement of schemaStatements) db.exec(statement);
+      for (const table of replicatedTables) db.prepare('SELECT crsql_as_crr(?)').get(table);
+      for (const statement of indexStatements) db.exec(statement);
       db.prepare('UPDATE schema_meta SET version = ?').run(workspaceSchemaVersion);
       db.exec('COMMIT');
     } catch (error) {
@@ -184,9 +170,9 @@ export function openWorkspaceDb(id: string): Database.Database {
       db.close();
       throw error;
     }
-  } else if (row.version !== workspaceSchemaVersion) {
+  } else if (row.version > workspaceSchemaVersion) {
     db.close();
-    throw new Error(`This proof-of-concept database uses schema ${row.version}; create a fresh database for schema ${workspaceSchemaVersion}`);
+    throw new Error(`This server cannot open workspace schema ${row.version}; update Brewlog first.`);
   }
   return db;
 }

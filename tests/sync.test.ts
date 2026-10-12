@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { nanoid } from 'nanoid';
 import Database from 'better-sqlite3';
-import { changeColumns, inventoryLocationTables, nowSeconds, replicatedTables, schemaStatements, type SyncRequest, validateChange, } from '../shared/schema.ts';
+import { changeColumns, nowSeconds, type SyncRequest, validateChange, } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 
 process.env.BREWLOG_DATA_DIR = mkdtempSync(join(tmpdir(), 'brewlog-sync-'));
@@ -85,24 +85,27 @@ test('recording an action wins over a concurrent skip', () => {
     const at = nowSeconds();
     first.prepare('INSERT INTO batches(id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
       .run(batchId, 'Test', 'active', at, at);
-    first.prepare('INSERT INTO batch_events(id, batch_id, event_type, title, offset_seconds, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(id, batchId, 'addition', 'Hops', 0, JSON.stringify({ quantity: 6, unit: 'oz' }), at);
+    first.prepare('INSERT INTO batch_events(id, batch_id, event_type, title, offset_seconds, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(id, batchId, 'addition', 'Hops', 0, at);
+    first.prepare('INSERT INTO additions(event_id, item_name, quantity, unit) VALUES (?, ?, ?, ?)')
+      .run(id, 'Hops', 6, 'oz');
     const changes = () => (first.prepare(selectChanges).all(0) as SqlChangeRow[]).map(encodeChange);
     for (const change of changes()) second.prepare(insertChange).run(...decodeChange(change));
 
     first.prepare('UPDATE batch_events SET skipped_at = ? WHERE id = ?').run(at + 60, id);
-    second.prepare('UPDATE batch_events SET actual_at = ?, details_json = ? WHERE id = ?')
-      .run(at + 70, JSON.stringify({ quantity: 5, unit: 'oz' }), id);
+    second.prepare('UPDATE batch_events SET actual_at = ? WHERE id = ?').run(at + 70, id);
+    second.prepare('UPDATE additions SET quantity = ? WHERE event_id = ?').run(5, id);
     const secondChanges = (second.prepare(selectChanges).all(0) as SqlChangeRow[]).map(encodeChange);
     for (const change of changes()) second.prepare(insertChange).run(...decodeChange(change));
     for (const change of secondChanges) first.prepare(insertChange).run(...decodeChange(change));
 
     for (const db of [first, second]) {
-      const row = db.prepare('SELECT actual_at, skipped_at, details_json FROM batch_events WHERE id = ?')
-        .get(id) as { actual_at: number; skipped_at: number; details_json: string };
+      const row = db.prepare('SELECT actual_at, skipped_at FROM batch_events WHERE id = ?')
+        .get(id) as { actual_at: number; skipped_at: number };
       assert.equal(row.actual_at, at + 70);
       assert.equal(row.skipped_at, at + 60);
-      assert.equal(JSON.parse(row.details_json).quantity, 5);
+      const addition = db.prepare('SELECT quantity FROM additions WHERE event_id = ?').get(id) as { quantity: number };
+      assert.equal(addition.quantity, 5);
     }
   } finally {
     closeWorkspaceDb(first);
@@ -110,73 +113,24 @@ test('recording an action wins over a concurrent skip', () => {
   }
 });
 
-test('older proof-of-concept databases require a fresh schema', () => {
-  const id = nanoid();
-  const file = join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`);
-  const old = new Database(file);
-  old.exec('CREATE TABLE schema_meta(version INTEGER NOT NULL); INSERT INTO schema_meta VALUES (6)');
-  old.close();
-  assert.throws(() => openWorkspaceDb(id), /create a fresh database/);
-});
-
-test('schema 7 inventory upgrades and removes an unused duplicate without losing stock', () => {
+test('pre-release workspace schemas reset without carrying old event JSON', () => {
   const id = nanoid();
   const file = join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`);
   const old = new Database(file);
   old.loadExtension('vendor/crsqlite.so');
-  old.exec('CREATE TABLE schema_meta(version INTEGER NOT NULL); INSERT INTO schema_meta VALUES (7)');
-  for (const [index, table] of replicatedTables.entries()) {
-    if (inventoryLocationTables.includes(table as typeof inventoryLocationTables[number])) continue;
-    old.exec(schemaStatements[index]);
-    old.prepare('SELECT crsql_as_crr(?)').get(table);
-  }
-  const emptyId = nanoid();
-  const stockedId = nanoid();
-  old.prepare('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)')
-    .run(emptyId, 'SafAle US-05', 'Yeast', 'packet', 1);
-  old.prepare('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)')
-    .run(stockedId, 'SafAle US-05', 'Yeast', 'packet', 2);
-  old.prepare('INSERT INTO inventory_purchases(id, inventory_item_id, quantity, unit, purchased_at) VALUES (?, ?, ?, ?, ?)')
-    .run(nanoid(), stockedId, 10, 'packet', 3);
-  const acidId = nanoid();
-  old.prepare('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)')
-    .run(acidId, 'Lactic acid', 'Chemical', 'mL', 2);
+  old.exec(`CREATE TABLE schema_meta(version INTEGER NOT NULL);
+    INSERT INTO schema_meta VALUES (10);
+    CREATE TABLE batch_events(id TEXT PRIMARY KEY NOT NULL, batch_id TEXT, details_json TEXT)`);
+  old.prepare('SELECT crsql_as_crr(?)').get('batch_events');
+  old.prepare('INSERT INTO batch_events(id, batch_id, details_json) VALUES (?, ?, ?)')
+    .run(nanoid(), nanoid(), '{"mode":"hold"}');
   old.close();
-
   const db = openWorkspaceDb(id);
   try {
-    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 10);
-    assert.deepEqual(db.prepare("SELECT id FROM inventory_items WHERE name = 'SafAle US-05'").all(), [{ id: stockedId }]);
-    assert.equal((db.prepare('SELECT category FROM inventory_items WHERE id = ?').get(acidId) as { category: string }).category, 'Adjunct');
-    assert.equal((db.prepare('SELECT quantity FROM inventory_purchases WHERE inventory_item_id = ?').get(stockedId) as { quantity: number }).quantity, 10);
-    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'inventory_locations'").get());
-  } finally { closeWorkspaceDb(db); }
-});
-
-test('schema 8 consolidates controlled fermenters without losing their specifications', () => {
-  const id = nanoid();
-  const file = join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`);
-  const old = new Database(file);
-  old.loadExtension('vendor/crsqlite.so');
-  old.exec('CREATE TABLE schema_meta(version INTEGER NOT NULL); INSERT INTO schema_meta VALUES (8)');
-  for (const [index, table] of replicatedTables.entries()) {
-    old.exec(schemaStatements[index]);
-    old.prepare('SELECT crsql_as_crr(?)').get(table);
-  }
-  const equipmentId = nanoid();
-  old.prepare('INSERT INTO equipment(id, name, kind, specification_json, created_at) VALUES (?, ?, ?, ?, ?)')
-    .run(equipmentId, 'My fermenter', 'controlled_fermenter', '{"capacity_liters":30,"temperature_offset_c":0.5}', 1);
-  old.close();
-
-  const db = openWorkspaceDb(id);
-  try {
-    const row = db.prepare('SELECT kind, specification_json FROM equipment WHERE id = ?').get(equipmentId) as {
-      kind: string; specification_json: string;
-    };
-    assert.equal(row.kind, 'fermenter');
-    assert.deepEqual(JSON.parse(row.specification_json), {
-      capacity_liters: 30, temperature_offset_c: 0.5, built_in_temperature_control: true
-    });
-    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 10);
+    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 11);
+    assert.equal((db.prepare('SELECT COUNT(*) AS count FROM batch_events').get() as { count: number }).count, 0);
+    assert.equal((db.pragma('table_info(batch_events)') as { name: string }[])
+      .some(column => column.name === 'details_json'), false);
+    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'recipe_temperature_control_events'").get());
   } finally { closeWorkspaceDb(db); }
 });

@@ -1,26 +1,26 @@
-import type { ActualEvent, Plan } from './db.ts';
+import type { ActualEvent, Plan, PlanDetails } from './db.ts';
 import { formatQuantity } from '../shared/units.ts';
 import { kindLabel } from './constants.ts';
 
-type TimedPlan = Pick<Plan, 'id' | 'title'> & Partial<Pick<Plan, 'event_type' | 'planned_at' | 'anchor_event_id' | 'offset_seconds' | 'details_json'>>;
+type TimedPlan = Pick<Plan, 'id' | 'title'> & Partial<Pick<Plan, 'event_type' | 'planned_at' | 'anchor_event_id' | 'offset_seconds' | 'details'>>;
 
 export function supportsDuration(eventType: string, phase?: string): boolean {
   return eventType === 'pressure_control' || eventType === 'temperature_control' && phase !== 'chill';
 }
 
-export function planDuration(plan: Pick<TimedPlan, 'event_type' | 'details_json'>): number {
-  const details = parsePlanDetails(plan.details_json);
+export function planDuration(plan: Pick<TimedPlan, 'event_type' | 'details'>): number {
+  const details = plan.details || {};
   if (!plan.event_type || !supportsDuration(plan.event_type, String(details.phase || ''))) return 0;
   const value = details.duration_seconds;
   return typeof value === 'number' && value > 0 ? value : 0;
 }
 
-export function anchorPoint(plan: Pick<TimedPlan, 'details_json'>): 'start' | 'end' {
-  return parsePlanDetails(plan.details_json).anchor_point === 'end' ? 'end' : 'start';
+export function anchorPoint(plan: Pick<TimedPlan, 'details'>): 'start' | 'end' {
+  return plan.details?.anchor_point === 'end' ? 'end' : 'start';
 }
 
-export function planKindLabel(plan: { event_type: string; details_json?: string | null }): string {
-  const phase = parsePlanDetails(plan.details_json).phase;
+export function planKindLabel(plan: { event_type: string; details?: PlanDetails }): string {
+  const phase = plan.details?.phase;
   return plan.event_type === 'temperature_control' && typeof phase === 'string'
     ? phase[0].toUpperCase() + phase.slice(1) : kindLabel(plan.event_type);
 }
@@ -78,7 +78,7 @@ export function timelineGroupKey(at: number | null, step: number, id: string): s
   return at == null ? `unresolved:${id}` : `time:${at}:${step}`;
 }
 
-export function orderTimelineGroup<T extends { id: string; event_type: string; anchor_event_id?: string | null; details_json?: string | null }>(
+export function orderTimelineGroup<T extends { id: string; event_type: string; anchor_event_id?: string | null; details?: PlanDetails }>(
   events: readonly T[], eventTimes: ReadonlyMap<string, number | null>): T[] {
   const at = (event: T) => eventTimes.get(event.id) ?? Number.MAX_SAFE_INTEGER;
   const byTime = [...events].sort((a, b) => at(a) - at(b));
@@ -94,7 +94,7 @@ export function orderTimelineGroup<T extends { id: string; event_type: string; a
         return !anchor || anchorPoint(event) === 'start' && planDuration(anchor) > 0;
       });
       const next = ready.find(event => event.event_type === 'addition'
-        && parsePlanDetails(event.details_json).item_category !== 'Yeast') || ready[0] || pending[0];
+        && event.details?.item_category !== 'Yeast') || ready[0] || pending[0];
       ordered.push(next);
       pending.splice(pending.indexOf(next), 1);
     }
@@ -103,16 +103,9 @@ export function orderTimelineGroup<T extends { id: string; event_type: string; a
   return ordered;
 }
 
-export function parsePlanDetails(detailsJson: string | null | undefined): Record<string, string | number> {
-  try {
-    const value = JSON.parse(detailsJson || '{}') as unknown;
-    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, string | number> : {};
-  } catch { return {}; }
-}
-
-export function planDetailsLabel(plan: Pick<Plan, 'event_type'> & { title?: string; details_json?: string | null },
+export function planDetailsLabel(plan: Pick<Plan, 'event_type'> & { title?: string; details?: PlanDetails },
   equipmentNames: ReadonlyMap<string, string> = new Map()): string {
-  const details = parsePlanDetails(plan.details_json);
+  const details = plan.details || {};
   const destinationName = () => equipmentNames.get(String(details.to_vessel_id))
     || String(details.to_vessel_name || 'Archived vessel');
   const amount = typeof details.quantity === 'number' ? formatQuantity(details.quantity, String(details.unit || ''), String(details.display_unit || '')) : '';
@@ -128,7 +121,7 @@ export function planDetailsLabel(plan: Pick<Plan, 'event_type'> & { title?: stri
         : plan.event_type === 'pressure_control' ? [target]
           : plan.event_type === 'transfer' ? [details.to_vessel_id ? `To ${destinationName()}` : '', amount]
             : plan.event_type === 'packaging' ? [details.container_count,
-              details.container_name, details.container_size != null ? `${details.container_size} ${details.container_unit || details.unit || ''}`.trim() : ''] : [];
+              details.container_name, details.container_size != null ? `${details.container_size} ${details.container_unit || ''}`.trim() : ''] : [];
   if (duration) parts.push(duration);
   if (details.note) parts.push(details.note);
   return parts.filter(Boolean).join(' · ');

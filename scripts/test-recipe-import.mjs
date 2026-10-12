@@ -46,7 +46,9 @@ try {
     const db = await openLocalDb(session.workspaces[0].id);
     const recipes = await db.execO("SELECT id FROM recipes WHERE name = 'Import Pale Ale'");
     const inputs = await db.execO('SELECT inputs_json FROM recipe_inputs WHERE id = ?', [recipes[0].id]);
-    const hops = await db.execO("SELECT id, anchor_event_id, offset_seconds, details_json FROM recipe_events WHERE recipe_id = ? AND title = 'Cascade'", [recipes[0].id]);
+    const hops = await db.execO(`SELECT e.id, e.anchor_event_id, e.offset_seconds, a.item_category, a.quantity, a.unit
+      FROM recipe_events e JOIN recipe_additions a ON a.event_id = e.id
+      WHERE e.recipe_id = ? AND e.title = 'Cascade'`, [recipes[0].id]);
     const hopInputs = await db.execO('SELECT inputs_json FROM recipe_event_inputs WHERE id = ?', [hops[0].id]);
     const items = await db.execO("SELECT name FROM inventory_items WHERE name = '2-row pale malt' OR name = 'Cascade'");
     const counts = await db.execO('SELECT id FROM inventory_counts');
@@ -63,6 +65,7 @@ try {
       batchInputs: JSON.parse(batchInputs[0].inputs_json), batchHopInputs: JSON.parse(batchHopInputs[0].inputs_json) };
   });
   if (imported.inputs.efficiency !== '72' || imported.inputs.est_og || imported.hop.offset_seconds !== -900
+    || imported.hop.item_category !== 'Hops' || imported.hop.quantity !== 30 || imported.hop.unit !== 'g'
     || imported.hopInputs.alpha !== '6' || imported.items.join(',') !== '2-row pale malt'
     || imported.counts !== 0 || imported.sources !== 1 || imported.links !== 1
     || imported.batchInputs.efficiency !== '72' || imported.batchHopInputs.alpha !== '6') {
