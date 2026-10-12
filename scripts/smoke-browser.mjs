@@ -624,8 +624,7 @@ try {
   await page.getByRole('button', { name: 'Add grain' }).click();
   const moreGrain = page.getByRole('dialog', { name: 'New grain item' });
   await moreGrain.getByRole('combobox', { name: 'Item' }).fill('Smoke grain');
-  await moreGrain.getByRole('combobox', { name: 'Location' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Unspecified' }).click();
+  if (await page.getByText('Unspecified', { exact: true }).count()) throw new Error('Unset stock location appeared as a named location');
   await moreGrain.getByText('This item is already at this location').waitFor();
   await moreGrain.getByRole('spinbutton', { name: 'Starting quantity on hand · pounds' }).fill('1');
   await moreGrain.getByRole('button', { name: 'Add stock' }).click();
@@ -693,6 +692,18 @@ try {
   await grainRow.getByRole('button', { name: 'Actions for Smoke grain' }).click();
   await page.getByRole('menuitem', { name: 'Move' }).click();
   const moveDialog = page.getByRole('dialog', { name: 'Move stock' });
+  if (await moveDialog.getByRole('button', { name: 'Create or manage locations' }).count()) {
+    throw new Error('Move stock still has a separate location management link');
+  }
+  await moveDialog.getByRole('combobox', { name: 'To location (optional)' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'New location…' }).click();
+  const moveLocationDialog = page.getByRole('dialog', { name: 'Inventory locations' });
+  await moveLocationDialog.getByRole('textbox', { name: 'Name' }).fill('Spare shelf');
+  await moveLocationDialog.getByRole('button', { name: 'Add location' }).click();
+  await moveLocationDialog.waitFor({ state: 'hidden' });
+  if (!await moveDialog.getByRole('combobox', { name: 'To location (optional)' }).locator('..').getByText('Spare shelf').count()) {
+    throw new Error('New location was not selected for the stock move');
+  }
   await moveDialog.getByRole('combobox', { name: 'To location' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Back room / Shelf A' }).click();
   await moveDialog.getByRole('checkbox', { name: 'Move all available stock' }).check();
@@ -711,6 +722,18 @@ try {
   const shelvedGrain = page.getByRole('dialog', { name: 'New grain item' });
   await shelvedGrain.waitFor();
   await shelvedGrain.locator('input#name').fill('Smoke grain');
+  if (await shelvedGrain.getByRole('button', { name: 'Create or manage locations' }).count()) {
+    throw new Error('New inventory item still has a separate location management link');
+  }
+  await shelvedGrain.locator('input#location_id').click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'New location…' }).click();
+  const itemLocationDialog = page.getByRole('dialog', { name: 'Inventory locations' });
+  await itemLocationDialog.getByRole('textbox', { name: 'Name' }).fill('Stock cabinet');
+  await itemLocationDialog.getByRole('button', { name: 'Add location' }).click();
+  await itemLocationDialog.waitFor({ state: 'hidden' });
+  if (!await shelvedGrain.getByRole('combobox', { name: 'Location (optional)' }).locator('..').getByText('Stock cabinet').count()) {
+    throw new Error('New location was not selected for the inventory item');
+  }
   await shelvedGrain.locator('input#location_id').click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Back room / Shelf A' }).click();
   await shelvedGrain.getByText('This item is already at this location').waitFor();

@@ -596,7 +596,7 @@ export async function listInventoryLocations(db: DB): Promise<InventoryLocation[
 }
 
 export function inventoryLocationPath(locationId: string | null, locations: InventoryLocation[]): string {
-  if (!locationId) return 'Unspecified';
+  if (!locationId) return '';
   const byId = new Map(locations.map(location => [location.id, location]));
   const names: string[] = [];
   const seen = new Set<string>();
