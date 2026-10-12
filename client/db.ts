@@ -3,7 +3,7 @@ import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { nanoid } from 'nanoid';
 import { capacityKinds, equipmentKinds, measurementRangeUnits } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, workspaceV2Statements, workspaceV3Statements, workspaceV4Statements, workspaceV5Statements, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
+import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, workspaceV2Statements, workspaceV3Statements, workspaceV4Statements, workspaceV5Statements, workspaceV6Statements, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 import { convertUnit, formatQuantity } from '../shared/units.ts';
 
@@ -21,6 +21,19 @@ export interface ActualEvent {
 }
 export interface Equipment { id: string; name: string; kind: string; specification_json: string | null }
 export interface InventoryItem { id: string; name: string; category: string; default_unit: string; display_unit: string }
+export interface InventoryMovement { id: string; kind: 'Purchased' | 'Counted' | 'Used' | 'Discarded'; quantity: number; unit: string; at: number }
+
+const inventoryMassInGrams: Record<string, number> = { g: 1, kg: 1000, oz: 28.349523125, lb: 453.59237, 'lb + oz': 28.349523125 };
+const inventoryVolumeInLiters: Record<string, number> = { mL: 0.001, L: 1, 'US fl oz': 0.0295735295625, 'US gal': 3.785411784 };
+
+export function convertInventoryUnit(quantity: number, from: string, to: string): number | null {
+  if (!Number.isFinite(quantity)) return null;
+  if (from === to) return quantity;
+  for (const factors of [inventoryMassInGrams, inventoryVolumeInLiters]) {
+    if (factors[from] && factors[to]) return Number((quantity * factors[from] / factors[to]).toFixed(6));
+  }
+  return null;
+}
 
 let sqlitePromise: ReturnType<typeof initWasm> | undefined;
 const opened = new Map<string, Promise<DB>>();
@@ -41,7 +54,7 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
           await tx.exec('CREATE TABLE sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
           await tx.exec('INSERT INTO schema_meta(version) VALUES (?)', [workspaceSchemaVersion]);
         });
-      } else if ([1, 2, 3, 4].includes(version[0].version)) {
+      } else if (version[0].version >= 1 && version[0].version < workspaceSchemaVersion) {
         await db.tx(async tx => {
           if (version[0].version < 2) {
             for (const statement of workspaceV2Statements) await tx.exec(statement);
@@ -55,8 +68,12 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
             for (const statement of workspaceV4Statements) await tx.exec(statement);
             await tx.exec('SELECT crsql_as_crr(?)', ['inventory_display_units']);
           }
-          for (const statement of workspaceV5Statements) await tx.exec(statement);
-          for (const table of ['recipe_types', 'event_ends']) await tx.exec('SELECT crsql_as_crr(?)', [table]);
+          if (version[0].version < 5) {
+            for (const statement of workspaceV5Statements) await tx.exec(statement);
+            for (const table of ['recipe_types', 'event_ends']) await tx.exec('SELECT crsql_as_crr(?)', [table]);
+          }
+          for (const statement of workspaceV6Statements) await tx.exec(statement);
+          await tx.exec('SELECT crsql_as_crr(?)', ['inventory_discards']);
           await tx.exec('UPDATE schema_meta SET version = ?', [workspaceSchemaVersion]);
         });
       } else if (version[0].version !== workspaceSchemaVersion) {
@@ -429,6 +446,31 @@ export async function listInventory(db: DB): Promise<InventoryItem[]> {
     LEFT JOIN inventory_display_units d ON d.id = i.id ORDER BY i.name COLLATE NOCASE`);
 }
 
+export async function listInventoryMovements(db: DB, itemId: string): Promise<InventoryMovement[]> {
+  return db.execO<InventoryMovement>(`
+    SELECT id, 'Purchased' AS kind, quantity, unit, purchased_at AS at FROM inventory_purchases WHERE inventory_item_id = ?
+    UNION ALL SELECT id, 'Counted' AS kind, quantity, unit, counted_at AS at FROM inventory_counts WHERE inventory_item_id = ?
+    UNION ALL SELECT id, 'Discarded' AS kind, quantity, unit, discarded_at AS at FROM inventory_discards WHERE inventory_item_id = ?
+    UNION ALL SELECT a.event_id AS id, 'Used' AS kind, a.quantity, a.unit, e.actual_at AS at
+      FROM additions a JOIN batch_events e ON e.id = a.event_id WHERE a.inventory_item_id = ?
+    ORDER BY at DESC, id DESC`, [itemId, itemId, itemId, itemId]);
+}
+
+export function inventoryBalance(rows: InventoryMovement[], unit: string): number | null {
+  const currentCount = rows.find(row => row.kind === 'Counted');
+  const afterAnchor = currentCount ? rows.filter(row => row.at > currentCount.at) : rows;
+  const anchor = currentCount ? convertInventoryUnit(currentCount.quantity, currentCount.unit, unit) : 0;
+  if (anchor == null) return null;
+  let balance = anchor;
+  for (const row of afterAnchor) {
+    const amount = convertInventoryUnit(row.quantity, row.unit, unit);
+    if (amount == null) return null;
+    if (row.kind === 'Purchased') balance += amount;
+    else if (row.kind === 'Used' || row.kind === 'Discarded') balance -= amount;
+  }
+  return balance;
+}
+
 export async function createInventoryItem(db: DB, name: string, category: string, defaultUnit: string,
   startingQuantity: number | null = null, accountId: string | null = null, displayUnit = defaultUnit): Promise<string> {
   const id = nanoid();
@@ -444,11 +486,19 @@ export async function createInventoryItem(db: DB, name: string, category: string
   return id;
 }
 
-export async function addInventoryEntry(db: DB, itemId: string, kind: 'purchase' | 'count', quantity: number, unit: string, accountId: string): Promise<void> {
-  const now = nowSeconds();
+export async function addInventoryEntry(db: DB, itemId: string, kind: 'purchase' | 'count' | 'discard', quantity: number, unit: string, accountId: string): Promise<void> {
+  if (!Number.isFinite(quantity) || quantity < 0 || kind !== 'count' && quantity === 0) throw new Error('Enter a positive quantity');
+  const latest = await db.execO<{ at: number | null }>(`SELECT MAX(at) AS at FROM (
+    SELECT purchased_at AS at FROM inventory_purchases WHERE inventory_item_id = ?
+    UNION ALL SELECT counted_at AS at FROM inventory_counts WHERE inventory_item_id = ?
+    UNION ALL SELECT discarded_at AS at FROM inventory_discards WHERE inventory_item_id = ?)`, [itemId, itemId, itemId]);
+  const now = Math.max(nowSeconds(), (latest[0]?.at ?? 0) + 1);
   if (kind === 'purchase') {
     await db.exec('INSERT INTO inventory_purchases(id, inventory_item_id, quantity, unit, purchased_at) VALUES (?, ?, ?, ?, ?)',
       [nanoid(), itemId, quantity, unit, now]);
+  } else if (kind === 'discard') {
+    await db.exec('INSERT INTO inventory_discards(id, inventory_item_id, quantity, unit, discarded_at, created_by_account_id) VALUES (?, ?, ?, ?, ?, ?)',
+      [nanoid(), itemId, quantity, unit, now, accountId]);
   } else {
     await db.exec('INSERT INTO inventory_counts(id, inventory_item_id, quantity, unit, counted_at, created_by_account_id) VALUES (?, ?, ?, ?, ?, ?)',
       [nanoid(), itemId, quantity, unit, now, accountId]);

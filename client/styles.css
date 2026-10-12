@@ -53,9 +53,12 @@ button, input, textarea { font: inherit; }
 .record-link strong, .record-link small { display: block; }
 .record-link small { color: #728079; margin-top: 5px; font-size: 13px; }
 .group-tables { margin-top: 24px; gap: 30px; }
-.group-table h2 { margin: 0 0 10px; font-size: 20px; }
+.group-table h2 { margin: 0; font-size: 20px; }
+.group-table-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .group-table { min-width: 0; width: 100%; }
 .group-table .ant-table-wrapper { width: 100%; }
+.inventory-add-types { margin: 20px 0 0; color: #728079; font-size: 14px; line-height: 1.6; }
+.inventory-add-types a { color: #1d604f; text-decoration: underline; text-underline-offset: 2px; }
 .capacity-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(110px, 1fr); gap: 12px; }
 .section-heading, .content-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
 .section-heading h1, .content-heading h2 { margin: 4px 0 8px; letter-spacing: -.04em; line-height: 1.15; }
