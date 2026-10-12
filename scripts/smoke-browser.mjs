@@ -296,8 +296,8 @@ try {
   if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw new Error('Grouped equipment tables overflow a narrow phone');
   await page.setViewportSize({ width: 1280, height: 900 });
   await navigateSection(page, 'Batches');
-  if (!await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Smoke pH meter' }).count()) {
-    throw new Error('Recent equipment disappeared when navigating to batches');
+  if (await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Smoke pH meter' }).count()) {
+    throw new Error('Equipment still has child links in the navigation');
   }
   await openBatch(page, batchName);
   await page.getByRole('button', { name: 'Record activity' }).click();
@@ -312,7 +312,7 @@ try {
   await measurementDialog.getByRole('button', { name: 'Save event' }).click();
   await page.getByText('ph 5.2 pH').waitFor();
   await navigateSection(page, 'Equipment');
-  await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Smoke pH meter' }).click();
+  await page.locator('.group-table').getByRole('link', { name: 'Smoke pH meter' }).click();
   await page.getByRole('heading', { name: 'Smoke pH meter' }).waitFor();
   await page.getByRole('button', { name: 'Equipment settings' }).click();
   await page.getByRole('menuitem', { name: 'Delete equipment' }).click();
@@ -334,6 +334,9 @@ try {
   await page.getByRole('combobox', { name: 'Preferred mass unit' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="oz"]').click();
   await page.waitForFunction(async () => (await (await fetch('/api/me')).json()).preferred_units.mass === 'oz');
+  await page.getByRole('combobox', { name: 'Preferred temperature unit' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="°F"]').click();
+  await page.waitForFunction(async () => (await (await fetch('/api/me')).json()).preferred_units.temperature === '°F');
   await navigateSection(page, 'Recipes');
   await page.getByRole('button', { name: 'New recipe' }).click();
   await page.getByLabel('Recipe name').fill('Smoke recipe');
@@ -348,6 +351,9 @@ try {
   const boilPlan = page.getByRole('dialog', { name: 'Edit Boil' });
   if (!await boilPlan.getByRole('spinbutton', { name: 'Duration (optional)' }).inputValue().then(value => Number(value) === 1)) {
     throw new Error('Seeded boil did not have a one-hour duration');
+  }
+  if (Number(await boilPlan.getByRole('spinbutton', { name: 'Target temperature' }).inputValue()) !== 212) {
+    throw new Error('Seeded boil did not use preferred Fahrenheit');
   }
   await boilPlan.locator('.ant-modal-close').click();
   await page.getByRole('button', { name: 'Add recipe event' }).click();
@@ -411,10 +417,10 @@ try {
   await page.waitForFunction(async () => (await (await fetch('/api/me')).json()).preferred_units.mass === 'lb + oz');
   await navigateSection(page, 'Inventory');
   await page.getByRole('link', { name: 'grain', exact: true }).click();
-  await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Item' }).click();
+  await page.getByRole('dialog', { name: 'New grain item' }).getByRole('combobox', { name: 'Item' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Maris Otter malt' }).last().click();
-  await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Item' }).fill('Smoke grain');
-  const newGrain = page.getByRole('dialog', { name: 'New inventory item' });
+  await page.getByRole('dialog', { name: 'New grain item' }).getByRole('combobox', { name: 'Item' }).fill('Smoke grain');
+  const newGrain = page.getByRole('dialog', { name: 'New grain item' });
   if (!await newGrain.getByRole('combobox', { name: 'Unit' }).locator('..').getByText('lb + oz', { exact: true }).count()) {
     throw new Error('Preferred compound grain unit default was not set');
   }
@@ -425,58 +431,68 @@ try {
   }
   await newGrain.getByRole('spinbutton', { name: 'Starting quantity on hand · pounds' }).fill('2');
   await newGrain.getByRole('spinbutton', { name: 'Ounces' }).fill('5');
+  await newGrain.getByRole('combobox', { name: 'Unit' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="oz"]').click();
+  if (Number(await newGrain.getByRole('spinbutton', { name: 'Starting quantity on hand' }).inputValue()) !== 37) {
+    throw new Error('Changing from pounds and ounces did not convert the amount');
+  }
+  await newGrain.getByRole('combobox', { name: 'Unit' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="lb + oz"]').click();
   await page.getByRole('button', { name: 'Create item' }).click();
-  await page.waitForURL(url => /^\/inventory\/[A-Za-z0-9_-]{10,32}$/.test(url.pathname));
-  await page.getByText('2 lb 5 oz estimated on hand').waitFor();
-  await navigateSection(page, 'Inventory');
-  await page.getByRole('button', { name: 'New inventory item' }).click();
-  const moreGrain = page.getByRole('dialog', { name: 'New inventory item' });
-  await moreGrain.getByRole('combobox', { name: 'Type' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Grain' }).click();
+  await newGrain.waitFor({ state: 'hidden' });
+  await page.waitForURL(url => url.pathname === '/inventory');
+  await page.getByRole('button', { name: 'Add grain' }).waitFor();
+  await page.getByRole('button', { name: 'Add grain' }).click();
+  const moreGrain = page.getByRole('dialog', { name: 'New grain item' });
   await moreGrain.getByRole('combobox', { name: 'Item' }).fill('Smoke grain');
   await moreGrain.getByText('This item is already in your inventory').waitFor();
   await moreGrain.getByRole('spinbutton', { name: 'Starting quantity on hand · pounds' }).fill('1');
   await moreGrain.getByRole('button', { name: 'Add stock' }).click();
-  await page.getByText('3 lb 5 oz estimated on hand').waitFor();
-  await page.getByRole('button', { name: 'Bought some' }).click();
-  await page.getByRole('dialog', { name: 'Record purchase' }).getByRole('spinbutton', { name: 'Quantity · pounds' }).fill('1');
-  await page.getByRole('dialog', { name: 'Record purchase' }).getByRole('button', { name: 'Save' }).click();
+  await moreGrain.waitFor({ state: 'hidden' });
+  if (await page.locator('.group-table').getByRole('link', { name: 'Smoke grain' }).count() !== 1) {
+    throw new Error('Adding an existing inventory item created a duplicate row');
+  }
+  await page.getByRole('button', { name: 'Actions for Smoke grain' }).click();
+  await page.getByRole('menuitem', { name: 'Bought' }).click();
+  const bought = page.getByRole('dialog', { name: 'Bought Smoke grain' });
+  await bought.getByRole('spinbutton', { name: 'Quantity · pounds' }).fill('1');
+  await bought.getByRole('button', { name: 'Save' }).click();
+  await bought.waitFor({ state: 'hidden' });
+  await page.locator('.group-table').getByRole('link', { name: 'Smoke grain' }).click();
   await page.getByText('4 lb 5 oz estimated on hand').waitFor();
   await page.getByRole('button', { name: 'Discard' }).click();
   const discard = page.getByRole('dialog', { name: 'Discard Smoke grain' });
   await discard.getByRole('spinbutton', { name: 'Ounces' }).fill('5');
   await discard.getByRole('button', { name: 'Save' }).click();
-  await page.getByText(/4 lb(?: 0 oz)? estimated on hand/).waitFor();
+  await page.getByText('4 lb estimated on hand').waitFor();
   await page.getByRole('button', { name: 'Discard' }).click();
   const discardAll = page.getByRole('dialog', { name: 'Discard Smoke grain' });
   await discardAll.getByRole('checkbox', { name: 'All available stock' }).check();
   await discardAll.getByRole('button', { name: 'Save' }).click();
-  await page.getByText(/0 lb(?: 0 oz)? estimated on hand/).waitFor();
+  await page.getByText('0 lb estimated on hand').waitFor();
   if (await page.getByText('Discarded', { exact: true }).count() !== 2) throw new Error('Discard movements are missing');
   await page.reload();
-  await page.getByText(/0 lb(?: 0 oz)? estimated on hand/).waitFor();
+  await page.getByText('0 lb estimated on hand').waitFor();
   await navigateSection(page, 'Inventory');
-  if (await page.locator('.group-table').getByRole('link', { name: 'Smoke grain' }).count() !== 1) throw new Error('Duplicate inventory row');
   await page.getByRole('link', { name: 'packaging', exact: true }).click();
-  await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Item' }).click();
+  await page.getByRole('dialog', { name: 'New packaging item' }).getByRole('combobox', { name: 'Item' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: '12 oz bottle' }).last().click();
-  if (!await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Unit' }).locator('..').getByText('each', { exact: true }).count()) throw new Error('Packaging unit default was not set');
+  if (!await page.getByRole('dialog', { name: 'New packaging item' }).getByRole('combobox', { name: 'Unit' }).locator('..').getByText('each', { exact: true }).count()) throw new Error('Packaging unit default was not set');
   await page.getByRole('button', { name: 'Create item' }).click();
-  await navigateSection(page, 'Inventory');
-  if (await page.locator('.group-table').count() !== 2) throw new Error('Inventory categories should have separate tables');
+  await page.getByRole('dialog', { name: 'New packaging item' }).waitFor({ state: 'hidden' });
+  await page.waitForURL(url => url.pathname === '/inventory');
+  await page.waitForFunction(() => document.querySelectorAll('.group-table').length === 2);
   await page.setViewportSize({ width: 320, height: 720 });
   if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw new Error('Grouped inventory tables overflow a narrow phone');
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.route('**/api/**', route => route.abort());
   await page.goto(`${baseUrl}/inventory`);
   await page.getByRole('heading', { name: 'Inventory', exact: true }).waitFor();
-  await page.getByRole('button', { name: 'New inventory item' }).click();
-  await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Type' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Grain' }).click();
-  await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Item' }).click();
+  await page.getByRole('button', { name: 'Add grain' }).click();
+  await page.getByRole('dialog', { name: 'New grain item' }).getByRole('combobox', { name: 'Item' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Maris Otter malt' }).waitFor();
-  await page.getByRole('dialog', { name: 'New inventory item' }).locator('.ant-modal-close').click();
-  await page.getByRole('dialog', { name: 'New inventory item' }).waitFor({ state: 'hidden' });
+  await page.getByRole('dialog', { name: 'New grain item' }).locator('.ant-modal-close').click();
+  await page.getByRole('dialog', { name: 'New grain item' }).waitFor({ state: 'hidden' });
   await page.unroute('**/api/**');
   console.log('Navigated recipe and inventory pages with grouped inventory tables');
 

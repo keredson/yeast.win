@@ -8,6 +8,7 @@ import { compoundMassUnit, quantityForStorage, quantityUnitsForCategory, splitOu
 import { parsePlanDetails } from './planTiming.ts';
 import { inventoryCategories } from '../shared/catalog.ts';
 import { QuantityFields } from './QuantityFields.tsx';
+import { changeNumberUnit, changeQuantityUnit } from './unitFields.ts';
 
 function measurementUnits(kind: MeasurementKind): readonly string[] {
   if (kind === 'ph') return ['pH'];
@@ -61,7 +62,8 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
   const [error, setError] = useState('');
   const [photo, setPhoto] = useState<File | null>(null);
   const initialQuantity = typeof initialData?.payload.quantity === 'number' ? initialData.payload.quantity : plannedNumber('quantity');
-  const storedUnit = String(initialData?.payload.unit || plannedString('unit') || eventUnit(kind, preferredUnits) || '');
+  const storedUnit = String(initialData?.payload.unit || plannedString('unit') || (kind === 'measurement'
+    ? measurementUnit(initialMeasurement || 'temperature', preferredUnits) : eventUnit(kind, preferredUnits)) || '');
   const initialUnit = kind === 'addition' && storedUnit === 'oz'
     && (plannedString('display_unit') === compoundMassUnit || preferredUnits.mass === compoundMassUnit)
     ? compoundMassUnit : storedUnit;
@@ -69,7 +71,16 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
   const initialCategory = plannedString('item_category')
     || inventory.find(item => item.id === (initialData?.payload.inventory_item_id || plannedString('inventory_item_id')))?.category || 'Other';
   const selectedUnit = Form.useWatch('unit', form) as string | undefined;
+  const selectedTargetUnit = Form.useWatch('target_unit', form) as string | undefined;
+  const selectedContainerUnit = Form.useWatch('container_unit', form) as string | undefined;
   const selectedCategory = Form.useWatch('item_category', form) as string | undefined;
+
+  function changeMainUnit(next: string) {
+    const from = selectedUnit || initialUnit;
+    if (kind === 'addition') changeQuantityUnit(form, from, next);
+    else if (kind === 'measurement') changeNumberUnit(form, ['value', 'uncertainty'], from, next, ['uncertainty']);
+    else changeNumberUnit(form, ['quantity'], from, next);
+  }
 
   useEffect(() => {
     if (!instrumentId) return setCalibrations([]);
@@ -190,12 +201,13 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
         <Select disabled={!!initialEvent} options={measurementKinds.map(item => ({ value: item.value, label: item.label }))}
           onChange={(value: MeasurementKind) => {
             setMeasurement(value);
-            form.setFieldValue('unit', measurementUnit(value, preferredUnits));
+            form.setFieldsValue({ unit: measurementUnit(value, preferredUnits), value: undefined, uncertainty: undefined });
           }} />
       </Form.Item>
       <div className="form-pair">
         <Form.Item name="value" label="Corrected value" rules={[{ required: true }]}><InputNumber className="full-width" step="any" /></Form.Item>
-        <Form.Item name="unit" label="Unit" rules={[{ required: true }]}><Select options={unitOptions(measurementUnits(measurement))} /></Form.Item>
+        <Form.Item name="unit" label="Unit" rules={[{ required: true }]}><Select options={unitOptions(measurementUnits(measurement))}
+          onChange={changeMainUnit} /></Form.Item>
       </div>
       <div className="form-pair">
         <Form.Item name="uncertainty" label="Uncertainty (±)"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
@@ -211,15 +223,18 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
     {kind === 'addition' && <>
       {!completingPlan && <>
         <Form.Item name="item_category" label="Type"><Select options={inventoryCategories.map(value => ({ value, label: value }))}
-          onChange={() => form.setFieldsValue({ inventory_item_id: undefined, item_name: undefined, unit: preferredUnits.mass })} /></Form.Item>
+          onChange={() => form.setFieldsValue({ inventory_item_id: undefined, item_name: undefined, unit: preferredUnits.mass,
+            quantity: undefined, pounds: undefined, ounces: undefined })} /></Form.Item>
         <Form.Item name="inventory_item_id" label="Inventory item"><Select allowClear placeholder="Optional"
           options={inventory.filter(item => item.category === (selectedCategory || initialCategory)).map(item => ({ value: item.id, label: item.name }))}
           onChange={id => { const item = inventory.find(row => row.id === id);
-            if (item) form.setFieldsValue({ item_name: item.name, item_category: item.category, unit: item.display_unit }); }} /></Form.Item>
+            if (item) { changeQuantityUnit(form, selectedUnit || initialUnit, item.display_unit);
+              form.setFieldsValue({ item_name: item.name, item_category: item.category, unit: item.display_unit }); } }} /></Form.Item>
         <Form.Item name="item_name" label="What was added?" rules={[{ required: true }]}><Input placeholder="e.g. Fermaid O, yeast, oxygen" /></Form.Item>
       </>}
       <Form.Item name="unit" label="Unit" rules={[{ required: true }]}>
-        <Select showSearch options={unitOptions(quantityUnitsForCategory(selectedCategory || initialCategory))} /></Form.Item>
+        <Select showSearch options={unitOptions(quantityUnitsForCategory(selectedCategory || initialCategory))}
+          onChange={changeMainUnit} /></Form.Item>
       <QuantityFields unit={selectedUnit || initialUnit} />
     </>}
     {(kind === 'temperature_control' || kind === 'pressure_control') && <>
@@ -231,20 +246,22 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
       <div className="form-pair"><Form.Item name="target_value" label="Target" rules={kind === 'pressure_control' ? [{ required: true }] : []}>
         <InputNumber className="full-width" step="any" /></Form.Item>
         <Form.Item name="target_unit" label="Unit" rules={kind === 'pressure_control' ? [{ required: true }] : []}>
-          <Select options={unitOptions(kind === 'pressure_control' ? unitGroups.pressure : unitGroups.temperature)} /></Form.Item></div>
+          <Select options={unitOptions(kind === 'pressure_control' ? unitGroups.pressure : unitGroups.temperature)}
+            onChange={unit => changeNumberUnit(form, ['target_value'], selectedTargetUnit, unit)} /></Form.Item></div>
       {kind === 'temperature_control' && <Form.Item name="power_watts" label="Power (W), if set"><InputNumber className="full-width" min={0} /></Form.Item>}
     </>}
     {kind === 'transfer' && <>
       <div className="form-pair"><Form.Item name="from_vessel_id" label="From vessel"><Select allowClear options={equipment.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
         <Form.Item name="to_vessel_id" label="To vessel"><Select allowClear options={equipment.map(item => ({ value: item.id, label: item.name }))} /></Form.Item></div>
       <div className="form-pair"><Form.Item name="quantity" label="Quantity"><InputNumber className="full-width" step="any" /></Form.Item>
-        <Form.Item name="unit" label="Unit"><Select options={unitOptions(unitGroups.volume)} /></Form.Item></div>
+        <Form.Item name="unit" label="Unit"><Select options={unitOptions(unitGroups.volume)} onChange={changeMainUnit} /></Form.Item></div>
     </>}
     {kind === 'packaging' && <>
       <Form.Item name="inventory_item_id" label="Container inventory item"><Select allowClear options={inventory.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
       <Form.Item name="container_name" label="Container" rules={[{ required: true }]}><Input placeholder="Bottle, keg…" /></Form.Item>
       <div className="form-triple"><Form.Item name="container_size" label="Size" rules={[{ required: true }]}><InputNumber className="full-width" step="any" /></Form.Item>
-        <Form.Item name="container_unit" label="Unit" rules={[{ required: true }]}><Select options={unitOptions(unitGroups.volume)} /></Form.Item>
+        <Form.Item name="container_unit" label="Unit" rules={[{ required: true }]}><Select options={unitOptions(unitGroups.volume)}
+          onChange={unit => changeNumberUnit(form, ['container_size'], selectedContainerUnit, unit)} /></Form.Item>
         <Form.Item name="container_count" label="Count" rules={[{ required: true }]}><InputNumber className="full-width" min={1} precision={0} /></Form.Item></div>
     </>}
     {kind === 'photo' && <Form.Item label={initialEvent ? 'Replace photo (optional)' : 'Photo'} required={!initialEvent}>

@@ -3,9 +3,9 @@ import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { nanoid } from 'nanoid';
 import { capacityKinds, equipmentKinds, measurementRangeUnits } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, workspaceV2Statements, workspaceV3Statements, workspaceV4Statements, workspaceV5Statements, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
+import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, workspaceV2Statements, workspaceV3Statements, workspaceV4Statements, workspaceV5Statements, workspaceV6Statements, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
-import { formatQuantity } from '../shared/units.ts';
+import { convertUnit, formatQuantity } from '../shared/units.ts';
 
 export type LocalDb = DB;
 export interface Batch { id: string; name: string; description: string | null; status: string; created_at: number }
@@ -54,7 +54,7 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
           await tx.exec('CREATE TABLE sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
           await tx.exec('INSERT INTO schema_meta(version) VALUES (?)', [workspaceSchemaVersion]);
         });
-      } else if ([1, 2, 3, 4].includes(version[0].version)) {
+      } else if (version[0].version >= 1 && version[0].version < workspaceSchemaVersion) {
         await db.tx(async tx => {
           if (version[0].version < 2) {
             for (const statement of workspaceV2Statements) await tx.exec(statement);
@@ -68,8 +68,12 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
             for (const statement of workspaceV4Statements) await tx.exec(statement);
             await tx.exec('SELECT crsql_as_crr(?)', ['inventory_display_units']);
           }
-          for (const statement of workspaceV5Statements) await tx.exec(statement);
-          for (const table of ['recipe_types', 'event_ends']) await tx.exec('SELECT crsql_as_crr(?)', [table]);
+          if (version[0].version < 5) {
+            for (const statement of workspaceV5Statements) await tx.exec(statement);
+            for (const table of ['recipe_types', 'event_ends']) await tx.exec('SELECT crsql_as_crr(?)', [table]);
+          }
+          for (const statement of workspaceV6Statements) await tx.exec(statement);
+          await tx.exec('SELECT crsql_as_crr(?)', ['inventory_discards']);
           await tx.exec('UPDATE schema_meta SET version = ?', [workspaceSchemaVersion]);
         });
       } else if (version[0].version !== workspaceSchemaVersion) {
@@ -99,7 +103,8 @@ export async function listRecipes(db: DB): Promise<Recipe[]> {
     LEFT JOIN recipe_types t ON t.id = r.id ORDER BY r.name COLLATE NOCASE`);
 }
 
-export async function createRecipe(db: DB, name: string, description: string, recipeType: RecipeType): Promise<string> {
+export async function createRecipe(db: DB, name: string, description: string, recipeType: RecipeType,
+  temperatureUnit: '°C' | '°F' = '°C'): Promise<string> {
   const id = nanoid();
   const now = nowSeconds();
   if (!['beer', 'wine', 'mead'].includes(recipeType)) throw new Error('Choose a recipe type');
@@ -115,9 +120,9 @@ export async function createRecipe(db: DB, name: string, description: string, re
       VALUES (?, ?, ?, ?, NULL, ?, 0, ?, ?)`, [eventId, id, eventType, title, anchorId, JSON.stringify(details), order]);
     if (recipeType === 'beer') {
       await insert(mashId, 'temperature_control', 'Mash', null,
-        { phase: 'mash', mode: 'hold', target_value: 67, target_unit: '°C', duration_seconds: 1800 }, 1);
+        { phase: 'mash', mode: 'hold', target_value: convertUnit(67, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 1800 }, 1);
       await insert(boilId, 'temperature_control', 'Boil', mashId,
-        { phase: 'boil', mode: 'heat', target_value: 100, target_unit: '°C', duration_seconds: 3600, anchor_point: 'end' }, 2);
+        { phase: 'boil', mode: 'heat', target_value: convertUnit(100, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 3600, anchor_point: 'end' }, 2);
     }
     await insert(nanoid(), 'addition', 'Pitch yeast', recipeType === 'beer' ? boilId : null,
       { item_category: 'Yeast', item_name: 'Yeast', ...(recipeType === 'beer' ? { anchor_point: 'end' } : {}) }, recipeType === 'beer' ? 3 : 1);
