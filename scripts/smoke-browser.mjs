@@ -170,6 +170,10 @@ try {
   await measurementAction.getByRole('spinbutton', { name: 'Time offset' }).fill('10');
   await measurementAction.getByRole('button', { name: 'Add measurement' }).click();
   await page.locator('.plan-card').filter({ hasText: 'Check gravity' }).getByText('10 minutes after Add nutrient').waitFor();
+  if (!await page.locator('.plan-card').filter({ hasText: 'Add nutrient' }).first()
+    .locator('.title-edit-row').getByRole('button', { name: 'Edit Add nutrient' }).count()) {
+    throw new Error('Batch edit button moved away from the event title');
+  }
   await page.getByRole('button', { name: 'Edit Add nutrient' }).click();
   const editAction = page.getByRole('dialog', { name: 'Edit addition' });
   await editAction.getByLabel('What will be added?').fill('Add nutrient dose');
@@ -362,6 +366,10 @@ try {
   await page.getByRole('button', { name: 'Edit planned event Chill' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Transfer to fermenter' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
+  if (await page.locator('.plan-card').filter({ hasText: 'Pitch yeast' }).first()
+    .locator('.title-edit-row').getByRole('button', { name: 'Edit planned event Pitch yeast' }).count()) {
+    throw new Error('Recipe edit button is still beside the event title');
+  }
   await page.getByRole('button', { name: 'Edit planned event Boil' }).click();
   const boilPlan = page.getByRole('dialog', { name: 'Edit Boil' });
   if (!await boilPlan.getByRole('spinbutton', { name: 'Duration (optional)' }).inputValue().then(value => Number(value) === 1)) {
@@ -418,9 +426,12 @@ try {
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: '2-row pale malt extra' }).last().click();
   await recipeReminder.getByRole('button', { name: 'Add notes' }).click();
   await recipeReminder.waitFor({ state: 'hidden' });
-  await page.getByRole('button', { name: 'Delete planned event 2-row pale malt extra' }).click();
+  await page.getByRole('button', { name: 'Edit planned event 2-row pale malt extra' }).click();
+  const deleteRecipeEvent = page.getByRole('dialog', { name: 'Edit 2-row pale malt extra' });
+  await deleteRecipeEvent.getByRole('button', { name: 'Delete event' }).click();
   await page.getByText('Actions timed from this one will become relative to batch start.').waitFor();
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  await deleteRecipeEvent.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Edit planned event Boil' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Check the mash' }).waitFor();
   await page.locator('.plan-card').filter({ hasText: 'Check the mash' }).getByText(/batch start/).waitFor();

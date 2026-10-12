@@ -28,6 +28,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
   const [creatingKind, setCreatingKind] = useState<string | null>(null);
   const [preset, setPreset] = useState<PlanPreset>({});
   const [editingPlan, setEditingPlan] = useState<(PlanInput & { id: string }) | null>(null);
+  const [planDeleteError, setPlanDeleteError] = useState('');
   const [newBatch, setNewBatch] = useState(false);
   const [deletingRecipe, setDeletingRecipe] = useState(false);
   const [error, setError] = useState('');
@@ -56,8 +57,9 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
     if (!recipe) return;
     try {
       await deleteRecipePlan(db, recipe.id, id);
+      setEditingPlan(null);
       await refreshPlans(); await onChanged();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    } catch (cause) { setPlanDeleteError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
   async function removeRecipe() {
@@ -114,7 +116,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
             <Button type="text" shape="circle" icon={<SettingOutlined />} aria-label="Recipe settings"
               title="Recipe settings" onClick={openSettings} /></div>
         </div>
-        <EventTimeline events={plans} onEdit={plan => setEditingPlan(plan)} onDelete={plan => removePlan(plan.id)}
+        <EventTimeline events={plans} onEdit={plan => { setPlanDeleteError(''); setEditingPlan(plan); }}
           onAdd={(kind, settings) => { setEditingPlan(null); setPreset(settings); setCreatingKind(kind); }} />
       </section>}
     <Modal title="New recipe" open={newRecipe} onCancel={() => setNewRecipe(false)} footer={null} destroyOnHidden>
@@ -145,11 +147,19 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
     <Modal title={editingPlan ? editingPlan.event_type === 'measurement'
       ? `Edit ${String(parsePlanDetails(editingPlan.details_json).measurement_kind || 'measurement').replaceAll('_', ' ')} measurement`
       : `Edit ${editingPlan.title}` : `Add ${preset.phase || (preset.measurementKind ? `${preset.measurementKind.replaceAll('_', ' ')} measurement` : creatingKind === 'addition' ? 'ingredient' : kindLabel(creatingKind || '').toLowerCase())}`}
-      open={!!(editingPlan || creatingKind)} onCancel={() => { setCreatingKind(null); setEditingPlan(null); }} footer={null} destroyOnHidden>
+      open={!!(editingPlan || creatingKind)} onCancel={() => { setCreatingKind(null); setEditingPlan(null); setPlanDeleteError(''); }} footer={null} destroyOnHidden>
       {(editingPlan || creatingKind) && <PlanForm key={editingPlan?.id || creatingKind || 'new'} eventType={editingPlan?.event_type || creatingKind || 'addition'}
         anchors={plans.filter(item => item.id !== editingPlan?.id)} initialPlan={editingPlan || undefined}
         inventory={inventory} catalog={catalogInventory} preferredUnits={preferredUnits} preset={editingPlan ? undefined : preset} submit={addPlan} />
       }
+      {editingPlan && <div className="recipe-plan-delete">
+        {planDeleteError && <Alert type="error" message={planDeleteError} className="form-alert" />}
+        <Popconfirm title={`Delete ${editingPlan.title}?`}
+          description="Actions timed from this one will become relative to batch start. Existing batches keep their copies."
+          okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => void removePlan(editingPlan.id)}>
+          <Button type="text" danger icon={<DeleteOutlined />}>Delete event</Button>
+        </Popconfirm>
+      </div>}
     </Modal>
     <Modal title="Start a batch" open={newBatch} onCancel={() => setNewBatch(false)} footer={null} destroyOnHidden>
       <Form layout="vertical" onFinish={start} initialValues={{ name: recipe ? `${recipe.name} batch` : '' }}>

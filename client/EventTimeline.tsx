@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Button, Card, Dropdown, Empty, Popconfirm, Tag } from 'antd';
-import { CheckOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
+import { Button, Card, Dropdown, Empty, Tag } from 'antd';
+import { CheckOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ActualEvent, PlanInput } from './db.ts';
 import { kindLabel, measurementKinds } from './constants.ts';
 import { formatTime } from './time.ts';
@@ -32,10 +32,10 @@ const actionItems = [
   { key: 'photo', label: 'Photo' }, { key: 'note', label: 'Notes' }
 ];
 
-export function EventTimeline({ events, batchStartAt, details = {}, photos = [], onEdit, onAdd, onRecord, onDelete }: {
+export function EventTimeline({ events, batchStartAt, details = {}, photos = [], onEdit, onAdd, onRecord }: {
   events: TimelineEvent[]; batchStartAt?: number; details?: Record<string, string>; photos?: TimelinePhoto[];
   onEdit: (event: TimelineEvent) => void; onAdd: (kind: string, preset: PlanPreset) => void;
-  onRecord?: (event: ActualEvent) => void; onDelete?: (event: TimelineEvent) => Promise<void>;
+  onRecord?: (event: ActualEvent) => void;
 }) {
   const isBatch = batchStartAt != null;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -70,8 +70,8 @@ export function EventTimeline({ events, batchStartAt, details = {}, photos = [],
         const images = photos.filter(photo => photo.batch_event_id === item.id);
         return <div key={item.id} className="timeline-entry plan-card">
           <div className="timeline-card"><div><div className="title-edit-row">
-            <Button type="text" size="small" icon={<EditOutlined />} aria-label={`${isBatch ? 'Edit' : 'Edit planned event'} ${item.title || kindLabel(item.event_type)}`}
-              onClick={() => onEdit(item)} />
+            {isBatch && <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${item.title || kindLabel(item.event_type)}`}
+              onClick={() => onEdit(item)} />}
             <strong>{item.title || planKindLabel(item)}</strong></div>
             <div className="plan-meta">{planKindLabel(item)} · {happened
               ? `${formatTime(item.actual_at!)}${item.ended_at ? ` – ${formatTime(item.ended_at)}` : ''}`
@@ -80,11 +80,9 @@ export function EventTimeline({ events, batchStartAt, details = {}, photos = [],
               {happened ? planDuration(item) && !item.ended_at ? 'In progress' : 'Done' : skipped ? 'Skipped' : 'Pending'}</Tag>}</div>
             {onRecord && !happened && <Button type="text" shape="circle" icon={<CheckOutlined />} aria-label={`Record ${item.title}`}
               title="Record or skip" onClick={() => onRecord(item as ActualEvent)} />}
-            {onDelete && <Popconfirm title={`Delete ${item.title}?`}
-              description="Actions timed from this one will become relative to batch start. Existing batches keep their copies."
-              okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => void onDelete(item)}>
-              <Button type="text" danger size="small" icon={<DeleteOutlined />} aria-label={`Delete planned event ${item.title}`} />
-            </Popconfirm>}</div>
+            {!isBatch && <Button type="text" shape="circle" size="small" icon={<EditOutlined />}
+              aria-label={`Edit planned event ${item.title || kindLabel(item.event_type)}`}
+              title="Edit event" onClick={() => onEdit(item)} />}</div>
           {detail && <p className="event-detail">{detail}</p>}
           {images.length > 0 && <div className="photo-grid">{images.map(photo => <img key={photo.id} src={photo.url} alt="Batch activity" />)}</div>}
         </div>;
