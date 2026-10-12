@@ -32,6 +32,29 @@ export function openCatalogDb(dataDir: string): Database.Database {
       db.prepare('UPDATE catalog_meta SET version = 3').run();
     })();
   }
+  if (version < 4) {
+    db.transaction(() => {
+      const addEquipment = db.prepare('INSERT OR IGNORE INTO catalog_equipment(id, name, kind, specification_json) VALUES (?, ?, ?, ?)');
+      for (const item of initialCatalogEquipment) addEquipment.run(item.id, item.name, item.kind, item.specification_json);
+      db.prepare("UPDATE catalog_equipment SET kind = 'all_in_one' WHERE id = 'equipment_vevor_35l'").run();
+      db.prepare('UPDATE catalog_meta SET version = 4').run();
+    })();
+  }
+  if (version < 5) {
+    db.transaction(() => {
+      const update = db.prepare("UPDATE catalog_equipment SET kind = 'fermentation_temperature_control' WHERE id = ?");
+      for (const id of ['equipment_rapt_chamber', 'equipment_inkbird_itc_308', 'equipment_inkbird_itc_308_wifi',
+        'equipment_rapt_controller', 'equipment_grainfather_gc4', 'equipment_rapt_glycol',
+        'equipment_fermentation_fridge', 'equipment_temperature_controller']) update.run(id);
+      db.prepare('UPDATE catalog_meta SET version = 5').run();
+    })();
+  }
+  if (version < 6) {
+    db.transaction(() => {
+      db.prepare("UPDATE catalog_equipment SET kind = 'all_in_one' WHERE id = 'equipment_vevor_35l'").run();
+      db.prepare('UPDATE catalog_meta SET version = 6').run();
+    })();
+  }
   return db;
 }
 

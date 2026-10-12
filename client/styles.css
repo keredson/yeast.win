@@ -77,13 +77,20 @@ button, input, textarea { font: inherit; }
 .recipe-detail-heading { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
 .recipe-detail-heading > div { min-width: 0; }
 .group-tables { margin-top: 24px; gap: 30px; }
-.group-table h2 { margin: 0; font-size: 20px; }
+.equipment-category { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.equipment-category > h2 { margin: 0; font-size: 22px; }
+.group-table h3 { margin: 0 0 10px; font-size: 18px; }
 .group-table-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .group-table { min-width: 0; width: 100%; }
 .group-table .ant-table-wrapper { width: 100%; }
 .inventory-add-types { margin: 20px 0 0; color: #728079; font-size: 14px; line-height: 1.6; }
 .inventory-add-types a { color: #1d604f; text-decoration: underline; text-underline-offset: 2px; }
 .capacity-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(110px, 1fr); gap: 12px; }
+.equipment-parameters { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-bottom: 24px; }
+.equipment-parameter { display: flex; align-items: center; gap: 4px; min-height: 34px; color: #455c52; }
+.equipment-calibration { margin-top: 24px; }
+.equipment-calibration-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.equipment-calibration-heading h3 { margin: 0; }
 .section-heading, .content-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
 .section-heading h1, .content-heading h2 { margin: 4px 0 8px; letter-spacing: -.04em; line-height: 1.15; }
 .section-heading h1 { font-size: 34px; }
@@ -97,6 +104,7 @@ button, input, textarea { font: inherit; }
 .plan-form-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .batch-timeline { min-width: 0; }
 .timeline-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 24px; }
+.timeline-actions-recipe { justify-content: flex-start; }
 .timeline-track { position: relative; }
 .timeline-track::before { content: ''; position: absolute; top: 21px; bottom: 21px; left: 2rem;
   border-left: 2px dashed #b8cfc1; pointer-events: none; }

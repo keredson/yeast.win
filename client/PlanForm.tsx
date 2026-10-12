@@ -50,7 +50,6 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
   const [form] = Form.useForm<Values>();
   const initialDetails = parsePlanDetails(initialPlan?.details_json);
   const kind = initialPlan?.event_type || eventType;
-  const timedControl = supportsDuration(kind);
   const offset = initialPlan?.offset_seconds ?? 0;
   const offsetUnit = offset === 0 ? timeUnits[1] : [...timeUnits].reverse().find(item => Math.abs(offset) % item.multiplier === 0) || timeUnits[0];
   const initialItem = String(initialDetails.item_name || initialPlan?.title || preset?.title || '');
@@ -64,6 +63,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
   const lockedMeasurementKind = preset?.measurementKind || (initialPlan?.event_type === 'measurement' ? String(initialDetails.measurement_kind || '') : '');
   const [measurementKind, setMeasurementKind] = useState(String(initialDetails.measurement_kind || preset?.measurementKind || 'temperature'));
   const phase = String(initialDetails.phase || preset?.phase || '');
+  const timedControl = supportsDuration(kind, phase);
   const duration = initialPlan ? planDuration(initialPlan) : preset?.phase === 'boil' ? 3600 : preset?.phase === 'mash' ? 1800 : 0;
   const [itemCategory, setItemCategory] = useState(initialCategory);
   const [busy, setBusy] = useState(false);
@@ -167,7 +167,8 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
     quantity: initialUnit === compoundMassUnit ? undefined : initialDetails.quantity,
     pounds: initialSplit?.pounds, ounces: initialSplit?.ounces,
     target_value: initialDetails.target_value ?? (phase === 'mash' ? convertUnit(67, '°C', preferredUnits.temperature)
-      : phase === 'boil' ? convertUnit(100, '°C', preferredUnits.temperature) : undefined), container_name: initialDetails.container_name,
+      : phase === 'boil' ? convertUnit(100, '°C', preferredUnits.temperature)
+        : phase === 'chill' ? convertUnit(20, '°C', preferredUnits.temperature) : undefined), container_name: initialDetails.container_name,
     container_size: initialDetails.container_size, container_count: initialDetails.container_count,
     to_vessel_id: initialDetails.to_vessel_id
   }}>
@@ -219,8 +220,8 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
       <Form.Item name="mode" label="Mode"><Select options={[
         { value: 'heat', label: 'Heat' }, { value: 'chill', label: 'Chill' }, { value: 'hold', label: 'Hold' }
       ]} /></Form.Item>
-      <div className="form-pair"><Form.Item name="target_value" label="Target temperature"><InputNumber className="full-width" step="any" /></Form.Item>
-        <Form.Item name="target_unit" label="Unit"><Select options={unitOptions(unitGroups.temperature)}
+      <div className="form-pair"><Form.Item name="target_value" label="Target temperature" rules={phase === 'chill' ? [{ required: true }] : []}><InputNumber className="full-width" step="any" /></Form.Item>
+        <Form.Item name="target_unit" label="Unit" rules={phase === 'chill' ? [{ required: true }] : []}><Select options={unitOptions(unitGroups.temperature)}
           onChange={unit => changeNumberUnit(form, ['target_value'], selectedTargetUnit, unit)} /></Form.Item></div>
     </>}
     {kind === 'pressure_control' && <div className="form-pair"><Form.Item name="target_value" label="Target pressure"><InputNumber className="full-width" step="any" /></Form.Item>

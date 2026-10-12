@@ -20,12 +20,56 @@ test('existing catalog gains new equipment and inventory without item capacity',
     const snapshot = catalogSnapshot(db, 1);
     assert.ok(!('unchanged' in snapshot));
     if ('unchanged' in snapshot) return;
-    assert.equal(snapshot.version, 3);
+    assert.equal(snapshot.version, 6);
+    assert.equal(snapshot.equipment.find(row => row.id === 'equipment_brewzilla_35l_g4')?.kind, 'all_in_one');
+    assert.equal(snapshot.equipment.find(row => row.id === 'equipment_grainfather_gf30')?.kind, 'controlled_fermenter');
+    assert.equal(snapshot.equipment.find(row => row.id === 'equipment_inkbird_itc_308')?.kind, 'fermentation_temperature_control');
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_vevor_35l')?.name,
       'VEVOR Electric Brewing System 9.2 Gal/35 L Brewing Pot');
+    assert.equal(snapshot.equipment.find(row => row.id === 'equipment_vevor_35l')?.kind, 'all_in_one');
     assert.deepEqual(snapshot.inventory.find(row => row.id === 'inventory_bottle_12oz'),
       { id: 'inventory_bottle_12oz', name: '12 oz bottle', category: 'Packaging', unit: 'each' });
     assert.ok(snapshot.inventory.length > 20);
     assert.equal(snapshot.inventory.find(row => row.id === 'inventory_lactic_acid')?.category, 'Adjunct');
+  } finally { db.close(); }
+});
+
+test('existing catalog models use the combined fermentation control choice', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
+  const old = new Database(join(dir, 'catalog.sqlite'));
+  old.exec(`CREATE TABLE catalog_meta(version INTEGER NOT NULL); INSERT INTO catalog_meta VALUES (4);
+    CREATE TABLE catalog_equipment(id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, specification_json TEXT);
+    CREATE TABLE catalog_inventory(id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, unit TEXT NOT NULL);
+    INSERT INTO catalog_equipment VALUES ('equipment_rapt_chamber', 'KegLand RAPT Fermentation Chamber', 'refrigerator', NULL);
+    INSERT INTO catalog_equipment VALUES ('equipment_grainfather_gc4', 'Grainfather GC4 Glycol Chiller', 'glycol_chiller', NULL);`);
+  old.close();
+
+  const db = openCatalogDb(dir);
+  try {
+    const snapshot = catalogSnapshot(db, 4);
+    assert.ok(!('unchanged' in snapshot));
+    if ('unchanged' in snapshot) return;
+    assert.equal(snapshot.version, 6);
+    assert.deepEqual(snapshot.equipment.map(row => row.kind),
+      ['fermentation_temperature_control', 'fermentation_temperature_control']);
+  } finally { db.close(); }
+});
+
+test('version 5 catalog restores VEVOR as an all-in-one system', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
+  const old = new Database(join(dir, 'catalog.sqlite'));
+  old.exec(`CREATE TABLE catalog_meta(version INTEGER NOT NULL); INSERT INTO catalog_meta VALUES (5);
+    CREATE TABLE catalog_equipment(id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, specification_json TEXT);
+    CREATE TABLE catalog_inventory(id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, unit TEXT NOT NULL);
+    INSERT INTO catalog_equipment VALUES ('equipment_vevor_35l', 'VEVOR Electric Brewing System 9.2 Gal/35 L Brewing Pot', 'kettle', NULL);`);
+  old.close();
+
+  const db = openCatalogDb(dir);
+  try {
+    const snapshot = catalogSnapshot(db, 5);
+    assert.ok(!('unchanged' in snapshot));
+    if ('unchanged' in snapshot) return;
+    assert.equal(snapshot.version, 6);
+    assert.equal(snapshot.equipment[0].kind, 'all_in_one');
   } finally { db.close(); }
 });

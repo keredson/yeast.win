@@ -89,11 +89,12 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
         </div>;
       })}
     </Card>)}</div>
-    <div className="timeline-actions"><Dropdown trigger={['click']} placement="topLeft" open={menuOpen} onOpenChange={setMenuOpen}
+    <div className={`timeline-actions${isBatch ? '' : ' timeline-actions-recipe'}`}><Dropdown trigger={['click']} placement="topLeft" open={menuOpen} onOpenChange={setMenuOpen}
       menu={{ items: actionItems, triggerSubMenuAction: 'click', onClick: ({ key }) => {
         const action = actionForMenu(key, events); setMenuOpen(false); onAdd(action.kind, action.preset);
       } }}>
-      <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label={isBatch ? 'Add action' : 'Add recipe event'} title="Add action" />
+      {isBatch ? <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="Add action" title="Add action" />
+        : <Button type="text" icon={<PlusOutlined />} aria-label="Add recipe event">Add event</Button>}
     </Dropdown></div>
   </section>;
 }

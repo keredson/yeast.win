@@ -1,9 +1,5 @@
 import type { InventoryItem } from './db.ts';
-
-function slug(value: string): string {
-  return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'item';
-}
+import { recordSlug as slug } from './recordSlug.ts';
 
 export function inventoryPathSegment(item: InventoryItem, items: InventoryItem[]): string {
   const name = slug(item.name);
