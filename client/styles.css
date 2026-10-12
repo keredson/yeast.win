@@ -112,6 +112,8 @@ button, input, textarea { font: inherit; }
 .timeline-track::before { content: ''; position: absolute; top: 21px; bottom: 21px; left: 2rem;
   border-left: 2px dashed #b8cfc1; pointer-events: none; }
 .timeline-track > .timeline-group { position: relative; }
+.timeline-gap { position: relative; z-index: 1; width: fit-content; margin: 0 0 0 2rem;
+  padding: 2px 8px; background: #fff; color: #728079; font-size: 12px; font-weight: 600; }
 .timeline-group .ant-card-body { padding: 0; }
 .timeline-group-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
   padding: 13px 18px; border-bottom: 1px solid #e6ebe4; background: #f6f8f4; }
@@ -119,12 +121,14 @@ button, input, textarea { font: inherit; }
 .timeline-empty { padding: 2px 18px; }
 .timeline-empty .ant-empty { margin: 12px 0; }
 .timeline-entry { padding: 14px 18px; }
+.recipe-timeline .timeline-entry { padding-block: 8px; }
 .timeline-entry + .timeline-entry { border-top: 1px solid #edf0eb; }
 .timeline-entry .timeline-entry { margin: 12px 0 0 12px; padding: 10px 0 0 14px; border-top: 1px solid #edf0eb; border-left: 2px solid #c7d8cd; }
 .column-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 .column-title h3 { margin: 0; font-size: 17px; letter-spacing: -.02em; }
 .column-title > span { color: #809087; font-size: 13px; }
 .timeline-card { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.recipe-timeline .timeline-card { align-items: center; }
 .timeline-card strong { display: block; font-size: 14px; line-height: 1.35; }
 .timeline-card .muted { margin-top: 4px; }
 .timeline-card .ant-tag { margin-right: 0; flex: none; }
@@ -135,6 +139,9 @@ button, input, textarea { font: inherit; }
 .title-edit-row { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .title-edit-row .ant-btn { flex: none; color: #667; margin-left: -7px; }
 .title-edit-row strong { min-width: 0; overflow-wrap: anywhere; }
+.timeline-card > div:first-child { min-width: 0; }
+.recipe-title-detail { flex-wrap: wrap; column-gap: 8px; }
+.recipe-event-detail { color: #66766d; font-size: 13px; line-height: 1.45; }
 .event-form-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .event-detail { margin: 10px 0 2px; font-size: 13px; line-height: 1.45; }
 .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }

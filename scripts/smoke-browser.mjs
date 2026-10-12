@@ -178,8 +178,8 @@ try {
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'After Add nutrient' }).click();
   await measurementAction.getByRole('spinbutton', { name: 'Time offset' }).fill('10');
   await measurementAction.getByRole('button', { name: 'Add measurement' }).click();
-  await page.locator('.timeline-group').filter({ hasText: 'Check gravity' }).locator('.timeline-group-heading')
-    .getByText('10 minutes after Add nutrient').waitFor();
+  await page.locator('.timeline-group').filter({ hasText: 'Check gravity' }).locator('xpath=preceding-sibling::*[1]')
+    .getByText('10 minutes', { exact: true }).waitFor();
   if (!await page.locator('.plan-card').filter({ hasText: 'Add nutrient' }).first()
     .locator('.title-edit-row').getByRole('button', { name: 'Edit Add nutrient' }).count()) {
     throw new Error('Batch edit button moved away from the event title');
@@ -430,13 +430,25 @@ try {
   await page.getByRole('button', { name: 'Create recipe' }).click();
   await page.waitForURL(url => /^\/recipe\/[A-Za-z0-9_-]{10,32}$/.test(url.pathname));
   await page.locator('.recipe-detail-heading .recipe-type-icon[data-recipe-type="beer"]').waitFor();
+  if (await page.locator('.batch-timeline .column-title').getByText(/\d+ actions/).count()) {
+    throw new Error('Recipe timeline still displays an action count');
+  }
   await page.getByRole('button', { name: 'Edit planned event Mash' }).waitFor();
   if (await page.locator('.plan-card').filter({ has: page.getByRole('button', { name: 'Edit planned event Mash' }) })
     .locator('.plan-meta').count()) throw new Error('Recipe start action repeats its group timing');
   await page.getByRole('button', { name: 'Edit planned event Boil' }).waitFor();
-  await page.locator('.timeline-group').filter({ has: page.getByRole('button', { name: 'Edit planned event Boil' }) })
-    .locator('.timeline-group-heading').getByText('After Mash').waitFor();
+  const seededBoilGroup = page.locator('.timeline-group').filter({ has: page.getByRole('button', { name: 'Edit planned event Boil' }) });
+  const boilRowHeight = await seededBoilGroup.locator('.timeline-entry').first().evaluate(element => element.getBoundingClientRect().height);
+  if (boilRowHeight > 45) throw new Error(`Single-line recipe row has excess bottom space: ${boilRowHeight}px`);
+  if (await seededBoilGroup.locator('xpath=preceding-sibling::*[1]').evaluate(element => element.classList.contains('timeline-gap'))) {
+    throw new Error('Mash duration was repeated as a timeline gap');
+  }
+  if (await seededBoilGroup.locator('.timeline-group-heading').count()) throw new Error('Recipe group still has an anchor heading');
   await page.getByRole('button', { name: 'Edit planned event Chill' }).waitFor();
+  const seededChillGroup = page.locator('.timeline-group').filter({ has: page.getByRole('button', { name: 'Edit planned event Chill' }) });
+  if (await seededChillGroup.locator('xpath=preceding-sibling::*[1]').evaluate(element => element.classList.contains('timeline-gap'))) {
+    throw new Error('Boil duration was repeated as a timeline gap');
+  }
   const recipeAdd = page.getByRole('button', { name: 'Add recipe event' });
   if (await recipeAdd.textContent() !== 'Add'
     || !await recipeAdd.evaluate(element => element.classList.contains('ant-btn-text'))
@@ -468,6 +480,8 @@ try {
   await transferPlan.getByRole('button', { name: 'Save event' }).click();
   await page.locator('.plan-card').filter({ hasText: 'Transfer to fermenter' }).getByText('To Smoke fermenter').waitFor();
   await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
+  await page.locator('.timeline-group').filter({ has: page.getByRole('button', { name: 'Edit planned event Package batch' }) })
+    .locator('xpath=preceding-sibling::*[1]').getByText('21 days', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Package batch' }).click();
   const beerPackaging = page.getByRole('dialog', { name: 'Edit Package batch' });
   if (await beerPackaging.getByRole('textbox', { name: 'Container' }).inputValue()) {
@@ -518,6 +532,11 @@ try {
   await recipePlan.getByRole('button', { name: 'Add addition' }).click();
   await recipePlan.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Edit planned event 2-row pale malt' }).waitFor();
+  const ingredientCard = page.locator('.plan-card').filter({ has: page.getByRole('button', { name: 'Edit planned event 2-row pale malt' }) });
+  if (!await ingredientCard.locator('.title-edit-row').getByText('5 oz', { exact: true }).count()
+    || await ingredientCard.locator('p.event-detail').count()) {
+    throw new Error('Recipe ingredient quantity should share the title line');
+  }
   const boilGroup = page.locator('.timeline-group').filter({ has: page.getByRole('button', { name: 'Edit planned event Boil' }) });
   const boilGroupTitles = await boilGroup.locator('.title-edit-row strong').allTextContents();
   if (boilGroupTitles.indexOf('2-row pale malt') > boilGroupTitles.indexOf('Boil')
@@ -548,8 +567,6 @@ try {
   await recordTransfer.getByRole('button', { name: 'Save event' }).click();
   await recordTransfer.waitFor({ state: 'hidden' });
   await page.locator('.plan-card').filter({ hasText: 'Transfer to fermenter' }).getByText('To Smoke fermenter').waitFor();
-  await page.locator('.timeline-group').filter({ hasText: 'Package batch' }).locator('.timeline-group-heading')
-    .getByText('21 days after Pitch yeast').waitFor();
   await page.getByRole('button', { name: 'Record Package batch' }).click();
   const recordPackaging = page.getByRole('dialog', { name: 'Record: Package batch' });
   await recordPackaging.getByRole('button', { name: 'Save event' }).click();
@@ -581,7 +598,10 @@ try {
   await deleteRecipeEvent.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Edit planned event Boil' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Check the mash' }).waitFor();
-  await page.locator('.plan-card').filter({ hasText: 'Check the mash' }).getByText(/batch start/).waitFor();
+  await page.getByRole('button', { name: 'Edit planned event Check the mash' }).click();
+  const unanchoredReminder = page.getByRole('dialog', { name: 'Edit Check the mash' });
+  await unanchoredReminder.getByRole('combobox', { name: 'Timing' }).locator('..').getByText('Batch start').waitFor();
+  await unanchoredReminder.locator('.ant-modal-close').click();
   await page.getByRole('button', { name: 'Recipe settings' }).click();
   const recipeSettings = page.getByRole('dialog', { name: 'Recipe settings' });
   await recipeSettings.getByRole('textbox', { name: 'Recipe name' }).fill('Smoke recipe revised');
