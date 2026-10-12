@@ -145,7 +145,7 @@ test('schema 7 inventory upgrades and removes an unused duplicate without losing
 
   const db = openWorkspaceDb(id);
   try {
-    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 9);
+    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 10);
     assert.deepEqual(db.prepare("SELECT id FROM inventory_items WHERE name = 'SafAle US-05'").all(), [{ id: stockedId }]);
     assert.equal((db.prepare('SELECT category FROM inventory_items WHERE id = ?').get(acidId) as { category: string }).category, 'Adjunct');
     assert.equal((db.prepare('SELECT quantity FROM inventory_purchases WHERE inventory_item_id = ?').get(stockedId) as { quantity: number }).quantity, 10);
@@ -177,6 +177,6 @@ test('schema 8 consolidates controlled fermenters without losing their specifica
     assert.deepEqual(JSON.parse(row.specification_json), {
       capacity_liters: 30, temperature_offset_c: 0.5, built_in_temperature_control: true
     });
-    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 9);
+    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 10);
   } finally { closeWorkspaceDb(db); }
 });

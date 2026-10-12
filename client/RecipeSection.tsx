@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Empty, Form, Input, Modal, Popconfirm, Select } from 'antd';
-import { DeleteOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
-import { addRecipePlan, createRecipe, deleteRecipe, deleteRecipePlan, listRecipePlans, startBatchFromRecipe, updateRecipe, updateRecipePlan,
+import { DeleteOutlined, DownloadOutlined, PlusOutlined, SettingOutlined, UploadOutlined } from '@ant-design/icons';
+import { addRecipePlan, createRecipe, deleteRecipe, deleteRecipePlan, hasRecipeImport, listRecipePlans, startBatchFromRecipe, updateRecipe, updateRecipePlan,
+  recipeImportSource,
   type Equipment, type InventoryItem, type LocalDb, type PlanInput, type Recipe, type RecipeType } from './db.ts';
+import { RecipeImportModal } from './RecipeImportModal.tsx';
 import { PlanForm, type PlanPreset } from './PlanForm.tsx';
 import { kindLabel } from './constants.ts';
 import { parsePlanDetails } from './planTiming.ts';
@@ -23,7 +25,9 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
 }) {
   const [settingsForm] = Form.useForm<{ name: string; description?: string; recipe_type: RecipeType }>();
   const [plans, setPlans] = useState<(PlanInput & { id: string })[]>([]);
+  const [importedRecipe, setImportedRecipe] = useState(false);
   const [newRecipe, setNewRecipe] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [settingsError, setSettingsError] = useState('');
@@ -40,6 +44,9 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
     if (selectedId) setPlans(await listRecipePlans(db, selectedId));
   }
   useEffect(() => { void refreshPlans(); }, [db, selectedId]);
+  useEffect(() => { if (!selectedId) { setImportedRecipe(false); return; }
+    void hasRecipeImport(db, selectedId).then(setImportedRecipe);
+  }, [db, selectedId]);
 
   async function addRecipe(values: { name: string; description?: string; recipe_type: RecipeType }) {
     try {
@@ -94,6 +101,19 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
     setSettingsOpen(true);
   }
 
+  async function downloadImport() {
+    if (!recipe) return;
+    try {
+      const source = await recipeImportSource(db, recipe.id);
+      if (!source) return;
+      const url = URL.createObjectURL(new Blob([source.content as BlobPart],
+        { type: source.format === 'beerxml' ? 'application/xml' : 'application/json' }));
+      const anchor = document.createElement('a');
+      anchor.href = url; anchor.download = source.filename; anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (cause) { setSettingsError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
   async function start(values: { name: string }) {
     if (!recipe) return;
     try {
@@ -105,7 +125,9 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
   return <div className="section-page">
     {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
     {!selectedId ? <section className="record-index">
-      <div className="section-heading"><div><span className="eyebrow">Planning</span><h1>Recipes</h1></div><Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New recipe" title="New recipe" onClick={() => setNewRecipe(true)} /></div>
+      <div className="section-heading"><div><span className="eyebrow">Planning</span><h1>Recipes</h1></div>
+        <div className="heading-actions"><Button type="text" shape="circle" icon={<UploadOutlined />} aria-label="Import recipes" title="Import recipes" onClick={() => setImportOpen(true)} />
+          <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New recipe" title="New recipe" onClick={() => setNewRecipe(true)} /></div></div>
       <p className="muted">Reusable event plans for your batches.</p>
       {recipes.length > 0 && <div className="record-list">{recipes.map(item =>
         <a key={item.id} className="record-link recipe-link" href={`${basePath}/recipe/${item.id}`}
@@ -141,6 +163,8 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
         <Form.Item name="description" label="Description"><Input.TextArea rows={3} /></Form.Item>
         {settingsError && <Alert type="error" message={settingsError} className="form-alert" />}
         <div className="recipe-settings-actions"><Button type="primary" htmlType="submit" loading={settingsBusy}>Save changes</Button>
+          {importedRecipe && <Button type="text" htmlType="button" icon={<DownloadOutlined />}
+            onClick={() => void downloadImport()}>Download original import</Button>}
           <Popconfirm title={`Delete ${recipe?.name || 'recipe'}?`}
             description="The recipe and its planned actions will be deleted. Batches already started from it keep their actions."
             okText="Delete recipe" okButtonProps={{ danger: true, loading: deletingRecipe }}
@@ -149,6 +173,8 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
           </Popconfirm></div>
       </Form>
     </Modal>
+    <RecipeImportModal open={importOpen} db={db} inventory={inventory} preferredUnits={preferredUnits}
+      onClose={() => setImportOpen(false)} onImported={async ids => { await onChanged(); if (ids.length === 1) onSelect(ids[0]); }} />
     <Modal title={editingPlan ? editingPlan.event_type === 'measurement'
       ? `Edit ${String(parsePlanDetails(editingPlan.details_json).measurement_kind || 'measurement').replaceAll('_', ' ')} measurement`
       : `Edit ${editingPlan.title}` : `Add ${preset.phase || (preset.measurementKind ? `${preset.measurementKind.replaceAll('_', ' ')} measurement` : creatingKind === 'addition' ? 'ingredient' : kindLabel(creatingKind || '').toLowerCase())}`}

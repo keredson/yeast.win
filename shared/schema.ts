@@ -5,7 +5,13 @@ const definitions: Record<string, string> = {
   recipes: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, description TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL`,
   recipe_types: `id TEXT PRIMARY KEY NOT NULL, recipe_type TEXT NOT NULL`,
   recipe_events: `id TEXT PRIMARY KEY NOT NULL, recipe_id TEXT NOT NULL, event_type TEXT NOT NULL, title TEXT NOT NULL, planned_at INTEGER, anchor_event_id TEXT, offset_seconds INTEGER, details_json TEXT, sort_order INTEGER NOT NULL`,
+  recipe_import_sources: `id TEXT PRIMARY KEY NOT NULL, filename TEXT NOT NULL, format TEXT NOT NULL, sha256 TEXT NOT NULL, byte_count INTEGER NOT NULL, content BLOB NOT NULL, imported_at INTEGER NOT NULL`,
+  recipe_import_links: `id TEXT PRIMARY KEY NOT NULL, source_id TEXT NOT NULL, source_index INTEGER NOT NULL, external_id TEXT`,
+  recipe_inputs: `id TEXT PRIMARY KEY NOT NULL, inputs_json TEXT NOT NULL`,
+  recipe_event_inputs: `id TEXT PRIMARY KEY NOT NULL, inputs_json TEXT NOT NULL`,
   batch_events: `id TEXT PRIMARY KEY NOT NULL, batch_id TEXT NOT NULL, recipe_event_id TEXT, event_type TEXT NOT NULL, title TEXT, planned_at INTEGER, anchor_event_id TEXT, offset_seconds INTEGER, details_json TEXT, actual_at INTEGER, skipped_at INTEGER, note TEXT, created_at INTEGER NOT NULL, created_by_account_id TEXT, recorded_by_account_id TEXT, source_id TEXT, external_id TEXT, received_at INTEGER`,
+  batch_recipe_inputs: `id TEXT PRIMARY KEY NOT NULL, inputs_json TEXT NOT NULL`,
+  batch_event_inputs: `id TEXT PRIMARY KEY NOT NULL, inputs_json TEXT NOT NULL`,
   event_ends: `id TEXT PRIMARY KEY NOT NULL, ended_at INTEGER NOT NULL`,
   additions: `event_id TEXT PRIMARY KEY NOT NULL, inventory_item_id TEXT, item_name TEXT NOT NULL, quantity REAL NOT NULL, unit TEXT NOT NULL, lot TEXT`,
   temperature_measurements: measurementColumns(),
@@ -52,6 +58,7 @@ export const indexStatements = [
   `CREATE INDEX IF NOT EXISTS batch_events_type_time ON batch_events(batch_id, event_type, actual_at, id)`,
   `CREATE INDEX IF NOT EXISTS batch_events_by_batch ON batch_events(batch_id, created_at, id)`,
   `CREATE INDEX IF NOT EXISTS recipe_events_by_recipe ON recipe_events(recipe_id, sort_order, id)`,
+  `CREATE INDEX IF NOT EXISTS recipe_import_links_by_source ON recipe_import_links(source_id, source_index)`,
   `CREATE INDEX IF NOT EXISTS pill_bindings_by_pill ON pill_bindings(pill_id, valid_from)`
 ];
 
@@ -88,7 +95,12 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 9;
+export const workspaceSchemaVersion = 10;
+
+export const recipeImportTables = [
+  'recipe_import_sources', 'recipe_import_links', 'recipe_inputs', 'recipe_event_inputs',
+  'batch_recipe_inputs', 'batch_event_inputs'
+] as const;
 
 export const inventoryLocationTables = ['inventory_locations', 'inventory_item_locations', 'inventory_moves'] as const;
 

@@ -5,9 +5,10 @@ import { nanoid } from 'nanoid';
 import { boilOffKinds, capacityKinds, equipmentKinds, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import { equipmentSlug } from './equipmentRoutes.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { changeColumns, indexStatements, inventoryLocationTables, nowSeconds, recategorizeLacticAcid, removeEmptyDuplicateInventory, replicatedTables, schemaStatements, workspaceSchemaVersion, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
+import { changeColumns, indexStatements, inventoryLocationTables, nowSeconds, recipeImportTables, recategorizeLacticAcid, removeEmptyDuplicateInventory, replicatedTables, schemaStatements, workspaceSchemaVersion, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
-import { convertUnit, formatQuantity } from '../shared/units.ts';
+import { convertUnit, formatQuantity, storageUnit } from '../shared/units.ts';
+import type { ImportedRecipe } from './recipeImport.ts';
 
 export type LocalDb = DB;
 export interface Batch { id: string; name: string; description: string | null; status: string; created_at: number }
@@ -57,7 +58,7 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
           await tx.exec('CREATE TABLE sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
           await tx.exec('INSERT INTO schema_meta(version) VALUES (?)', [workspaceSchemaVersion]);
         });
-      } else if (version[0].version === 7 || version[0].version === 8) {
+      } else if ([7, 8, 9].includes(version[0].version)) {
         await db.tx(async tx => {
           if (version[0].version === 7) {
             for (const table of inventoryLocationTables) {
@@ -67,14 +68,21 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
             await tx.exec(removeEmptyDuplicateInventory);
             await tx.exec(recategorizeLacticAcid);
           }
-          const legacy = await tx.execO<{ id: string; specification_json: string | null }>(
-            "SELECT id, specification_json FROM equipment WHERE kind = 'controlled_fermenter'");
-          for (const item of legacy) {
-            const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
-            specification.built_in_temperature_control = true;
-            await tx.exec('UPDATE equipment SET kind = ?, specification_json = ? WHERE id = ?',
-              ['fermenter', JSON.stringify(specification), item.id]);
+          if (version[0].version < 9) {
+            const legacy = await tx.execO<{ id: string; specification_json: string | null }>(
+              "SELECT id, specification_json FROM equipment WHERE kind = 'controlled_fermenter'");
+            for (const item of legacy) {
+              const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
+              specification.built_in_temperature_control = true;
+              await tx.exec('UPDATE equipment SET kind = ?, specification_json = ? WHERE id = ?',
+                ['fermenter', JSON.stringify(specification), item.id]);
+            }
           }
+          for (const table of recipeImportTables) {
+            await tx.exec(schemaStatements[replicatedTables.indexOf(table)]);
+            await tx.exec('SELECT crsql_as_crr(?)', [table]);
+          }
+          await tx.exec(indexStatements.find(statement => statement.includes('recipe_import_links_by_source'))!);
           await tx.exec('UPDATE schema_meta SET version = ?', [workspaceSchemaVersion]);
         });
       } else if (version[0].version !== workspaceSchemaVersion) {
@@ -153,10 +161,94 @@ export async function deleteRecipe(db: DB, recipeId: string): Promise<void> {
   await db.tx(async tx => {
     const recipes = await tx.execO<{ id: string }>('SELECT id FROM recipes WHERE id = ?', [recipeId]);
     if (!recipes.length) throw new Error('Recipe not found');
+    const events = await tx.execO<{ id: string }>('SELECT id FROM recipe_events WHERE recipe_id = ?', [recipeId]);
+    for (const event of events) await tx.exec('DELETE FROM recipe_event_inputs WHERE id = ?', [event.id]);
     await tx.exec('DELETE FROM recipe_events WHERE recipe_id = ?', [recipeId]);
+    await tx.exec('DELETE FROM recipe_inputs WHERE id = ?', [recipeId]);
+    const links = await tx.execO<{ source_id: string }>('SELECT source_id FROM recipe_import_links WHERE id = ?', [recipeId]);
+    await tx.exec('DELETE FROM recipe_import_links WHERE id = ?', [recipeId]);
+    for (const link of links) {
+      const others = await tx.execO<{ id: string }>('SELECT id FROM recipe_import_links WHERE source_id = ? LIMIT 1', [link.source_id]);
+      if (!others.length) await tx.exec('DELETE FROM recipe_import_sources WHERE id = ?', [link.source_id]);
+    }
     await tx.exec('DELETE FROM recipe_types WHERE id = ?', [recipeId]);
     await tx.exec('DELETE FROM recipes WHERE id = ?', [recipeId]);
   });
+}
+
+export type IngredientImportChoice = { mode: 'unlinked' } | { mode: 'existing'; inventoryItemId: string }
+  | { mode: 'create'; unit: string };
+
+export async function importRecipes(db: DB, source: {
+  filename: string; format: 'beerxml' | 'brewfather_json'; bytes: Uint8Array; sha256: string;
+}, selected: ImportedRecipe[], choices: Record<string, IngredientImportChoice>): Promise<string[]> {
+  if (!selected.length) throw new Error('Choose at least one recipe');
+  if (source.bytes.byteLength > 10 * 1024 * 1024) throw new Error('Import file exceeds 10 MB');
+  if (!/^[a-f0-9]{64}$/.test(source.sha256)) throw new Error('Invalid import hash');
+  const sourceId = nanoid();
+  const now = nowSeconds();
+  const ids: string[] = [];
+  await db.tx(async tx => {
+    await tx.exec(`INSERT INTO recipe_import_sources(id, filename, format, sha256, byte_count, content, imported_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`, [sourceId, source.filename, source.format, source.sha256,
+      source.bytes.byteLength, source.bytes, now]);
+    const ingredientIds = new Map<string, string>();
+    for (const ingredient of new Map(selected.flatMap(recipe => recipe.ingredients.map(item => [item.key, item] as const))).values()) {
+      const choice = choices[ingredient.key];
+      if (!choice || choice.mode === 'unlinked') continue;
+      if (choice.mode === 'existing') {
+        const rows = await tx.execO<{ id: string }>('SELECT id FROM inventory_items WHERE id = ? AND category = ?',
+          [choice.inventoryItemId, ingredient.category]);
+        if (!rows.length) throw new Error(`Choose an inventory item for ${ingredient.name}`);
+        ingredientIds.set(ingredient.key, choice.inventoryItemId);
+      } else {
+        const id = nanoid();
+        if (!choice.unit) throw new Error(`Choose a unit for ${ingredient.name}`);
+        await tx.exec('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)',
+          [id, ingredient.name, ingredient.category, storageUnit(choice.unit), now]);
+        if (choice.unit !== storageUnit(choice.unit)) await tx.exec(
+          'INSERT INTO inventory_display_units(id, display_unit) VALUES (?, ?)', [id, choice.unit]);
+        ingredientIds.set(ingredient.key, id);
+      }
+    }
+    for (const recipe of selected) {
+      const recipeId = nanoid();
+      ids.push(recipeId);
+      await tx.exec('INSERT INTO recipes(id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+        [recipeId, recipe.name.slice(0, 100), recipe.description || null, now, now]);
+      await tx.exec('INSERT INTO recipe_types(id, recipe_type) VALUES (?, ?)', [recipeId, recipe.type]);
+      await tx.exec('INSERT INTO recipe_import_links(id, source_id, source_index, external_id) VALUES (?, ?, ?, ?)',
+        [recipeId, sourceId, recipe.sourceIndex, recipe.externalId || null]);
+      await tx.exec('INSERT INTO recipe_inputs(id, inputs_json) VALUES (?, ?)', [recipeId, JSON.stringify(recipe.inputs)]);
+      const eventIds = new Map(recipe.actions.map(action => [action.key, nanoid()]));
+      for (const [order, action] of recipe.actions.entries()) {
+        const eventId = eventIds.get(action.key)!;
+        const details = { ...action.details };
+        const inventoryId = action.ingredientKey && ingredientIds.get(action.ingredientKey);
+        if (inventoryId) details.inventory_item_id = inventoryId;
+        await tx.exec(`INSERT INTO recipe_events(id, recipe_id, event_type, title, planned_at, anchor_event_id,
+          offset_seconds, details_json, sort_order) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+        [eventId, recipeId, action.eventType, action.title, action.anchorKey ? eventIds.get(action.anchorKey) || null : null,
+          action.offsetSeconds, Object.keys(details).length ? JSON.stringify(details) : null, order + 1]);
+        if (Object.keys(action.inputs).length) await tx.exec('INSERT INTO recipe_event_inputs(id, inputs_json) VALUES (?, ?)',
+          [eventId, JSON.stringify(action.inputs)]);
+      }
+    }
+  });
+  return ids;
+}
+
+export async function recipeImportSource(db: DB, recipeId: string): Promise<{
+  filename: string; format: string; content: Uint8Array;
+} | null> {
+  const rows = await db.execO<{ filename: string; format: string; content: Uint8Array }>(`
+    SELECT s.filename, s.format, s.content FROM recipe_import_links l
+      JOIN recipe_import_sources s ON s.id = l.source_id WHERE l.id = ?`, [recipeId]);
+  return rows[0] || null;
+}
+
+export async function hasRecipeImport(db: DB, recipeId: string): Promise<boolean> {
+  return (await db.execO<{ id: string }>('SELECT id FROM recipe_import_links WHERE id = ?', [recipeId])).length > 0;
 }
 
 export async function createRecipe(db: DB, name: string, description: string, recipeType: RecipeType,
@@ -272,6 +364,7 @@ export async function deleteRecipePlan(db: DB, recipeId: string, planId: string)
       await tx.exec(`UPDATE recipe_events SET anchor_event_id = NULL, offset_seconds = ?, details_json = ?
         WHERE id = ? AND recipe_id = ?`, [effectiveOffset(child), Object.keys(details).length ? JSON.stringify(details) : null, child.id, recipeId]);
     }
+    await tx.exec('DELETE FROM recipe_event_inputs WHERE id = ?', [planId]);
     await tx.exec('DELETE FROM recipe_events WHERE id = ? AND recipe_id = ?', [planId, recipeId]);
   });
 }
@@ -302,6 +395,9 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
   await db.tx(async tx => {
     await tx.exec('INSERT INTO batches(id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
       [batchId, name, description, 'active', now, now]);
+    const recipeInputs = await tx.execO<{ inputs_json: string }>('SELECT inputs_json FROM recipe_inputs WHERE id = ?', [recipe.id]);
+    if (recipeInputs.length) await tx.exec('INSERT INTO batch_recipe_inputs(id, inputs_json) VALUES (?, ?)',
+      [batchId, recipeInputs[0].inputs_json]);
     for (const plan of plans) {
       await tx.exec(`INSERT INTO batch_events(id, batch_id, recipe_event_id, event_type, title, planned_at,
         anchor_event_id, offset_seconds, details_json, created_at, created_by_account_id)
@@ -309,6 +405,9 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
         [ids.get(plan.id)!, batchId, plan.id, plan.event_type, plan.title, plan.planned_at ?? null,
           plan.anchor_event_id ? ids.get(plan.anchor_event_id) ?? null : null,
           plan.offset_seconds ?? null, plan.details_json ?? null, now, accountId]);
+      const eventInputs = await tx.execO<{ inputs_json: string }>('SELECT inputs_json FROM recipe_event_inputs WHERE id = ?', [plan.id]);
+      if (eventInputs.length) await tx.exec('INSERT INTO batch_event_inputs(id, inputs_json) VALUES (?, ?)',
+        [ids.get(plan.id)!, eventInputs[0].inputs_json]);
     }
   });
   return batchId;
