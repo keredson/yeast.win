@@ -160,7 +160,9 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
           unit: unitForCategory(value, preferredUnits.mass), quantity: undefined, pounds: undefined, ounces: undefined }); }} /></Form.Item>
       <Form.Item name="title" label="What will be added?" rules={[{ required: true, whitespace: true }]}>
         <AutoComplete placeholder="Search inventory or enter an item" maxLength={120} options={[
-          ...inventory.filter(item => item.category === itemCategory).map(item => ({ value: item.name, label: `${item.name} · Your inventory` })),
+          ...inventory.filter((item, index) => item.category === itemCategory &&
+            inventory.findIndex(other => other.category === item.category && other.name.toLowerCase() === item.name.toLowerCase()) === index)
+            .map(item => ({ value: item.name, label: `${item.name} · Your inventory` })),
           ...catalog.filter(item => item.category === itemCategory && !inventory.some(owned => owned.category === itemCategory && owned.name.toLowerCase() === item.name.toLowerCase()))
             .map(item => ({ value: item.name, label: `${item.name} · Shared catalog` }))
         ]} filterOption={(input, option) => String(option?.value || '').toLowerCase().includes(input.toLowerCase())}

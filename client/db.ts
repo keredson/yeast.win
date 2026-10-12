@@ -4,7 +4,7 @@ import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { nanoid } from 'nanoid';
 import { capacityKinds, equipmentKinds, measurementRangeUnits } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
+import { changeColumns, indexStatements, inventoryLocationTables, nowSeconds, recategorizeLacticAcid, removeEmptyDuplicateInventory, replicatedTables, schemaStatements, workspaceSchemaVersion, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 import { convertUnit, formatQuantity } from '../shared/units.ts';
 
@@ -21,8 +21,9 @@ export interface BatchEvent {
 export type Plan = BatchEvent;
 export type ActualEvent = BatchEvent;
 export interface Equipment { id: string; name: string; kind: string; specification_json: string | null }
-export interface InventoryItem { id: string; name: string; category: string; default_unit: string; display_unit: string }
-export interface InventoryMovement { id: string; kind: 'Purchased' | 'Counted' | 'Used' | 'Discarded'; quantity: number; unit: string; at: number }
+export interface InventoryItem { id: string; name: string; category: string; default_unit: string; display_unit: string; location_id: string | null; location_name?: string | null }
+export interface InventoryLocation { id: string; name: string; parent_id: string | null }
+export interface InventoryMovement { id: string; kind: 'Purchased' | 'Counted' | 'Used' | 'Discarded' | 'Moved in' | 'Moved out'; quantity: number; unit: string; at: number }
 
 const inventoryMassInGrams: Record<string, number> = { g: 1, kg: 1000, oz: 28.349523125, lb: 453.59237, 'lb + oz': 28.349523125 };
 const inventoryVolumeInLiters: Record<string, number> = { mL: 0.001, L: 1, 'US fl oz': 0.0295735295625, 'US gal': 3.785411784 };
@@ -54,6 +55,16 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
           for (const statement of indexStatements) await tx.exec(statement);
           await tx.exec('CREATE TABLE sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
           await tx.exec('INSERT INTO schema_meta(version) VALUES (?)', [workspaceSchemaVersion]);
+        });
+      } else if (version[0].version === 7) {
+        await db.tx(async tx => {
+          for (const table of inventoryLocationTables) {
+            await tx.exec(schemaStatements[replicatedTables.indexOf(table)]);
+            await tx.exec('SELECT crsql_as_crr(?)', [table]);
+          }
+          await tx.exec(removeEmptyDuplicateInventory);
+          await tx.exec(recategorizeLacticAcid);
+          await tx.exec('UPDATE schema_meta SET version = ?', [workspaceSchemaVersion]);
         });
       } else if (version[0].version !== workspaceSchemaVersion) {
         throw new Error(`This proof-of-concept database uses schema ${version[0].version}; create a fresh database for schema ${workspaceSchemaVersion}`);
@@ -113,6 +124,16 @@ export async function listRecipes(db: DB): Promise<Recipe[]> {
     LEFT JOIN recipe_types t ON t.id = r.id ORDER BY r.name COLLATE NOCASE`);
 }
 
+export async function deleteRecipe(db: DB, recipeId: string): Promise<void> {
+  await db.tx(async tx => {
+    const recipes = await tx.execO<{ id: string }>('SELECT id FROM recipes WHERE id = ?', [recipeId]);
+    if (!recipes.length) throw new Error('Recipe not found');
+    await tx.exec('DELETE FROM recipe_events WHERE recipe_id = ?', [recipeId]);
+    await tx.exec('DELETE FROM recipe_types WHERE id = ?', [recipeId]);
+    await tx.exec('DELETE FROM recipes WHERE id = ?', [recipeId]);
+  });
+}
+
 export async function createRecipe(db: DB, name: string, description: string, recipeType: RecipeType,
   temperatureUnit: '°C' | '°F' = '°C'): Promise<string> {
   const id = nanoid();
@@ -124,6 +145,8 @@ export async function createRecipe(db: DB, name: string, description: string, re
     await tx.exec('INSERT INTO recipe_types(id, recipe_type) VALUES (?, ?)', [id, recipeType]);
     const mashId = nanoid();
     const boilId = nanoid();
+    const chillId = nanoid();
+    const transferId = nanoid();
     const insert = async (eventId: string, eventType: string, title: string, anchorId: string | null,
       details: Record<string, string | number>, order: number) => tx.exec(`INSERT INTO recipe_events
       (id, recipe_id, event_type, title, planned_at, anchor_event_id, offset_seconds, details_json, sort_order)
@@ -133,9 +156,14 @@ export async function createRecipe(db: DB, name: string, description: string, re
         { phase: 'mash', mode: 'hold', target_value: convertUnit(67, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 1800 }, 1);
       await insert(boilId, 'temperature_control', 'Boil', mashId,
         { phase: 'boil', mode: 'heat', target_value: convertUnit(100, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 3600, anchor_point: 'end' }, 2);
+      await insert(chillId, 'temperature_control', 'Chill', boilId,
+        { phase: 'chill', mode: 'chill', target_value: convertUnit(20, '°C', temperatureUnit)!, target_unit: temperatureUnit,
+          duration_seconds: 1200, anchor_point: 'end' }, 3);
+      await insert(transferId, 'transfer', 'Transfer to fermenter', chillId,
+        { anchor_point: 'end' }, 4);
     }
-    await insert(nanoid(), 'addition', 'Pitch yeast', recipeType === 'beer' ? boilId : null,
-      { item_category: 'Yeast', item_name: 'Yeast', ...(recipeType === 'beer' ? { anchor_point: 'end' } : {}) }, recipeType === 'beer' ? 3 : 1);
+    await insert(nanoid(), 'addition', 'Pitch yeast', recipeType === 'beer' ? transferId : null,
+      { item_category: 'Yeast', item_name: 'Yeast' }, recipeType === 'beer' ? 5 : 1);
   });
   return id;
 }
@@ -193,14 +221,26 @@ export async function updateRecipePlan(db: DB, recipeId: string, planId: string,
 export async function deleteRecipePlan(db: DB, recipeId: string, planId: string): Promise<void> {
   const plans = await listRecipePlans(db, recipeId);
   if (!plans.some(plan => plan.id === planId)) throw new Error('Recipe event not found');
-  const removed = new Set([planId]);
-  let size = 0;
-  while (removed.size !== size) {
-    size = removed.size;
-    for (const plan of plans) if (plan.anchor_event_id && removed.has(plan.anchor_event_id)) removed.add(plan.id);
-  }
+  const children = plans.filter(plan => plan.anchor_event_id === planId);
+  const effectiveOffset = (plan: PlanInput & { id: string }, visited = new Set<string>()): number => {
+    if (visited.has(plan.id)) throw new Error('Timing cannot create a cycle');
+    visited.add(plan.id);
+    if (!plan.anchor_event_id) return plan.offset_seconds || 0;
+    const anchor = plans.find(item => item.id === plan.anchor_event_id);
+    if (!anchor) return plan.offset_seconds || 0;
+    const details = JSON.parse(plan.details_json || '{}') as { anchor_point?: string };
+    const anchorDetails = JSON.parse(anchor.details_json || '{}') as { duration_seconds?: number };
+    return effectiveOffset(anchor, visited) + (details.anchor_point === 'end' ? anchorDetails.duration_seconds || 0 : 0)
+      + (plan.offset_seconds || 0);
+  };
   await db.tx(async tx => {
-    for (const id of [...removed].reverse()) await tx.exec('DELETE FROM recipe_events WHERE id = ? AND recipe_id = ?', [id, recipeId]);
+    for (const child of children) {
+      const details = JSON.parse(child.details_json || '{}') as Record<string, string | number>;
+      delete details.anchor_point;
+      await tx.exec(`UPDATE recipe_events SET anchor_event_id = NULL, offset_seconds = ?, details_json = ?
+        WHERE id = ? AND recipe_id = ?`, [effectiveOffset(child), Object.keys(details).length ? JSON.stringify(details) : null, child.id, recipeId]);
+    }
+    await tx.exec('DELETE FROM recipe_events WHERE id = ? AND recipe_id = ?', [planId, recipeId]);
   });
 }
 
@@ -481,8 +521,68 @@ export async function deleteEquipment(db: DB, id: string): Promise<void> {
 
 export async function listInventory(db: DB): Promise<InventoryItem[]> {
   return db.execO<InventoryItem>(`SELECT i.id, i.name, i.category, i.default_unit,
-    COALESCE(d.display_unit, i.default_unit) AS display_unit FROM inventory_items i
-    LEFT JOIN inventory_display_units d ON d.id = i.id ORDER BY i.name COLLATE NOCASE`);
+    COALESCE(d.display_unit, i.default_unit) AS display_unit, l.location_id, places.name AS location_name FROM inventory_items i
+    LEFT JOIN inventory_display_units d ON d.id = i.id
+    LEFT JOIN inventory_item_locations l ON l.id = i.id
+    LEFT JOIN inventory_locations places ON places.id = l.location_id ORDER BY i.name COLLATE NOCASE`);
+}
+
+export async function listInventoryLocations(db: DB): Promise<InventoryLocation[]> {
+  return db.execO<InventoryLocation>('SELECT id, name, parent_id FROM inventory_locations ORDER BY name COLLATE NOCASE, id');
+}
+
+export function inventoryLocationPath(locationId: string | null, locations: InventoryLocation[]): string {
+  if (!locationId) return 'Unspecified';
+  const byId = new Map(locations.map(location => [location.id, location]));
+  const names: string[] = [];
+  const seen = new Set<string>();
+  let current: string | null = locationId;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const location: InventoryLocation | undefined = byId.get(current);
+    if (!location) break;
+    names.unshift(location.name);
+    current = location.parent_id;
+  }
+  return names.join(' / ') || 'Unknown location';
+}
+
+export async function saveInventoryLocation(db: DB, name: string, parentId: string | null, id?: string): Promise<string> {
+  const clean = name.trim();
+  if (!clean) throw new Error('Enter a location name');
+  const locations = await listInventoryLocations(db);
+  if (parentId && !locations.some(location => location.id === parentId)) throw new Error('Parent location not found');
+  if (locations.some(location => location.id !== id && location.parent_id === parentId && location.name.toLowerCase() === clean.toLowerCase()))
+    throw new Error('A location with this name already exists here');
+  if (id) {
+    let current = parentId;
+    while (current) {
+      if (current === id) throw new Error('A location cannot contain itself');
+      current = locations.find(location => location.id === current)?.parent_id || null;
+    }
+    await db.exec('UPDATE inventory_locations SET name = ?, parent_id = ? WHERE id = ?', [clean, parentId, id]);
+    return id;
+  }
+  const nextId = nanoid();
+  await db.exec('INSERT INTO inventory_locations(id, name, parent_id, created_at) VALUES (?, ?, ?, ?)', [nextId, clean, parentId, nowSeconds()]);
+  return nextId;
+}
+
+export async function deleteInventoryLocation(db: DB, id: string): Promise<void> {
+  const [children, stock] = await Promise.all([
+    db.execO('SELECT id FROM inventory_locations WHERE parent_id = ? LIMIT 1', [id]),
+    db.execO('SELECT id FROM inventory_item_locations WHERE location_id = ? LIMIT 1', [id])
+  ]);
+  if (children.length || stock.length) throw new Error('Move stock and child locations before deleting this location');
+  await db.exec('DELETE FROM inventory_locations WHERE id = ?', [id]);
+}
+
+function sameInventoryProduct(item: InventoryItem, name: string, category: string): boolean {
+  return item.category === category && item.name.trim().toLocaleLowerCase() === name.trim().toLocaleLowerCase();
+}
+
+export function stockAtLocation(items: InventoryItem[], name: string, category: string, locationId: string | null): InventoryItem | undefined {
+  return items.find(item => sameInventoryProduct(item, name, category) && item.location_id === locationId);
 }
 
 export async function listInventoryMovements(db: DB, itemId: string): Promise<InventoryMovement[]> {
@@ -490,9 +590,11 @@ export async function listInventoryMovements(db: DB, itemId: string): Promise<In
     SELECT id, 'Purchased' AS kind, quantity, unit, purchased_at AS at FROM inventory_purchases WHERE inventory_item_id = ?
     UNION ALL SELECT id, 'Counted' AS kind, quantity, unit, counted_at AS at FROM inventory_counts WHERE inventory_item_id = ?
     UNION ALL SELECT id, 'Discarded' AS kind, quantity, unit, discarded_at AS at FROM inventory_discards WHERE inventory_item_id = ?
+    UNION ALL SELECT id, 'Moved in' AS kind, quantity, unit, moved_at AS at FROM inventory_moves WHERE to_item_id = ?
+    UNION ALL SELECT id, 'Moved out' AS kind, quantity, unit, moved_at AS at FROM inventory_moves WHERE from_item_id = ?
     UNION ALL SELECT a.event_id AS id, 'Used' AS kind, a.quantity, a.unit, e.actual_at AS at
       FROM additions a JOIN batch_events e ON e.id = a.event_id WHERE a.inventory_item_id = ? AND e.actual_at IS NOT NULL
-    ORDER BY at DESC, id DESC`, [itemId, itemId, itemId, itemId]);
+    ORDER BY at DESC, id DESC`, [itemId, itemId, itemId, itemId, itemId, itemId]);
 }
 
 export async function listInventoryBalances(db: DB, items: InventoryItem[]): Promise<Record<string, number | null>> {
@@ -501,6 +603,8 @@ export async function listInventoryBalances(db: DB, items: InventoryItem[]): Pro
     SELECT id, inventory_item_id, 'Purchased' AS kind, quantity, unit, purchased_at AS at FROM inventory_purchases
     UNION ALL SELECT id, inventory_item_id, 'Counted' AS kind, quantity, unit, counted_at AS at FROM inventory_counts
     UNION ALL SELECT id, inventory_item_id, 'Discarded' AS kind, quantity, unit, discarded_at AS at FROM inventory_discards
+    UNION ALL SELECT id, to_item_id AS inventory_item_id, 'Moved in' AS kind, quantity, unit, moved_at AS at FROM inventory_moves
+    UNION ALL SELECT id, from_item_id AS inventory_item_id, 'Moved out' AS kind, quantity, unit, moved_at AS at FROM inventory_moves
     UNION ALL SELECT a.event_id AS id, a.inventory_item_id, 'Used' AS kind, a.quantity, a.unit, e.actual_at AS at
       FROM additions a JOIN batch_events e ON e.id = a.event_id WHERE a.inventory_item_id IS NOT NULL AND e.actual_at IS NOT NULL
     ORDER BY inventory_item_id, at DESC, id DESC`);
@@ -522,19 +626,26 @@ export function inventoryBalance(rows: InventoryMovement[], unit: string): numbe
   for (const row of afterAnchor) {
     const amount = convertInventoryUnit(row.quantity, row.unit, unit);
     if (amount == null) return null;
-    if (row.kind === 'Purchased') balance += amount;
-    else if (row.kind === 'Used' || row.kind === 'Discarded') balance -= amount;
+    if (row.kind === 'Purchased' || row.kind === 'Moved in') balance += amount;
+    else if (row.kind === 'Used' || row.kind === 'Discarded' || row.kind === 'Moved out') balance -= amount;
   }
   return balance;
 }
 
 export async function createInventoryItem(db: DB, name: string, category: string, defaultUnit: string,
-  startingQuantity: number | null = null, accountId: string | null = null, displayUnit = defaultUnit): Promise<string> {
+  startingQuantity: number | null = null, accountId: string | null = null, displayUnit = defaultUnit,
+  locationId: string | null = null): Promise<string> {
+  const items = await listInventory(db);
+  if (stockAtLocation(items, name, category, locationId)) throw new Error('This item already exists at that location');
+  if (items.some(item => sameInventoryProduct(item, name, category)) && (!startingQuantity || startingQuantity <= 0))
+    throw new Error('Enter a positive quantity to add this existing item');
+  if (locationId && !(await listInventoryLocations(db)).some(location => location.id === locationId)) throw new Error('Location not found');
   const id = nanoid();
   const now = nowSeconds();
   await db.tx(async tx => {
     await tx.exec('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)',
       [id, name, category, defaultUnit, now]);
+    if (locationId) await tx.exec('INSERT INTO inventory_item_locations(id, location_id) VALUES (?, ?)', [id, locationId]);
     if (displayUnit !== defaultUnit) await tx.exec('INSERT INTO inventory_display_units(id, display_unit) VALUES (?, ?)',
       [id, displayUnit]);
     if (startingQuantity != null) await tx.exec(`INSERT INTO inventory_counts(id, inventory_item_id, quantity, unit, counted_at, created_by_account_id)
@@ -543,12 +654,49 @@ export async function createInventoryItem(db: DB, name: string, category: string
   return id;
 }
 
+export async function moveInventoryStock(db: DB, source: InventoryItem, destinationId: string | null,
+  quantity: number, unit: string): Promise<string> {
+  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Enter a positive quantity');
+  if (source.location_id === destinationId) throw new Error('Choose another location');
+  if (destinationId && !(await listInventoryLocations(db)).some(location => location.id === destinationId)) throw new Error('Location not found');
+  const available = inventoryBalance(await listInventoryMovements(db, source.id), source.default_unit);
+  const converted = convertInventoryUnit(quantity, unit, source.default_unit);
+  if (converted == null) throw new Error('Choose a compatible unit');
+  if (available == null || converted > available + 1e-9) throw new Error('Cannot move more than the available stock');
+  let target = stockAtLocation(await listInventory(db), source.name, source.category, destinationId);
+  if (target && convertInventoryUnit(quantity, unit, target.default_unit) == null) throw new Error('Destination uses an incompatible unit');
+  if (!target) target = { ...source, id: nanoid(), location_id: destinationId };
+  const latest = await db.execO<{ at: number | null }>(`SELECT MAX(at) AS at FROM (
+    SELECT purchased_at AS at FROM inventory_purchases WHERE inventory_item_id IN (?, ?)
+    UNION ALL SELECT counted_at FROM inventory_counts WHERE inventory_item_id IN (?, ?)
+    UNION ALL SELECT discarded_at FROM inventory_discards WHERE inventory_item_id IN (?, ?)
+    UNION ALL SELECT moved_at FROM inventory_moves WHERE from_item_id IN (?, ?) OR to_item_id IN (?, ?)
+    UNION ALL SELECT e.actual_at FROM additions a JOIN batch_events e ON e.id = a.event_id
+      WHERE a.inventory_item_id IN (?, ?) AND e.actual_at IS NOT NULL)`,
+  [source.id, target.id, source.id, target.id, source.id, target.id, source.id, target.id, source.id, target.id, source.id, target.id]);
+  await db.tx(async tx => {
+    if (!(await tx.execO('SELECT id FROM inventory_items WHERE id = ?', [target.id])).length) {
+      await tx.exec('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)',
+        [target.id, target.name, target.category, target.default_unit, nowSeconds()]);
+      if (destinationId) await tx.exec('INSERT INTO inventory_item_locations(id, location_id) VALUES (?, ?)', [target.id, destinationId]);
+      if (target.display_unit !== target.default_unit) await tx.exec('INSERT INTO inventory_display_units(id, display_unit) VALUES (?, ?)',
+        [target.id, target.display_unit]);
+    }
+    await tx.exec('INSERT INTO inventory_moves(id, from_item_id, to_item_id, quantity, unit, moved_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [nanoid(), source.id, target.id, quantity, unit, Math.max(nowSeconds(), (latest[0]?.at ?? 0) + 1)]);
+  });
+  return target.id;
+}
+
 export async function addInventoryEntry(db: DB, itemId: string, kind: 'purchase' | 'count' | 'discard', quantity: number, unit: string, accountId: string): Promise<void> {
   if (!Number.isFinite(quantity) || quantity < 0 || kind !== 'count' && quantity === 0) throw new Error('Enter a positive quantity');
   const latest = await db.execO<{ at: number | null }>(`SELECT MAX(at) AS at FROM (
     SELECT purchased_at AS at FROM inventory_purchases WHERE inventory_item_id = ?
     UNION ALL SELECT counted_at AS at FROM inventory_counts WHERE inventory_item_id = ?
-    UNION ALL SELECT discarded_at AS at FROM inventory_discards WHERE inventory_item_id = ?)`, [itemId, itemId, itemId]);
+    UNION ALL SELECT discarded_at AS at FROM inventory_discards WHERE inventory_item_id = ?
+    UNION ALL SELECT moved_at AS at FROM inventory_moves WHERE from_item_id = ? OR to_item_id = ?
+    UNION ALL SELECT e.actual_at AS at FROM additions a JOIN batch_events e ON e.id = a.event_id
+      WHERE a.inventory_item_id = ? AND e.actual_at IS NOT NULL)`, [itemId, itemId, itemId, itemId, itemId, itemId]);
   const now = Math.max(nowSeconds(), (latest[0]?.at ?? 0) + 1);
   if (kind === 'purchase') {
     await db.exec('INSERT INTO inventory_purchases(id, inventory_item_id, quantity, unit, purchased_at) VALUES (?, ?, ?, ?, ?)',

@@ -24,6 +24,9 @@ const definitions: Record<string, string> = {
   equipment_calibrations: `id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, effective_at INTEGER NOT NULL, method TEXT NOT NULL, parameters_json TEXT NOT NULL, created_by_account_id TEXT`,
   equipment_characterization_observations: `id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, observed_at INTEGER NOT NULL, power_watts REAL, ambient_c REAL, liquid_c REAL, start_liters REAL, end_liters REAL, duration_seconds INTEGER`,
   inventory_items: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL, default_unit TEXT NOT NULL, created_at INTEGER NOT NULL`,
+  inventory_locations: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, parent_id TEXT, created_at INTEGER NOT NULL`,
+  inventory_item_locations: `id TEXT PRIMARY KEY NOT NULL, location_id TEXT`,
+  inventory_moves: `id TEXT PRIMARY KEY NOT NULL, from_item_id TEXT NOT NULL, to_item_id TEXT NOT NULL, quantity REAL NOT NULL, unit TEXT NOT NULL, moved_at INTEGER NOT NULL`,
   inventory_display_units: `id TEXT PRIMARY KEY NOT NULL, display_unit TEXT NOT NULL`,
   inventory_item_specs: `id TEXT PRIMARY KEY NOT NULL, inventory_item_id TEXT NOT NULL, capacity_liters REAL`,
   inventory_purchases: `id TEXT PRIMARY KEY NOT NULL, inventory_item_id TEXT NOT NULL, quantity REAL NOT NULL, unit TEXT NOT NULL, purchased_at INTEGER NOT NULL, supplier TEXT, lot TEXT, cost REAL`,
@@ -85,7 +88,27 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 7;
+export const workspaceSchemaVersion = 8;
+
+export const inventoryLocationTables = ['inventory_locations', 'inventory_item_locations', 'inventory_moves'] as const;
+
+export const removeEmptyDuplicateInventory = `DELETE FROM inventory_items WHERE id IN (
+  SELECT empty.id FROM inventory_items empty WHERE EXISTS (
+    SELECT 1 FROM inventory_items other WHERE other.id <> empty.id
+      AND lower(trim(other.name)) = lower(trim(empty.name)) AND other.category = empty.category
+      AND (other.created_at > empty.created_at OR other.created_at = empty.created_at AND other.id > empty.id
+        OR EXISTS (SELECT 1 FROM inventory_purchases WHERE inventory_item_id = other.id)
+        OR EXISTS (SELECT 1 FROM inventory_counts WHERE inventory_item_id = other.id)
+        OR EXISTS (SELECT 1 FROM inventory_discards WHERE inventory_item_id = other.id)))
+  AND NOT EXISTS (SELECT 1 FROM inventory_purchases WHERE inventory_item_id = empty.id)
+  AND NOT EXISTS (SELECT 1 FROM inventory_counts WHERE inventory_item_id = empty.id)
+  AND NOT EXISTS (SELECT 1 FROM inventory_discards WHERE inventory_item_id = empty.id)
+  AND NOT EXISTS (SELECT 1 FROM additions WHERE inventory_item_id = empty.id)
+  AND NOT EXISTS (SELECT 1 FROM packaging WHERE inventory_item_id = empty.id)
+  AND NOT EXISTS (SELECT 1 FROM photos WHERE inventory_item_id = empty.id)
+  AND NOT EXISTS (SELECT 1 FROM inventory_item_specs WHERE inventory_item_id = empty.id)
+)`;
+export const recategorizeLacticAcid = "UPDATE inventory_items SET category = 'Adjunct' WHERE category = 'Chemical' AND lower(trim(name)) = 'lactic acid'";
 
 export function isValidId(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{10,32}$/.test(value);

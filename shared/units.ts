@@ -26,7 +26,7 @@ export const quantityUnits = [...massInputUnits, ...unitGroups.volume, ...unitGr
 
 export function quantityUnitsForCategory(category: string): readonly string[] {
   if (category === 'Grain' || category === 'Hops') return massInputUnits;
-  if (category === 'Nutrient' || category === 'Chemical') return [...massInputUnits, ...unitGroups.volume];
+  if (category === 'Nutrient' || category === 'Chemical' || category === 'Adjunct') return [...massInputUnits, ...unitGroups.volume];
   if (category === 'Yeast') return [...unitGroups.count, ...massInputUnits, ...unitGroups.volume];
   if (category === 'Packaging') return unitGroups.count;
   return quantityUnits;

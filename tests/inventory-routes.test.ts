@@ -4,7 +4,7 @@ import { inventoryItemForPath, inventoryPathSegment } from '../client/inventoryR
 import type { InventoryItem } from '../client/db.ts';
 
 const item = (id: string, name: string, category = 'Hops'): InventoryItem =>
-  ({ id, name, category, default_unit: 'g', display_unit: 'g' });
+  ({ id, name, category, default_unit: 'g', display_unit: 'g', location_id: null });
 
 test('inventory links use readable names and resolve legacy IDs', () => {
   const mosaic = item('u95969aXiGdKSVnMXTi40', 'Mosaic hops');

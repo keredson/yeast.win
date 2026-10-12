@@ -55,7 +55,8 @@ async function choosePlanCategory(page, dialog, category) {
 
 async function choosePlanKind(page, buttonName, kind) {
   await page.getByRole('button', { name: buttonName }).click();
-  await page.getByRole('menuitem', { name: kind, exact: true }).click();
+  await page.getByRole('menuitem', { name: kind, exact: kind !== 'Measurement' }).click();
+  if (kind === 'Measurement') await page.getByRole('menuitem', { name: 'Temperature', exact: true }).click();
 }
 
 async function localBreweryBlocks(page, id) {
@@ -142,15 +143,17 @@ try {
   await page.locator('.app-nav .ant-menu-item').filter({ hasText: batchName }).click();
   await page.getByRole('heading', { name: batchName }).waitFor();
   console.log('Created batch:', batchName);
+  await page.locator('.timeline-group-heading').getByText('Batch start').waitFor();
+  if (await page.locator('.timeline-group .plan-card').count()) throw new Error('Empty batch start already has actions');
 
-  await choosePlanKind(page, 'Add action', 'Addition');
+  await choosePlanKind(page, 'Add action', 'Ingredient');
   const firstAction = page.getByRole('dialog', { name: 'Add addition' });
   await choosePlanCategory(page, firstAction, 'Nutrient');
   await firstAction.getByLabel('What will be added?').fill('Add nutrient');
   await firstAction.getByRole('spinbutton', { name: 'Quantity' }).fill('1');
   await firstAction.getByRole('button', { name: 'Add addition' }).click();
   await firstAction.waitFor({ state: 'hidden' });
-  await choosePlanKind(page, 'Add action', 'Addition');
+  await choosePlanKind(page, 'Add action', 'Ingredient');
   const yeastAction = page.getByRole('dialog', { name: 'Add addition' });
   await choosePlanCategory(page, yeastAction, 'Yeast');
   await yeastAction.getByLabel('What will be added?').fill('Add yeast');
@@ -356,6 +359,8 @@ try {
   await page.waitForURL(url => /^\/recipe\/[A-Za-z0-9_-]{10,32}$/.test(url.pathname));
   await page.getByRole('button', { name: 'Edit planned event Mash' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Boil' }).waitFor();
+  await page.getByRole('button', { name: 'Edit planned event Chill' }).waitFor();
+  await page.getByRole('button', { name: 'Edit planned event Transfer to fermenter' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Boil' }).click();
   const boilPlan = page.getByRole('dialog', { name: 'Edit Boil' });
@@ -414,9 +419,19 @@ try {
   await recipeReminder.getByRole('button', { name: 'Add notes' }).click();
   await recipeReminder.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Delete planned event 2-row pale malt extra' }).click();
-  await page.getByText('Also deletes Check the mash').waitFor();
+  await page.getByText('Actions timed from this one will become relative to batch start.').waitFor();
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
   await page.getByRole('button', { name: 'Edit planned event Boil' }).waitFor();
+  await page.getByRole('button', { name: 'Edit planned event Check the mash' }).waitFor();
+  await page.locator('.plan-card').filter({ hasText: 'Check the mash' }).getByText(/batch start/).waitFor();
+  await page.getByRole('button', { name: 'Delete recipe Smoke recipe' }).click();
+  await page.getByText('Batches already started from it keep their actions.').waitFor();
+  await page.getByRole('button', { name: 'Delete recipe', exact: true }).last().click();
+  await page.waitForURL(url => url.pathname === '/recipes');
+  await page.locator('.record-link').filter({ hasText: 'Smoke recipe' }).waitFor({ state: 'hidden' });
+  await page.reload();
+  await page.getByRole('heading', { name: 'Recipes', exact: true }).waitFor();
+  if (await page.locator('.record-link').filter({ hasText: 'Smoke recipe' }).count()) throw new Error('Deleted recipe returned after reload');
   await navigateSection(page, 'Batches');
   await openBatch(page, 'Batch from recipe');
   await page.locator('.plan-card').getByText('2-row pale malt extra').waitFor();
@@ -456,7 +471,7 @@ try {
   await page.waitForURL(url => url.pathname === '/inventory');
   await page.getByRole('button', { name: 'Add grain' }).waitFor();
   const grainRow = page.locator('.group-table').getByRole('row').filter({ has: page.getByRole('link', { name: 'Smoke grain' }) });
-  await page.getByRole('columnheader', { name: 'On hand' }).waitFor();
+  await page.getByRole('columnheader', { name: 'Qty' }).waitFor();
   await grainRow.getByText('2 lb 5 oz').waitFor();
   if (!String(await grainRow.getByRole('link', { name: 'Smoke grain' }).getAttribute('href')).endsWith('/inventory/smoke-grain')) {
     throw new Error('Inventory link still uses an item ID');
@@ -464,7 +479,9 @@ try {
   await page.getByRole('button', { name: 'Add grain' }).click();
   const moreGrain = page.getByRole('dialog', { name: 'New grain item' });
   await moreGrain.getByRole('combobox', { name: 'Item' }).fill('Smoke grain');
-  await moreGrain.getByText('This item is already in your inventory').waitFor();
+  await moreGrain.getByRole('combobox', { name: 'Location' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Unspecified' }).click();
+  await moreGrain.getByText('This item is already at this location').waitFor();
   await moreGrain.getByRole('spinbutton', { name: 'Starting quantity on hand · pounds' }).fill('1');
   await moreGrain.getByRole('button', { name: 'Add stock' }).click();
   await moreGrain.waitFor({ state: 'hidden' });
@@ -511,6 +528,54 @@ try {
   await page.setViewportSize({ width: 320, height: 720 });
   if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw new Error('Grouped inventory tables overflow a narrow phone');
   await page.setViewportSize({ width: 1280, height: 900 });
+  await page.getByRole('button', { name: 'Manage locations' }).click();
+  const locationsDialog = page.getByRole('dialog', { name: 'Inventory locations' });
+  await locationsDialog.getByRole('textbox', { name: 'Name' }).fill('Back room');
+  await locationsDialog.getByRole('button', { name: 'Add location' }).click();
+  await locationsDialog.getByText('Back room').waitFor();
+  await locationsDialog.getByRole('textbox', { name: 'Name' }).fill('Shelf A');
+  await locationsDialog.getByRole('combobox', { name: 'Inside' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Back room' }).click();
+  await locationsDialog.getByRole('button', { name: 'Add location' }).click();
+  await locationsDialog.getByText('Shelf A').waitFor();
+  await locationsDialog.locator('.ant-modal-close').click();
+  await grainRow.getByRole('button', { name: 'Actions for Smoke grain' }).click();
+  await page.getByRole('menuitem', { name: 'Bought' }).click();
+  const refill = page.getByRole('dialog', { name: 'Bought Smoke grain' });
+  await refill.getByRole('spinbutton', { name: 'Quantity · pounds' }).fill('2');
+  await refill.getByRole('button', { name: 'Save' }).click();
+  await refill.waitFor({ state: 'hidden' });
+  await grainRow.getByRole('button', { name: 'Actions for Smoke grain' }).click();
+  await page.getByRole('menuitem', { name: 'Move' }).click();
+  const moveDialog = page.getByRole('dialog', { name: 'Move stock' });
+  await moveDialog.getByRole('combobox', { name: 'To location' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Back room / Shelf A' }).click();
+  await moveDialog.getByRole('checkbox', { name: 'Move all available stock' }).check();
+  await moveDialog.getByRole('button', { name: 'Move stock' }).click();
+  await moveDialog.waitFor({ state: 'hidden' });
+  await page.getByRole('cell', { name: 'Back room / Shelf A' }).waitFor();
+  if (await page.locator('.group-table').getByRole('link', { name: 'Smoke grain' }).count() !== 2) {
+    throw new Error('Moving stock did not create a distinct location row');
+  }
+  const shelfRow = page.locator('.group-table').getByRole('row').filter({ has: page.getByRole('cell', { name: 'Back room / Shelf A' }) });
+  await shelfRow.getByText('2 lb').waitFor();
+  await shelfRow.getByRole('link', { name: 'Smoke grain' }).click();
+  await page.getByText('Moved in', { exact: true }).waitFor();
+  await navigateSection(page, 'Inventory');
+  await page.getByRole('button', { name: 'Add grain' }).click();
+  const shelvedGrain = page.getByRole('dialog', { name: 'New grain item' });
+  await shelvedGrain.waitFor();
+  await shelvedGrain.locator('input#name').fill('Smoke grain');
+  await shelvedGrain.locator('input#location_id').click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Back room / Shelf A' }).click();
+  await shelvedGrain.getByText('This item is already at this location').waitFor();
+  await shelvedGrain.getByRole('spinbutton', { name: 'Starting quantity on hand · pounds' }).fill('1');
+  await shelvedGrain.getByRole('button', { name: 'Add stock' }).click();
+  await shelvedGrain.waitFor({ state: 'hidden' });
+  await shelfRow.getByText('3 lb').waitFor();
+  if (await page.locator('.group-table').getByRole('link', { name: 'Smoke grain' }).count() !== 2) {
+    throw new Error('Buying more at a location created another stock row');
+  }
   await page.route('**/api/**', route => route.abort());
   await page.goto(`${baseUrl}/inventory`);
   await page.getByRole('heading', { name: 'Inventory', exact: true }).waitFor();
