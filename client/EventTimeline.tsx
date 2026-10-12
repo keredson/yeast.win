@@ -95,7 +95,7 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
         const action = actionForMenu(key, events); setMenuOpen(false); onAdd(action.kind, action.preset);
       } }}>
       {isBatch ? <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="Add action" title="Add action" />
-        : <Button type="text" icon={<PlusOutlined />} aria-label="Add recipe event">Add event</Button>}
+        : <Button type="text" icon={<PlusOutlined />} aria-label="Add recipe event">Add</Button>}
     </Dropdown></div>
   </section>;
 }

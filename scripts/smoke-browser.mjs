@@ -430,7 +430,7 @@ try {
   await page.getByRole('button', { name: 'Edit planned event Boil' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Chill' }).waitFor();
   const recipeAdd = page.getByRole('button', { name: 'Add recipe event' });
-  if (await recipeAdd.textContent() !== 'Add event'
+  if (await recipeAdd.textContent() !== 'Add'
     || !await recipeAdd.evaluate(element => element.classList.contains('ant-btn-text'))
     || !await recipeAdd.locator('svg').count()
     || await recipeAdd.evaluate(element => getComputedStyle(element.parentElement).justifyContent) !== 'flex-start') {
