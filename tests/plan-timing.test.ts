@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { effectivePlanTime, planDuration, planTimingLabel } from '../client/planTiming.ts';
+import { effectivePlanTime, orderTimelineGroup, planDuration, planTimingLabel } from '../client/planTiming.ts';
 import type { Plan } from '../client/db.ts';
 
 test('plans use batch start and an actual anchor when it arrives', () => {
@@ -65,4 +65,23 @@ test('pitching after chill follows the chill completion point', () => {
   assert.equal(effectivePlanTime(pitch, [chill, pitch], [], start), start + 600);
   const recordedChill = { ...chill, actual_at: start + 900 };
   assert.equal(effectivePlanTime(pitch, [chill, pitch], [recordedChill], start), start + 900);
+});
+
+test('same-time timeline rows keep chill before its dependent yeast pitch', () => {
+  const chill = { id: 'chill', event_type: 'temperature_control', anchor_event_id: 'boil', details_json: '{"phase":"chill"}' };
+  const transfer = { id: 'transfer', event_type: 'transfer', anchor_event_id: 'chill', details_json: null };
+  const gravity = { id: 'gravity', event_type: 'measurement', anchor_event_id: 'transfer', details_json: null };
+  const pitch = { id: 'pitch', event_type: 'addition', anchor_event_id: 'chill', details_json: '{"item_category":"Yeast"}' };
+  const group = [pitch, chill, transfer, gravity];
+  const times = new Map(group.map(event => [event.id, 600]));
+  assert.deepEqual(orderTimelineGroup(group, times).map(event => event.id), ['chill', 'pitch', 'transfer', 'gravity']);
+  assert.deepEqual(orderTimelineGroup([chill, transfer, gravity, pitch], times).map(event => event.id),
+    ['chill', 'transfer', 'gravity', 'pitch']);
+  const grain = { id: 'grain', event_type: 'addition', anchor_event_id: null, details_json: '{"item_category":"Grain"}' };
+  assert.equal(orderTimelineGroup([chill, grain], new Map([['chill', 600], ['grain', 600]]))[0].id, 'grain');
+  const boil = { id: 'boil', event_type: 'temperature_control', anchor_event_id: null,
+    details_json: '{"phase":"boil","duration_seconds":3600}' };
+  const boilGrain = { ...grain, anchor_event_id: 'boil', details_json: '{"item_category":"Grain","anchor_point":"start"}' };
+  assert.deepEqual(orderTimelineGroup([boil, boilGrain], new Map([['boil', 600], ['grain', 600]])).map(event => event.id),
+    ['grain', 'boil']);
 });

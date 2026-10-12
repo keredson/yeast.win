@@ -4,7 +4,7 @@ import { CheckOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ActualEvent, Equipment, PlanInput } from './db.ts';
 import { kindLabel, measurementKinds } from './constants.ts';
 import { formatTime } from './time.ts';
-import { effectivePlanTime, formatOffset, parsePlanDetails, planDetailsLabel, planDuration, planKindLabel } from './planTiming.ts';
+import { effectivePlanTime, formatOffset, orderTimelineGroup, parsePlanDetails, planDetailsLabel, planDuration, planKindLabel } from './planTiming.ts';
 import type { PlanPreset } from './PlanForm.tsx';
 
 export type TimelineEvent = PlanInput & { id: string; actual_at?: number | null; skipped_at?: number | null; ended_at?: number | null };
@@ -59,11 +59,7 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
       if (isBatch && !group.label && (item.actual_at != null || item.skipped_at != null)) group.label = formatTime(at!);
       group.events.push(item);
     }
-    for (const group of grouped.values()) group.events.sort((a, b) => {
-      const timeDifference = (eventTimes.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (eventTimes.get(b.id) ?? Number.MAX_SAFE_INTEGER);
-      if (timeDifference) return timeDifference;
-      return Number(b.event_type === 'addition') - Number(a.event_type === 'addition');
-    });
+    for (const group of grouped.values()) group.events = orderTimelineGroup(group.events, eventTimes);
     return [...grouped.values()].sort((a, b) => (a.at ?? Number.MAX_SAFE_INTEGER) - (b.at ?? Number.MAX_SAFE_INTEGER) || a.key.localeCompare(b.key));
   }, [events, batchStartAt, isBatch]);
 

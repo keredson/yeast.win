@@ -510,6 +510,10 @@ try {
   await gravityPlan.getByRole('button', { name: 'Save event' }).click();
   await gravityPlan.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
+  const chillGroupTitles = await seededChillGroup.locator('.title-edit-row strong').allTextContents();
+  if (chillGroupTitles.indexOf('Chill') < 0 || chillGroupTitles.indexOf('Pitch yeast') <= chillGroupTitles.indexOf('Chill')) {
+    throw new Error('Pitch yeast appeared before Chill in their shared timeline group');
+  }
   await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).click();
   const pitchPlan = page.getByRole('dialog', { name: 'Edit Pitch yeast' });
   await pitchPlan.waitFor();
