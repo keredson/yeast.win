@@ -55,7 +55,9 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
   const genericPitch = kind === 'addition' && initialPlan?.title === 'Pitch yeast'
     && initialDetails.item_category === 'Yeast' && !initialDetails.inventory_item_id && !initialDetails.catalog_item_id
     && (!initialDetails.item_name || initialDetails.item_name === 'Yeast');
-  const initialItem = genericPitch ? '' : String(initialDetails.item_name || initialPlan?.title || preset?.title || '');
+  const unspecifiedAddition = kind === 'addition' && !!initialPlan && !!initialDetails.item_category
+    && !initialDetails.item_name && !initialDetails.inventory_item_id && !initialDetails.catalog_item_id;
+  const initialItem = genericPitch || unspecifiedAddition ? '' : String(initialDetails.item_name || initialPlan?.title || preset?.title || '');
   const initialCategory = String(initialDetails.item_category || inventory.find(item => item.id === initialDetails.inventory_item_id)?.category
     || catalog.find(item => item.id === initialDetails.catalog_item_id || item.name === initialItem)?.category || preset?.itemCategory || '');
   const initialUnit = String(initialDetails.display_unit || initialDetails.unit ||

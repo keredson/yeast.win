@@ -452,6 +452,24 @@ try {
     throw new Error('Recipe timeline still displays an action count');
   }
   await page.getByRole('button', { name: 'Edit planned event Mash' }).waitFor();
+  await page.getByRole('button', { name: 'Edit planned event Add fermentable' }).waitFor();
+  if (await page.getByRole('button', { name: 'Edit planned event Add fermentable' }).count() !== 1) {
+    throw new Error('Beer template should have one fermentable placeholder');
+  }
+  const mashGroup = page.locator('.timeline-group').filter({ has: page.getByRole('button', { name: 'Edit planned event Mash' }) });
+  const mashTitles = await mashGroup.locator('.title-edit-row strong').allTextContents();
+  if (mashTitles.indexOf('Add fermentable') < 0 || mashTitles.indexOf('Add fermentable') > mashTitles.indexOf('Mash')) {
+    throw new Error('Fermentable placeholder should appear at the start of Mash');
+  }
+  await page.getByRole('button', { name: 'Edit planned event Add fermentable' }).click();
+  const fermentablePlan = page.getByRole('dialog', { name: 'Edit Add fermentable' });
+  await fermentablePlan.waitFor();
+  if (await fermentablePlan.getByLabel('What will be added?').inputValue()
+    || !await fermentablePlan.getByRole('combobox', { name: 'Type' }).locator('..').getByText('Grain').count()
+    || !await fermentablePlan.getByRole('combobox', { name: 'Timing' }).locator('..').getByText('At or after start of Mash').count()) {
+    throw new Error('Fermentable placeholder should have no selected item and start with Mash');
+  }
+  await fermentablePlan.locator('.ant-modal-close').click();
   if (await page.locator('.plan-card').filter({ has: page.getByRole('button', { name: 'Edit planned event Mash' }) })
     .locator('.plan-meta').count()) throw new Error('Recipe start action repeats its group timing');
   await page.getByRole('button', { name: 'Edit planned event Boil' }).waitFor();
