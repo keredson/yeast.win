@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { nanoid } from 'nanoid';
 import Database from 'better-sqlite3';
-import { changeColumns, nowSeconds, type SyncRequest, validateChange, } from '../shared/schema.ts';
+import { changeColumns, inventoryLocationTables, nowSeconds, replicatedTables, schemaStatements, type SyncRequest, validateChange, } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 
 process.env.BREWLOG_DATA_DIR = mkdtempSync(join(tmpdir(), 'brewlog-sync-'));
@@ -35,6 +35,20 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
     const discardedItem = nanoid();
     first.prepare('INSERT INTO inventory_discards(id, inventory_item_id, quantity, unit, discarded_at) VALUES (?, ?, ?, ?, ?)')
       .run(nanoid(), discardedItem, 5, 'g', timestamp);
+    const roomId = nanoid();
+    const shelfId = nanoid();
+    const sourceId = nanoid();
+    const targetId = nanoid();
+    first.prepare('INSERT INTO inventory_locations(id, name, parent_id, created_at) VALUES (?, ?, ?, ?)')
+      .run(roomId, 'Back room', null, timestamp);
+    first.prepare('INSERT INTO inventory_locations(id, name, parent_id, created_at) VALUES (?, ?, ?, ?)')
+      .run(shelfId, 'Shelf A', roomId, timestamp);
+    for (const itemId of [sourceId, targetId]) first.prepare(
+      'INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(itemId, 'Mosaic hops', 'Hops', 'g', timestamp);
+    first.prepare('INSERT INTO inventory_item_locations(id, location_id) VALUES (?, ?)').run(targetId, shelfId);
+    first.prepare('INSERT INTO inventory_moves(id, from_item_id, to_item_id, quantity, unit, moved_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(nanoid(), sourceId, targetId, 25, 'g', timestamp);
     const pixels = Buffer.from([0, 1, 2, 127, 254, 255]);
     first.prepare('INSERT INTO photos(id, batch_id, mime_type, byte_count, image, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run(photoId, batchA, 'image/png', pixels.length, pixels, timestamp);
@@ -48,6 +62,9 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
     assert.equal((second.prepare('SELECT COUNT(*) AS count FROM batches').get() as { count: number }).count, 2);
     assert.equal((second.prepare('SELECT value FROM temperature_measurements WHERE event_id = ?').get(event) as { value: number }).value, 20);
     assert.equal((second.prepare('SELECT quantity FROM inventory_discards WHERE inventory_item_id = ?').get(discardedItem) as { quantity: number }).quantity, 5);
+    assert.equal((second.prepare('SELECT parent_id FROM inventory_locations WHERE id = ?').get(shelfId) as { parent_id: string }).parent_id, roomId);
+    assert.equal((second.prepare('SELECT location_id FROM inventory_item_locations WHERE id = ?').get(targetId) as { location_id: string }).location_id, shelfId);
+    assert.equal((second.prepare('SELECT quantity FROM inventory_moves WHERE to_item_id = ?').get(targetId) as { quantity: number }).quantity, 25);
     assert.deepEqual((second.prepare('SELECT image FROM photos WHERE id = ?').get(photoId) as { image: Buffer }).image, pixels);
 
     const apply = first.prepare(insertChange);
@@ -100,4 +117,38 @@ test('older proof-of-concept databases require a fresh schema', () => {
   old.exec('CREATE TABLE schema_meta(version INTEGER NOT NULL); INSERT INTO schema_meta VALUES (6)');
   old.close();
   assert.throws(() => openWorkspaceDb(id), /create a fresh database/);
+});
+
+test('schema 7 inventory upgrades and removes an unused duplicate without losing stock', () => {
+  const id = nanoid();
+  const file = join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`);
+  const old = new Database(file);
+  old.loadExtension('vendor/crsqlite.so');
+  old.exec('CREATE TABLE schema_meta(version INTEGER NOT NULL); INSERT INTO schema_meta VALUES (7)');
+  for (const [index, table] of replicatedTables.entries()) {
+    if (inventoryLocationTables.includes(table as typeof inventoryLocationTables[number])) continue;
+    old.exec(schemaStatements[index]);
+    old.prepare('SELECT crsql_as_crr(?)').get(table);
+  }
+  const emptyId = nanoid();
+  const stockedId = nanoid();
+  old.prepare('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(emptyId, 'SafAle US-05', 'Yeast', 'packet', 1);
+  old.prepare('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(stockedId, 'SafAle US-05', 'Yeast', 'packet', 2);
+  old.prepare('INSERT INTO inventory_purchases(id, inventory_item_id, quantity, unit, purchased_at) VALUES (?, ?, ?, ?, ?)')
+    .run(nanoid(), stockedId, 10, 'packet', 3);
+  const acidId = nanoid();
+  old.prepare('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(acidId, 'Lactic acid', 'Chemical', 'mL', 2);
+  old.close();
+
+  const db = openWorkspaceDb(id);
+  try {
+    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 8);
+    assert.deepEqual(db.prepare("SELECT id FROM inventory_items WHERE name = 'SafAle US-05'").all(), [{ id: stockedId }]);
+    assert.equal((db.prepare('SELECT category FROM inventory_items WHERE id = ?').get(acidId) as { category: string }).category, 'Adjunct');
+    assert.equal((db.prepare('SELECT quantity FROM inventory_purchases WHERE inventory_item_id = ?').get(stockedId) as { quantity: number }).quantity, 10);
+    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'inventory_locations'").get());
+  } finally { closeWorkspaceDb(db); }
 });

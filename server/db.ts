@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { nanoid } from 'nanoid';
-import { indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion } from '../shared/schema.ts';
+import { indexStatements, inventoryLocationTables, nowSeconds, recategorizeLacticAcid, removeEmptyDuplicateInventory, replicatedTables, schemaStatements, workspaceSchemaVersion } from '../shared/schema.ts';
 
 if (existsSync('.env')) process.loadEnvFile('.env');
 export const dataDir = resolve(process.env.BREWLOG_DATA_DIR || './data');
@@ -131,6 +131,24 @@ export function openWorkspaceDb(id: string): Database.Database {
       for (const table of replicatedTables) db.prepare('SELECT crsql_as_crr(?)').get(table);
       for (const statement of indexStatements) db.exec(statement);
       db.prepare('INSERT INTO schema_meta(version) VALUES (?)').run(workspaceSchemaVersion);
+      db.exec('COMMIT');
+    } catch (error) {
+      if (db.inTransaction) db.exec('ROLLBACK');
+      db.close();
+      throw error;
+    }
+  } else if (row.version === 7) {
+    db.exec('BEGIN');
+    try {
+      for (const table of inventoryLocationTables) {
+        db.exec(schemaStatements[replicatedTables.indexOf(table)]);
+        db.prepare('SELECT crsql_as_crr(?)').get(table);
+      }
+      // A legacy zero row may precede a second row with purchases. Remove only
+      // the row that has no history or references, preserving every real ledger.
+      db.exec(removeEmptyDuplicateInventory);
+      db.exec(recategorizeLacticAcid);
+      db.prepare('UPDATE schema_meta SET version = ?').run(workspaceSchemaVersion);
       db.exec('COMMIT');
     } catch (error) {
       if (db.inTransaction) db.exec('ROLLBACK');

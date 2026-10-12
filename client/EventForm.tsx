@@ -221,7 +221,8 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
           onChange={() => form.setFieldsValue({ inventory_item_id: undefined, item_name: undefined, unit: preferredUnits.mass,
             quantity: undefined, pounds: undefined, ounces: undefined })} /></Form.Item>
         <Form.Item name="inventory_item_id" label="Inventory item"><Select allowClear placeholder="Optional"
-          options={inventory.filter(item => item.category === (selectedCategory || initialCategory)).map(item => ({ value: item.id, label: item.name }))}
+          options={inventory.filter(item => item.category === (selectedCategory || initialCategory)).map(item =>
+            ({ value: item.id, label: `${item.name} · ${item.location_name || 'Unspecified'}` }))}
           onChange={id => { const item = inventory.find(row => row.id === id);
             if (item) { changeQuantityUnit(form, selectedUnit || initialUnit, item.display_unit);
               form.setFieldsValue({ item_name: item.name, item_category: item.category, unit: item.display_unit }); } }} /></Form.Item>
