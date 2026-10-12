@@ -43,6 +43,9 @@ export const vesselKinds = new Set<string>(['electric_kettle', 'all_in_one', 'co
 
 export const boilOffKinds = new Set<string>(['electric_kettle', 'all_in_one']);
 
+export const temperatureCalibrationKinds = new Set<string>(['electric_kettle', 'all_in_one', 'controlled_fermenter',
+  'temperature_controller', 'fermentation_temperature_control', 'thermometer']);
+
 export const measurementRangeUnits: Record<string, readonly string[]> = {
   hydrometer: ['SG', '°Plato'],
   refractometer: ['°Brix', 'SG'],
