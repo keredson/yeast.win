@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Empty, Form, Input, Modal, Select, Tag } from 'antd';
+import { Alert, Button, Card, Dropdown, Empty, Form, Input, Modal, Select, Tag } from 'antd';
 import { CheckOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import { addBatchPlan, createBatch, eventDetails, eventFormData, listEvents, listPhotos, listPlans,
   startBatchFromRecipe, updateBatchPlan, type ActualEvent, type Batch, type Equipment, type InventoryItem, type LocalDb, type MeasurementKind, type Plan, type PlanInput, type Recipe } from './db.ts';
-import { kindLabel } from './constants.ts';
+import { kindLabel, planKinds } from './constants.ts';
 import { formatTime } from './time.ts';
 import { PlanForm } from './PlanForm.tsx';
 import { EventForm } from './EventForm.tsx';
@@ -27,7 +27,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   const [details, setDetails] = useState<Record<string, string>>({});
   const [photos, setPhotos] = useState<{ id: string; url: string; batch_event_id: string | null; created_at: number }[]>([]);
   const [newBatch, setNewBatch] = useState(false);
-  const [newPlan, setNewPlan] = useState(false);
+  const [creatingPlanKind, setCreatingPlanKind] = useState<string | null>(null);
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
   const [newEvent, setNewEvent] = useState(false);
   const [eventPlan, setEventPlan] = useState<Plan | null>(null);
@@ -97,7 +97,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
     if (!batch) return;
     if (editingPlan) await updateBatchPlan(db, batch.id, editingPlan.id, input);
     else await addBatchPlan(db, batch.id, input, accountId);
-    setNewPlan(false); setEditingPlan(null); await changed();
+    setCreatingPlanKind(null); setEditingPlan(null); await changed();
   }
 
   async function editEvent(event: ActualEvent) {
@@ -149,7 +149,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
                 return <div key={plan.id} className="timeline-entry plan-card">
                   <div className="timeline-card"><div><div className="title-edit-row">
                     <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit planned event ${plan.title}`}
-                      onClick={() => { setEditingPlan(plan); setNewPlan(true); }} />
+                      onClick={() => setEditingPlan(plan)} />
                     <strong>{plan.title}</strong></div>
                     <div className="plan-meta">{kindLabel(plan.event_type)} · {planTimingLabel(plan, plans)}</div>
                     <Tag color={conflicting ? 'orange' : completed.length ? 'green' : skipped.length ? 'default' : 'blue'}>
@@ -167,7 +167,11 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
               </div>)}
             </Card>)}</div>}
         </section>
-        <div className="timeline-actions"><Button onClick={() => { setEditingPlan(null); setNewPlan(true); }}>Plan an action</Button>
+        <div className="timeline-actions"><Dropdown trigger={['click']} placement="topLeft"
+          menu={{ items: planKinds.map(item => ({ key: item.value, label: item.label })),
+            onClick: ({ key }) => { setEditingPlan(null); setCreatingPlanKind(key); } }}>
+          <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="Plan an action" title="Plan an action" />
+        </Dropdown>
           <Button type="primary" onClick={() => { setEventPlan(null); setEditingEvent(null); setEditingData(null); setNewEvent(true); }}>Record activity</Button></div>
       </section>}
     <Modal title="New batch" open={newBatch} onCancel={() => setNewBatch(false)} footer={null} destroyOnHidden>
@@ -179,10 +183,12 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
         <Button type="primary" htmlType="submit">Create batch</Button>
       </Form>
     </Modal>
-    <Modal title={editingPlan ? 'Edit planned event' : 'Plan an event'} open={newPlan}
-      onCancel={() => { setNewPlan(false); setEditingPlan(null); }} footer={null} destroyOnHidden>
-      <PlanForm key={editingPlan?.id || 'new'} anchors={plans.filter(item => item.id !== editingPlan?.id)} initialPlan={editingPlan || undefined}
-        inventory={inventory} catalog={catalogInventory} preferredMassUnit={preferredUnits.mass} submit={plan} />
+    <Modal title={editingPlan ? `Edit ${kindLabel(editingPlan.event_type).toLowerCase()}` : `Add ${kindLabel(creatingPlanKind || '').toLowerCase()}`}
+      open={!!(editingPlan || creatingPlanKind)} onCancel={() => { setCreatingPlanKind(null); setEditingPlan(null); }} footer={null} destroyOnHidden>
+      {(editingPlan || creatingPlanKind) && <PlanForm key={editingPlan?.id || creatingPlanKind || 'new'}
+        eventType={editingPlan?.event_type || creatingPlanKind || 'addition'} anchors={plans.filter(item => item.id !== editingPlan?.id)}
+        initialPlan={editingPlan || undefined} inventory={inventory} catalog={catalogInventory}
+        preferredMassUnit={preferredUnits.mass} submit={plan} />}
     </Modal>
     <Modal title={editingEvent ? 'Edit event' : eventPlan ? `Record: ${eventPlan.title}` : 'Record activity'} open={newEvent}
       onCancel={() => { setNewEvent(false); setEventPlan(null); setEditingEvent(null); setEditingData(null); }} footer={null} destroyOnHidden width={600}>

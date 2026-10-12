@@ -88,6 +88,10 @@ button, input, textarea { font: inherit; }
 .title-edit-row { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .title-edit-row .ant-btn { flex: none; color: #667; margin-left: -7px; }
 .title-edit-row strong { min-width: 0; overflow-wrap: anywhere; }
+.recipe-card-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.recipe-add-action { display: flex; justify-content: flex-end; margin-top: 14px; }
+.recipe-add-action .ant-btn { font-size: 18px; }
+.recipe-delete-description { max-width: min(280px, calc(100vw - 64px)); overflow-wrap: anywhere; }
 .event-form-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .event-detail { margin: 10px 0 2px; font-size: 13px; line-height: 1.45; }
 .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }

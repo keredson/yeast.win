@@ -53,6 +53,11 @@ async function choosePlanCategory(page, dialog, category) {
   await page.locator(`.ant-select-dropdown:visible .ant-select-item-option[title="${category}"]`).click();
 }
 
+async function choosePlanKind(page, buttonName, kind) {
+  await page.getByRole('button', { name: buttonName }).click();
+  await page.getByRole('menuitem', { name: kind, exact: true }).click();
+}
+
 try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
@@ -109,27 +114,25 @@ try {
   await page.getByRole('heading', { name: batchName }).waitFor();
   console.log('Created batch:', batchName);
 
-  await page.getByRole('button', { name: 'Plan an action' }).click();
-  const firstPlan = page.getByRole('dialog', { name: 'Plan an event' });
-  await firstPlan.getByRole('combobox', { name: 'Event type' }).waitFor();
+  await choosePlanKind(page, 'Plan an action', 'Addition');
+  const firstPlan = page.getByRole('dialog', { name: 'Add addition' });
+  if (await firstPlan.getByRole('combobox', { name: 'Event type' }).count()) throw new Error('Addition modal contains event type selector');
   await choosePlanCategory(page, firstPlan, 'Nutrient');
   await firstPlan.getByLabel('What will be added?').fill('Add nutrient');
-  await page.getByRole('button', { name: 'Add planned event' }).click();
+  await firstPlan.getByRole('button', { name: 'Add addition' }).click();
   await firstPlan.waitFor({ state: 'hidden' });
   await page.getByText('Add nutrient', { exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Plan an action' }).click();
-  await choosePlanCategory(page, page.getByRole('dialog', { name: 'Plan an event' }), 'Yeast');
+  await choosePlanKind(page, 'Plan an action', 'Addition');
+  await choosePlanCategory(page, page.getByRole('dialog', { name: 'Add addition' }), 'Yeast');
   await page.getByLabel('What will be added?').fill('Add yeast');
-  await page.getByRole('button', { name: 'Add planned event' }).click();
-  await page.getByRole('dialog', { name: 'Plan an event' }).waitFor({ state: 'hidden' });
+  await page.getByRole('dialog', { name: 'Add addition' }).getByRole('button', { name: 'Add addition' }).click();
+  await page.getByRole('dialog', { name: 'Add addition' }).waitFor({ state: 'hidden' });
   await page.getByText('Add yeast', { exact: true }).waitFor();
   if (await page.locator('.timeline-group').count() !== 1 || await page.locator('.timeline-group .plan-card').count() !== 2) {
     throw new Error(`Actions at batch start were not grouped together: groups=${await page.locator('.timeline-group').count()}, plans=${await page.locator('.timeline-group .plan-card').count()}, errors=${JSON.stringify(await page.locator('.ant-form-item-explain-error').allTextContents())}`);
   }
-  await page.getByRole('button', { name: 'Plan an action' }).click();
-  const measurementPlan = page.getByRole('dialog', { name: 'Plan an event' });
-  await measurementPlan.getByRole('combobox', { name: 'Event type' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="Measurement"]').click();
+  await choosePlanKind(page, 'Plan an action', 'Measurement');
+  const measurementPlan = page.getByRole('dialog', { name: 'Add measurement' });
   await measurementPlan.getByLabel('What will be measured?').fill('Check gravity');
   if (!await measurementPlan.getByRole('combobox', { name: 'Measurement' }).count()) throw new Error('Measurement planning fields did not appear');
   await measurementPlan.getByRole('combobox', { name: 'Timing' }).click();
@@ -138,22 +141,20 @@ try {
   }
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'After Add nutrient' }).click();
   await measurementPlan.getByRole('spinbutton', { name: 'Time offset' }).fill('10');
-  await measurementPlan.getByRole('button', { name: 'Add planned event' }).click();
+  await measurementPlan.getByRole('button', { name: 'Add measurement' }).click();
   await page.locator('.plan-card').filter({ hasText: 'Check gravity' }).getByText('10 minutes after Add nutrient').waitFor();
-  await page.getByRole('button', { name: 'Plan an action' }).click();
-  const beforePlan = page.getByRole('dialog', { name: 'Plan an event' });
-  await beforePlan.getByRole('combobox', { name: 'Event type' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="Notes"]').click();
+  await choosePlanKind(page, 'Plan an action', 'Notes');
+  const beforePlan = page.getByRole('dialog', { name: 'Add notes' });
   await beforePlan.getByLabel('Reminder').fill('Prepare gravity sample');
   await beforePlan.getByRole('combobox', { name: 'Timing' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Before Check gravity' }).click();
   await beforePlan.getByRole('spinbutton', { name: 'Time offset' }).fill('5');
-  await beforePlan.getByRole('button', { name: 'Add planned event' }).click();
+  await beforePlan.getByRole('button', { name: 'Add notes' }).click();
   await page.locator('.plan-card').filter({ hasText: 'Prepare gravity sample' }).getByText('5 minutes before Check gravity').waitFor();
   await page.getByRole('button', { name: 'Edit planned event Add nutrient' }).click();
-  const editBatchPlan = page.getByRole('dialog', { name: 'Edit planned event' });
+  const editBatchPlan = page.getByRole('dialog', { name: 'Edit addition' });
   await editBatchPlan.getByLabel('What will be added?').fill('Add nutrient dose');
-  await editBatchPlan.getByRole('button', { name: 'Save planned event' }).click();
+  await editBatchPlan.getByRole('button', { name: 'Save event' }).click();
   await page.getByText('Add nutrient dose', { exact: true }).waitFor();
   await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).getByRole('button', { name: 'Record Add nutrient dose' }).click();
   const plannedAction = page.getByRole('dialog', { name: 'Record: Add nutrient dose' });
@@ -325,26 +326,37 @@ try {
   await page.getByText('ph 5.2 pH').waitFor();
   console.log('Grouped equipment and hid used gear while preserving its measurement');
 
+  await page.getByRole('button', { name: 'Account settings' }).click();
+  await page.getByRole('heading', { name: 'Settings' }).waitFor();
+  await page.getByRole('combobox', { name: 'Preferred mass unit' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'oz' }).click();
+  await page.waitForFunction(async () => (await (await fetch('/api/me')).json()).preferred_units.mass === 'oz');
   await navigateSection(page, 'Recipes');
   await page.getByRole('button', { name: 'New recipe' }).click();
   await page.getByLabel('Recipe name').fill('Smoke recipe');
   await page.getByRole('button', { name: 'Create recipe' }).click();
   await page.waitForURL(url => /^\/recipe\/[A-Za-z0-9_-]{10,32}$/.test(url.pathname));
-  await page.getByRole('button', { name: 'Add planned event' }).click();
-  const recipePlan = page.getByRole('dialog', { name: 'Planned recipe event' });
+  if (await page.locator('.content-heading').getByRole('button', { name: 'Add planned event' }).count()) {
+    throw new Error('Recipe still has a header add button');
+  }
+  await choosePlanKind(page, 'Add recipe event', 'Addition');
+  const recipePlan = page.getByRole('dialog', { name: 'Add addition' });
   await choosePlanCategory(page, recipePlan, 'Grain');
-  await recipePlan.getByLabel('What will be added?').fill('Maris');
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Maris Otter malt' }).click();
-  await recipePlan.getByRole('spinbutton', { name: 'Planned quantity' }).fill('500');
-  await page.getByRole('dialog', { name: 'Planned recipe event' }).getByRole('button', { name: 'Add planned event' }).click();
+  await recipePlan.getByLabel('What will be added?').fill('2-row');
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: '2-row pale malt' }).click();
+  await recipePlan.getByRole('spinbutton', { name: 'Planned quantity' }).fill('5');
+  if (!await recipePlan.getByRole('combobox', { name: 'Unit' }).locator('..').getByText('oz', { exact: true }).count()) {
+    throw new Error('Shared grain suggestion replaced preferred ounces');
+  }
+  await recipePlan.getByRole('button', { name: 'Add addition' }).click();
   await recipePlan.waitFor({ state: 'hidden' });
-  await page.getByRole('button', { name: 'Edit planned event Maris Otter malt' }).waitFor();
-  await page.getByText('500 g', { exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Edit planned event Maris Otter malt' }).click();
-  const editRecipePlan = page.getByRole('dialog', { name: 'Edit recipe event' });
-  await editRecipePlan.getByLabel('What will be added?').fill('Maris Otter malt extra');
-  await editRecipePlan.getByRole('button', { name: 'Save planned event' }).click();
-  await page.getByText('Maris Otter malt extra').waitFor();
+  await page.getByRole('button', { name: 'Edit planned event 2-row pale malt' }).waitFor();
+  await page.getByText('5 oz', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Edit planned event 2-row pale malt' }).click();
+  const editRecipePlan = page.getByRole('dialog', { name: 'Edit addition' });
+  await editRecipePlan.getByLabel('What will be added?').fill('2-row pale malt extra');
+  await editRecipePlan.getByRole('button', { name: 'Save event' }).click();
+  await page.getByText('2-row pale malt extra').waitFor();
   await navigateSection(page, 'Batches');
   await page.getByRole('button', { name: 'New batch' }).click();
   await page.getByRole('dialog', { name: 'New batch' }).getByLabel('Batch name').fill('Batch from recipe');
@@ -352,7 +364,23 @@ try {
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke recipe' }).click();
   await page.getByRole('button', { name: 'Create batch' }).click();
   await page.getByRole('heading', { name: 'Batch from recipe' }).waitFor();
-  await page.locator('.plan-card').getByText('Maris Otter malt extra').waitFor();
+  await page.locator('.plan-card').getByText('2-row pale malt extra').waitFor();
+  await navigateSection(page, 'Recipes');
+  await page.locator('.record-link').filter({ hasText: 'Smoke recipe' }).click();
+  await choosePlanKind(page, 'Add recipe event', 'Notes');
+  const recipeReminder = page.getByRole('dialog', { name: 'Add notes' });
+  await recipeReminder.getByLabel('Reminder').fill('Check the mash');
+  await recipeReminder.getByRole('combobox', { name: 'Timing' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'After 2-row pale malt extra' }).click();
+  await recipeReminder.getByRole('button', { name: 'Add notes' }).click();
+  await recipeReminder.waitFor({ state: 'hidden' });
+  await page.getByRole('button', { name: 'Delete planned event 2-row pale malt extra' }).click();
+  await page.getByText('Also deletes Check the mash').waitFor();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click();
+  await page.getByText('Add the first planned event').waitFor();
+  await navigateSection(page, 'Batches');
+  await openBatch(page, 'Batch from recipe');
+  await page.locator('.plan-card').getByText('2-row pale malt extra').waitFor();
   await navigateSection(page, 'Inventory');
   await page.getByRole('button', { name: 'New inventory item' }).click();
   await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Type' }).click();
@@ -360,7 +388,7 @@ try {
   await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Find in shared inventory catalog' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Maris Otter malt' }).last().click();
   await page.getByLabel('Item', { exact: true }).fill('Smoke grain');
-  if (!await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Unit' }).locator('..').getByText('g', { exact: true }).count()) throw new Error('Grain unit default was not set');
+  if (!await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Unit' }).locator('..').getByText('oz', { exact: true }).count()) throw new Error('Preferred grain unit default was not set');
   await page.getByRole('button', { name: 'Create item' }).click();
   await page.waitForURL(url => /^\/inventory\/[A-Za-z0-9_-]{10,32}$/.test(url.pathname));
   await navigateSection(page, 'Inventory');

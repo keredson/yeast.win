@@ -133,6 +133,20 @@ export async function updateRecipePlan(db: DB, recipeId: string, planId: string,
     input.offset_seconds ?? null, input.details_json ?? null, planId, recipeId]);
 }
 
+export async function deleteRecipePlan(db: DB, recipeId: string, planId: string): Promise<void> {
+  const plans = await listRecipePlans(db, recipeId);
+  if (!plans.some(plan => plan.id === planId)) throw new Error('Recipe event not found');
+  const removed = new Set([planId]);
+  let size = 0;
+  while (removed.size !== size) {
+    size = removed.size;
+    for (const plan of plans) if (plan.anchor_event_id && removed.has(plan.anchor_event_id)) removed.add(plan.id);
+  }
+  await db.tx(async tx => {
+    for (const id of [...removed].reverse()) await tx.exec('DELETE FROM recipe_events WHERE id = ? AND recipe_id = ?', [id, recipeId]);
+  });
+}
+
 export async function addBatchPlan(db: DB, batchId: string, input: PlanInput, accountId: string): Promise<string> {
   const id = nanoid();
   await db.exec(`INSERT INTO batch_planned_events(id, batch_id, event_type, title, planned_at, anchor_event_id,
