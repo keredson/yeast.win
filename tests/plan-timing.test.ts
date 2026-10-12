@@ -36,7 +36,7 @@ test('a timed process exposes separate start and end anchors', () => {
     offset_seconds: 0, details_json: JSON.stringify({ anchor_point: 'end' }) };
   const plans = [boil, hops, yeast];
   assert.equal(planTimingLabel(hops, plans), 'At start of Boil');
-  assert.equal(planTimingLabel(yeast, plans), 'At end of Boil');
+  assert.equal(planTimingLabel(yeast, plans), 'After Boil');
   assert.equal(effectivePlanTime(hops, plans, [], start), start + 600);
   assert.equal(effectivePlanTime(yeast, plans, [], start), start + 4200);
   const recorded = plans.map(plan => plan.id === 'boil' ? { ...plan, actual_at: start + 900, ended_at: start + 4500 } : plan);

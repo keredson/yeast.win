@@ -17,7 +17,7 @@ function onHandQuantity(item: InventoryItem, balance: number): string {
   const amount = convertInventoryUnit(balance, item.default_unit, item.display_unit);
   return amount == null ? 'Needs conversion' : String(Number(amount.toFixed(6)));
 }
-const unspecifiedLocation = '__unspecified__';
+const newLocationOption = '__new_location__';
 
 function locationTree(locations: InventoryLocation[], parentId: string | null = null, seen = new Set<string>()): (InventoryLocation & { children?: InventoryLocation[] })[] {
   return locations.filter(location => location.parent_id === parentId && !seen.has(location.id)).map(location => {
@@ -65,10 +65,11 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
     !inventoryCategories.some(known => known === category))].filter((category, index, all) => all.indexOf(category) === index);
   const missingCategories = categories.filter(category => !items.some(row => row.category === category));
   const existingItem = items.find(row => row.category === newItemCategory && row.name.trim().toLocaleLowerCase() === newItemName?.trim().toLocaleLowerCase());
-  const existingAtLocation = existingItem && newLocationId !== undefined
-    ? stockAtLocation(items, existingItem.name, existingItem.category, newLocationId === unspecifiedLocation ? null : newLocationId) : undefined;
-  const locationOptions = [{ value: unspecifiedLocation, label: 'Unspecified' }, ...locations.map(location =>
-    ({ value: location.id, label: inventoryLocationPath(location.id, locations) }))];
+  const existingAtLocation = existingItem
+    ? stockAtLocation(items, existingItem.name, existingItem.category, newLocationId || null) : undefined;
+  const locationOptions = locations.map(location =>
+    ({ value: location.id, label: inventoryLocationPath(location.id, locations) }));
+  const locationChoices = [...locationOptions, { value: newLocationOption, label: 'New location…' }];
   const entryDisplayUnit = entryItem?.display_unit === compoundMassUnit || entryItem?.default_unit === 'oz' && preferredUnits.mass === compoundMassUnit
     ? compoundMassUnit : entryItem?.display_unit || entryItem?.default_unit;
 
@@ -78,6 +79,13 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
     previousItemUnit.current = unit;
     itemForm.setFieldsValue({ category, default_unit: unit, location_id: undefined });
     setNewItemCategory(category);
+  }
+
+  function openLocationCreate(returnTo: 'item' | 'move') {
+    setLocationEditing(null);
+    locationForm.resetFields();
+    setLocationReturn(returnTo);
+    setLocationsOpen(true);
   }
 
   async function openEntry(target: InventoryItem, kind: 'purchase' | 'count' | 'discard') {
@@ -113,7 +121,7 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
     starting_quantity?: number; pounds?: number; ounces?: number; location_id?: string }) {
     try {
       const starting = quantityForStorage(values.default_unit, values.starting_quantity, values.pounds, values.ounces);
-      const locationId = !values.location_id || values.location_id === unspecifiedLocation ? null : values.location_id;
+      const locationId = values.location_id || null;
       const match = stockAtLocation(items, values.name, values.category, locationId);
       if (items.some(row => row.category === values.category && row.name.trim().toLocaleLowerCase() === values.name.trim().toLocaleLowerCase())
         && (!starting || starting.quantity <= 0)) throw new Error('Enter a positive quantity to add this existing item');
@@ -131,11 +139,11 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
 
   async function saveLocation(values: { name: string; parent_id?: string }) {
     try {
-      const id = await saveInventoryLocation(db, values.name,
-        !values.parent_id || values.parent_id === unspecifiedLocation ? null : values.parent_id, locationEditing || undefined);
+      const id = await saveInventoryLocation(db, values.name, values.parent_id || null, locationEditing || undefined);
       setLocations(await listInventoryLocations(db));
       if (locationReturn === 'item') itemForm.setFieldValue('location_id', id);
       if (locationReturn === 'move') moveForm.setFieldValue('location_id', id);
+      if (locationReturn) setLocationsOpen(false);
       setLocationEditing(null); locationForm.resetFields(); setLocationReturn(null);
       await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
@@ -146,14 +154,14 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  async function move(values: { location_id: string; unit: string; quantity?: number; pounds?: number; ounces?: number; all?: boolean }) {
+  async function move(values: { location_id?: string; unit: string; quantity?: number; pounds?: number; ounces?: number; all?: boolean }) {
     if (!moveItem) return;
     try {
       const available = inventoryBalance(await listInventoryMovements(db, moveItem.id), moveItem.default_unit);
       const amount = values.all && available != null ? { quantity: available, unit: moveItem.default_unit }
         : quantityForStorage(values.unit, values.quantity, values.pounds, values.ounces);
       if (!amount) throw new Error('Enter a quantity');
-      await moveInventoryStock(db, moveItem, values.location_id === unspecifiedLocation ? null : values.location_id, amount.quantity, amount.unit);
+      await moveInventoryStock(db, moveItem, values.location_id || null, amount.quantity, amount.unit);
       setMoveItemId(null); moveForm.resetFields(); await refreshMovements(); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -189,7 +197,7 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
           <Table<InventoryItem> dataSource={rows} rowKey="id" pagination={false} size="small"
             columns={[{ title: 'Item', dataIndex: 'name', render: (_, row) =>
               <a href={`${basePath}/inventory/${inventoryPathSegment(row, items)}`} onClick={event => { event.preventDefault(); onSelect(row.id); }}>{row.name}</a> },
-            { title: 'Location', key: 'location', width: 190, render: (_, row) => inventoryLocationPath(row.location_id, locations) },
+            { title: 'Location', key: 'location', width: 190, render: (_, row) => inventoryLocationPath(row.location_id, locations) || '—' },
             { title: 'Qty', key: 'on_hand', width: 140, align: 'right', render: (_, row) => onHand[row.id] === undefined ? '—'
               : onHand[row.id] === null ? 'Needs conversion'
                 : onHandQuantity(row, onHand[row.id]!) },
@@ -205,7 +213,7 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
           <a href={`${basePath}/inventory`} onClick={event => { event.preventDefault(); openCreate(category); }}>{category.toLowerCase()}</a></span>)}.</p>}
     </section> : !item ? <Empty description="Inventory item not found" /> : <section className="record-detail">
         <div className="content-heading"><div><span className="eyebrow">{item.category}</span><h2>{item.name}</h2>
-          <p className="muted">{inventoryLocationPath(item.location_id, locations)} · {balance == null ? 'Balance needs unit conversion'
+          <p className="muted">{item.location_id ? `${inventoryLocationPath(item.location_id, locations)} · ` : ''}{balance == null ? 'Balance needs unit conversion'
             : `${formatQuantity(balance ?? 0, item.default_unit, itemDisplayUnit)} estimated on hand`}</p></div>
           <div className="heading-actions"><Button onClick={() => void openEntry(item, 'purchase')}>Bought some</Button>
             <Button onClick={() => void openEntry(item, 'discard')}>Discard</Button>
@@ -234,10 +242,12 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
                 previousItemUnit.current = nextUnit;
                 itemForm.setFieldValue('default_unit', nextUnit); } }} />
         </Form.Item>
-        <Form.Item name="location_id" label="Location" rules={existingItem ? [{ required: true, message: 'Choose where to add this item' }] : []}>
-          <Select placeholder="Choose a location" options={locationOptions} />
+        <Form.Item name="location_id" label="Location (optional)" normalize={(value, previousValue) => {
+          if (value === newLocationOption) { openLocationCreate('item'); return previousValue; }
+          return value;
+        }}>
+          <Select allowClear placeholder="Choose a location" options={locationChoices} />
         </Form.Item>
-        <Button type="link" onClick={() => { setLocationReturn('item'); setLocationsOpen(true); }}>Create or manage locations</Button>
         <Form.Item name="default_unit" label="Unit" rules={[{ required: true }]}>
           <Select showSearch options={unitOptions(quantityUnitsForCategory(newItemCategory || 'Other'))}
             onChange={unit => { changeQuantityUnit(itemForm, previousItemUnit.current, unit, 'starting_quantity'); previousItemUnit.current = unit; }} /></Form.Item>
@@ -250,12 +260,15 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
     <Modal title="Move stock" open={!!moveItem} onCancel={() => setMoveItemId(null)} footer={null} destroyOnHidden>
       {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
       <Form form={moveForm} layout="vertical" onFinish={move} initialValues={{ unit: moveItem?.display_unit || moveItem?.default_unit }}>
-        <p className="muted">From {inventoryLocationPath(moveItem?.location_id || null, locations)}.
+        <p className="muted">From {inventoryLocationPath(moveItem?.location_id || null, locations) || 'no location'}.
           {moveItem && onHand[moveItem.id] != null ? ` ${formatQuantity(onHand[moveItem.id]!, moveItem.default_unit, moveItem.display_unit)} available.` : ''}</p>
-        <Form.Item name="location_id" label="To location" rules={[{ required: true, message: 'Choose a destination' }]}>
-          <Select options={locationOptions.filter(option => option.value !== (moveItem?.location_id || unspecifiedLocation))} />
+        <Form.Item name="location_id" label="To location (optional)" normalize={(value, previousValue) => {
+          if (value === newLocationOption) { openLocationCreate('move'); return previousValue; }
+          return value;
+        }}>
+          <Select allowClear placeholder="Leave empty to clear location"
+            options={locationChoices.filter(option => option.value !== moveItem?.location_id)} />
         </Form.Item>
-        <Button type="link" onClick={() => { setLocationReturn('move'); setLocationsOpen(true); }}>Create or manage locations</Button>
         <Form.Item name="all" valuePropName="checked"><Checkbox>Move all available stock</Checkbox></Form.Item>
         {!moveAll && <><Form.Item name="unit" label="Unit" rules={[{ required: true }]}>
           <Select options={unitOptions(quantityUnitsForCategory(moveItem?.category || 'Other'))} /></Form.Item>
@@ -263,19 +276,22 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
         <Button type="primary" htmlType="submit">Move stock</Button>
       </Form>
     </Modal>
-    <Modal title="Inventory locations" open={locationsOpen} onCancel={() => { setLocationsOpen(false); setLocationReturn(null); }} footer={null} width={620}>
+    <Modal title="Inventory locations" open={locationsOpen} onCancel={() => { setLocationsOpen(false); setLocationReturn(null); }}
+      footer={null} width={620} zIndex={locationReturn ? 1100 : undefined}>
       {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
-      <p className="muted">Create a room, shelf, or building at any level. A parent is optional.</p>
+      <p className="muted">Create a room, shelf, or building at any level.</p>
       {locations.length > 0 && <Table<InventoryLocation> dataSource={locationTree(locations)} rowKey="id" size="small" pagination={false}
         expandable={{ expandedRowKeys: locations.map(location => location.id) }}
         columns={[{ title: 'Location', dataIndex: 'name' },
           { title: '', width: 155, render: (_, row) => <><Button type="link" onClick={() => { setLocationEditing(row.id);
-            locationForm.setFieldsValue({ name: row.name, parent_id: row.parent_id || unspecifiedLocation }); }}>Edit</Button>
+            locationForm.setFieldsValue({ name: row.name, parent_id: row.parent_id || undefined }); }}>Edit</Button>
             <Button type="link" danger onClick={() => void removeLocation(row.id)}>Delete</Button></> }]} />}
       <h3>{locationEditing ? 'Edit location' : 'New location'}</h3>
       <Form form={locationForm} layout="vertical" onFinish={saveLocation}>
         <Form.Item name="name" label="Name" rules={[{ required: true, whitespace: true }]}><Input maxLength={100} placeholder="Back room" /></Form.Item>
-        <Form.Item name="parent_id" label="Inside" initialValue={unspecifiedLocation}><Select options={locationOptions.filter(option => option.value !== locationEditing)} /></Form.Item>
+        {locationOptions.some(option => option.value !== locationEditing) &&
+          <Form.Item name="parent_id" label="Inside (optional)"><Select allowClear placeholder="Top level"
+            options={locationOptions.filter(option => option.value !== locationEditing)} /></Form.Item>}
         <Button type="primary" htmlType="submit">{locationEditing ? 'Save location' : 'Add location'}</Button>
         {locationEditing && <Button onClick={() => { setLocationEditing(null); locationForm.resetFields(); }}>Cancel edit</Button>}
       </Form>

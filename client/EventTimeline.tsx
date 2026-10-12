@@ -45,8 +45,10 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
     const startAt = batchStartAt ?? 0;
     const startKey = `time:${Math.floor(startAt / 60)}`;
     const grouped = new Map<string, Group>([[startKey, { key: startKey, at: startAt, label: 'Batch start', events: [] }]]);
+    const eventTimes = new Map<string, number | null>();
     for (const item of events) {
       const at = item.actual_at ?? item.skipped_at ?? effectivePlanTime(item, events, events as ActualEvent[], startAt);
+      eventTimes.set(item.id, at);
       const key = at == null ? `anchor:${item.anchor_event_id}:${item.offset_seconds || 0}` : `time:${Math.floor(at / 60)}`;
       let group = grouped.get(key);
       if (!group) {
@@ -56,6 +58,11 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
       }
       group.events.push(item);
     }
+    for (const group of grouped.values()) group.events.sort((a, b) => {
+      const timeDifference = (eventTimes.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (eventTimes.get(b.id) ?? Number.MAX_SAFE_INTEGER);
+      if (timeDifference) return timeDifference;
+      return Number(b.event_type === 'addition') - Number(a.event_type === 'addition');
+    });
     return [...grouped.values()].sort((a, b) => (a.at ?? Number.MAX_SAFE_INTEGER) - (b.at ?? Number.MAX_SAFE_INTEGER) || a.key.localeCompare(b.key));
   }, [events, batchStartAt, isBatch]);
 
@@ -69,15 +76,16 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
         const skipped = !happened && item.skipped_at != null;
         const detail = happened && ['addition', 'measurement', 'temperature_control', 'note', 'photo'].includes(item.event_type)
           ? details[item.id] : planDetailsLabel(item, equipmentNames) || details[item.id];
+        const timing = planTimingLabel(item, events);
+        const metadata = item.ended_at != null ? `Ended ${formatTime(item.ended_at)}`
+          : !isBatch && timing !== group.label && !(group.label === 'Batch start' && timing === 'At batch start') ? timing : '';
         const images = photos.filter(photo => photo.batch_event_id === item.id);
         return <div key={item.id} className="timeline-entry plan-card">
           <div className="timeline-card"><div><div className="title-edit-row">
             {isBatch && <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${item.title || kindLabel(item.event_type)}`}
               onClick={() => onEdit(item)} />}
             <strong>{item.title || planKindLabel(item)}</strong></div>
-            <div className="plan-meta">{planKindLabel(item)} · {happened
-              ? `${formatTime(item.actual_at!)}${item.ended_at ? ` – ${formatTime(item.ended_at)}` : ''}`
-              : skipped ? `Skipped ${formatTime(item.skipped_at!)}` : planTimingLabel(item, events)}</div>
+            {metadata && <div className="plan-meta">{metadata}</div>}
             {isBatch && <Tag color={happened ? planDuration(item) && !item.ended_at ? 'cyan' : 'green' : skipped ? 'default' : 'blue'}>
               {happened ? planDuration(item) && !item.ended_at ? 'In progress' : 'Done' : skipped ? 'Skipped' : 'Pending'}</Tag>}</div>
             {onRecord && !happened && <Button type="text" shape="circle" icon={<CheckOutlined />} aria-label={`Record ${item.title}`}
