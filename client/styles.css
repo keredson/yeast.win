@@ -76,6 +76,15 @@ button, input, textarea { font: inherit; }
 .recipe-type-icon-compact svg { width: 16px; height: 16px; }
 .recipe-detail-heading { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
 .recipe-detail-heading > div { min-width: 0; }
+.recipe-estimates { margin: 0 0 28px; padding: 18px 20px; border: 1px solid #dce4d9; border-radius: 12px; background: #fff; }
+.recipe-estimates h3 { margin: 0 0 14px; font-size: 18px; }
+.recipe-estimate-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 16px; }
+.recipe-estimate-grid > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.recipe-estimate-grid span { color: #728079; font-size: 12px; }
+.recipe-estimate-grid strong { color: #263c36; font-size: 22px; font-weight: 650; }
+.recipe-estimates .muted { margin: 12px 0 0; }
+.recipe-estimate-missing { color: #826536; }
+@media (max-width: 650px) { .recipe-estimate-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 18px; } }
 .group-tables { margin-top: 24px; gap: 30px; }
 .equipment-category { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .equipment-category > h2 { margin: 0; font-size: 22px; }

@@ -86,6 +86,8 @@ Calculate results on the device from stored inputs. Initial calculation list, in
 
 Do not persist these predicted values. Store chosen calculation methods and user-supplied assumptions as inputs; recompute when inputs change. A result may be cached locally for display but is disposable. Imported source-only fields need explicit schema or UI support before they become editable: the current event form reconstructs `details_json` on save and can discard unknown keys.
 
+The recipe Details section currently computes target volume, expected OG, FG, ABV, and estimated beer color locally. OG uses grain yield and either an imported brewhouse efficiency or mash efficiency with an explicit kettle retention value. FG uses one yeast's attenuation; ABV follows from OG and FG. Color uses fermentable Lovibond values and the Morey approximation. Missing inputs leave the result blank with a prompt. Adjunct extract, fruit/honey sugar, bitterness, and other calculations above still need their own models and inputs.
+
 ### Actual event payloads
 
 `batch_events` holds the shared event identity and provenance. Payload tables hold data specific to each action. One event can have multiple compatible payload rows: a single RAPT Pill reading creates one `batch_events` row and both gravity and temperature measurement rows.

@@ -80,6 +80,11 @@ try {
   await page.goto(`${process.env.BREWLOG_TEST_URL || 'http://127.0.0.1:5173'}/recipe/${result.recipeId}`);
   await page.getByText('Drain grain').first().waitFor();
   await page.getByText('Measure pre-boil gravity').first().waitFor();
+  const details = page.getByRole('region', { name: 'Recipe details' });
+  await details.getByRole('heading', { name: 'Details' }).waitFor();
+  const og = await details.locator('.recipe-estimate-grid > div').filter({ hasText: 'Expected OG' }).locator('strong').textContent();
+  const color = await details.locator('.recipe-estimate-grid > div').filter({ hasText: 'Estimated color' }).locator('strong').textContent();
+  if (!og || Number(og) <= 1.04 || !color?.includes('SRM')) throw new Error('Recipe estimates did not render');
   await page.getByRole('button', { name: 'Recipe settings' }).click();
   const target = page.getByRole('spinbutton', { name: 'Target volume into fermenter (optional)' });
   if (Number(await target.inputValue()) !== 19) throw new Error('Recipe target volume is missing from settings');
