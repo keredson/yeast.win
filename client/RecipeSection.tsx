@@ -131,8 +131,8 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
       <Form form={settingsForm} layout="vertical" onFinish={saveSettings}>
         <Form.Item name="name" label="Recipe name" rules={[{ required: true, whitespace: true }, { max: 100 }]}>
           <Input maxLength={100} /></Form.Item>
-        <Form.Item name="recipe_type" label="Type" extra="Changing the type does not change planned actions."
-          rules={[{ required: true }]}><Select options={recipeTypeOptions} /></Form.Item>
+        <Form.Item name="recipe_type" label="Type" rules={[{ required: true }]}>
+          <Select options={recipeTypeOptions} /></Form.Item>
         <Form.Item name="description" label="Description"><Input.TextArea rows={3} /></Form.Item>
         {settingsError && <Alert type="error" message={settingsError} className="form-alert" />}
         <div className="recipe-settings-actions"><Button type="primary" htmlType="submit" loading={settingsBusy}>Save changes</Button>
