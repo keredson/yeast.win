@@ -20,7 +20,7 @@ test('existing catalog gains new equipment and inventory without item capacity',
     const snapshot = catalogSnapshot(db, 1);
     assert.ok(!('unchanged' in snapshot));
     if ('unchanged' in snapshot) return;
-    assert.equal(snapshot.version, 5);
+    assert.equal(snapshot.version, 6);
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_brewzilla_35l_g4')?.kind, 'all_in_one');
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_grainfather_gf30')?.kind, 'controlled_fermenter');
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_inkbird_itc_308')?.kind, 'fermentation_temperature_control');
@@ -49,8 +49,27 @@ test('existing catalog models use the combined fermentation control choice', () 
     const snapshot = catalogSnapshot(db, 4);
     assert.ok(!('unchanged' in snapshot));
     if ('unchanged' in snapshot) return;
-    assert.equal(snapshot.version, 5);
+    assert.equal(snapshot.version, 6);
     assert.deepEqual(snapshot.equipment.map(row => row.kind),
       ['fermentation_temperature_control', 'fermentation_temperature_control']);
+  } finally { db.close(); }
+});
+
+test('version 5 catalog restores VEVOR as an all-in-one system', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
+  const old = new Database(join(dir, 'catalog.sqlite'));
+  old.exec(`CREATE TABLE catalog_meta(version INTEGER NOT NULL); INSERT INTO catalog_meta VALUES (5);
+    CREATE TABLE catalog_equipment(id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, specification_json TEXT);
+    CREATE TABLE catalog_inventory(id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, unit TEXT NOT NULL);
+    INSERT INTO catalog_equipment VALUES ('equipment_vevor_35l', 'VEVOR Electric Brewing System 9.2 Gal/35 L Brewing Pot', 'kettle', NULL);`);
+  old.close();
+
+  const db = openCatalogDb(dir);
+  try {
+    const snapshot = catalogSnapshot(db, 5);
+    assert.ok(!('unchanged' in snapshot));
+    if ('unchanged' in snapshot) return;
+    assert.equal(snapshot.version, 6);
+    assert.equal(snapshot.equipment[0].kind, 'all_in_one');
   } finally { db.close(); }
 });

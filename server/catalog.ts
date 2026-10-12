@@ -49,6 +49,12 @@ export function openCatalogDb(dataDir: string): Database.Database {
       db.prepare('UPDATE catalog_meta SET version = 5').run();
     })();
   }
+  if (version < 6) {
+    db.transaction(() => {
+      db.prepare("UPDATE catalog_equipment SET kind = 'all_in_one' WHERE id = 'equipment_vevor_35l'").run();
+      db.prepare('UPDATE catalog_meta SET version = 6').run();
+    })();
+  }
   return db;
 }
 
