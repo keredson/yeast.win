@@ -20,9 +20,12 @@ test('existing catalog gains new equipment and inventory without item capacity',
     const snapshot = catalogSnapshot(db, 1);
     assert.ok(!('unchanged' in snapshot));
     if ('unchanged' in snapshot) return;
-    assert.equal(snapshot.version, 3);
+    assert.equal(snapshot.version, 4);
+    assert.equal(snapshot.equipment.find(row => row.id === 'equipment_brewzilla_35l_g4')?.kind, 'all_in_one');
+    assert.equal(snapshot.equipment.find(row => row.id === 'equipment_grainfather_gf30')?.kind, 'controlled_fermenter');
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_vevor_35l')?.name,
       'VEVOR Electric Brewing System 9.2 Gal/35 L Brewing Pot');
+    assert.equal(snapshot.equipment.find(row => row.id === 'equipment_vevor_35l')?.kind, 'all_in_one');
     assert.deepEqual(snapshot.inventory.find(row => row.id === 'inventory_bottle_12oz'),
       { id: 'inventory_bottle_12oz', name: '12 oz bottle', category: 'Packaging', unit: 'each' });
     assert.ok(snapshot.inventory.length > 20);

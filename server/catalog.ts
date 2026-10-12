@@ -32,6 +32,14 @@ export function openCatalogDb(dataDir: string): Database.Database {
       db.prepare('UPDATE catalog_meta SET version = 3').run();
     })();
   }
+  if (version < 4) {
+    db.transaction(() => {
+      const addEquipment = db.prepare('INSERT OR IGNORE INTO catalog_equipment(id, name, kind, specification_json) VALUES (?, ?, ?, ?)');
+      for (const item of initialCatalogEquipment) addEquipment.run(item.id, item.name, item.kind, item.specification_json);
+      db.prepare("UPDATE catalog_equipment SET kind = 'all_in_one' WHERE id = 'equipment_vevor_35l'").run();
+      db.prepare('UPDATE catalog_meta SET version = 4').run();
+    })();
+  }
   return db;
 }
 
