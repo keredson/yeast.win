@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { Alert, AutoComplete, Button, Checkbox, Form, Input, InputNumber, Select } from 'antd';
 import { kindLabel, measurementKinds } from './constants.ts';
 import type { InventoryItem, PlanInput } from './db.ts';
@@ -34,13 +35,14 @@ interface Values {
   duration_value?: number; duration_unit?: typeof timeUnits[number]['value'];
 }
 
-export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, preferredUnits, preset, allowRecordNow = false, submit }: {
+export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, preferredUnits, preset, allowRecordNow = false, extraAction, submit }: {
   anchors: Anchor[];
   eventType: string;
   initialPlan?: PlanInput & { id: string };
   inventory: InventoryItem[]; catalog: CatalogInventory[]; preferredUnits: PreferredUnits;
   preset?: PlanPreset;
   allowRecordNow?: boolean;
+  extraAction?: ReactNode;
   submit: (input: PlanInput, recordNow?: boolean) => Promise<void>;
 }) {
   const [form] = Form.useForm<Values>();
@@ -240,6 +242,9 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
     {allowRecordNow && !initialPlan && <Form.Item name="record_now" valuePropName="checked" initialValue={false}>
       <Checkbox>Record this now</Checkbox>
     </Form.Item>}
-    <Button type="primary" htmlType="submit" loading={busy}>{initialPlan ? 'Save event' : `Add ${kindLabel(kind).toLowerCase()}`}</Button>
+    <div className="plan-form-actions">
+      <Button type="primary" htmlType="submit" loading={busy}>{initialPlan ? 'Save event' : `Add ${kindLabel(kind).toLowerCase()}`}</Button>
+      {extraAction}
+    </div>
   </Form>;
 }

@@ -74,9 +74,7 @@ button, input, textarea { font: inherit; }
 .muted { color: #728079; font-size: 13px; line-height: 1.5; }
 .heading-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: end; }
 .recipe-settings-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.recipe-plan-delete { display: flex; flex-direction: column; align-items: flex-end; gap: 12px;
-  margin-top: 16px; padding-top: 12px; border-top: 1px solid #e6ebe4; }
-.recipe-plan-delete .ant-alert { align-self: stretch; }
+.plan-form-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .batch-timeline { min-width: 0; }
 .timeline-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 24px; }
 .timeline-track { position: relative; }

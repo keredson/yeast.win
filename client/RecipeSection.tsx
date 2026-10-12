@@ -148,18 +148,16 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
       ? `Edit ${String(parsePlanDetails(editingPlan.details_json).measurement_kind || 'measurement').replaceAll('_', ' ')} measurement`
       : `Edit ${editingPlan.title}` : `Add ${preset.phase || (preset.measurementKind ? `${preset.measurementKind.replaceAll('_', ' ')} measurement` : creatingKind === 'addition' ? 'ingredient' : kindLabel(creatingKind || '').toLowerCase())}`}
       open={!!(editingPlan || creatingKind)} onCancel={() => { setCreatingKind(null); setEditingPlan(null); setPlanDeleteError(''); }} footer={null} destroyOnHidden>
+      {planDeleteError && <Alert type="error" message={planDeleteError} className="form-alert" />}
       {(editingPlan || creatingKind) && <PlanForm key={editingPlan?.id || creatingKind || 'new'} eventType={editingPlan?.event_type || creatingKind || 'addition'}
         anchors={plans.filter(item => item.id !== editingPlan?.id)} initialPlan={editingPlan || undefined}
-        inventory={inventory} catalog={catalogInventory} preferredUnits={preferredUnits} preset={editingPlan ? undefined : preset} submit={addPlan} />
-      }
-      {editingPlan && <div className="recipe-plan-delete">
-        {planDeleteError && <Alert type="error" message={planDeleteError} className="form-alert" />}
-        <Popconfirm title={`Delete ${editingPlan.title}?`}
+        inventory={inventory} catalog={catalogInventory} preferredUnits={preferredUnits} preset={editingPlan ? undefined : preset} submit={addPlan}
+        extraAction={editingPlan && <Popconfirm title={`Delete ${editingPlan.title}?`}
           description="Actions timed from this one will become relative to batch start. Existing batches keep their copies."
           okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => void removePlan(editingPlan.id)}>
-          <Button type="text" danger icon={<DeleteOutlined />}>Delete event</Button>
-        </Popconfirm>
-      </div>}
+          <Button type="text" htmlType="button" danger icon={<DeleteOutlined />}>Delete event</Button>
+        </Popconfirm>} />
+      }
     </Modal>
     <Modal title="Start a batch" open={newBatch} onCancel={() => setNewBatch(false)} footer={null} destroyOnHidden>
       <Form layout="vertical" onFinish={start} initialValues={{ name: recipe ? `${recipe.name} batch` : '' }}>

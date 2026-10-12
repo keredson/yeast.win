@@ -428,7 +428,9 @@ try {
   await recipeReminder.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Edit planned event 2-row pale malt extra' }).click();
   const deleteRecipeEvent = page.getByRole('dialog', { name: 'Edit 2-row pale malt extra' });
-  await deleteRecipeEvent.getByRole('button', { name: 'Delete event' }).click();
+  const recipeEventActions = deleteRecipeEvent.locator('.plan-form-actions');
+  await recipeEventActions.getByRole('button', { name: 'Save event' }).waitFor();
+  await recipeEventActions.getByRole('button', { name: 'Delete event' }).click();
   await page.getByText('Actions timed from this one will become relative to batch start.').waitFor();
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
   await deleteRecipeEvent.waitFor({ state: 'hidden' });
