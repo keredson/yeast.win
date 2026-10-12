@@ -1,15 +1,15 @@
 import { Fragment, useMemo, useState } from 'react';
-import { Button, Card, Dropdown, Empty, Tag } from 'antd';
+import { Button, Card, Dropdown, Tag } from 'antd';
 import { CheckOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ActualEvent, Equipment, PlanInput } from './db.ts';
 import { kindLabel, measurementKinds } from './constants.ts';
 import { formatTime } from './time.ts';
-import { effectivePlanTime, formatOffset, parsePlanDetails, planDetailsLabel, planDuration, planKindLabel } from './planTiming.ts';
+import { effectivePlanTime, formatOffset, orderTimelineGroup, parsePlanDetails, planDetailsLabel, planDuration, planKindLabel, timelineGroupKey, timelineGroupStep } from './planTiming.ts';
 import type { PlanPreset } from './PlanForm.tsx';
 
 export type TimelineEvent = PlanInput & { id: string; actual_at?: number | null; skipped_at?: number | null; ended_at?: number | null };
 export interface TimelinePhoto { id: string; url: string; batch_event_id: string | null }
-interface Group { key: string; at: number | null; label: string; events: TimelineEvent[] }
+interface Group { key: string; at: number | null; step: number; label: string; events: TimelineEvent[] }
 
 export function actionForMenu(key: string, plans: TimelineEvent[]): { kind: string; preset: PlanPreset } {
   const [action, measurementKind] = key.split(':');
@@ -43,28 +43,29 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
   const [menuOpen, setMenuOpen] = useState(false);
   const groups = useMemo(() => {
     const startAt = batchStartAt ?? 0;
-    const startKey = `time:${Math.floor(startAt / 60)}`;
-    const grouped = new Map<string, Group>([[startKey, { key: startKey, at: startAt, label: 'Batch start', events: [] }]]);
+    const startKey = timelineGroupKey(startAt, 0, 'start');
+    const grouped = new Map<string, Group>([[startKey, { key: startKey, at: startAt, step: 0, label: '', events: [] }]]);
     const eventTimes = new Map<string, number | null>();
     for (const item of events) {
       const at = item.actual_at ?? item.skipped_at ?? effectivePlanTime(item, events, events as ActualEvent[], startAt);
       eventTimes.set(item.id, at);
-      const key = at == null ? `anchor:${item.anchor_event_id}:${item.offset_seconds || 0}` : `time:${Math.floor(at / 60)}`;
+    }
+    for (const item of events) {
+      const at = eventTimes.get(item.id) ?? null;
+      const step = timelineGroupStep(item, events, eventTimes);
+      const key = timelineGroupKey(at, step, item.id);
       let group = grouped.get(key);
       if (!group) {
-        group = { key, at, label: isBatch && (item.actual_at != null || item.skipped_at != null)
+        group = { key, at, step, label: isBatch && (item.actual_at != null || item.skipped_at != null)
           ? formatTime(at!) : '', events: [] };
         grouped.set(key, group);
       }
-      if (isBatch && !group.label && (item.actual_at != null || item.skipped_at != null)) group.label = formatTime(at!);
+      if (isBatch && key !== startKey && !group.label && (item.actual_at != null || item.skipped_at != null)) group.label = formatTime(at!);
       group.events.push(item);
     }
-    for (const group of grouped.values()) group.events.sort((a, b) => {
-      const timeDifference = (eventTimes.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (eventTimes.get(b.id) ?? Number.MAX_SAFE_INTEGER);
-      if (timeDifference) return timeDifference;
-      return Number(b.event_type === 'addition') - Number(a.event_type === 'addition');
-    });
-    return [...grouped.values()].sort((a, b) => (a.at ?? Number.MAX_SAFE_INTEGER) - (b.at ?? Number.MAX_SAFE_INTEGER) || a.key.localeCompare(b.key));
+    for (const group of grouped.values()) group.events = orderTimelineGroup(group.events, eventTimes);
+    return [...grouped.values()].sort((a, b) => (a.at ?? Number.MAX_SAFE_INTEGER) - (b.at ?? Number.MAX_SAFE_INTEGER)
+      || a.step - b.step || a.key.localeCompare(b.key));
   }, [events, batchStartAt, isBatch]);
 
   return <section className={`batch-timeline${isBatch ? '' : ' recipe-timeline'}`}><div className="column-title"><h3>Timeline</h3>{isBatch && <span>{events.length} actions</span>}</div>
@@ -76,10 +77,8 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
       return <Fragment key={group.key}>
       {gapSeconds > 0 && !gapAlreadyShown && (!isBatch || !group.label)
         && <div className="timeline-gap">{formatOffset(gapSeconds)}</div>}
-      <Card size="small" className="timeline-group">
-      {group.label && <div className="timeline-group-heading"><strong>{group.label}</strong>
-        {isBatch && group.label === 'Batch start' && group.at != null && <span className="muted">{formatTime(group.at)}</span>}</div>}
-      {group.events.length === 0 && <div className="timeline-empty"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No actions at the start yet" /></div>}
+      {group.events.length > 0 && <Card size="small" className="timeline-group">
+      {group.label && <div className="timeline-group-heading"><strong>{group.label}</strong></div>}
       {group.events.map(item => {
         const happened = item.actual_at != null;
         const skipped = !happened && item.skipped_at != null;
@@ -105,7 +104,7 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
           {images.length > 0 && <div className="photo-grid">{images.map(photo => <img key={photo.id} src={photo.url} alt="Batch activity" />)}</div>}
         </div>;
       })}
-      </Card></Fragment>;
+      </Card>}</Fragment>;
     })}</div>
     <div className={`timeline-actions${isBatch ? '' : ' timeline-actions-recipe'}`}><Dropdown trigger={['click']} placement="topLeft" open={menuOpen} onOpenChange={setMenuOpen}
       menu={{ items: actionItems, triggerSubMenuAction: 'click', onClick: ({ key }) => {

@@ -149,8 +149,10 @@ try {
   await page.locator('.app-nav .ant-menu-item').filter({ hasText: batchName }).click();
   await page.getByRole('heading', { name: batchName }).waitFor();
   console.log('Created batch:', batchName);
-  await page.locator('.timeline-group-heading').getByText('Batch start').waitFor();
-  if (await page.locator('.timeline-group .plan-card').count()) throw new Error('Empty batch start already has actions');
+  await page.getByRole('button', { name: 'Add action' }).waitFor();
+  if (await page.locator('.timeline-group').count() || await page.getByText('Batch start', { exact: true }).count()) {
+    throw new Error('An empty batch should not show a Batch start group');
+  }
 
   await choosePlanKind(page, 'Add action', 'Ingredient');
   const firstAction = page.getByRole('dialog', { name: 'Add addition' });
@@ -167,6 +169,9 @@ try {
   await yeastAction.waitFor({ state: 'hidden' });
   if (await page.locator('.timeline-group').count() !== 1 || await page.locator('.timeline-group .plan-card').count() !== 2) {
     throw new Error('Actions at batch start were not grouped together');
+  }
+  if (await page.locator('.timeline-group-heading').getByText('Batch start').count()) {
+    throw new Error('Batch start heading should not appear above actions');
   }
   if (await page.locator('.timeline-group .plan-meta').count()) {
     throw new Error('Batch start actions repeat their group timing in each row');
@@ -447,6 +452,24 @@ try {
     throw new Error('Recipe timeline still displays an action count');
   }
   await page.getByRole('button', { name: 'Edit planned event Mash' }).waitFor();
+  await page.getByRole('button', { name: 'Edit planned event Add fermentable' }).waitFor();
+  if (await page.getByRole('button', { name: 'Edit planned event Add fermentable' }).count() !== 1) {
+    throw new Error('Beer template should have one fermentable placeholder');
+  }
+  const mashGroup = page.locator('.timeline-group').filter({ has: page.getByRole('button', { name: 'Edit planned event Mash' }) });
+  const mashTitles = await mashGroup.locator('.title-edit-row strong').allTextContents();
+  if (mashTitles.indexOf('Add fermentable') < 0 || mashTitles.indexOf('Add fermentable') > mashTitles.indexOf('Mash')) {
+    throw new Error('Fermentable placeholder should appear at the start of Mash');
+  }
+  await page.getByRole('button', { name: 'Edit planned event Add fermentable' }).click();
+  const fermentablePlan = page.getByRole('dialog', { name: 'Edit Add fermentable' });
+  await fermentablePlan.waitFor();
+  if (await fermentablePlan.getByLabel('What will be added?').inputValue()
+    || !await fermentablePlan.getByRole('combobox', { name: 'Type' }).locator('..').getByText('Grain').count()
+    || !await fermentablePlan.getByRole('combobox', { name: 'Timing' }).locator('..').getByText('At or after start of Mash').count()) {
+    throw new Error('Fermentable placeholder should have no selected item and start with Mash');
+  }
+  await fermentablePlan.locator('.ant-modal-close').click();
   if (await page.locator('.plan-card').filter({ has: page.getByRole('button', { name: 'Edit planned event Mash' }) })
     .locator('.plan-meta').count()) throw new Error('Recipe start action repeats its group timing');
   await page.getByRole('button', { name: 'Edit planned event Boil' }).waitFor();
@@ -481,9 +504,13 @@ try {
   await page.getByRole('button', { name: 'Edit planned event Transfer to fermenter' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Transfer to fermenter' }).click();
   const transferPlan = page.getByRole('dialog', { name: 'Edit Transfer to fermenter' });
+  await transferPlan.waitFor();
   if (await transferPlan.getByRole('combobox', { name: /From vessel/ }).count()
     || await transferPlan.getByRole('spinbutton', { name: 'Duration (optional)' }).count()) {
     throw new Error('Transfer plan still asks for a source vessel or duration');
+  }
+  if (!await transferPlan.getByRole('combobox', { name: 'Timing' }).locator('..').getByText('After Chill').count()) {
+    throw new Error('Transfer timing should display its Chill anchor');
   }
   await transferPlan.getByRole('combobox', { name: 'To vessel (optional)' }).click();
   if (await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke chiller' }).count()) {
@@ -510,6 +537,31 @@ try {
   await gravityPlan.getByRole('button', { name: 'Save event' }).click();
   await gravityPlan.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
+  const templateGroups = await page.locator('.recipe-timeline .timeline-group').evaluateAll(groups => groups.map(group =>
+    [...group.querySelectorAll('.title-edit-row strong')].map(title => title.textContent?.trim())));
+  const chillGroupIndex = templateGroups.findIndex(titles => titles.includes('Chill'));
+  const transferGroupIndex = templateGroups.findIndex(titles => titles.includes('Transfer to fermenter'));
+  const gravityGroupIndex = templateGroups.findIndex(titles => titles.includes('Measure original specific gravity'));
+  const pitchGroupIndex = templateGroups.findIndex(titles => titles.includes('Pitch yeast'));
+  if (chillGroupIndex < 0 || transferGroupIndex <= chillGroupIndex || gravityGroupIndex <= transferGroupIndex
+    || pitchGroupIndex <= chillGroupIndex) {
+    throw new Error('Consecutive beer template actions should occupy separate timeline groups');
+  }
+  await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).click();
+  const pitchPlan = page.getByRole('dialog', { name: 'Edit Pitch yeast' });
+  await pitchPlan.waitFor();
+  if (!await pitchPlan.getByRole('combobox', { name: 'Timing' }).locator('..').getByText('After Chill').count()) {
+    throw new Error('Beer template should pitch yeast at the end of Chill');
+  }
+  if (await pitchPlan.getByLabel('What will be added?').inputValue()
+    || await pitchPlan.locator('.ant-form-item').filter({ has: pitchPlan.getByLabel('What will be added?') }).locator('.ant-form-item-required').count()) {
+    throw new Error('Pitch yeast should not require a generic yeast ingredient');
+  }
+  await pitchPlan.getByRole('button', { name: 'Save event' }).click();
+  await pitchPlan.waitFor({ state: 'hidden' });
+  if (await page.locator('.plan-card').filter({ hasText: 'Pitch yeast' }).first().getByText('Yeast', { exact: true }).count()) {
+    throw new Error('Pitch yeast displayed a redundant generic yeast item');
+  }
   await page.locator('.timeline-group').filter({ has: page.getByRole('button', { name: 'Edit planned event Package batch' }) })
     .locator('xpath=preceding-sibling::*[1]').getByText('21 days', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Package batch' }).click();

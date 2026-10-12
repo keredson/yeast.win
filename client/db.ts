@@ -270,24 +270,26 @@ export async function createRecipe(db: DB, name: string, description: string, re
       VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)`, [eventId, id, eventType, title, anchorId, offsetSeconds, JSON.stringify(details), order]);
     if (recipeType === 'beer') {
       await insert(mashId, 'temperature_control', 'Mash', null,
-        { phase: 'mash', mode: 'hold', target_value: convertUnit(67, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 1800 }, 1);
+        { phase: 'mash', mode: 'hold', target_value: convertUnit(67, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 1800 }, 2);
+      await insert(nanoid(), 'addition', 'Add fermentable', mashId,
+        { item_category: 'Grain', anchor_point: 'start' }, 1);
       await insert(boilId, 'temperature_control', 'Boil', mashId,
-        { phase: 'boil', mode: 'heat', target_value: convertUnit(100, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 3600, anchor_point: 'end' }, 2);
+        { phase: 'boil', mode: 'heat', target_value: convertUnit(100, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 3600, anchor_point: 'end' }, 3);
       await insert(chillId, 'temperature_control', 'Chill', boilId,
         { phase: 'chill', mode: 'chill', target_value: convertUnit(20, '°C', temperatureUnit)!, target_unit: temperatureUnit,
-          anchor_point: 'end' }, 3);
+          anchor_point: 'end' }, 4);
       await insert(transferId, 'transfer', 'Transfer to fermenter', chillId,
-        {}, 4);
+        { anchor_point: 'end' }, 5);
     }
     const gravityId = nanoid();
     await insert(gravityId, 'measurement', 'Measure original specific gravity', recipeType === 'beer' ? transferId : null,
-      { measurement_kind: 'gravity', target_unit: 'SG' }, recipeType === 'beer' ? 5 : 1);
+      { measurement_kind: 'gravity', target_unit: 'SG' }, recipeType === 'beer' ? 6 : 1);
     const pitchId = nanoid();
-    await insert(pitchId, 'addition', 'Pitch yeast', gravityId,
-      { item_category: 'Yeast', item_name: 'Yeast' }, recipeType === 'beer' ? 6 : 2);
+    await insert(pitchId, 'addition', 'Pitch yeast', recipeType === 'beer' ? chillId : gravityId,
+      { item_category: 'Yeast', ...(recipeType === 'beer' ? { anchor_point: 'end' } : {}) }, recipeType === 'beer' ? 7 : 2);
     const packagingDays: Record<RecipeType, number> = { beer: 21, cider: 28, wine: 60, mead: 60 };
     await insert(nanoid(), 'packaging', 'Package batch', pitchId,
-      {}, recipeType === 'beer' ? 7 : 3, packagingDays[recipeType] * 86400);
+      {}, recipeType === 'beer' ? 8 : 3, packagingDays[recipeType] * 86400);
   });
   return id;
 }
