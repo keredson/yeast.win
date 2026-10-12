@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Alert, Button, Form, Input, InputNumber, Select } from 'antd';
 import { kindLabel, measurementKinds, planKinds } from './constants.ts';
 import { fromDatetimeLocal, toDatetimeLocal } from './time.ts';
@@ -36,7 +36,7 @@ function eventUnit(kind: string, units: PreferredUnits): string | undefined {
 interface Values {
   event_type: string; measurement_kind?: MeasurementKind; actual_at: string; ended_at?: string;
   note?: string; value?: number; unit?: string; uncertainty?: number; equipment_id?: string;
-  calibration_id?: string; source?: string; item_name?: string; inventory_item_id?: string;
+  source?: string; item_name?: string; inventory_item_id?: string;
   item_category?: string; quantity?: number; pounds?: number; ounces?: number;
   mode?: string; target_value?: number; target_unit?: string; power_watts?: number;
   to_vessel_id?: string; container_name?: string; container_size?: number;
@@ -59,8 +59,6 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
   const chillToTarget = kind === 'temperature_control' && plannedString('phase') === 'chill';
   const timedControl = supportsDuration(kind, plannedString('phase'));
   const [measurement, setMeasurement] = useState<MeasurementKind>(initialData?.measurementKind || initialMeasurement || 'temperature');
-  const [instrumentId, setInstrumentId] = useState<string | undefined>(String(initialData?.payload.equipment_id || '') || undefined);
-  const [calibrations, setCalibrations] = useState<{ id: string; effective_at: number }[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [photo, setPhoto] = useState<File | null>(null);
@@ -90,13 +88,6 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
     else changeNumberUnit(form, ['quantity'], from, next);
   }
 
-  useEffect(() => {
-    if (!instrumentId) return setCalibrations([]);
-    void db.execO<{ id: string; effective_at: number }>(
-      'SELECT id, effective_at FROM equipment_calibrations WHERE equipment_id = ? ORDER BY effective_at DESC', [instrumentId])
-      .then(setCalibrations);
-  }, [db, instrumentId]);
-
   async function submit(values: Values) {
     setBusy(true); setError('');
     try {
@@ -120,7 +111,9 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
         if (values.value == null) throw new Error('Enter the measured value');
         input.measurementKind = values.measurement_kind || measurement;
         payload = { value: values.value, unit: values.unit || '', uncertainty: values.uncertainty ?? null,
-          equipment_id: values.equipment_id || null, calibration_id: values.calibration_id || null,
+          equipment_id: values.equipment_id || null,
+          calibration_id: values.equipment_id === initialData?.payload.equipment_id
+            && typeof initialData?.payload.calibration_id === 'string' ? initialData.payload.calibration_id : null,
           source: values.source || 'manual' };
       } else if (kind === 'addition') {
         const itemName = values.item_name || plannedString('item_name') || initialPlan?.title;
@@ -217,12 +210,8 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
         <Form.Item name="uncertainty" label="Uncertainty (±)"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
         <Form.Item name="source" label="Method/source"><Input placeholder="e.g. refractometer" /></Form.Item>
       </div>
-      <div className="form-pair">
-        <Form.Item name="equipment_id" label="Instrument"><Select allowClear placeholder="Choose equipment"
-          options={equipment.map(item => ({ value: item.id, label: item.name }))} onChange={setInstrumentId} /></Form.Item>
-        <Form.Item name="calibration_id" label="Calibration"><Select allowClear placeholder="If calibrated"
-          options={calibrations.map(item => ({ value: item.id, label: new Date(item.effective_at * 1000).toLocaleDateString() }))} /></Form.Item>
-      </div>
+      <Form.Item name="equipment_id" label="Instrument"><Select allowClear placeholder="Choose equipment"
+        options={equipment.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
     </>}
     {kind === 'addition' && <>
       <>

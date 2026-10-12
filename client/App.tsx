@@ -505,7 +505,7 @@ export function App() {
                   ? inventoryItemForPath(route.selectedId, inventory)?.id || route.selectedId : null}
                 onSelect={id => showItem('inventory', id)} onChanged={changed} />)}
             {section === 'equipment' && (equipmentWorkspaceId !== workspaceId ? <div className="loading-screen"><Spin description="Loading equipment" /></div>
-              : <EquipmentSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} equipment={equipment}
+              : <EquipmentSection key={workspaceId} db={db} basePath={activeBase} equipment={equipment}
                 catalog={catalogEquipment} selectedId={route.selectedId
                   ? equipmentItemForPath(route.selectedId, equipment)?.id || route.selectedId : null}
                 onSelect={id => showItem('equipment', id)} onChanged={changed} />)}

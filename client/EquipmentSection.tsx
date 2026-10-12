@@ -1,30 +1,18 @@
 import { useEffect, useState } from 'react';
-import { Alert, AutoComplete, Button, Card, Dropdown, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Table, Tag } from 'antd';
+import { Alert, AutoComplete, Button, Dropdown, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Table } from 'antd';
 import { EditOutlined, PlusOutlined } from '@ant-design/icons';
-import { nanoid } from 'nanoid';
-import { boilOffKinds, capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits } from '../shared/equipment.ts';
+import { boilOffKinds, capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { createEquipment, deleteEquipment, updateEquipmentBoilHeatLoss, updateEquipmentIdentity, updateEquipmentRatedPower, updateEquipmentCapacity,
+import { createEquipment, deleteEquipment, updateEquipmentBoilHeatLoss, updateEquipmentCalibration, updateEquipmentIdentity, updateEquipmentRatedPower, updateEquipmentCapacity,
+  updateEquipmentTemperatureOffset,
   updateEquipmentMeasurementRange,
   type Equipment, type EquipmentSpecifications, type LocalDb } from './db.ts';
 import { capacityInLiters, capacityLabel, capacityUnits } from '../shared/capacity.ts';
-import { fromDatetimeLocal, formatTime, toDatetimeLocal } from './time.ts';
 import { changeNumberUnit } from './unitFields.ts';
 import { equipmentPathSegment, equipmentSlug } from './equipmentRoutes.ts';
 import { heatLossFromBoil, predictedBoilOff } from './boilOff.ts';
 
-interface Calibration { id: string; method: string; effective_at: number; parameters_json: string }
-
 const calibrationProfiles: Record<string, { method: string; fields: { key: string; label: string }[] }> = {
-  electric_kettle: { method: 'Temperature °C', fields: [
-    { key: 'reference_c', label: 'Reference temperature °C' }, { key: 'observed_c', label: 'Kettle reading °C' }
-  ] },
-  all_in_one: { method: 'Temperature °C', fields: [
-    { key: 'reference_c', label: 'Reference temperature °C' }, { key: 'observed_c', label: 'System reading °C' }
-  ] },
-  controlled_fermenter: { method: 'Temperature °C', fields: [
-    { key: 'reference_c', label: 'Reference temperature °C' }, { key: 'observed_c', label: 'Fermenter reading °C' }
-  ] },
   ph_meter: { method: 'Two-point pH', fields: [
     { key: 'buffer_4_observed', label: 'pH 4.00 buffer reading' }, { key: 'buffer_7_observed', label: 'pH 7.00 buffer reading' }
   ] },
@@ -33,15 +21,6 @@ const calibrationProfiles: Record<string, { method: string; fields: { key: strin
   ] },
   refractometer: { method: 'Refractometer Brix', fields: [
     { key: 'reference_brix', label: 'Reference °Brix' }, { key: 'observed_brix', label: 'Refractometer reading °Brix' }
-  ] },
-  temperature_controller: { method: 'Temperature °C', fields: [
-    { key: 'reference_c', label: 'Reference temperature °C' }, { key: 'observed_c', label: 'Controller reading °C' }
-  ] },
-  fermentation_temperature_control: { method: 'Temperature °C', fields: [
-    { key: 'reference_c', label: 'Reference temperature °C' }, { key: 'observed_c', label: 'Controller reading °C' }
-  ] },
-  thermometer: { method: 'Temperature °C', fields: [
-    { key: 'reference_c', label: 'Reference temperature °C' }, { key: 'observed_c', label: 'Thermometer reading °C' }
   ] },
   scale: { method: 'Scale g', fields: [
     { key: 'reference_g', label: 'Reference weight g' }, { key: 'observed_g', label: 'Scale reading g' }
@@ -65,14 +44,14 @@ function addEquipmentTitle(kind: string): string {
   return `Add ${label[0].toLowerCase()}${label.slice(1)}`;
 }
 
-export function EquipmentSection({ db, basePath, accountId, equipment, catalog, selectedId, onSelect, onChanged }: {
-  db: LocalDb; basePath: string; accountId: string; equipment: Equipment[]; catalog: CatalogEquipment[]; selectedId: string | null; onSelect: (id: string | null) => void;
+export function EquipmentSection({ db, basePath, equipment, catalog, selectedId, onSelect, onChanged }: {
+  db: LocalDb; basePath: string; equipment: Equipment[]; catalog: CatalogEquipment[]; selectedId: string | null; onSelect: (id: string | null) => void;
   onChanged: () => Promise<void>;
 }) {
-  const [calibrations, setCalibrations] = useState<Calibration[]>([]);
   const [creatingKind, setCreatingKind] = useState<string | null>(null);
-  const [newCalibration, setNewCalibration] = useState(false);
+  const [editCalibration, setEditCalibration] = useState(false);
   const [newBoilCalibration, setNewBoilCalibration] = useState(false);
+  const [newTemperatureCalibration, setNewTemperatureCalibration] = useState(false);
   const [editIdentity, setEditIdentity] = useState(false);
   const [editCapacity, setEditCapacity] = useState(false);
   const [editPower, setEditPower] = useState(false);
@@ -98,12 +77,6 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
   if (earlierKinds.length) groupedKinds.push({ key: 'earlier', label: 'Previously added equipment', kinds: earlierKinds });
 
   useEffect(() => {
-    if (!selectedId) return;
-    void db.execO<Calibration>('SELECT id, method, effective_at, parameters_json FROM equipment_calibrations WHERE equipment_id = ? ORDER BY effective_at DESC', [selectedId])
-      .then(setCalibrations);
-  }, [db, selectedId, equipment]);
-
-  useEffect(() => {
     if (!item || !boilOffKinds.has(item.kind) || specs.boil_heat_loss_watts != null) return;
     let active = true;
     void (async () => {
@@ -119,6 +92,38 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
       }
       if (active && heatLoss != null) {
         await updateEquipmentBoilHeatLoss(db, item, heatLoss);
+        await onChanged();
+      }
+    })().catch(cause => { if (active) setError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => { active = false; };
+  }, [db, item?.id, item?.specification_json]);
+
+  useEffect(() => {
+    if (!item || !temperatureCalibrationKinds.has(item.kind) || specs.temperature_offset_c != null) return;
+    let active = true;
+    void (async () => {
+      const rows = await db.execO<{ parameters_json: string }>(`SELECT parameters_json FROM equipment_calibrations
+        WHERE equipment_id = ? AND method = 'Temperature °C' ORDER BY effective_at DESC, id DESC LIMIT 1`, [item.id]);
+      if (!rows.length) return;
+      const values = JSON.parse(rows[0].parameters_json) as { reference_c?: number; observed_c?: number };
+      if (active && Number.isFinite(values.reference_c) && Number.isFinite(values.observed_c)) {
+        await updateEquipmentTemperatureOffset(db, item, Number(values.reference_c) - Number(values.observed_c));
+        await onChanged();
+      }
+    })().catch(cause => { if (active) setError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => { active = false; };
+  }, [db, item?.id, item?.specification_json]);
+
+  useEffect(() => {
+    if (!item || !profile || specs.current_calibration) return;
+    let active = true;
+    void (async () => {
+      const rows = await db.execO<{ parameters_json: string }>(`SELECT parameters_json FROM equipment_calibrations
+        WHERE equipment_id = ? AND method = ? ORDER BY effective_at DESC, id DESC LIMIT 1`, [item.id, profile.method]);
+      if (!rows.length) return;
+      const values = JSON.parse(rows[0].parameters_json) as Record<string, number>;
+      if (active && profile.fields.every(field => Number.isFinite(values[field.key]))) {
+        await updateEquipmentCalibration(db, item, Object.fromEntries(profile.fields.map(field => [field.key, values[field.key]])));
         await onChanged();
       }
     })().catch(cause => { if (active) setError(cause instanceof Error ? cause.message : String(cause)); });
@@ -187,6 +192,15 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
+  async function saveTemperatureCalibration(values: { reference_c: number; observed_c: number }) {
+    if (!item) return;
+    try {
+      if (!Number.isFinite(values.reference_c) || !Number.isFinite(values.observed_c)) throw new Error('Enter valid temperatures');
+      await updateEquipmentTemperatureOffset(db, item, values.reference_c - values.observed_c);
+      setNewTemperatureCalibration(false); await onChanged();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
   async function saveRange(values: { measurement_min?: number; measurement_max?: number; measurement_unit?: string }) {
     if (!item) return;
     try {
@@ -205,13 +219,12 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  async function calibrate(values: { effective_at: string; parameters: Record<string, number> }) {
+  async function saveCalibration(values: { parameters: Record<string, number> }) {
     if (!item || !profile) return;
     try {
       const parameters = Object.fromEntries(profile.fields.map(field => [field.key, values.parameters[field.key]]));
-      await db.exec(`INSERT INTO equipment_calibrations(id, equipment_id, effective_at, method, parameters_json, created_by_account_id)
-        VALUES (?, ?, ?, ?, ?, ?)`, [nanoid(), item.id, fromDatetimeLocal(values.effective_at), profile.method, JSON.stringify(parameters), accountId]);
-      setNewCalibration(false); await onChanged();
+      await updateEquipmentCalibration(db, item, parameters);
+      setEditCalibration(false); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
@@ -253,22 +266,19 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
           {boilOffKinds.has(item.kind) && <div className="equipment-parameter"><span>Rated power: {specs.rated_power_watts != null
             ? `${specs.rated_power_watts} W` : 'Not set'}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit rated power" onClick={() => setEditPower(true)} /></div>}
+          {temperatureCalibrationKinds.has(item.kind) && <div className="equipment-parameter"><span>Temperature offset: {specs.temperature_offset_c == null
+            ? 'Not calibrated' : `${specs.temperature_offset_c > 0 ? '+' : ''}${Number(specs.temperature_offset_c.toFixed(2))} °C`}</span>
+            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit temperature offset" onClick={() => setNewTemperatureCalibration(true)} /></div>}
+          {boilOffKinds.has(item.kind) && <div className="equipment-parameter"><span>Heat loss at boil: {specs.boil_heat_loss_watts == null
+            ? 'Not calibrated' : `${Math.round(specs.boil_heat_loss_watts)} W`}</span>
+            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit boil heat loss" onClick={() => setNewBoilCalibration(true)} /></div>}
+          {ratedEstimate != null && <div className="equipment-parameter">Estimated boil-off at rated power: {Number(ratedEstimate.toFixed(2))} L/h</div>}
           {measurementRangeUnits[item.kind] && <div className="equipment-parameter"><span>Measurement range: {specs.measurement_min != null && specs.measurement_max != null
             ? `${specs.measurement_min}–${specs.measurement_max} ${specs.measurement_unit}` : 'Not set'}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit measurement range" onClick={() => setEditRange(true)} /></div>}
+          {profile?.fields.map(field => <div key={field.key} className="equipment-parameter"><span>{field.label}: {specs.current_calibration?.[field.key] ?? 'Not calibrated'}</span>
+            <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${field.label}`} onClick={() => setEditCalibration(true)} /></div>)}
         </div>
-        {(profile || boilOffKinds.has(item.kind)) && <div className="equipment-calibration"><div className="equipment-calibration-heading"><h3>Calibration</h3>
-          <div className="heading-actions">{boilOffKinds.has(item.kind) && <Button icon={<EditOutlined />} onClick={() => setNewBoilCalibration(true)}>Calibrate boil-off</Button>}
-          {profile && <Button icon={<PlusOutlined />} onClick={() => setNewCalibration(true)}>Record calibration</Button>}</div></div>
-        {boilOffKinds.has(item.kind) && <>
-          <p>Heat loss at boil: {specs.boil_heat_loss_watts == null ? 'Not calibrated' : `${Math.round(specs.boil_heat_loss_watts)} W`}</p>
-          {ratedEstimate != null && <p>Estimated boil-off at rated power: {Number(ratedEstimate.toFixed(2))} L/h</p>}
-        </>}
-        {calibrations.length > 0 &&
-        <div className="card-stack">{calibrations.map(row => <Card key={row.id} size="small">
-          <div className="timeline-card"><div><strong>{row.method}</strong><div className="muted">{formatTime(row.effective_at)}</div></div><Tag>Immutable</Tag></div>
-          <pre className="calibration-data">{row.parameters_json}</pre>
-        </Card>)}</div>}</div>}
         <div className="equipment-delete"><Popconfirm title={`Delete ${item.name}?`}
           description="Used equipment stays in batch history. Unused equipment and calibrations are removed."
           okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => void remove()}>
@@ -341,9 +351,8 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
         <Button type="primary" htmlType="submit">Save range</Button>
       </Form>
     </Modal>
-    <Modal title={profile ? `Calibrate ${equipmentKindLabel(item?.kind || '')}` : 'Record calibration'} open={newCalibration} onCancel={() => setNewCalibration(false)} footer={null} destroyOnHidden>
-      <Form layout="vertical" onFinish={calibrate} initialValues={{ effective_at: toDatetimeLocal() }}>
-        <Form.Item name="effective_at" label="When" rules={[{ required: true }]}><Input type="datetime-local" /></Form.Item>
+    <Modal title={profile ? `Calibrate ${equipmentKindLabel(item?.kind || '')}` : 'Edit calibration'} open={editCalibration} onCancel={() => setEditCalibration(false)} footer={null} destroyOnHidden>
+      <Form key={item?.id} layout="vertical" onFinish={saveCalibration} initialValues={{ parameters: specs.current_calibration }}>
         {profile?.fields.map(field => <Form.Item key={field.key} name={['parameters', field.key]} label={field.label} rules={[{ required: true }]}>
           <InputNumber className="full-width" step="any" /></Form.Item>)}
         <Button type="primary" htmlType="submit">Save calibration</Button>
@@ -358,6 +367,14 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
           <Form.Item name="end_liters" label="End volume (L)" rules={[{ required: true }]}><InputNumber className="full-width" min={0} step="any" /></Form.Item></div>
         <Form.Item name="duration_minutes" label="Boil duration (minutes)" rules={[{ required: true }]}><InputNumber className="full-width" min={0.01} step="any" /></Form.Item>
         <Button type="primary" htmlType="submit">Save calibration</Button>
+      </Form>
+    </Modal>
+    <Modal title="Calibrate temperature" open={newTemperatureCalibration} onCancel={() => setNewTemperatureCalibration(false)} footer={null} destroyOnHidden>
+      <Form key={item?.id} layout="vertical" onFinish={saveTemperatureCalibration}>
+        <p className="muted">The offset is added to the equipment reading. Saving replaces the previous offset.</p>
+        <Form.Item name="reference_c" label="Reference temperature (°C)" rules={[{ required: true }]}><InputNumber className="full-width" step="any" /></Form.Item>
+        <Form.Item name="observed_c" label="Equipment reading (°C)" rules={[{ required: true }]}><InputNumber className="full-width" step="any" /></Form.Item>
+        <Button type="primary" htmlType="submit">Save temperature calibration</Button>
       </Form>
     </Modal>
   </div>;

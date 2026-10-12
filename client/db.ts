@@ -2,7 +2,7 @@ import initWasm, { type DB } from '@vlcn.io/crsqlite-wasm';
 import { fetchApi } from './api.ts';
 import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { nanoid } from 'nanoid';
-import { boilOffKinds, capacityKinds, equipmentKinds, measurementRangeUnits } from '../shared/equipment.ts';
+import { boilOffKinds, capacityKinds, equipmentKinds, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import { equipmentSlug } from './equipmentRoutes.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
 import { changeColumns, indexStatements, inventoryLocationTables, nowSeconds, recategorizeLacticAcid, removeEmptyDuplicateInventory, replicatedTables, schemaStatements, workspaceSchemaVersion, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
@@ -481,6 +481,8 @@ export interface EquipmentSpecifications {
   measurement_unit?: string;
   boil_heat_loss_watts?: number;
   rated_power_watts?: number;
+  temperature_offset_c?: number;
+  current_calibration?: Record<string, number>;
 }
 
 export async function updateEquipmentIdentity(db: DB, item: Equipment, name: string, slug: string,
@@ -508,6 +510,7 @@ export async function createEquipment(db: DB, name: string, kind: string, catalo
   if (!capacityKinds.has(kind)) delete specification.capacity_liters;
   delete specification.boil_off_liters_per_hour;
   if (!boilOffKinds.has(kind)) delete specification.boil_heat_loss_watts;
+  if (!temperatureCalibrationKinds.has(kind)) delete specification.temperature_offset_c;
   if (!measurementRangeUnits[kind]) {
     delete specification.measurement_min;
     delete specification.measurement_max;
@@ -534,6 +537,23 @@ export async function updateEquipmentBoilHeatLoss(db: DB, item: Equipment, watts
   delete specification.boil_off_liters_per_hour;
   await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?',
     [JSON.stringify(specification), item.id]);
+}
+
+export async function updateEquipmentTemperatureOffset(db: DB, item: Equipment, offsetC: number): Promise<void> {
+  if (!temperatureCalibrationKinds.has(item.kind)) throw new Error('This equipment has no temperature reading to calibrate');
+  if (!Number.isFinite(offsetC)) throw new Error('Enter valid temperatures');
+  const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
+  specification.temperature_offset_c = offsetC;
+  await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?', [JSON.stringify(specification), item.id]);
+}
+
+export async function updateEquipmentCalibration(db: DB, item: Equipment, values: Record<string, number>): Promise<void> {
+  if (!Object.keys(values).length || Object.values(values).some(value => !Number.isFinite(value))) {
+    throw new Error('Enter valid calibration values');
+  }
+  const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
+  specification.current_calibration = values;
+  await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?', [JSON.stringify(specification), item.id]);
 }
 
 export async function updateEquipmentRatedPower(db: DB, item: Equipment, watts: number | null): Promise<void> {
