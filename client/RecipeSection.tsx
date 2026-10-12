@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Empty, Form, Input, Modal, Popconfirm, Select } from 'antd';
-import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
-import { addRecipePlan, createRecipe, deleteRecipe, deleteRecipePlan, listRecipePlans, startBatchFromRecipe, updateRecipePlan,
+import { DeleteOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
+import { addRecipePlan, createRecipe, deleteRecipe, deleteRecipePlan, listRecipePlans, startBatchFromRecipe, updateRecipe, updateRecipePlan,
   type InventoryItem, type LocalDb, type PlanInput, type Recipe, type RecipeType } from './db.ts';
 import { PlanForm, type PlanPreset } from './PlanForm.tsx';
 import { kindLabel } from './constants.ts';
@@ -10,13 +10,21 @@ import { EventTimeline } from './EventTimeline.tsx';
 import type { CatalogInventory } from '../shared/catalog.ts';
 import type { PreferredUnits } from './api.ts';
 
+const recipeTypeOptions = [
+  { value: 'beer', label: 'Beer' }, { value: 'wine', label: 'Wine' }, { value: 'mead', label: 'Mead' }
+];
+
 export function RecipeSection({ db, basePath, accountId, recipes, inventory, catalogInventory, preferredUnits, selectedId, onSelect, onChanged, onBatchStarted }: {
   db: LocalDb; basePath: string; accountId: string; recipes: Recipe[]; selectedId: string | null; onSelect: (id: string | null) => void;
   inventory: InventoryItem[]; catalogInventory: CatalogInventory[]; preferredUnits: PreferredUnits;
   onChanged: () => Promise<void>; onBatchStarted: (id: string) => void;
 }) {
+  const [settingsForm] = Form.useForm<{ name: string; description?: string; recipe_type: RecipeType }>();
   const [plans, setPlans] = useState<(PlanInput & { id: string })[]>([]);
   const [newRecipe, setNewRecipe] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [settingsError, setSettingsError] = useState('');
   const [creatingKind, setCreatingKind] = useState<string | null>(null);
   const [preset, setPreset] = useState<PlanPreset>({});
   const [editingPlan, setEditingPlan] = useState<(PlanInput & { id: string }) | null>(null);
@@ -54,13 +62,32 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
 
   async function removeRecipe() {
     if (!recipe || deletingRecipe) return;
-    setDeletingRecipe(true); setError('');
+    setDeletingRecipe(true); setSettingsError('');
     try {
       await deleteRecipe(db, recipe.id);
+      setSettingsOpen(false);
       onSelect(null);
       await onChanged();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    } catch (cause) { setSettingsError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setDeletingRecipe(false); }
+  }
+
+  async function saveSettings(values: { name: string; description?: string; recipe_type: RecipeType }) {
+    if (!recipe) return;
+    setSettingsBusy(true); setSettingsError('');
+    try {
+      await updateRecipe(db, recipe.id, values.name, values.description || '', values.recipe_type);
+      await onChanged();
+      setSettingsOpen(false);
+    } catch (cause) { setSettingsError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setSettingsBusy(false); }
+  }
+
+  function openSettings() {
+    if (!recipe) return;
+    setSettingsError('');
+    settingsForm.setFieldsValue({ name: recipe.name, description: recipe.description || '', recipe_type: recipe.recipe_type || 'beer' });
+    setSettingsOpen(true);
   }
 
   async function start(values: { name: string }) {
@@ -84,13 +111,8 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
     </section> : !recipe ? <Empty description="Recipe not found" /> : <section className="record-detail">
         <div className="content-heading"><div><span className="eyebrow">Recipe plan · {recipe.recipe_type || 'Unspecified'}</span><h2>{recipe.name}</h2><p className="muted">{recipe.description}</p></div>
           <div className="heading-actions"><Button type="primary" onClick={() => setNewBatch(true)}>Start batch</Button>
-            <Popconfirm title={`Delete ${recipe.name}?`}
-              description="The recipe and its planned actions will be deleted. Batches already started from it keep their actions."
-              okText="Delete recipe" okButtonProps={{ danger: true, loading: deletingRecipe }}
-              onConfirm={() => void removeRecipe()}>
-              <Button type="text" danger shape="circle" icon={<DeleteOutlined />} aria-label={`Delete recipe ${recipe.name}`}
-                title="Delete recipe" disabled={deletingRecipe} />
-            </Popconfirm></div>
+            <Button type="text" shape="circle" icon={<SettingOutlined />} aria-label="Recipe settings"
+              title="Recipe settings" onClick={openSettings} /></div>
         </div>
         <EventTimeline events={plans} onEdit={plan => setEditingPlan(plan)} onDelete={plan => removePlan(plan.id)}
           onAdd={(kind, settings) => { setEditingPlan(null); setPreset(settings); setCreatingKind(kind); }} />
@@ -98,11 +120,26 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
     <Modal title="New recipe" open={newRecipe} onCancel={() => setNewRecipe(false)} footer={null} destroyOnHidden>
       <Form layout="vertical" onFinish={addRecipe} initialValues={{ recipe_type: 'beer' }}>
         <Form.Item name="name" label="Recipe name" rules={[{ required: true }]}><Input maxLength={100} /></Form.Item>
-        <Form.Item name="recipe_type" label="Type" rules={[{ required: true }]}><Select options={[
-          { value: 'beer', label: 'Beer' }, { value: 'wine', label: 'Wine' }, { value: 'mead', label: 'Mead' }
-        ]} /></Form.Item>
+        <Form.Item name="recipe_type" label="Type" rules={[{ required: true }]}><Select options={recipeTypeOptions} /></Form.Item>
         <Form.Item name="description" label="Description"><Input.TextArea rows={2} /></Form.Item>
         <Button type="primary" htmlType="submit">Create recipe</Button>
+      </Form>
+    </Modal>
+    <Modal title="Recipe settings" open={settingsOpen} onCancel={() => setSettingsOpen(false)} footer={null} destroyOnHidden>
+      <Form form={settingsForm} layout="vertical" onFinish={saveSettings}>
+        <Form.Item name="name" label="Recipe name" rules={[{ required: true, whitespace: true }, { max: 100 }]}>
+          <Input maxLength={100} /></Form.Item>
+        <Form.Item name="recipe_type" label="Type" extra="Changing the type does not change planned actions."
+          rules={[{ required: true }]}><Select options={recipeTypeOptions} /></Form.Item>
+        <Form.Item name="description" label="Description"><Input.TextArea rows={3} /></Form.Item>
+        {settingsError && <Alert type="error" message={settingsError} className="form-alert" />}
+        <div className="recipe-settings-actions"><Button type="primary" htmlType="submit" loading={settingsBusy}>Save changes</Button>
+          <Popconfirm title={`Delete ${recipe?.name || 'recipe'}?`}
+            description="The recipe and its planned actions will be deleted. Batches already started from it keep their actions."
+            okText="Delete recipe" okButtonProps={{ danger: true, loading: deletingRecipe }}
+            onConfirm={() => void removeRecipe()}>
+            <Button type="text" danger icon={<DeleteOutlined />} loading={deletingRecipe}>Delete recipe</Button>
+          </Popconfirm></div>
       </Form>
     </Modal>
     <Modal title={editingPlan ? editingPlan.event_type === 'measurement'

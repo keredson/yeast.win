@@ -123,6 +123,20 @@ export async function listRecipes(db: DB): Promise<Recipe[]> {
     LEFT JOIN recipe_types t ON t.id = r.id ORDER BY r.name COLLATE NOCASE`);
 }
 
+export async function updateRecipe(db: DB, recipeId: string, name: string, description: string, recipeType: RecipeType): Promise<void> {
+  if (!name.trim() || name.trim().length > 100) throw new Error('Recipe name must be 1–100 characters');
+  if (!['beer', 'wine', 'mead'].includes(recipeType)) throw new Error('Choose a recipe type');
+  await db.tx(async tx => {
+    const recipes = await tx.execO<{ id: string }>('SELECT id FROM recipes WHERE id = ?', [recipeId]);
+    if (!recipes.length) throw new Error('Recipe not found');
+    await tx.exec('UPDATE recipes SET name = ?, description = ?, updated_at = ? WHERE id = ?',
+      [name.trim(), description.trim() || null, nowSeconds(), recipeId]);
+    const types = await tx.execO<{ id: string }>('SELECT id FROM recipe_types WHERE id = ?', [recipeId]);
+    if (types.length) await tx.exec('UPDATE recipe_types SET recipe_type = ? WHERE id = ?', [recipeType, recipeId]);
+    else await tx.exec('INSERT INTO recipe_types(id, recipe_type) VALUES (?, ?)', [recipeId, recipeType]);
+  });
+}
+
 export async function deleteRecipe(db: DB, recipeId: string): Promise<void> {
   await db.tx(async tx => {
     const recipes = await tx.execO<{ id: string }>('SELECT id FROM recipes WHERE id = ?', [recipeId]);
