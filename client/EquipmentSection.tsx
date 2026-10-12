@@ -14,6 +14,10 @@ import { equipmentPathSegment, equipmentSlug } from './equipmentRoutes.ts';
 import { heatLossFromBoil, predictedBoilOff } from './boilOff.ts';
 import { convertUnit, unitOptions, unitGroups, type PreferredUnits } from '../shared/units.ts';
 
+function rangeLabel(min: number, max: number, scale: string | undefined): string {
+  return `${min}–${max}${scale === 'SG' ? ' (specific gravity)' : ` ${scale || ''}`}`;
+}
+
 const calibrationProfiles: Record<string, { method: string; fields: { key: string; label: string }[] }> = {
   ph_meter: { method: 'Two-point pH', fields: [
     { key: 'buffer_4_observed', label: 'pH 4.00 buffer reading' }, { key: 'buffer_7_observed', label: 'pH 7.00 buffer reading' }
@@ -286,7 +290,7 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
               ...(measurementRangeUnits[kind] ? [{ title: 'Measurement range', key: 'range', width: 180, responsive: ['sm' as const], render: (_: unknown, row: Equipment) => {
                 const spec = JSON.parse(row.specification_json || '{}') as EquipmentSpecifications;
                 return spec.measurement_min != null && spec.measurement_max != null
-                  ? `${spec.measurement_min}–${spec.measurement_max} ${spec.measurement_unit || ''}` : '';
+                  ? rangeLabel(spec.measurement_min, spec.measurement_max, spec.measurement_unit) : '';
               } }] : [])]} />
         </section> : null;
       })}</section>)}</div>}
@@ -313,7 +317,7 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit boil heat loss" onClick={() => setNewBoilCalibration(true)} /></div>}
           {ratedEstimate != null && <div className="equipment-parameter">Estimated boil-off at rated power: {Number(ratedEstimate.toFixed(2))} L/h</div>}
           {measurementRangeUnits[item.kind] && <div className="equipment-parameter"><span>Measurement range: {specs.measurement_min != null && specs.measurement_max != null
-            ? `${specs.measurement_min}–${specs.measurement_max} ${specs.measurement_unit}` : 'Not set'}</span>
+            ? rangeLabel(specs.measurement_min, specs.measurement_max, specs.measurement_unit) : 'Not set'}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit measurement range" onClick={() => setEditRange(true)} /></div>}
           {profile?.fields.map(field => <div key={field.key} className="equipment-parameter"><span>{field.label}: {specs.current_calibration?.[field.key] ?? 'Not calibrated'}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${field.label}`} onClick={() => setEditCalibration(true)} /></div>)}
@@ -359,8 +363,8 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
         {measurementRangeUnits[creatingKind] && <div className="form-triple">
           <Form.Item name="measurement_min" label="Range minimum"><InputNumber className="full-width" step="any" /></Form.Item>
           <Form.Item name="measurement_max" label="Range maximum"><InputNumber className="full-width" step="any" /></Form.Item>
-          <Form.Item name="measurement_unit" label="Unit">
-            <Select options={measurementRangeUnits[creatingKind].map(value => ({ value, label: value }))}
+          <Form.Item name="measurement_unit" label="Scale">
+            <Select options={unitOptions(measurementRangeUnits[creatingKind])}
               onChange={unit => changeNumberUnit(equipmentForm, ['measurement_min', 'measurement_max'],
                 newRangeUnit || measurementRangeUnits[creatingKind][0], unit)} /></Form.Item>
         </div>}
@@ -409,7 +413,7 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
         measurement_unit: specs.measurement_unit || (item && measurementRangeUnits[item.kind]?.[0]) }}>
         <div className="form-triple"><Form.Item name="measurement_min" label="Range minimum"><InputNumber className="full-width" step="any" /></Form.Item>
           <Form.Item name="measurement_max" label="Range maximum"><InputNumber className="full-width" step="any" /></Form.Item>
-          <Form.Item name="measurement_unit" label="Unit"><Select options={(item && measurementRangeUnits[item.kind] || []).map(value => ({ value, label: value }))}
+          <Form.Item name="measurement_unit" label="Scale"><Select options={unitOptions(item && measurementRangeUnits[item.kind] || [])}
             onChange={unit => changeNumberUnit(rangeForm, ['measurement_min', 'measurement_max'], editRangeUnit, unit)} /></Form.Item></div>
         <Button type="primary" htmlType="submit">Save range</Button>
       </Form>

@@ -75,7 +75,8 @@ export function planDetailsLabel(plan: Pick<Plan, 'event_type'> & { title?: stri
   const destinationName = () => equipmentNames.get(String(details.to_vessel_id))
     || String(details.to_vessel_name || 'Archived vessel');
   const amount = typeof details.quantity === 'number' ? formatQuantity(details.quantity, String(details.unit || ''), String(details.display_unit || '')) : '';
-  const target = details.target_value != null ? `${details.target_value} ${details.target_unit || ''}`.trim() : '';
+  const target = details.target_value != null
+    ? `${details.target_value}${details.measurement_kind === 'gravity' && details.target_unit === 'SG' ? '' : ` ${details.target_unit || ''}`}`.trim() : '';
   const duration = supportsDuration(plan.event_type, String(details.phase || '')) && typeof details.duration_seconds === 'number' && details.duration_seconds > 0
     ? `For ${formatOffset(details.duration_seconds)}` : '';
   const parts = plan.event_type === 'addition' ? [amount, details.item_name === plan.title ? '' : details.item_name]

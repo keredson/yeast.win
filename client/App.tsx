@@ -270,8 +270,10 @@ export function App() {
     }
     if (route.section !== 'me' && route.selectedId) {
       const name = route.section;
-      next[name] = [route.selectedId, ...next[name].filter(id => id !== route.selectedId)].slice(0, 5);
-      localStorage.setItem(`brewlog:recent:${workspaceId}:${name}`, JSON.stringify(next[name]));
+      if (name !== 'recipes' || !next[name].includes(route.selectedId)) {
+        next[name] = [route.selectedId, ...next[name].filter(id => id !== route.selectedId)].slice(0, 5);
+        localStorage.setItem(`brewlog:recent:${workspaceId}:${name}`, JSON.stringify(next[name]));
+      }
     }
     setRecent(next);
   }, [workspaceId, route]);

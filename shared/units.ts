@@ -15,10 +15,12 @@ export const unitGroups = {
   mass: ['g', 'kg', 'oz', 'lb'],
   pressure: ['kPa', 'psi'],
   count: ['each', 'packet', 'vial', 'can', 'bottle'],
-  gravity: ['SG', '°Brix', '°Plato'],
   carbonation: ['vol CO₂', 'g/L'],
   dissolved_oxygen: ['mg/L', 'ppm']
 } as const;
+
+// Specific gravity is a density ratio, so these are gravity scales rather than units.
+export const gravityScales = ['SG', '°Brix', '°Plato'] as const;
 
 export const compoundMassUnit = 'lb + oz' as const;
 export const massInputUnits = [...unitGroups.mass, compoundMassUnit];
@@ -91,7 +93,7 @@ export function convertUnit(value: number, from: string, to: string, delta = fal
 }
 
 export function unitOptions(units: readonly string[]) {
-  return units.map(value => ({ value, label: value }));
+  return units.map(value => ({ value, label: value === 'SG' ? 'Specific gravity (unitless)' : value }));
 }
 
 export function validPreferredUnits(input: unknown): input is PreferredUnits {

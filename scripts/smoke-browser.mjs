@@ -492,6 +492,23 @@ try {
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke fermenter' }).click();
   await transferPlan.getByRole('button', { name: 'Save event' }).click();
   await page.locator('.plan-card').filter({ hasText: 'Transfer to fermenter' }).getByText('To Smoke fermenter').waitFor();
+  await page.getByRole('button', { name: 'Edit planned event Measure original specific gravity' }).click();
+  const gravityPlan = page.getByRole('dialog', { name: 'Edit gravity measurement' });
+  await gravityPlan.waitFor();
+  if (!await gravityPlan.getByRole('combobox', { name: 'Scale' }).locator('..').getByText('Specific gravity (unitless)').count()
+    || !await gravityPlan.getByRole('combobox', { name: 'Timing' }).locator('..').getByText('At or after Transfer to fermenter').count()) {
+    throw new Error('Beer template should measure unitless original specific gravity after transfer');
+  }
+  const gravityOffset = gravityPlan.getByRole('spinbutton', { name: 'Time offset' });
+  if (await gravityOffset.inputValue() || await gravityPlan.getByRole('combobox', { name: 'Unit' }).inputValue()) {
+    throw new Error('Gravity measurement should start without a time offset or time unit');
+  }
+  await gravityOffset.fill('5');
+  await gravityPlan.getByRole('button', { name: 'Save event' }).click();
+  await gravityPlan.locator('.ant-form-item-explain-error').waitFor();
+  await gravityOffset.fill('');
+  await gravityPlan.getByRole('button', { name: 'Save event' }).click();
+  await gravityPlan.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
   await page.locator('.timeline-group').filter({ has: page.getByRole('button', { name: 'Edit planned event Package batch' }) })
     .locator('xpath=preceding-sibling::*[1]').getByText('21 days', { exact: true }).waitFor();
@@ -995,6 +1012,13 @@ try {
     await dialog.getByRole('combobox', { name: 'Type' }).click();
     await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: type }).click();
     await dialog.getByRole('button', { name: 'Create recipe' }).click();
+    await page.getByRole('button', { name: 'Edit planned event Measure original specific gravity' }).click();
+    const gravityPlan = page.getByRole('dialog', { name: 'Edit gravity measurement' });
+    await gravityPlan.waitFor();
+    if (!await gravityPlan.getByRole('combobox', { name: 'Scale' }).locator('..').getByText('Specific gravity (unitless)').count()) {
+      throw new Error(`${type} template should include a unitless original specific gravity measurement`);
+    }
+    await gravityPlan.locator('.ant-modal-close').click();
     await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
     await page.getByRole('button', { name: 'Edit planned event Package batch' }).click();
     const packaging = page.getByRole('dialog', { name: 'Edit Package batch' });
