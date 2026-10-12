@@ -256,6 +256,9 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
         { value: `after:start:${anchor.id}`, label: `At or after start of ${anchor.title}` },
         { value: `before:end:${anchor.id}`, label: `Before end of ${anchor.title}` },
         { value: `after:end:${anchor.id}`, label: `At or after end of ${anchor.title}` }
+      ] : parsePlanDetails(anchor.details_json).phase === 'chill' ? [
+        { value: `before:start:${anchor.id}`, label: `Before ${anchor.title} · ${kindLabel(anchor.event_type)}` },
+        { value: `after:end:${anchor.id}`, label: `After ${anchor.title}` }
       ] : [
         { value: `before:start:${anchor.id}`, label: `Before ${anchor.title} · ${kindLabel(anchor.event_type)}` },
         { value: `after:start:${anchor.id}`, label: `At or after ${anchor.title} · ${kindLabel(anchor.event_type)}` }

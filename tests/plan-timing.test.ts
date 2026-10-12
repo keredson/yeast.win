@@ -53,3 +53,16 @@ test('packaging does not become a range even if old plan details contain a durat
   assert.equal(planDuration({ ...packaging, event_type: 'temperature_control',
     details_json: JSON.stringify({ phase: 'chill', duration_seconds: 3600 }) }), 0);
 });
+
+test('pitching after chill follows the chill completion point', () => {
+  const start = 1_800_000_000;
+  const chill: Plan = { id: 'chill', batch_id: 'batch', title: 'Chill', event_type: 'temperature_control',
+    planned_at: null, anchor_event_id: null, offset_seconds: 600,
+    details_json: JSON.stringify({ phase: 'chill' }), actual_at: null, skipped_at: null, note: null, source_id: null };
+  const pitch: Plan = { ...chill, id: 'pitch', title: 'Pitch yeast', event_type: 'addition',
+    anchor_event_id: 'chill', offset_seconds: 0, details_json: JSON.stringify({ anchor_point: 'end' }) };
+  assert.equal(planTimingLabel(pitch, [chill, pitch]), 'After Chill');
+  assert.equal(effectivePlanTime(pitch, [chill, pitch], [], start), start + 600);
+  const recordedChill = { ...chill, actual_at: start + 900 };
+  assert.equal(effectivePlanTime(pitch, [chill, pitch], [recordedChill], start), start + 900);
+});

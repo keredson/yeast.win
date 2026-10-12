@@ -191,8 +191,8 @@ export async function createRecipe(db: DB, name: string, description: string, re
     await insert(gravityId, 'measurement', 'Measure original specific gravity', recipeType === 'beer' ? transferId : null,
       { measurement_kind: 'gravity', target_unit: 'SG' }, recipeType === 'beer' ? 5 : 1);
     const pitchId = nanoid();
-    await insert(pitchId, 'addition', 'Pitch yeast', gravityId,
-      { item_category: 'Yeast', item_name: 'Yeast' }, recipeType === 'beer' ? 6 : 2);
+    await insert(pitchId, 'addition', 'Pitch yeast', recipeType === 'beer' ? chillId : gravityId,
+      { item_category: 'Yeast', item_name: 'Yeast', ...(recipeType === 'beer' ? { anchor_point: 'end' } : {}) }, recipeType === 'beer' ? 6 : 2);
     const packagingDays: Record<RecipeType, number> = { beer: 21, cider: 28, wine: 60, mead: 60 };
     await insert(nanoid(), 'packaging', 'Package batch', pitchId,
       {}, recipeType === 'beer' ? 7 : 3, packagingDays[recipeType] * 86400);

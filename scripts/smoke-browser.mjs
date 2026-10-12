@@ -510,6 +510,13 @@ try {
   await gravityPlan.getByRole('button', { name: 'Save event' }).click();
   await gravityPlan.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
+  await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).click();
+  const pitchPlan = page.getByRole('dialog', { name: 'Edit Pitch yeast' });
+  await pitchPlan.waitFor();
+  if (!await pitchPlan.getByRole('combobox', { name: 'Timing' }).locator('..').getByText('After Chill').count()) {
+    throw new Error('Beer template should pitch yeast at the end of Chill');
+  }
+  await pitchPlan.locator('.ant-modal-close').click();
   await page.locator('.timeline-group').filter({ has: page.getByRole('button', { name: 'Edit planned event Package batch' }) })
     .locator('xpath=preceding-sibling::*[1]').getByText('21 days', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Package batch' }).click();
