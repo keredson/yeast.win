@@ -1,12 +1,15 @@
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { nanoid } from 'nanoid';
 import { indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion } from '../shared/schema.ts';
 
-if (existsSync('.env')) process.loadEnvFile('.env');
-export const dataDir = resolve(process.env.BREWLOG_DATA_DIR || './data');
-const extensionPath = resolve('vendor/crsqlite.so');
+export const projectRoot = fileURLToPath(new URL('..', import.meta.url));
+const envPath = resolve(projectRoot, '.env');
+if (existsSync(envPath)) process.loadEnvFile(envPath);
+export const dataDir = resolve(projectRoot, process.env.BREWLOG_DATA_DIR || './data');
+const extensionPath = resolve(projectRoot, 'vendor/crsqlite.so');
 mkdirSync(dataDir, { recursive: true });
 
 export function assertCrSqliteAvailable(): void {

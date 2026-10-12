@@ -4,7 +4,7 @@ import { resolve, extname, sep } from 'node:path';
 import type Database from 'better-sqlite3';
 import { accountForToken, changePassword, clearSessionCookie, getAvatar, getPreferredUnits, login, logout,
   readSessionCookie, register, saveAvatar, savePreferredUnits, sessionCookie } from './auth.ts';
-import { assertCrSqliteAvailable, closeWorkspaceDb, createWorkspace, dataDir, deleteWorkspace, openAuthDb, openWorkspaceDb, updateWorkspace } from './db.ts';
+import { assertCrSqliteAvailable, closeWorkspaceDb, createWorkspace, dataDir, deleteWorkspace, openAuthDb, openWorkspaceDb, projectRoot, updateWorkspace } from './db.ts';
 import { catalogSnapshot, openCatalogDb } from './catalog.ts';
 import { syncWorkspace, validateSyncRequest } from './sync.ts';
 import { isValidId } from '../shared/schema.ts';
@@ -14,7 +14,7 @@ assertCrSqliteAvailable();
 const authDb = openAuthDb();
 const catalogDb = openCatalogDb(dataDir);
 const workspaceDbs = new Map<string, Database.Database>();
-const distDir = resolve('dist');
+const distDir = resolve(projectRoot, 'dist');
 const port = Number(process.env.BREWLOG_PORT || 3001);
 const loginFailures = new Map<string, { count: number; resetAt: number }>();
 const registrationAttempts = new Map<string, { count: number; resetAt: number }>();
