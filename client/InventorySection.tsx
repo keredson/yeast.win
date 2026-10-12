@@ -115,8 +115,10 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
       const starting = quantityForStorage(values.default_unit, values.starting_quantity, values.pounds, values.ounces);
       const locationId = !values.location_id || values.location_id === unspecifiedLocation ? null : values.location_id;
       const match = stockAtLocation(items, values.name, values.category, locationId);
+      if (items.some(row => row.category === values.category && row.name.trim().toLocaleLowerCase() === values.name.trim().toLocaleLowerCase())
+        && (!starting || starting.quantity <= 0)) throw new Error('Enter a positive quantity to add this existing item');
       if (match) {
-        if (!starting || starting.quantity <= 0) throw new Error('Enter a quantity to add to this existing item');
+        if (!starting) throw new Error('Enter a quantity');
         if (convertInventoryUnit(starting.quantity, starting.unit, match.default_unit) == null) throw new Error('Choose a unit compatible with the existing item');
         await addInventoryEntry(db, match.id, 'purchase', starting.quantity, starting.unit, accountId);
       } else {
@@ -239,7 +241,7 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
         <Form.Item name="default_unit" label="Unit" rules={[{ required: true }]}>
           <Select showSearch options={unitOptions(quantityUnitsForCategory(newItemCategory || 'Other'))}
             onChange={unit => { changeQuantityUnit(itemForm, previousItemUnit.current, unit, 'starting_quantity'); previousItemUnit.current = unit; }} /></Form.Item>
-        <QuantityFields unit={newItemUnit} label="Starting quantity on hand" name="starting_quantity" optional />
+        <QuantityFields unit={newItemUnit} label="Starting quantity on hand" name="starting_quantity" optional={!existingItem} />
         {existingAtLocation && <p className="muted">This item is already at this location. The quantity will be recorded as a purchase.</p>}
         {existingItem && !existingAtLocation && <p className="muted">This creates another stock row for the selected location.</p>}
         <Button type="primary" htmlType="submit">{existingAtLocation ? 'Add stock' : 'Create item'}</Button>

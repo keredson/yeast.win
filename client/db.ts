@@ -607,6 +607,8 @@ export async function createInventoryItem(db: DB, name: string, category: string
   locationId: string | null = null): Promise<string> {
   const items = await listInventory(db);
   if (stockAtLocation(items, name, category, locationId)) throw new Error('This item already exists at that location');
+  if (items.some(item => sameInventoryProduct(item, name, category)) && (!startingQuantity || startingQuantity <= 0))
+    throw new Error('Enter a positive quantity to add this existing item');
   if (locationId && !(await listInventoryLocations(db)).some(location => location.id === locationId)) throw new Error('Location not found');
   const id = nanoid();
   const now = nowSeconds();
