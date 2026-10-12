@@ -115,7 +115,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
         </a>)}</div>}
     </section> : !recipe ? <Empty description="Recipe not found" /> : <section className="record-detail">
         <div className="content-heading"><div className="recipe-detail-heading"><RecipeTypeIcon type={recipe.recipe_type} large />
-          <div><span className="eyebrow">Recipe plan · {recipe.recipe_type || 'Unspecified'}</span><h2>{recipe.name}</h2>
+          <div><h2>{recipe.name}</h2>
             <p className="muted">{recipe.description}</p></div></div>
           <div className="heading-actions"><Button type="primary" onClick={() => setNewBatch(true)}>Start batch</Button>
             <Button type="text" shape="circle" icon={<SettingOutlined />} aria-label="Recipe settings"

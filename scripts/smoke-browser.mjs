@@ -385,20 +385,25 @@ try {
   await page.getByRole('button', { name: 'Edit planned event Transfer to fermenter' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Transfer to fermenter' }).click();
   const transferPlan = page.getByRole('dialog', { name: 'Edit Transfer to fermenter' });
-  await transferPlan.getByRole('combobox', { name: 'From vessel (optional)' }).click();
+  if (await transferPlan.getByRole('combobox', { name: /From vessel/ }).count()
+    || await transferPlan.getByRole('spinbutton', { name: 'Duration (optional)' }).count()) {
+    throw new Error('Transfer plan still asks for a source vessel or duration');
+  }
+  await transferPlan.getByRole('combobox', { name: 'To vessel (optional)' }).click();
   if (await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke chiller' }).count()) {
     throw new Error('Transfer plan offered a chiller as a vessel');
   }
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke kettle' }).click();
-  await transferPlan.getByRole('combobox', { name: 'To vessel (optional)' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke fermenter' }).last().click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke fermenter' }).click();
   await transferPlan.getByRole('button', { name: 'Save event' }).click();
-  await page.locator('.plan-card').filter({ hasText: 'Transfer to fermenter' }).getByText('Smoke kettle → Smoke fermenter').waitFor();
+  await page.locator('.plan-card').filter({ hasText: 'Transfer to fermenter' }).getByText('To Smoke fermenter').waitFor();
   await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Package batch' }).click();
   const beerPackaging = page.getByRole('dialog', { name: 'Edit Package batch' });
   if (await beerPackaging.getByRole('textbox', { name: 'Container' }).inputValue()) {
     throw new Error('New recipe chose a packaging container in advance');
+  }
+  if (await beerPackaging.getByRole('spinbutton', { name: 'Duration (optional)' }).count()) {
+    throw new Error('Packaging plan still has a duration');
   }
   if (Number(await beerPackaging.getByRole('spinbutton', { name: 'Time offset' }).inputValue()) !== 21
     || !await beerPackaging.getByRole('combobox', { name: 'Timing' }).locator('..').getByText('At or after Pitch yeast').count()) {
@@ -458,11 +463,14 @@ try {
   await page.locator('.plan-card').getByText('2-row pale malt extra').waitFor();
   await page.getByRole('button', { name: 'Record Transfer to fermenter' }).click();
   const recordTransfer = page.getByRole('dialog', { name: 'Record: Transfer to fermenter' });
-  await recordTransfer.getByRole('combobox', { name: 'From vessel' }).locator('..').getByText('Smoke kettle').waitFor();
+  if (await recordTransfer.getByRole('combobox', { name: 'From vessel' }).count()
+    || await recordTransfer.getByLabel('Ended (optional)').count()) {
+    throw new Error('Transfer recording still asks for a source vessel or end time');
+  }
   await recordTransfer.getByRole('combobox', { name: 'To vessel' }).locator('..').getByText('Smoke fermenter').waitFor();
   await recordTransfer.getByRole('button', { name: 'Save event' }).click();
   await recordTransfer.waitFor({ state: 'hidden' });
-  await page.locator('.plan-card').filter({ hasText: 'Transfer to fermenter' }).getByText('Smoke kettle → Smoke fermenter').waitFor();
+  await page.locator('.plan-card').filter({ hasText: 'Transfer to fermenter' }).getByText('To Smoke fermenter').waitFor();
   await page.locator('.plan-card').filter({ hasText: 'Package batch' }).getByText('21 days after Pitch yeast').waitFor();
   await page.getByRole('button', { name: 'Record Package batch' }).click();
   const recordPackaging = page.getByRole('dialog', { name: 'Record: Package batch' });
@@ -506,7 +514,7 @@ try {
   await recipeSettings.waitFor({ state: 'hidden' });
   await page.getByRole('heading', { name: 'Smoke recipe revised' }).waitFor();
   await page.getByText('Edited recipe description').waitFor();
-  await page.getByText('Recipe plan · wine').waitFor();
+  if (await page.getByText('Recipe plan · wine').count()) throw new Error('Recipe header still repeats its type');
   await page.locator('.recipe-detail-heading .recipe-type-icon[data-recipe-type="wine"]').waitFor();
   await page.getByRole('button', { name: 'Recipe settings' }).click();
   await recipeSettings.getByRole('button', { name: 'Delete recipe' }).click();

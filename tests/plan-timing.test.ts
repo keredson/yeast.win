@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { effectivePlanTime, planTimingLabel } from '../client/planTiming.ts';
+import { effectivePlanTime, planDuration, planTimingLabel } from '../client/planTiming.ts';
 import type { Plan } from '../client/db.ts';
 
 test('plans use batch start and an actual anchor when it arrives', () => {
@@ -42,4 +42,12 @@ test('a timed process exposes separate start and end anchors', () => {
   const recorded = plans.map(plan => plan.id === 'boil' ? { ...plan, actual_at: start + 900, ended_at: start + 4500 } : plan);
   assert.equal(effectivePlanTime(hops, recorded, recorded, start), start + 900);
   assert.equal(effectivePlanTime(yeast, recorded, recorded, start), start + 4500);
+});
+
+test('packaging does not become a range even if old plan details contain a duration', () => {
+  const packaging: Plan = { id: 'package', batch_id: 'batch', title: 'Package batch', event_type: 'packaging',
+    planned_at: null, anchor_event_id: null, offset_seconds: 0,
+    details_json: JSON.stringify({ duration_seconds: 3600 }), actual_at: null, skipped_at: null, note: null, source_id: null };
+  assert.equal(planDuration(packaging), 0);
+  assert.equal(planDuration({ ...packaging, event_type: 'pressure_control' }), 3600);
 });

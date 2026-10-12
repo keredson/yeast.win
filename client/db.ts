@@ -394,6 +394,7 @@ export async function updateEvent(db: DB, event: ActualEvent, input: EventInput)
     const columns = Object.keys(input.payload);
     await tx.exec(`UPDATE ${table} SET ${columns.map(column => `${column} = ?`).join(', ')} WHERE event_id = ?`,
       [...Object.values(input.payload), event.id]);
+    if (input.eventType === 'transfer') await tx.exec('UPDATE transfers SET from_vessel_id = NULL WHERE event_id = ?', [event.id]);
   });
 }
 
@@ -404,12 +405,13 @@ async function updateEventDetails(db: Pick<DB, 'execO' | 'exec'>, id: string, pa
     if (key !== 'event_id') details[key] = value;
   }
   if (rows[0]?.event_type === 'transfer') {
-    for (const field of ['from_vessel_id', 'to_vessel_id']) {
-      const equipmentId = payload[field];
-      const nameField = field.replace('_id', '_name');
-      if (typeof equipmentId !== 'string') { delete details[nameField]; continue; }
+    delete details.from_vessel_id;
+    delete details.from_vessel_name;
+    const equipmentId = payload.to_vessel_id;
+    if (typeof equipmentId !== 'string') delete details.to_vessel_name;
+    else {
       const equipment = await db.execO<{ name: string }>('SELECT name FROM equipment WHERE id = ?', [equipmentId]);
-      if (equipment.length) details[nameField] = equipment[0].name;
+      if (equipment.length) details.to_vessel_name = equipment[0].name;
     }
   }
   if (endedAt != null) delete details.duration_seconds;
