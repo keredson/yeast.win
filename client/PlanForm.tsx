@@ -23,7 +23,7 @@ const titleLabels: Record<string, string> = {
   measurement: 'What will be measured?',
   temperature_control: 'Temperature action', pressure_control: 'Pressure action',
   transfer: 'Transfer', packaging: 'Packaging action', boil_finished: 'Milestone',
-  photo: 'Photo reminder', note: 'Reminder'
+  photo: 'Description (optional)', note: 'Reminder'
 };
 
 interface Values {
@@ -94,6 +94,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
   async function save(values: Values) {
     try {
       setBusy(true); setError('');
+      const title = values.title?.trim() || (kind === 'photo' ? 'Photo' : '');
       const unit = timeUnits.find(item => item.value === values.offset_unit);
       if (!unit || !Number.isFinite(values.offset_value) || values.offset_value < 0) throw new Error('Choose a valid time offset');
       const [direction, point, anchorId] = values.timing_key === 'start' ? ['start', 'start', null] : values.timing_key.split(':', 3);
@@ -127,7 +128,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
         }
       }
       if (kind === 'addition') {
-        details.item_name = values.title.trim();
+        details.item_name = title;
         const amount = quantityForStorage(values.unit || '', values.quantity, values.pounds, values.ounces);
         if (amount) {
           if (!values.unit) throw new Error('Choose a unit');
@@ -135,13 +136,13 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
           details.unit = amount.unit;
           if (values.unit === compoundMassUnit) details.display_unit = compoundMassUnit;
         }
-        const owned = inventory.find(item => item.category === values.item_category && item.name.toLowerCase() === values.title.trim().toLowerCase());
-        const known = catalog.find(item => item.category === values.item_category && item.name.toLowerCase() === values.title.trim().toLowerCase());
+        const owned = inventory.find(item => item.category === values.item_category && item.name.toLowerCase() === title.toLowerCase());
+        const known = catalog.find(item => item.category === values.item_category && item.name.toLowerCase() === title.toLowerCase());
         if (owned) details.inventory_item_id = owned.id;
         else if (known) details.catalog_item_id = known.id;
       }
       await submit({
-        title: values.title.trim(), event_type: kind,
+        title, event_type: kind,
         planned_at: null, anchor_event_id: anchorId,
         offset_seconds: Math.round(values.offset_value * unit.multiplier) * (direction === 'before' ? -1 : 1),
         details_json: Object.keys(details).length ? JSON.stringify(details) : null
@@ -199,8 +200,9 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
         onChange={changeMainUnit} /></Form.Item>
       <QuantityFields unit={selectedUnit || initialUnit} label="Quantity" optional />
     </>}
-    {kind !== 'addition' && <Form.Item name="title" label={titleLabels[kind] || 'Action title'} rules={[{ required: true }]}>
-      <Input placeholder={`Describe the ${kindLabel(kind).toLowerCase()}`} maxLength={120} />
+    {kind !== 'addition' && <Form.Item name="title" label={titleLabels[kind] || 'Action title'}
+      rules={kind === 'photo' ? [] : [{ required: true }]}>
+      <Input placeholder={kind === 'photo' ? 'What should you photograph?' : `Describe the ${kindLabel(kind).toLowerCase()}`} maxLength={120} />
     </Form.Item>}
     {kind === 'measurement' && <>
       {!lockedMeasurementKind && <Form.Item name="measurement_kind" label="Measurement"><Select options={measurementKinds.map(item => ({ value: item.value, label: item.label }))}
