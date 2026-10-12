@@ -138,7 +138,7 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
     {!selectedId ? <section className="record-index equipment-index"><div className="section-heading"><div><span className="eyebrow">Your gear</span><h1>Equipment</h1></div>
       <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New equipment" title="New equipment" onClick={() => setNewEquipment(true)} /></div>
       <p className="muted">Measurements and control settings can reference a specific item.</p>
-      {equipment.length ? <div className="group-tables">{kinds.map(kind => {
+      {equipment.length > 0 && <div className="group-tables">{kinds.map(kind => {
         const rows = equipment.filter(row => row.kind === kind);
         return rows.length ? <section key={kind} className="group-table"><h2>{equipmentKindLabel(kind)}</h2>
           <Table<Equipment> dataSource={rows} rowKey="id" pagination={false} size="small"
@@ -152,7 +152,7 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
                   ? `${spec.measurement_min}–${spec.measurement_max} ${spec.measurement_unit || ''}` : '';
               } }] : [])]} />
         </section> : null;
-      })}</div> : <Empty description="No equipment yet" />}
+      })}</div>}
     </section> : !item ? <Empty description="Equipment not found" /> : <section className="record-detail">
         <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(item.kind)}</span><h2>{item.name}</h2></div>
           <div className="heading-actions"><Dropdown menu={{ items: [
@@ -168,11 +168,11 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
           {specs.working_volume_liters != null && ` · Brewing volume: ${capacityLabel(specs.working_volume_liters)}`}</p>}
         {measurementRangeUnits[item.kind] && specs.measurement_min != null && specs.measurement_max != null &&
           <p className="muted">Measurement range: {specs.measurement_min}–{specs.measurement_max} {specs.measurement_unit}</p>}
-        <h3>{profile ? 'Calibration history' : 'Equipment details'}</h3>
-        <div className="card-stack">{calibrations.length ? calibrations.map(row => <Card key={row.id} size="small">
+        {calibrations.length > 0 && <><h3>Calibration history</h3>
+        <div className="card-stack">{calibrations.map(row => <Card key={row.id} size="small">
           <div className="timeline-card"><div><strong>{row.method}</strong><div className="muted">{formatTime(row.effective_at)}</div></div><Tag>Immutable</Tag></div>
           <pre className="calibration-data">{row.parameters_json}</pre>
-        </Card>) : <Card><Empty description={profile ? 'No calibrations yet' : 'This equipment type does not use measurement calibration'} /></Card>}</div>
+        </Card>)}</div></>}
       </section>}
     <Modal title="New equipment" open={newEquipment} onCancel={() => setNewEquipment(false)} footer={null} destroyOnHidden>
       <Form form={equipmentForm} layout="vertical" onFinish={create} initialValues={{ capacity_unit: 'L' }}>

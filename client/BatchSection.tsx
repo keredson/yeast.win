@@ -87,7 +87,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
       <div className="section-heading"><div><span className="eyebrow">Your brewing record</span><h1>Batches</h1></div>
         <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New batch" title="New batch" onClick={() => setNewBatch(true)} /></div>
       <p className="muted">Actions and readings, all around the batch.</p>
-      {batches.length === 0 ? <Empty description="No batches yet" /> : <div className="record-list">{batches.map(item =>
+      {batches.length > 0 && <div className="record-list">{batches.map(item =>
         <a key={item.id} className="record-link" href={`${basePath}/batch/${item.id}`}
           onClick={event => { event.preventDefault(); onSelect(item.id); }}>
           <strong>{item.name}</strong><small>{item.description || formatTime(item.created_at)}</small>

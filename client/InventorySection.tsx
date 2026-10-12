@@ -181,7 +181,7 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
     {!selectedId ? <section className="record-index"><div className="section-heading"><div><span className="eyebrow">Stock ledger</span><h1>Inventory</h1></div>
       <Button onClick={() => setLocationsOpen(true)}>Manage locations</Button></div>
       <p className="muted">Purchases, uses from batches, and physical counts.</p>
-      {items.length ? <div className="group-tables">{categories.map(category => {
+      {items.length > 0 && <div className="group-tables">{categories.map(category => {
         const rows = items.filter(row => row.category === category);
         return rows.length ? <section key={category} className="group-table"><div className="group-table-heading"><h2>{category}</h2>
           <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label={`Add ${category.toLowerCase()}`} title={`Add ${category.toLowerCase()}`}
@@ -199,7 +199,7 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
                 onClick: ({ key }) => key === 'move' ? setMoveItemId(row.id) : void openEntry(row, key as 'purchase' | 'count' | 'discard') }}>
               <Button type="text" shape="circle" icon={<MoreOutlined />} aria-label={`Actions for ${row.name}`} />
             </Dropdown> }]} /></section> : null;
-      })}</div> : <Empty description="No inventory items" />}
+      })}</div>}
       {missingCategories.length > 0 && <p className="inventory-add-types">Add {missingCategories.map((category, index) =>
         <span key={category}>{index > 0 && (index === missingCategories.length - 1 ? missingCategories.length === 2 ? ' or ' : ', or ' : ', ')}
           <a href={`${basePath}/inventory`} onClick={event => { event.preventDefault(); openCreate(category); }}>{category.toLowerCase()}</a></span>)}.</p>}
@@ -211,13 +211,13 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
             <Button onClick={() => void openEntry(item, 'discard')}>Discard</Button>
             <Button onClick={() => setMoveItemId(item.id)}>Move stock</Button>
             <Button type="primary" onClick={() => void openEntry(item, 'count')}>Count stock</Button></div></div>
-        <h3>Stock history</h3>
+        {movements.length > 0 && <><h3>Stock history</h3>
         <Table<InventoryMovement> className="inventory-history" dataSource={movements} rowKey={row => `${row.kind}-${row.id}`}
-          pagination={false} size="small" scroll={{ x: 480 }} locale={{ emptyText: 'No stock history yet' }}
+          pagination={false} size="small" scroll={{ x: 480 }}
           columns={[{ title: 'When', dataIndex: 'at', width: 190, render: at => formatTime(at) },
             { title: 'Activity', dataIndex: 'kind', width: 120 },
             { title: 'Quantity', key: 'quantity', align: 'right', render: (_, row) =>
-              `${row.kind === 'Purchased' || row.kind === 'Moved in' ? '+' : row.kind === 'Used' || row.kind === 'Discarded' || row.kind === 'Moved out' ? '−' : 'Set to '}${formatQuantity(row.quantity, row.unit, itemDisplayUnit)}` }]} />
+              `${row.kind === 'Purchased' || row.kind === 'Moved in' ? '+' : row.kind === 'Used' || row.kind === 'Discarded' || row.kind === 'Moved out' ? '−' : 'Set to '}${formatQuantity(row.quantity, row.unit, itemDisplayUnit)}` }]} /></>}
       </section>}
     <Modal title={newItemCategory ? `New ${newItemCategory.toLowerCase()} item` : 'New inventory item'} open={!!newItemCategory}
       onCancel={() => setNewItemCategory(null)} footer={null} destroyOnHidden>
@@ -266,12 +266,12 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
     <Modal title="Inventory locations" open={locationsOpen} onCancel={() => { setLocationsOpen(false); setLocationReturn(null); }} footer={null} width={620}>
       {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
       <p className="muted">Create a room, shelf, or building at any level. A parent is optional.</p>
-      <Table<InventoryLocation> dataSource={locationTree(locations)} rowKey="id" size="small" pagination={false}
-        expandable={{ expandedRowKeys: locations.map(location => location.id) }} locale={{ emptyText: 'No locations yet' }}
+      {locations.length > 0 && <Table<InventoryLocation> dataSource={locationTree(locations)} rowKey="id" size="small" pagination={false}
+        expandable={{ expandedRowKeys: locations.map(location => location.id) }}
         columns={[{ title: 'Location', dataIndex: 'name' },
           { title: '', width: 155, render: (_, row) => <><Button type="link" onClick={() => { setLocationEditing(row.id);
             locationForm.setFieldsValue({ name: row.name, parent_id: row.parent_id || unspecifiedLocation }); }}>Edit</Button>
-            <Button type="link" danger onClick={() => void removeLocation(row.id)}>Delete</Button></> }]} />
+            <Button type="link" danger onClick={() => void removeLocation(row.id)}>Delete</Button></> }]} />}
       <h3>{locationEditing ? 'Edit location' : 'New location'}</h3>
       <Form form={locationForm} layout="vertical" onFinish={saveLocation}>
         <Form.Item name="name" label="Name" rules={[{ required: true, whitespace: true }]}><Input maxLength={100} placeholder="Back room" /></Form.Item>
