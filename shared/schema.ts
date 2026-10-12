@@ -29,6 +29,7 @@ const definitions: Record<string, string> = {
   inventory_item_specs: `id TEXT PRIMARY KEY NOT NULL, inventory_item_id TEXT NOT NULL, capacity_liters REAL`,
   inventory_purchases: `id TEXT PRIMARY KEY NOT NULL, inventory_item_id TEXT NOT NULL, quantity REAL NOT NULL, unit TEXT NOT NULL, purchased_at INTEGER NOT NULL, supplier TEXT, lot TEXT, cost REAL`,
   inventory_counts: `id TEXT PRIMARY KEY NOT NULL, inventory_item_id TEXT NOT NULL, quantity REAL NOT NULL, unit TEXT NOT NULL, counted_at INTEGER NOT NULL, created_by_account_id TEXT`,
+  inventory_discards: `id TEXT PRIMARY KEY NOT NULL, inventory_item_id TEXT NOT NULL, quantity REAL NOT NULL, unit TEXT NOT NULL, discarded_at INTEGER NOT NULL, created_by_account_id TEXT`,
   photos: `id TEXT PRIMARY KEY NOT NULL, batch_id TEXT, batch_event_id TEXT, inventory_item_id TEXT, mime_type TEXT NOT NULL, byte_count INTEGER NOT NULL, image BLOB NOT NULL, created_at INTEGER NOT NULL, created_by_account_id TEXT`,
   pill_bindings: `id TEXT PRIMARY KEY NOT NULL, batch_id TEXT NOT NULL, pill_id TEXT NOT NULL, valid_from INTEGER NOT NULL, valid_until INTEGER`
 };
@@ -85,7 +86,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 5;
+export const workspaceSchemaVersion = 6;
 export const workspaceV2Statements = [
   schemaStatements.find(statement => statement.includes('equipment_archives'))!
 ];
@@ -98,6 +99,9 @@ export const workspaceV4Statements = [
 export const workspaceV5Statements = [
   schemaStatements.find(statement => statement.includes('recipe_types'))!,
   schemaStatements.find(statement => statement.includes('event_ends'))!
+];
+export const workspaceV6Statements = [
+  schemaStatements.find(statement => statement.includes('inventory_discards'))!
 ];
 
 export function isValidId(value: unknown): value is string {

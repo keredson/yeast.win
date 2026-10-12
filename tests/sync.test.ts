@@ -33,6 +33,9 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
       .run(event, batchA, 'measurement', timestamp);
     first.prepare('INSERT INTO temperature_measurements(event_id, value, unit) VALUES (?, ?, ?)')
       .run(event, 20, 'degC');
+    const discardedItem = nanoid();
+    first.prepare('INSERT INTO inventory_discards(id, inventory_item_id, quantity, unit, discarded_at) VALUES (?, ?, ?, ?, ?)')
+      .run(nanoid(), discardedItem, 5, 'g', timestamp);
     const pixels = Buffer.from([0, 1, 2, 127, 254, 255]);
     first.prepare('INSERT INTO photos(id, batch_id, mime_type, byte_count, image, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run(photoId, batchA, 'image/png', pixels.length, pixels, timestamp);
@@ -45,6 +48,7 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
     const response = syncWorkspace(second, request);
     assert.equal((second.prepare('SELECT COUNT(*) AS count FROM batches').get() as { count: number }).count, 2);
     assert.equal((second.prepare('SELECT value FROM temperature_measurements WHERE event_id = ?').get(event) as { value: number }).value, 20);
+    assert.equal((second.prepare('SELECT quantity FROM inventory_discards WHERE inventory_item_id = ?').get(discardedItem) as { quantity: number }).quantity, 5);
     assert.deepEqual((second.prepare('SELECT image FROM photos WHERE id = ?').get(photoId) as { image: Buffer }).image, pixels);
 
     const apply = first.prepare(insertChange);
@@ -56,13 +60,14 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
   }
 });
 
-for (const version of [1, 2, 3, 4]) test(`existing version ${version} workspace gains replicated recipe types and event ends`, () => {
+for (const version of [1, 2, 3, 4, 5]) test(`existing version ${version} workspace gains replicated inventory discards`, () => {
   const id = nanoid();
   const file = join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`);
   const old = new Database(file);
   old.loadExtension(resolve('vendor/crsqlite.so'));
   old.exec(`CREATE TABLE schema_meta(version INTEGER NOT NULL); INSERT INTO schema_meta VALUES (${version})`);
-  const existing = replicatedTables.filter(name => !['recipe_types', 'event_ends'].includes(name)
+  const existing = replicatedTables.filter(name => name !== 'inventory_discards'
+    && (version >= 5 || !['recipe_types', 'event_ends'].includes(name))
     && (version >= 4 || name !== 'inventory_display_units')
     && (version >= 3 || name !== 'inventory_item_specs') && (version > 1 || name !== 'equipment_archives'));
   for (const statement of schemaStatements.filter(sql => existing.some(name => sql.startsWith(`CREATE TABLE IF NOT EXISTS ${name} `)))) old.exec(statement);
@@ -72,7 +77,7 @@ for (const version of [1, 2, 3, 4]) test(`existing version ${version} workspace 
 
   const migrated = openWorkspaceDb(id);
   try {
-    assert.equal((migrated.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 5);
+    assert.equal((migrated.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 6);
     migrated.prepare('INSERT INTO equipment_archives(id, equipment_id, archived_at) VALUES (?, ?, ?)')
       .run(nanoid(), nanoid(), nowSeconds());
     assert.ok((migrated.prepare("SELECT 1 FROM crsql_changes WHERE \"table\" = 'equipment_archives' LIMIT 1").get()));
@@ -86,6 +91,9 @@ for (const version of [1, 2, 3, 4]) test(`existing version ${version} workspace 
     for (const table of ['recipe_types', 'event_ends']) {
       assert.ok(migrated.prepare('SELECT 1 FROM crsql_changes WHERE "table" = ? LIMIT 1').get(table));
     }
+    migrated.prepare('INSERT INTO inventory_discards(id, inventory_item_id, quantity, unit, discarded_at) VALUES (?, ?, ?, ?, ?)')
+      .run(nanoid(), nanoid(), 2, 'g', nowSeconds());
+    assert.ok(migrated.prepare("SELECT 1 FROM crsql_changes WHERE \"table\" = 'inventory_discards' LIMIT 1").get());
   } finally {
     closeWorkspaceDb(migrated);
   }
