@@ -8,7 +8,6 @@ import { createEquipment, deleteEquipment, updateEquipmentCapacity, updateEquipm
   type Equipment, type EquipmentSpecifications, type LocalDb } from './db.ts';
 import { capacityInLiters, capacityLabel, capacityUnits } from '../shared/capacity.ts';
 import { fromDatetimeLocal, formatTime, toDatetimeLocal } from './time.ts';
-import { changeNumberUnit } from './unitFields.ts';
 
 interface Calibration { id: string; method: string; effective_at: number; parameters_json: string }
 
@@ -54,14 +53,8 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [error, setError] = useState('');
   const [equipmentForm] = Form.useForm();
-  const [capacityForm] = Form.useForm();
-  const [rangeForm] = Form.useForm();
   const item = equipment.find(row => row.id === selectedId) || null;
   const selectedKind = Form.useWatch('kind', equipmentForm) as string | undefined;
-  const newCapacityUnit = Form.useWatch('capacity_unit', equipmentForm) as string | undefined;
-  const newRangeUnit = Form.useWatch('measurement_unit', equipmentForm) as string | undefined;
-  const editCapacityUnit = Form.useWatch('capacity_unit', capacityForm) as string | undefined;
-  const editRangeUnit = Form.useWatch('measurement_unit', rangeForm) as string | undefined;
   const profile = item ? calibrationProfiles[item.kind] : undefined;
   const specs = item ? JSON.parse(item.specification_json || '{}') as EquipmentSpecifications : {};
   const kinds = [...equipmentKinds.map(row => row.value), ...equipment.map(row => row.kind).filter(kind =>
@@ -191,34 +184,29 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
                   measurement_unit: specs.measurement_unit || measurementRangeUnits[entry.kind]?.[0] }); } }} />
         </Form.Item>
         {selectedKind && capacityKinds.has(selectedKind) && <div className="capacity-fields"><Form.Item name="capacity" label="Capacity (optional)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
-          <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]}
-            onChange={unit => changeNumberUnit(equipmentForm, ['capacity'], newCapacityUnit || 'L', unit)} /></Form.Item></div>}
+          <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]} /></Form.Item></div>}
         {selectedKind && measurementRangeUnits[selectedKind] && <div className="form-triple">
           <Form.Item name="measurement_min" label="Range minimum"><InputNumber className="full-width" step="any" /></Form.Item>
           <Form.Item name="measurement_max" label="Range maximum"><InputNumber className="full-width" step="any" /></Form.Item>
           <Form.Item name="measurement_unit" label="Unit" initialValue={measurementRangeUnits[selectedKind][0]}>
-            <Select options={measurementRangeUnits[selectedKind].map(value => ({ value, label: value }))}
-              onChange={unit => changeNumberUnit(equipmentForm, ['measurement_min', 'measurement_max'],
-                newRangeUnit || measurementRangeUnits[selectedKind][0], unit)} /></Form.Item>
+            <Select options={measurementRangeUnits[selectedKind].map(value => ({ value, label: value }))} /></Form.Item>
         </div>}
         <Button type="primary" htmlType="submit">Create equipment</Button>
       </Form>
     </Modal>
     <Modal title="Set equipment capacity" open={editCapacity} onCancel={() => setEditCapacity(false)} footer={null} destroyOnHidden>
-      <Form key={item?.id} form={capacityForm} layout="vertical" onFinish={saveCapacity} initialValues={{ capacity: specs.capacity_liters, capacity_unit: 'L' }}>
+      <Form layout="vertical" onFinish={saveCapacity} initialValues={{ capacity: specs.capacity_liters, capacity_unit: 'L' }}>
         <div className="capacity-fields"><Form.Item name="capacity" label="Capacity"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
-          <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]}
-            onChange={unit => changeNumberUnit(capacityForm, ['capacity'], editCapacityUnit || 'L', unit)} /></Form.Item></div>
+          <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]} /></Form.Item></div>
         <Button type="primary" htmlType="submit">Save capacity</Button>
       </Form>
     </Modal>
     <Modal title="Set measurement range" open={editRange} onCancel={() => setEditRange(false)} footer={null} destroyOnHidden>
-      <Form key={item?.id} form={rangeForm} layout="vertical" onFinish={saveRange} initialValues={{ measurement_min: specs.measurement_min, measurement_max: specs.measurement_max,
+      <Form layout="vertical" onFinish={saveRange} initialValues={{ measurement_min: specs.measurement_min, measurement_max: specs.measurement_max,
         measurement_unit: specs.measurement_unit || (item && measurementRangeUnits[item.kind]?.[0]) }}>
         <div className="form-triple"><Form.Item name="measurement_min" label="Range minimum"><InputNumber className="full-width" step="any" /></Form.Item>
           <Form.Item name="measurement_max" label="Range maximum"><InputNumber className="full-width" step="any" /></Form.Item>
-          <Form.Item name="measurement_unit" label="Unit"><Select options={(item && measurementRangeUnits[item.kind] || []).map(value => ({ value, label: value }))}
-            onChange={unit => changeNumberUnit(rangeForm, ['measurement_min', 'measurement_max'], editRangeUnit, unit)} /></Form.Item></div>
+          <Form.Item name="measurement_unit" label="Unit"><Select options={(item && measurementRangeUnits[item.kind] || []).map(value => ({ value, label: value }))} /></Form.Item></div>
         <Button type="primary" htmlType="submit">Save range</Button>
       </Form>
     </Modal>

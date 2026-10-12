@@ -55,7 +55,7 @@ function SectionNavigation({ route, recent, records, onNavigate }: {
   onNavigate: (section: RecordSection, id: string | null) => void;
 }) {
   const items = navItems.flatMap(({ key, label, icon: Icon }) => {
-    const links = (key === 'inventory' || key === 'equipment' ? [] : recent[key]).map(id => records[key].find(item => item.id === id))
+    const links = recent[key].map(id => records[key].find(item => item.id === id))
       .filter((item): item is { id: string; name: string } => !!item);
     return [{ key, label, icon: <Icon /> }, ...links.map(item => ({
       key: `${key}:${item.id}`, className: 'nav-recent-item',
@@ -63,8 +63,7 @@ function SectionNavigation({ route, recent, records, onNavigate }: {
     }))];
   });
   return <Menu mode="inline"
-    selectedKeys={route.section === 'me' ? [] : [route.selectedId && route.section !== 'inventory' && route.section !== 'equipment'
-      ? `${route.section}:${route.selectedId}` : route.section]}
+    selectedKeys={route.section === 'me' ? [] : [route.selectedId ? `${route.section}:${route.selectedId}` : route.section]}
     items={items}
     onClick={({ key }) => { const [section, id] = key.split(':'); onNavigate(section as RecordSection, id || null); }} />;
 }
@@ -412,7 +411,7 @@ export function App() {
               equipment={equipment} inventory={inventory} catalogInventory={catalogInventory} preferredUnits={preferredUnits}
               selectedId={route.selectedId} onSelect={id => showItem('batches', id)} onChanged={changed} />}
             {section === 'recipes' && <RecipeSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} recipes={recipes}
-              inventory={inventory} catalogInventory={catalogInventory} preferredUnits={preferredUnits}
+              inventory={inventory} catalogInventory={catalogInventory} preferredMassUnit={preferredUnits.mass}
               selectedId={route.selectedId} onSelect={id => showItem('recipes', id)}
               onChanged={changed} onBatchStarted={id => showItem('batches', id)} />}
             {section === 'inventory' && <InventorySection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} items={inventory}

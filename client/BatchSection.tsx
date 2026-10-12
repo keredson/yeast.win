@@ -188,7 +188,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
       {(editingPlan || creatingPlanKind) && <PlanForm key={editingPlan?.id || creatingPlanKind || 'new'}
         eventType={editingPlan?.event_type || creatingPlanKind || 'addition'} anchors={plans.filter(item => item.id !== editingPlan?.id)}
         initialPlan={editingPlan || undefined} inventory={inventory} catalog={catalogInventory}
-        preferredUnits={preferredUnits} submit={plan} />}
+        preferredMassUnit={preferredUnits.mass} submit={plan} />}
     </Modal>
     <Modal title={editingEvent ? 'Edit event' : eventPlan ? `Record: ${eventPlan.title}` : 'Record activity'} open={newEvent}
       onCancel={() => { setNewEvent(false); setEventPlan(null); setEditingEvent(null); setEditingData(null); }} footer={null} destroyOnHidden width={600}>

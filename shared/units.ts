@@ -58,36 +58,7 @@ export function splitOunces(total: number): { pounds: number; ounces: number } {
 export function formatQuantity(quantity: number, unit: string, displayUnit?: string): string {
   if (unit !== 'oz' || displayUnit !== compoundMassUnit) return `${quantity} ${unit}`;
   const { pounds, ounces } = splitOunces(quantity);
-  return ounces === 0 ? `${pounds} lb` : pounds === 0 ? `${ounces} oz` : `${pounds} lb ${ounces} oz`;
-}
-
-const massInGrams: Record<string, number> = { g: 1, kg: 1000, oz: 28.349523125, lb: 453.59237, [compoundMassUnit]: 28.349523125 };
-const volumeInLiters: Record<string, number> = { mL: 0.001, L: 1, 'US fl oz': 0.0295735295625, 'US gal': 3.785411784 };
-const pressureInKpa: Record<string, number> = { kPa: 1, psi: 6.894757293168 };
-const carbonDioxideInGramsPerLiter: Record<string, number> = { 'vol CO₂': 1.977, 'g/L': 1 };
-
-function scaled(value: number, from: string, to: string, factors: Record<string, number>): number | null {
-  return factors[from] && factors[to] ? value * factors[from] / factors[to] : null;
-}
-
-/** Returns null when units represent different physical quantities. */
-export function convertUnit(value: number, from: string, to: string, delta = false): number | null {
-  if (!Number.isFinite(value)) return null;
-  if (from === to) return value;
-  let result = scaled(value, from, to, massInGrams)
-    ?? scaled(value, from, to, volumeInLiters)
-    ?? scaled(value, from, to, pressureInKpa)
-    ?? scaled(value, from, to, carbonDioxideInGramsPerLiter);
-  if (result == null && (from === '°C' || from === '°F') && (to === '°C' || to === '°F')) {
-    result = from === '°C' ? value * 9 / 5 + (delta ? 0 : 32) : (value - (delta ? 0 : 32)) * 5 / 9;
-  }
-  if (result == null && ['mg/L', 'ppm'].includes(from) && ['mg/L', 'ppm'].includes(to)) result = value;
-  if (result == null && ['SG', '°Brix', '°Plato'].includes(from) && ['SG', '°Brix', '°Plato'].includes(to)) {
-    // Standard wort approximation; a corrected refractometer reading needs its own calibration first.
-    const sg = from === 'SG' ? value : 1 + value / (258.6 - value / 258.2 * 227.1);
-    result = to === 'SG' ? sg : -616.868 + 1111.14 * sg - 630.272 * sg ** 2 + 135.997 * sg ** 3;
-  }
-  return result == null ? null : Number(result.toFixed(6));
+  return `${pounds} lb ${ounces} oz`;
 }
 
 export function unitOptions(units: readonly string[]) {

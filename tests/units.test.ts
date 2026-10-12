@@ -1,22 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { convertUnit, formatQuantity, quantityForStorage, quantityUnitsForCategory, splitOunces, validPreferredUnits } from '../shared/units.ts';
+import { formatQuantity, quantityForStorage, quantityUnitsForCategory, splitOunces, validPreferredUnits } from '../shared/units.ts';
 
 test('compound pounds and ounces store as ounces and render without drift', () => {
   assert.deepEqual(quantityForStorage('lb + oz', undefined, 2, 5.5), { quantity: 37.5, unit: 'oz' });
   assert.deepEqual(splitOunces(37.5), { pounds: 2, ounces: 5.5 });
   assert.equal(formatQuantity(37.5, 'oz', 'lb + oz'), '2 lb 5.5 oz');
-  assert.equal(formatQuantity(800, 'oz', 'lb + oz'), '50 lb');
   assert.throws(() => quantityForStorage('lb + oz', undefined, 1, 16));
   assert.ok(validPreferredUnits({ temperature: '°C', volume: 'L', mass: 'lb + oz', pressure: 'kPa' }));
-});
-
-test('unit changes preserve amounts and clear incompatible quantities', () => {
-  assert.equal(convertUnit(5, 'US gal', 'L'), 18.927059);
-  assert.equal(convertUnit(20, '°C', '°F'), 68);
-  assert.equal(convertUnit(18, '°F', '°C', true), 10);
-  assert.equal(convertUnit(50, 'lb', 'lb + oz'), 800);
-  assert.equal(convertUnit(12, 'packet', 'oz'), null);
 });
 
 test('grain offers mass units without package counts', () => {

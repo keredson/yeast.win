@@ -7,11 +7,10 @@ import { PlanForm, type PlanPreset } from './PlanForm.tsx';
 import { kindLabel, measurementKinds } from './constants.ts';
 import { parsePlanDetails, planDetailsLabel, planKindLabel, planTimingLabel } from './planTiming.ts';
 import type { CatalogInventory } from '../shared/catalog.ts';
-import type { PreferredUnits } from './api.ts';
 
-export function RecipeSection({ db, basePath, accountId, recipes, inventory, catalogInventory, preferredUnits, selectedId, onSelect, onChanged, onBatchStarted }: {
+export function RecipeSection({ db, basePath, accountId, recipes, inventory, catalogInventory, preferredMassUnit, selectedId, onSelect, onChanged, onBatchStarted }: {
   db: LocalDb; basePath: string; accountId: string; recipes: Recipe[]; selectedId: string | null; onSelect: (id: string | null) => void;
-  inventory: InventoryItem[]; catalogInventory: CatalogInventory[]; preferredUnits: PreferredUnits;
+  inventory: InventoryItem[]; catalogInventory: CatalogInventory[]; preferredMassUnit: string;
   onChanged: () => Promise<void>; onBatchStarted: (id: string) => void;
 }) {
   const [plans, setPlans] = useState<(PlanInput & { id: string })[]>([]);
@@ -30,7 +29,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
 
   async function addRecipe(values: { name: string; description?: string; recipe_type: RecipeType }) {
     try {
-      const id = await createRecipe(db, values.name.trim(), values.description || '', values.recipe_type, preferredUnits.temperature);
+      const id = await createRecipe(db, values.name.trim(), values.description || '', values.recipe_type);
       onSelect(id); setNewRecipe(false); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -141,7 +140,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
       open={!!(editingPlan || creatingKind)} onCancel={() => { setCreatingKind(null); setEditingPlan(null); }} footer={null} destroyOnHidden>
       {(editingPlan || creatingKind) && <PlanForm key={editingPlan?.id || creatingKind || 'new'} eventType={editingPlan?.event_type || creatingKind || 'addition'}
         anchors={plans.filter(item => item.id !== editingPlan?.id)} initialPlan={editingPlan || undefined}
-        inventory={inventory} catalog={catalogInventory} preferredUnits={preferredUnits} preset={editingPlan ? undefined : preset} submit={addPlan} />
+        inventory={inventory} catalog={catalogInventory} preferredMassUnit={preferredMassUnit} preset={editingPlan ? undefined : preset} submit={addPlan} />
       }
     </Modal>
     <Modal title="Start a batch" open={newBatch} onCancel={() => setNewBatch(false)} footer={null} destroyOnHidden>
