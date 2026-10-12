@@ -149,8 +149,10 @@ try {
   await page.locator('.app-nav .ant-menu-item').filter({ hasText: batchName }).click();
   await page.getByRole('heading', { name: batchName }).waitFor();
   console.log('Created batch:', batchName);
-  await page.locator('.timeline-group-heading').getByText('Batch start').waitFor();
-  if (await page.locator('.timeline-group .plan-card').count()) throw new Error('Empty batch start already has actions');
+  await page.getByRole('button', { name: 'Add action' }).waitFor();
+  if (await page.locator('.timeline-group').count() || await page.getByText('Batch start', { exact: true }).count()) {
+    throw new Error('An empty batch should not show a Batch start group');
+  }
 
   await choosePlanKind(page, 'Add action', 'Ingredient');
   const firstAction = page.getByRole('dialog', { name: 'Add addition' });
@@ -167,6 +169,9 @@ try {
   await yeastAction.waitFor({ state: 'hidden' });
   if (await page.locator('.timeline-group').count() !== 1 || await page.locator('.timeline-group .plan-card').count() !== 2) {
     throw new Error('Actions at batch start were not grouped together');
+  }
+  if (await page.locator('.timeline-group-heading').getByText('Batch start').count()) {
+    throw new Error('Batch start heading should not appear above actions');
   }
   if (await page.locator('.timeline-group .plan-meta').count()) {
     throw new Error('Batch start actions repeat their group timing in each row');
