@@ -25,6 +25,13 @@ export function openCatalogDb(dataDir: string): Database.Database {
       else db.prepare('INSERT INTO catalog_meta(version) VALUES (2)').run();
     })();
   }
+  const version = (db.prepare('SELECT version FROM catalog_meta LIMIT 1').get() as { version: number }).version;
+  if (version < 3) {
+    db.transaction(() => {
+      db.prepare("UPDATE catalog_inventory SET category = 'Adjunct' WHERE id = 'inventory_lactic_acid'").run();
+      db.prepare('UPDATE catalog_meta SET version = 3').run();
+    })();
+  }
   return db;
 }
 

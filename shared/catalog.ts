@@ -2,7 +2,7 @@ export interface CatalogEquipment { id: string; name: string; kind: string; spec
 export interface CatalogInventory { id: string; name: string; category: string; unit: string }
 export interface CatalogSnapshot { version: number; equipment: CatalogEquipment[]; inventory: CatalogInventory[] }
 
-export const inventoryCategories = ['Grain', 'Hops', 'Yeast', 'Nutrient', 'Chemical', 'Packaging', 'Other'] as const;
+export const inventoryCategories = ['Grain', 'Hops', 'Yeast', 'Nutrient', 'Adjunct', 'Chemical', 'Packaging', 'Other'] as const;
 
 export function unitForCategory(category: string, preferredMass: string): string {
   if (category === 'Yeast') return 'packet';
@@ -60,7 +60,7 @@ export const initialCatalogInventory: CatalogInventory[] = [
   { id: 'inventory_dap', name: 'Diammonium phosphate', category: 'Nutrient', unit: 'g' },
   { id: 'inventory_yeast_energizer', name: 'Yeast energizer', category: 'Nutrient', unit: 'g' },
   { id: 'inventory_pbw', name: 'PBW cleaner', category: 'Chemical', unit: 'g' },
-  { id: 'inventory_lactic_acid', name: 'Lactic acid', category: 'Chemical', unit: 'mL' },
+  { id: 'inventory_lactic_acid', name: 'Lactic acid', category: 'Adjunct', unit: 'mL' },
   { id: 'inventory_bottle_22oz', name: '22 oz bottle', category: 'Packaging', unit: 'each' },
   { id: 'inventory_bottle_500ml', name: '500 mL bottle', category: 'Packaging', unit: 'each' },
   { id: 'inventory_keg_5gal', name: '5 US gal keg', category: 'Packaging', unit: 'each' },

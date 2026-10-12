@@ -20,11 +20,12 @@ test('existing catalog gains new equipment and inventory without item capacity',
     const snapshot = catalogSnapshot(db, 1);
     assert.ok(!('unchanged' in snapshot));
     if ('unchanged' in snapshot) return;
-    assert.equal(snapshot.version, 2);
+    assert.equal(snapshot.version, 3);
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_vevor_35l')?.name,
       'VEVOR Electric Brewing System 9.2 Gal/35 L Brewing Pot');
     assert.deepEqual(snapshot.inventory.find(row => row.id === 'inventory_bottle_12oz'),
       { id: 'inventory_bottle_12oz', name: '12 oz bottle', category: 'Packaging', unit: 'each' });
     assert.ok(snapshot.inventory.length > 20);
+    assert.equal(snapshot.inventory.find(row => row.id === 'inventory_lactic_acid')?.category, 'Adjunct');
   } finally { db.close(); }
 });
