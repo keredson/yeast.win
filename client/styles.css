@@ -36,6 +36,10 @@ button, input, textarea { font: inherit; }
 .unit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .unit-grid label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.brewery-row + .brewery-row { border-top: 1px solid #e8ebe8; padding-top: 14px; }
+.brewery-row > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+.brewery-row .ant-tag { margin-left: 8px; }
+.brewery-actions { display: flex; flex: none; gap: 4px; }
 .setting-row > strong { text-align: right; }
 .setting-description { margin: 4px 0 0 !important; max-width: 500px; }
 .account-page > .ant-btn { align-self: flex-start; }

@@ -1,10 +1,15 @@
 import { useRef, useState } from 'react';
-import { SyncOutlined, UploadOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Button, Card, Form, Input, Modal, Select, Switch, Tooltip, Typography } from 'antd';
-import { api, type PreferredUnits } from './api.ts';
+import { DeleteOutlined, EditOutlined, PlusOutlined, SyncOutlined, UploadOutlined } from '@ant-design/icons';
+import { Alert, Avatar, Button, Card, Form, Input, Modal, Select, Switch, Tag, Tooltip, Typography } from 'antd';
+import { api, type PreferredUnits, type Workspace } from './api.ts';
 
 interface Props {
   username: string;
+  workspaces: Workspace[];
+  activeWorkspaceId: string | null;
+  onCreateWorkspace: (name: string) => Promise<void>;
+  onUpdateWorkspace: (id: string, name: string, slug: string | null) => Promise<void>;
+  onDeleteWorkspace: (id: string) => Promise<void>;
   avatarSrc?: string;
   onAvatarUploaded: () => void;
   preferredUnits: PreferredUnits;
@@ -20,10 +25,16 @@ interface Props {
 
 interface PasswordValues { currentPassword: string; newPassword: string; confirmPassword: string }
 
-export function AccountSection({ username, avatarSrc, onAvatarUploaded, preferredUnits, onPreferredUnitsChange,
+export function AccountSection({ username, workspaces, activeWorkspaceId, onCreateWorkspace, onUpdateWorkspace, onDeleteWorkspace,
+  avatarSrc, onAvatarUploaded, preferredUnits, onPreferredUnitsChange,
   syncPhase, syncStatus, canSync, onManualSync, autoSync, onAutoSyncChange, onSignOut }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [passwordForm] = Form.useForm<PasswordValues>();
+  const [breweryForm] = Form.useForm<{ name: string; slug?: string }>();
+  const [breweryEditor, setBreweryEditor] = useState<Workspace | 'new' | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Workspace | null>(null);
+  const [breweryBusy, setBreweryBusy] = useState(false);
+  const [breweryError, setBreweryError] = useState('');
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarError, setAvatarError] = useState('');
   const [passwordBusy, setPasswordBusy] = useState(false);
@@ -84,6 +95,32 @@ export function AccountSection({ username, avatarSrc, onAvatarUploaded, preferre
     finally { setUnitsBusy(false); }
   }
 
+  function openBreweryEditor(target: Workspace | 'new') {
+    setBreweryError('');
+    breweryForm.setFieldsValue(target === 'new' ? { name: '', slug: undefined } : { name: target.name, slug: target.slug || '' });
+    setBreweryEditor(target);
+  }
+
+  async function saveBrewery(values: { name: string; slug?: string }) {
+    if (!breweryEditor) return;
+    setBreweryBusy(true); setBreweryError('');
+    try {
+      if (breweryEditor === 'new') await onCreateWorkspace(values.name.trim());
+      else await onUpdateWorkspace(breweryEditor.id, values.name.trim(), (values.slug || '').trim() || null);
+      setBreweryEditor(null);
+      breweryForm.resetFields();
+    } catch (cause) { setBreweryError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setBreweryBusy(false); }
+  }
+
+  async function removeBrewery() {
+    if (!deleteTarget) return;
+    setBreweryBusy(true); setBreweryError('');
+    try { await onDeleteWorkspace(deleteTarget.id); setDeleteTarget(null); }
+    catch (cause) { setBreweryError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setBreweryBusy(false); }
+  }
+
   return <div className="account-page">
     <div className="section-heading"><div><div className="eyebrow">Account</div><h1>Settings</h1></div></div>
     <Card title="Profile" className="account-card">
@@ -97,6 +134,41 @@ export function AccountSection({ username, avatarSrc, onAvatarUploaded, preferre
       </div>
       {avatarError && <Alert type="error" message={avatarError} showIcon />}
     </Card>
+    <Card title="Breweries" className="account-card" extra={<Button type="text" shape="circle" icon={<PlusOutlined />}
+      aria-label="New brewery" title="New brewery" onClick={() => openBreweryEditor('new')} />}>
+      {workspaces.length ? workspaces.map(brewery => <div className="setting-row brewery-row" key={brewery.id}>
+        <div><strong>{brewery.name}</strong>{brewery.id === activeWorkspaceId && <Tag color="green">Selected</Tag>}
+          <div className="muted">{brewery.slug === null ? 'Root URLs · /batches' : `/brewery/${brewery.slug}`}</div></div>
+        <div className="brewery-actions">
+          <Button type="text" shape="circle" icon={<EditOutlined />} aria-label={`Edit ${brewery.name}`}
+            title="Edit brewery" onClick={() => openBreweryEditor(brewery)} />
+          <Button type="text" shape="circle" danger icon={<DeleteOutlined />} aria-label={`Delete ${brewery.name}`}
+            title="Delete brewery" onClick={() => { setBreweryError(''); setDeleteTarget(brewery); }} />
+        </div>
+      </div>) : <Typography.Paragraph type="secondary">No breweries yet. Add one to start brewing.</Typography.Paragraph>}
+    </Card>
+    <Modal title={breweryEditor === 'new' ? 'New brewery' : 'Edit brewery'} open={!!breweryEditor} footer={null}
+      onCancel={() => { setBreweryEditor(null); breweryForm.resetFields(); }} destroyOnHidden>
+      <Form form={breweryForm} layout="vertical" onFinish={saveBrewery}>
+        <Form.Item name="name" label="Brewery name" rules={[{ required: true, whitespace: true }, { max: 80 }]}>
+          <Input autoFocus maxLength={80} placeholder="e.g. Homebrew or Downtown Brewery" />
+        </Form.Item>
+        {breweryEditor !== 'new' && <Form.Item name="slug" label="Brewery slug" rules={[
+          { pattern: /^[a-z0-9]+(?:-[a-z0-9]+)*$/, message: 'Use lowercase letters, numbers, and single hyphens' }, { max: 48 }]}>
+          <Input maxLength={48} addonBefore="/brewery/" />
+        </Form.Item>}
+        {breweryEditor !== 'new' && <Typography.Paragraph type="secondary">
+          Clear the slug to use root URLs such as /batches. Only one brewery can have no slug.
+        </Typography.Paragraph>}
+        {breweryError && <Alert type="error" message={breweryError} className="form-alert" />}
+        <Button type="primary" htmlType="submit" loading={breweryBusy}>{breweryEditor === 'new' ? 'Create brewery' : 'Save brewery'}</Button>
+      </Form>
+    </Modal>
+    <Modal title={`Delete ${deleteTarget?.name || 'brewery'}?`} open={!!deleteTarget} onCancel={() => setDeleteTarget(null)}
+      onOk={() => void removeBrewery()} okText="Delete brewery" okButtonProps={{ danger: true, loading: breweryBusy }} destroyOnHidden>
+      <Typography.Paragraph>This permanently deletes this brewery’s batches, recipes, inventory, equipment, and photos from the server and this device.</Typography.Paragraph>
+      {breweryError && <Alert type="error" message={breweryError} />}
+    </Modal>
     <Card title="Security" className="account-card">
       {passwordChanged && <Alert type="success" message="Password changed. Other sessions have been signed out." showIcon />}
       <Button onClick={() => { setPasswordError(''); setPasswordOpen(true); }}>Change password</Button>

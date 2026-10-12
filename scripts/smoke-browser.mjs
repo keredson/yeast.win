@@ -58,6 +58,26 @@ async function choosePlanKind(page, buttonName, kind) {
   await page.getByRole('menuitem', { name: kind, exact: true }).click();
 }
 
+async function localBreweryBlocks(page, id) {
+  return page.evaluate(async breweryId => {
+    const request = indexedDB.open('idb-batch-atomic');
+    const db = await new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      return await new Promise((resolve, reject) => {
+        let count = 0;
+        const tx = db.transaction('blocks', 'readonly');
+        const cursor = tx.objectStore('blocks').openKeyCursor(IDBKeyRange.bound([`/brewlog-${breweryId}`], [`/brewlog-${breweryId}`, []]));
+        cursor.onsuccess = () => { if (cursor.result) { count++; cursor.result.continue(); } };
+        tx.oncomplete = () => resolve(count);
+        tx.onerror = () => reject(tx.error);
+      });
+    } finally { db.close(); }
+  }, id);
+}
+
 try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
@@ -69,18 +89,27 @@ try {
   }
 
   await page.getByRole('combobox', { name: 'Brewery' }).click();
-  await page.getByText('＋ New brewery').click();
+  if (await page.getByText('＋ New brewery').count()) throw new Error('Brewery creation is still in the switcher');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Account settings' }).click();
+  await page.getByRole('button', { name: 'New brewery' }).click();
   await page.getByRole('dialog', { name: 'New brewery' }).waitFor();
   const secondBrewery = `Smoke brewery ${Date.now()}`;
   await page.getByRole('textbox', { name: 'Brewery name' }).fill(secondBrewery);
-  await page.getByRole('dialog', { name: 'New brewery' }).getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('dialog', { name: 'New brewery' }).getByRole('button', { name: 'Create brewery' }).click();
   await page.locator('.workspace-select').getByText(secondBrewery).waitFor();
+  await page.getByRole('button', { name: `Edit ${secondBrewery}` }).click();
+  const slug = `smoke-custom-${Date.now()}`;
+  await page.getByRole('dialog', { name: 'Edit brewery' }).getByRole('textbox', { name: 'Brewery slug' }).fill(slug);
+  await page.getByRole('dialog', { name: 'Edit brewery' }).getByRole('button', { name: 'Save brewery' }).click();
+  await page.getByText(`/brewery/${slug}`, { exact: true }).waitFor();
+  await navigateSection(page, 'Batches');
   await page.getByRole('button', { name: 'New batch' }).click();
   await page.getByLabel('Batch name').fill('Second brewery batch');
   await page.getByRole('button', { name: 'Create batch' }).click();
   await page.getByRole('heading', { name: 'Second brewery batch' }).waitFor();
   const secondBreweryBatchUrl = page.url();
-  if (!/^\/brewery\/[a-z0-9-]+\/batch\/[A-Za-z0-9_-]{10,32}$/.test(new URL(secondBreweryBatchUrl).pathname)
+  if (!new URL(secondBreweryBatchUrl).pathname.startsWith(`/brewery/${slug}/batch/`)
     || new URL(secondBreweryBatchUrl).search) throw new Error('Second brewery batch should use a clean brewery slug URL');
   await page.reload();
   await page.getByRole('heading', { name: 'Second brewery batch' }).waitFor();
@@ -98,7 +127,7 @@ try {
   await page.goForward();
   await page.getByRole('heading', { name: 'Batches', exact: true }).waitFor();
   await page.getByRole('button', { name: 'New batch' }).waitFor();
-  console.log('Created and switched breweries from the header switcher');
+  console.log('Created a brewery in Settings and switched from the header');
 
   await page.getByRole('button', { name: 'New batch' }).click();
   await page.getByLabel('Batch name').fill(`Smoke batch ${Date.now()}`);
@@ -549,6 +578,8 @@ try {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverCursor: '0', localCursor: '0', changes: [] })
   })).status, firstWorkspaceId);
   if (forbiddenStatus !== 404) throw new Error(`Second account accessed first account's workspace: ${forbiddenStatus}`);
+  const forbiddenDelete = await third.evaluate(async id => (await fetch(`/api/workspaces/${id}`, { method: 'DELETE' })).status, firstWorkspaceId);
+  if (forbiddenDelete !== 404) throw new Error(`Second account deleted first account's brewery: ${forbiddenDelete}`);
   console.log('Rejected duplicate username and isolated accounts');
 
   await page.getByRole('button', { name: 'Account settings' }).click();
@@ -670,6 +701,46 @@ try {
     await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
     if (await page.getByRole('button', { name: 'Edit planned event Boil' }).count()) throw new Error(`${type} recipe got a beer boil`);
   }
+
+  await page.getByRole('button', { name: 'Account settings' }).click();
+  await page.getByRole('button', { name: 'Delete Homebrew' }).click();
+  await page.getByRole('dialog', { name: 'Delete Homebrew?' }).getByRole('button', { name: 'Delete brewery' }).click();
+  await page.getByRole('button', { name: 'Delete Homebrew' }).waitFor({ state: 'hidden' });
+  const remainingBlocks = await localBreweryBlocks(page, firstWorkspaceId);
+  if (remainingBlocks) throw new Error(`Deleted Homebrew database remains in browser storage (${remainingBlocks} blocks): ${JSON.stringify(await page.locator('.page-alert').allTextContents())}`);
+  const afterDefaultDelete = await page.evaluate(async () => (await (await fetch('/api/me')).json()).workspaces);
+  if (afterDefaultDelete.length !== 1 || afterDefaultDelete[0].name !== secondBrewery) {
+    throw new Error('Deleting the default brewery did not retain the other brewery');
+  }
+  await navigateSection(page, 'Batches');
+  await openBatch(page, 'Second brewery batch');
+  if (!new URL(page.url()).pathname.startsWith(`/brewery/${slug}/batch/`)) {
+    throw new Error('Deleting the root brewery changed another brewery’s slug URL');
+  }
+  await page.getByRole('button', { name: 'Account settings' }).click();
+  await page.getByRole('button', { name: `Edit ${secondBrewery}` }).click();
+  await page.getByRole('dialog', { name: 'Edit brewery' }).getByRole('textbox', { name: 'Brewery name' }).fill('Renamed brewery');
+  await page.getByRole('dialog', { name: 'Edit brewery' }).getByRole('textbox', { name: 'Brewery slug' }).fill('');
+  await page.getByRole('dialog', { name: 'Edit brewery' }).getByRole('button', { name: 'Save brewery' }).click();
+  await page.getByRole('button', { name: 'Edit Renamed brewery' }).waitFor();
+  await page.getByText('Root URLs · /batches').waitFor();
+  await navigateSection(page, 'Batches');
+  await openBatch(page, 'Second brewery batch');
+  if (!/^\/batch\/[A-Za-z0-9_-]{10,32}$/.test(new URL(page.url()).pathname)) {
+    throw new Error('Clearing the remaining brewery slug did not claim root URLs');
+  }
+  await page.getByRole('button', { name: 'Account settings' }).click();
+  await page.getByRole('button', { name: 'Delete Renamed brewery' }).click();
+  await page.getByRole('dialog', { name: 'Delete Renamed brewery?' }).getByRole('button', { name: 'Delete brewery' }).click();
+  await page.getByText('No breweries yet. Add one to start brewing.').waitFor();
+  await page.getByRole('button', { name: 'New brewery' }).click();
+  const replacement = page.getByRole('dialog', { name: 'New brewery' });
+  await replacement.getByRole('textbox', { name: 'Brewery name' }).fill('Replacement');
+  await replacement.getByRole('button', { name: 'Create brewery' }).click();
+  await page.getByRole('button', { name: 'Edit Replacement' }).waitFor();
+  await navigateSection(page, 'Batches');
+  if (new URL(page.url()).pathname !== '/batches') throw new Error('New sole brewery did not use root URLs');
+  console.log('Managed slugs and deleted both the default and final brewery');
 
   if (errors.length) throw new Error(`Browser errors:\n${errors.join('\n')}`);
   console.log('Browser smoke passed');

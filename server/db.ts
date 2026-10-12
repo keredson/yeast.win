@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { nanoid } from 'nanoid';
 import { indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion } from '../shared/schema.ts';
@@ -43,9 +43,11 @@ export function openAuthDb(): Database.Database {
       slug TEXT,
       created_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS auth_meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
   `);
   const columns = db.pragma('table_info(workspaces)') as { name: string }[];
   if (!columns.some(column => column.name === 'slug')) db.exec('ALTER TABLE workspaces ADD COLUMN slug TEXT');
+  const needsRootMigration = !db.prepare("SELECT 1 FROM auth_meta WHERE key = 'nullable_root_slug_v1'").get();
   const rows = db.prepare('SELECT id, owner_account_id, name, slug FROM workspaces ORDER BY created_at, rowid')
     .all() as { id: string; owner_account_id: string; name: string; slug: string | null }[];
   const used = new Map<string, Set<string>>();
@@ -54,13 +56,24 @@ export function openAuthDb(): Database.Database {
     set.add(row.slug); used.set(row.owner_account_id, set);
   }
   const update = db.prepare('UPDATE workspaces SET slug = ? WHERE id = ?');
-  for (const row of rows) if (!row.slug) {
+  for (const row of rows) if (needsRootMigration && row.slug === null) {
     const slug = uniqueSlug(row.name, used.get(row.owner_account_id) || new Set());
     update.run(slug, row.id);
     const set = used.get(row.owner_account_id) || new Set<string>();
     set.add(slug); used.set(row.owner_account_id, set);
   }
+  if (needsRootMigration) {
+    db.transaction(() => {
+      const roots = new Set<string>();
+      for (const row of rows) if (!roots.has(row.owner_account_id)) {
+        roots.add(row.owner_account_id);
+        db.prepare('UPDATE workspaces SET slug = NULL WHERE id = ?').run(row.id);
+      }
+      db.prepare("INSERT INTO auth_meta(key, value) VALUES ('nullable_root_slug_v1', '1')").run();
+    })();
+  }
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS workspaces_owner_slug ON workspaces(owner_account_id, slug)');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS workspaces_one_root ON workspaces(owner_account_id) WHERE slug IS NULL');
   return db;
 }
 
@@ -74,13 +87,30 @@ function uniqueSlug(name: string, used: Set<string>): string {
 
 export function createWorkspace(auth: Database.Database, ownerId: string, name: string) {
   const id = nanoid();
-  const existing = auth.prepare('SELECT slug FROM workspaces WHERE owner_account_id = ?').all(ownerId) as { slug: string }[];
-  const slug = uniqueSlug(name, new Set(existing.map(row => row.slug)));
+  const existing = auth.prepare('SELECT slug FROM workspaces WHERE owner_account_id = ?').all(ownerId) as { slug: string | null }[];
+  const slug = existing.length ? uniqueSlug(name, new Set(existing.map(row => row.slug).filter((value): value is string => value !== null))) : null;
   const db = openWorkspaceDb(id);
   db.close();
   auth.prepare('INSERT INTO workspaces(id, owner_account_id, name, slug, created_at) VALUES (?, ?, ?, ?, ?)')
     .run(id, ownerId, name, slug, nowSeconds());
   return { id, name, slug };
+}
+
+export function updateWorkspace(auth: Database.Database, ownerId: string, id: string, name: string, slug: string | null) {
+  const result = auth.prepare('UPDATE workspaces SET name = ?, slug = ? WHERE id = ? AND owner_account_id = ?')
+    .run(name, slug, id, ownerId);
+  return result.changes ? { id, name, slug } : null;
+}
+
+export function deleteWorkspace(auth: Database.Database, ownerId: string, id: string,
+  closeOpenDb: () => void): boolean {
+  const owned = auth.prepare('SELECT 1 FROM workspaces WHERE id = ? AND owner_account_id = ?').get(id, ownerId);
+  if (!owned) return false;
+  closeOpenDb();
+  const file = join(dataDir, `${id}.sqlite`);
+  for (const path of [file, `${file}-wal`, `${file}-shm`]) if (existsSync(path)) unlinkSync(path);
+  auth.prepare('DELETE FROM workspaces WHERE id = ? AND owner_account_id = ?').run(id, ownerId);
+  return true;
 }
 
 export function openWorkspaceDb(id: string): Database.Database {

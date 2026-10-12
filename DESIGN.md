@@ -26,7 +26,7 @@ The app should work for a homebrewer with one operation and for an account that 
 
 The UI calls each operation a **brewery**; APIs and database tables retain `workspace` as their internal name. An account can own several private breweries. A shared batch stays in its brewery's workspace DB. Batch sharing, follower databases, and workspace membership are **later implementation targets**; they do not block the initial whole-workspace app.
 
-The first Homebrew brewery is the default at root routes such as `/batches`. Additional breweries have stable account-scoped slugs at `/brewery/:slug/batches`. Item routes follow the same prefix. Slugs live in the auth DB and remain stable if display names change.
+At most one brewery per account can have a null slug and use root routes such as `/batches`. A brewery with a slug uses `/brewery/:slug/batches`, regardless of creation order. Item routes follow the same prefix. Slugs live in the auth DB and can be changed in Settings independently of display names. Deleting the root brewery does not promote another brewery to root URLs.
 
 ### Implementation phases
 

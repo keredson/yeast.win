@@ -4,7 +4,7 @@ import { resolve, extname, sep } from 'node:path';
 import type Database from 'better-sqlite3';
 import { accountForToken, changePassword, clearSessionCookie, getAvatar, getPreferredUnits, login, logout,
   readSessionCookie, register, saveAvatar, savePreferredUnits, sessionCookie } from './auth.ts';
-import { closeWorkspaceDb, createWorkspace, dataDir, openAuthDb, openWorkspaceDb } from './db.ts';
+import { closeWorkspaceDb, createWorkspace, dataDir, deleteWorkspace, openAuthDb, openWorkspaceDb, updateWorkspace } from './db.ts';
 import { catalogSnapshot, openCatalogDb } from './catalog.ts';
 import { syncWorkspace, validateSyncRequest } from './sync.ts';
 import { isValidId } from '../shared/schema.ts';
@@ -71,7 +71,7 @@ function jpegDimensions(image: Buffer): { width: number; height: number } | null
 
 function ownerWorkspaces(accountId: string) {
   return authDb.prepare('SELECT id, name, slug FROM workspaces WHERE owner_account_id = ? ORDER BY created_at, rowid')
-    .all(accountId) as { id: string; name: string; slug: string }[];
+    .all(accountId) as { id: string; name: string; slug: string | null }[];
 }
 
 function ownsWorkspace(accountId: string, workspaceId: string): boolean {
@@ -216,6 +216,34 @@ const server = createServer(async (req, res) => {
         return json(res, 400, { error: 'Brewery name must be 1–80 characters' });
       }
       return json(res, 201, createWorkspace(authDb, account.id, body.name.trim()));
+    }
+    const workspaceMatch = /^\/api\/workspaces\/([^/]+)$/.exec(pathname);
+    if (workspaceMatch && (req.method === 'PATCH' || req.method === 'DELETE')) {
+      const workspaceId = workspaceMatch[1];
+      if (!isValidId(workspaceId) || !ownsWorkspace(account.id, workspaceId)) return json(res, 404, { error: 'Brewery not found' });
+      if (req.method === 'PATCH') {
+        const body = await readJson(req, 4 * 1024) as { name?: unknown; slug?: unknown };
+        if (!body || typeof body.name !== 'string' || !body.name.trim() || body.name.trim().length > 80) {
+          return json(res, 400, { error: 'Brewery name must be 1–80 characters' });
+        }
+        if (body.slug !== null && (typeof body.slug !== 'string'
+          || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(body.slug) || body.slug.length > 48)) {
+          return json(res, 400, { error: 'Slug must be empty for root URLs, or 1–48 lowercase letters, numbers, and single hyphens' });
+        }
+        try {
+          return json(res, 200, updateWorkspace(authDb, account.id, workspaceId, body.name.trim(), body.slug));
+        } catch (cause) {
+          if (cause instanceof Error && cause.message.includes('UNIQUE constraint failed')) {
+            return json(res, 409, { error: body.slug === null ? 'Another brewery already uses root URLs' : 'That slug is already used by another brewery' });
+          }
+          throw cause;
+        }
+      }
+      deleteWorkspace(authDb, account.id, workspaceId, () => {
+        const open = workspaceDbs.get(workspaceId);
+        if (open) { closeWorkspaceDb(open); workspaceDbs.delete(workspaceId); }
+      });
+      return json(res, 200, { ok: true });
     }
     const syncMatch = /^\/api\/workspaces\/([^/]+)\/sync$/.exec(pathname);
     if (syncMatch && req.method === 'POST') {

@@ -20,11 +20,17 @@ legacy.close();
 
 const { openAuthDb } = await import('../server/db.ts');
 
-test('legacy breweries receive stable unique slugs in creation order', () => {
+test('legacy first brewery becomes the only root brewery', () => {
   const db = openAuthDb();
   try {
     const rows = db.prepare('SELECT slug FROM workspaces WHERE owner_account_id = ? ORDER BY created_at, rowid')
-      .all('account') as { slug: string }[];
-    assert.deepEqual(rows.map(row => row.slug), ['homebrew', 'downtown-brewery', 'downtown-brewery-2']);
+      .all('account') as { slug: string | null }[];
+    assert.deepEqual(rows.map(row => row.slug), [null, 'downtown-brewery', 'downtown-brewery-2']);
   } finally { db.close(); }
+  const reopened = openAuthDb();
+  try {
+    const rows = reopened.prepare('SELECT slug FROM workspaces WHERE owner_account_id = ? ORDER BY created_at, rowid')
+      .all('account') as { slug: string | null }[];
+    assert.deepEqual(rows.map(row => row.slug), [null, 'downtown-brewery', 'downtown-brewery-2']);
+  } finally { reopened.close(); }
 });

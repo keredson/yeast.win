@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppstoreOutlined, BookOutlined, InboxOutlined, MenuOutlined, ToolOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Button, Card, Drawer, Empty, Form, Input, Layout, Menu, Modal, Select, Spin, Tooltip, Typography } from 'antd';
+import { Alert, Avatar, Button, Card, Drawer, Empty, Form, Input, Layout, Menu, Select, Spin, Tooltip, Typography } from 'antd';
 import { api, ApiError, type PreferredUnits, type Session, type Workspace } from './api.ts';
 import { defaultPreferredUnits } from '../shared/units.ts';
-import { openLocalDb, syncNow, type Batch, type Equipment, type InventoryItem, type LocalDb, type Recipe,
+import { forgetLocalDb, openLocalDb, syncNow, type Batch, type Equipment, type InventoryItem, type LocalDb, type Recipe,
   listBatches, listEquipment, listInventory, listRecipes } from './db.ts';
 import { BatchSection } from './BatchSection.tsx';
 import { RecipeSection } from './RecipeSection.tsx';
@@ -33,8 +33,8 @@ function routeFromPath(path: string): Route {
 }
 
 function workspaceBase(workspaceId: string | null, workspaces: Workspace[]): string {
-  const index = workspaces.findIndex(item => item.id === workspaceId);
-  return index <= 0 ? '' : `/brewery/${workspaces[index].slug}`;
+  const workspace = workspaces.find(item => item.id === workspaceId);
+  return workspace?.slug ? `/brewery/${workspace.slug}` : '';
 }
 
 function routePath(section: Section, selectedId: string | null, base: string): string {
@@ -70,7 +70,6 @@ function SectionNavigation({ route, recent, records, onNavigate }: {
     items={items}
     onClick={({ key }) => { const [section, id] = key.split(':'); onNavigate(section as RecordSection, id || null); }} />;
 }
-const newBreweryOption = '~new-brewery';
 const cachedSessionKey = 'brewlog:last-session';
 const signedOutKey = 'brewlog:signed-out';
 const autoSyncKey = 'brewlog:auto-sync';
@@ -83,7 +82,7 @@ function initialBrewery(workspaces: Workspace[]): string | null {
   if (linked) return workspaces.find(item => item.id === linked)?.id || workspaces[0]?.id || null;
   if (slug) return workspaces.find(item => item.slug === slug)?.id || workspaces[0]?.id || null;
   if (location.pathname === '/me') return workspaces.find(item => item.id === remembered)?.id || workspaces[0]?.id || null;
-  return workspaces[0]?.id || null;
+  return workspaces.find(item => item.slug === null)?.id || workspaces[0]?.id || null;
 }
 
 function canonicalizeLocation(workspaces: Workspace[]): void {
@@ -91,11 +90,11 @@ function canonicalizeLocation(workspaces: Workspace[]): void {
   const route = routeFromPath(location.pathname);
   if (route.section === 'me') return;
   const workspace = linked ? workspaces.find(item => item.id === linked)
-    : route.slug ? workspaces.find(item => item.slug === route.slug) : null;
-  if (linked || route.slug) {
-    const path = workspace ? routePath(route.section, route.selectedId, workspaceBase(workspace.id, workspaces)) : '/batches';
-    if (location.pathname + location.search !== path) history.replaceState(null, '', path);
-  }
+    : route.slug ? workspaces.find(item => item.slug === route.slug)
+      : workspaces.find(item => item.slug === null);
+  const target = workspace || workspaces[0];
+  const path = target ? routePath(route.section, workspace ? route.selectedId : null, workspaceBase(target.id, workspaces)) : '/me';
+  if (location.pathname + location.search !== path) history.replaceState(null, '', path);
 }
 
 function cachedSession(): Session | null {
@@ -104,13 +103,14 @@ function cachedSession(): Session | null {
     if (value && typeof value.account?.id === 'string' && Array.isArray(value.workspaces)
       && value.workspaces.every(item => typeof item.id === 'string' && typeof item.name === 'string')) {
       const used = new Set<string>();
-      const workspaces = [...value.workspaces].sort((a, b) =>
-        Number(b.name === 'Homebrew') - Number(a.name === 'Homebrew')).map(item => {
+      const workspaces = value.workspaces.map(item => {
         const base = item.name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
           .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'brewery';
-        let slug = typeof item.slug === 'string' && item.slug ? item.slug : base;
-        for (let number = 2; used.has(slug); number++) slug = `${base}-${number}`;
-        used.add(slug);
+        let slug: string | null = item.slug === null ? null : typeof item.slug === 'string' && item.slug ? item.slug : base;
+        if (slug) {
+          for (let number = 2; used.has(slug); number++) slug = `${base}-${number}`;
+          used.add(slug);
+        }
         return { ...item, slug };
       });
       return { ...value, workspaces };
@@ -159,8 +159,6 @@ export function App() {
   const [syncPhase, setSyncPhase] = useState<'idle' | 'syncing' | 'synced' | 'failed'>('idle');
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
-  const [workspaceDialog, setWorkspaceDialog] = useState(false);
-  const [workspaceName, setWorkspaceName] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [avatarVersion, setAvatarVersion] = useState(Date.now());
 
@@ -224,7 +222,8 @@ export function App() {
       const next = routeFromPath(location.pathname);
       setRoute(next);
       if (next.section === 'me' || !session) return;
-      const workspace = next.slug ? session.workspaces.find(item => item.slug === next.slug) : session.workspaces[0];
+      const workspace = next.slug ? session.workspaces.find(item => item.slug === next.slug)
+        : session.workspaces.find(item => item.slug === null);
       if (workspace) {
         setWorkspaceId(workspace.id);
         localStorage.setItem(activeBreweryKey, workspace.id);
@@ -345,22 +344,44 @@ export function App() {
     if (autoSync) void runSync(db, workspaceId);
   }, [db, workspaceId, refresh, runSync, autoSync]);
 
-  async function createWorkspace() {
-    if (!workspaceName.trim() || !session) return;
-    try {
-      const workspace = await api<Workspace>('/workspaces', 'POST', { name: workspaceName.trim() });
-      const updated = { ...session, workspaces: [...session.workspaces, workspace] };
-      rememberSession(updated);
-      setSession(updated);
-      setWorkspaceId(workspace.id);
-      localStorage.setItem(activeBreweryKey, workspace.id);
+  async function createWorkspace(name: string) {
+    if (!session) return;
+    const workspace = await api<Workspace>('/workspaces', 'POST', { name });
+    const updated = { ...session, workspaces: [...session.workspaces, workspace] };
+    rememberSession(updated);
+    setSession(updated);
+    setWorkspaceId(workspace.id);
+    localStorage.setItem(activeBreweryKey, workspace.id);
+    setOpenedDb(null);
+  }
+
+  async function renameWorkspace(id: string, name: string, slug: string | null) {
+    if (!session) return;
+    const workspace = await api<Workspace>(`/workspaces/${id}`, 'PATCH', { name, slug });
+    const updated = { ...session, workspaces: session.workspaces.map(item => item.id === id ? workspace : item) };
+    rememberSession(updated);
+    setSession(updated);
+  }
+
+  async function removeWorkspace(id: string) {
+    if (!session) return;
+    await api(`/workspaces/${id}`, 'DELETE');
+    const workspaces = session.workspaces.filter(item => item.id !== id);
+    const updated = { ...session, workspaces };
+    rememberSession(updated);
+    setSession(updated);
+    if (workspaceId === id) {
+      const fallback = workspaces[0]?.id || null;
+      activeWorkspaceId.current = fallback;
+      setWorkspaceId(fallback);
       setOpenedDb(null);
-      setWorkspaceDialog(false);
-      setWorkspaceName('');
-      const path = `/brewery/${workspace.slug}/batches`;
-      history.pushState(null, '', path);
-      setRoute({ section: 'batches', selectedId: null, slug: workspace.slug });
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+      if (fallback) localStorage.setItem(activeBreweryKey, fallback);
+      else localStorage.removeItem(activeBreweryKey);
+    }
+    localStorage.removeItem(lastSyncKey(id));
+    for (const name of recordSections) localStorage.removeItem(`brewlog:recent:${id}:${name}`);
+    try { await forgetLocalDb(id); }
+    catch (cause) { setError(`Brewery deleted, but its local cache could not be removed: ${cause instanceof Error ? cause.message : String(cause)}`); }
   }
 
   async function updatePreferredUnits(units: PreferredUnits) {
@@ -386,13 +407,11 @@ export function App() {
         <div className="brand"><img className="brand-mark" src="/icon.svg" alt="" /><div><strong>Brewlog</strong><small>Batch-first brewing</small></div></div>
       </div>
       <div className="header-controls">
-        <Select className="workspace-select" value={workspaceId} placeholder="Select brewery"
+        <Select className="workspace-select" value={workspaceId} placeholder="No breweries" disabled={!session.workspaces.length}
           aria-label="Brewery"
-          options={[...session.workspaces.map(item => ({ label: item.name, value: item.id })),
-            { label: '＋ New brewery', value: newBreweryOption }]}
+          options={session.workspaces.map(item => ({ label: item.name, value: item.id }))}
           onChange={value => {
-            if (value === newBreweryOption) setWorkspaceDialog(true);
-            else { setWorkspaceId(value); localStorage.setItem(activeBreweryKey, value); setOpenedDb(null); showSection('batches', value); }
+            setWorkspaceId(value); localStorage.setItem(activeBreweryKey, value); setOpenedDb(null); showSection('batches', value);
           }} />
         <Tooltip title="Account settings">
           <Button className="avatar-button" type="text" shape="circle" aria-label="Account settings" onClick={() => showSection('me')}>
@@ -414,13 +433,16 @@ export function App() {
       <main className="app-main">
         {error && <Alert type="warning" showIcon closable onClose={() => setError('')} message={error} className="page-alert" />}
         {section === 'me' ? <AccountSection username={session.account.username} avatarSrc={avatarSrc}
+          workspaces={session.workspaces} activeWorkspaceId={workspaceId}
+          onCreateWorkspace={createWorkspace} onUpdateWorkspace={renameWorkspace} onDeleteWorkspace={removeWorkspace}
           onAvatarUploaded={() => { const updated = { ...session, account: { ...session.account, has_avatar: true } };
             rememberSession(updated); setSession(updated); setAvatarVersion(Date.now()); }}
           preferredUnits={preferredUnits} onPreferredUnitsChange={updatePreferredUnits}
           syncPhase={syncPhase} syncStatus={timeSinceSync(lastSyncedAt, now)} canSync={!!db && !!workspaceId}
           onManualSync={() => { if (db && workspaceId) void runSync(db, workspaceId); }}
           autoSync={autoSync} onAutoSyncChange={enabled => { localStorage.setItem(autoSyncKey, enabled ? '1' : '0'); setAutoSync(enabled); }}
-          onSignOut={signOut} /> : !workspaceId ? <Empty description="Create a brewery to begin"><Button type="primary" onClick={() => setWorkspaceDialog(true)}>New brewery</Button></Empty> :
+          onSignOut={signOut} /> : !workspaceId ? <Empty description="Add a brewery in Settings to begin">
+            <Button type="primary" onClick={() => showSection('me')}>Open Settings</Button></Empty> :
           !db ? <div className="loading-screen"><Spin tip="Opening local database" /></div> : <>
             {section === 'batches' && <BatchSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} batches={batches} recipes={recipes}
               equipment={equipment} inventory={inventory} catalogInventory={catalogInventory} preferredUnits={preferredUnits}
@@ -439,9 +461,6 @@ export function App() {
           </>}
       </main>
     </div>
-    <Modal title="New brewery" open={workspaceDialog} onCancel={() => setWorkspaceDialog(false)} onOk={createWorkspace} okText="Create">
-      <Input autoFocus maxLength={80} placeholder="e.g. Homebrew or Downtown Brewery" aria-label="Brewery name" value={workspaceName} onChange={event => setWorkspaceName(event.target.value)} />
-    </Modal>
   </div>;
 }
 

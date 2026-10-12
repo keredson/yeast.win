@@ -64,6 +64,37 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
   return pending;
 }
 
+export async function forgetLocalDb(workspaceId: string): Promise<void> {
+  const pending = opened.get(workspaceId);
+  opened.delete(workspaceId);
+  if (pending) {
+    const db = await pending;
+    await syncQueues.get(db)?.catch(() => undefined);
+    await db.close();
+  }
+  // The current wa-sqlite VFS keeps all brewery files in one IndexedDB store.
+  // Remove only blocks for this file, leaving other breweries and the catalog.
+  const request = indexedDB.open('idb-batch-atomic');
+  const idb = await new Promise<IDBDatabase>((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  try {
+    if (!idb.objectStoreNames.contains('blocks')) return;
+    const path = `/brewlog-${workspaceId}`;
+    await new Promise<void>((resolve, reject) => {
+      const tx = idb.transaction('blocks', 'readwrite');
+      const range = IDBKeyRange.bound([path], [path, []]);
+      const blocks = tx.objectStore('blocks');
+      const keys = blocks.getAllKeys(range);
+      keys.onsuccess = () => { for (const key of keys.result) blocks.delete(key); };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  } finally { idb.close(); }
+}
+
 export async function listBatches(db: DB): Promise<Batch[]> {
   return db.execO<Batch>('SELECT id, name, description, status, created_at FROM batches ORDER BY created_at DESC, id DESC');
 }
