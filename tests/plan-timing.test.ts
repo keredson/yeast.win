@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { effectivePlanTime, orderTimelineGroup, planDuration, planTimingLabel } from '../client/planTiming.ts';
+import { effectivePlanTime, orderTimelineGroup, planDetailsLabel, planDuration, planTimingLabel, timelineGroupKey, timelineGroupStep } from '../client/planTiming.ts';
 import type { Plan } from '../client/db.ts';
 
 test('plans use batch start and an actual anchor when it arrives', () => {
@@ -84,4 +84,25 @@ test('same-time timeline rows keep chill before its dependent yeast pitch', () =
   const boilGrain = { ...grain, anchor_event_id: 'boil', details_json: '{"item_category":"Grain","anchor_point":"start"}' };
   assert.deepEqual(orderTimelineGroup([boil, boilGrain], new Map([['boil', 600], ['grain', 600]])).map(event => event.id),
     ['grain', 'boil']);
+});
+
+test('timeline groups only exact simultaneous steps', () => {
+  const chill: Plan = { id: 'chill', batch_id: 'batch', title: 'Chill', event_type: 'temperature_control',
+    planned_at: null, anchor_event_id: null, offset_seconds: 0, details_json: '{"phase":"chill"}',
+    actual_at: null, skipped_at: null, note: null, source_id: null };
+  const transfer: Plan = { ...chill, id: 'transfer', title: 'Transfer to fermenter', event_type: 'transfer',
+    anchor_event_id: 'chill', details_json: '{"anchor_point":"end"}' };
+  const gravity: Plan = { ...chill, id: 'gravity', title: 'Measure original specific gravity', event_type: 'measurement',
+    anchor_event_id: 'transfer', details_json: '{"anchor_point":"start"}' };
+  const pitch: Plan = { ...chill, id: 'pitch', title: 'Pitch yeast', event_type: 'addition',
+    anchor_event_id: 'chill', details_json: '{"anchor_point":"end","item_category":"Yeast"}' };
+  const plans = [chill, transfer, gravity, pitch];
+  const times = new Map(plans.map(plan => [plan.id, 600]));
+  const group = (plan: Plan) => timelineGroupKey(times.get(plan.id)!, timelineGroupStep(plan, plans, times), plan.id);
+  assert.notEqual(group(chill), group(transfer));
+  assert.equal(group(transfer), group(pitch));
+  assert.notEqual(group(transfer), group(gravity));
+  assert.notEqual(timelineGroupKey(600, 0, 'a'), timelineGroupKey(601, 0, 'b'));
+  assert.equal(planDetailsLabel({ event_type: 'addition', title: 'Pitch yeast',
+    details_json: '{"item_category":"Yeast","item_name":"Yeast"}' }), '');
 });

@@ -52,7 +52,10 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
   const kind = initialPlan?.event_type || eventType;
   const offset = initialPlan?.offset_seconds ?? 0;
   const offsetUnit = offset === 0 ? timeUnits[1] : [...timeUnits].reverse().find(item => Math.abs(offset) % item.multiplier === 0) || timeUnits[0];
-  const initialItem = String(initialDetails.item_name || initialPlan?.title || preset?.title || '');
+  const genericPitch = kind === 'addition' && initialPlan?.title === 'Pitch yeast'
+    && initialDetails.item_category === 'Yeast' && !initialDetails.inventory_item_id && !initialDetails.catalog_item_id
+    && (!initialDetails.item_name || initialDetails.item_name === 'Yeast');
+  const initialItem = genericPitch ? '' : String(initialDetails.item_name || initialPlan?.title || preset?.title || '');
   const initialCategory = String(initialDetails.item_category || inventory.find(item => item.id === initialDetails.inventory_item_id)?.category
     || catalog.find(item => item.id === initialDetails.catalog_item_id || item.name === initialItem)?.category || preset?.itemCategory || '');
   const initialUnit = String(initialDetails.display_unit || initialDetails.unit ||
@@ -96,7 +99,9 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
   async function save(values: Values) {
     try {
       setBusy(true); setError('');
-      const title = values.title?.trim() || (kind === 'photo' ? 'Photo' : '');
+      const itemName = values.title?.trim() || '';
+      const title = itemName || (kind === 'photo' ? 'Photo' : kind === 'addition' ? initialPlan?.title
+        || (values.item_category === 'Yeast' ? 'Pitch yeast' : `Add ${String(values.item_category || 'ingredient').toLowerCase()}`) : '');
       const hasOffset = values.offset_value != null;
       const unit = timeUnits.find(item => item.value === values.offset_unit);
       if ((!gravityMeasurement && (!hasOffset || !unit)) || hasOffset && (!unit || !Number.isFinite(values.offset_value) || values.offset_value! < 0)) {
@@ -133,7 +138,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
         }
       }
       if (kind === 'addition') {
-        details.item_name = title;
+        if (itemName) details.item_name = itemName;
         const amount = quantityForStorage(values.unit || '', values.quantity, values.pounds, values.ounces);
         if (amount) {
           if (!values.unit) throw new Error('Choose a unit');
@@ -141,8 +146,8 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
           details.unit = amount.unit;
           if (values.unit === compoundMassUnit) details.display_unit = compoundMassUnit;
         }
-        const owned = inventory.find(item => item.category === values.item_category && item.name.toLowerCase() === title.toLowerCase());
-        const known = catalog.find(item => item.category === values.item_category && item.name.toLowerCase() === title.toLowerCase());
+        const owned = inventory.find(item => item.category === values.item_category && item.name.toLowerCase() === itemName.toLowerCase());
+        const known = catalog.find(item => item.category === values.item_category && item.name.toLowerCase() === itemName.toLowerCase());
         if (owned) details.inventory_item_id = owned.id;
         else if (known) details.catalog_item_id = known.id;
       }
@@ -184,7 +189,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
       <Form.Item name="item_category" label="Type" rules={[{ required: true }]}><Select options={inventoryCategories.map(value => ({ value, label: value }))}
         onChange={(value: string) => { setItemCategory(value); form.setFieldsValue({ title: undefined,
           unit: unitForCategory(value, preferredUnits.mass), quantity: undefined, pounds: undefined, ounces: undefined }); }} /></Form.Item>
-      <Form.Item name="title" label="What will be added?" rules={[{ required: true, whitespace: true }]}>
+      <Form.Item name="title" label="What will be added?">
         <AutoComplete placeholder="Search inventory or enter an item" maxLength={120} options={[
           ...inventory.filter((item, index) => item.category === itemCategory &&
             inventory.findIndex(other => other.category === item.category && other.name.toLowerCase() === item.name.toLowerCase()) === index)
@@ -258,6 +263,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
         { value: `after:end:${anchor.id}`, label: `At or after end of ${anchor.title}` }
       ] : parsePlanDetails(anchor.details_json).phase === 'chill' ? [
         { value: `before:start:${anchor.id}`, label: `Before ${anchor.title} · ${kindLabel(anchor.event_type)}` },
+        { value: `after:start:${anchor.id}`, label: `At or after ${anchor.title}` },
         { value: `after:end:${anchor.id}`, label: `After ${anchor.title}` }
       ] : [
         { value: `before:start:${anchor.id}`, label: `Before ${anchor.title} · ${kindLabel(anchor.event_type)}` },

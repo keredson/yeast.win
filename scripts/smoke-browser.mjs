@@ -481,9 +481,13 @@ try {
   await page.getByRole('button', { name: 'Edit planned event Transfer to fermenter' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Transfer to fermenter' }).click();
   const transferPlan = page.getByRole('dialog', { name: 'Edit Transfer to fermenter' });
+  await transferPlan.waitFor();
   if (await transferPlan.getByRole('combobox', { name: /From vessel/ }).count()
     || await transferPlan.getByRole('spinbutton', { name: 'Duration (optional)' }).count()) {
     throw new Error('Transfer plan still asks for a source vessel or duration');
+  }
+  if (!await transferPlan.getByRole('combobox', { name: 'Timing' }).locator('..').getByText('After Chill').count()) {
+    throw new Error('Transfer timing should display its Chill anchor');
   }
   await transferPlan.getByRole('combobox', { name: 'To vessel (optional)' }).click();
   if (await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke chiller' }).count()) {
@@ -510,9 +514,15 @@ try {
   await gravityPlan.getByRole('button', { name: 'Save event' }).click();
   await gravityPlan.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
-  const chillGroupTitles = await seededChillGroup.locator('.title-edit-row strong').allTextContents();
-  if (chillGroupTitles.indexOf('Chill') < 0 || chillGroupTitles.indexOf('Pitch yeast') <= chillGroupTitles.indexOf('Chill')) {
-    throw new Error('Pitch yeast appeared before Chill in their shared timeline group');
+  const templateGroups = await page.locator('.recipe-timeline .timeline-group').evaluateAll(groups => groups.map(group =>
+    [...group.querySelectorAll('.title-edit-row strong')].map(title => title.textContent?.trim())));
+  const chillGroupIndex = templateGroups.findIndex(titles => titles.includes('Chill'));
+  const transferGroupIndex = templateGroups.findIndex(titles => titles.includes('Transfer to fermenter'));
+  const gravityGroupIndex = templateGroups.findIndex(titles => titles.includes('Measure original specific gravity'));
+  const pitchGroupIndex = templateGroups.findIndex(titles => titles.includes('Pitch yeast'));
+  if (chillGroupIndex < 0 || transferGroupIndex <= chillGroupIndex || gravityGroupIndex <= transferGroupIndex
+    || pitchGroupIndex <= chillGroupIndex) {
+    throw new Error('Consecutive beer template actions should occupy separate timeline groups');
   }
   await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).click();
   const pitchPlan = page.getByRole('dialog', { name: 'Edit Pitch yeast' });
@@ -520,7 +530,15 @@ try {
   if (!await pitchPlan.getByRole('combobox', { name: 'Timing' }).locator('..').getByText('After Chill').count()) {
     throw new Error('Beer template should pitch yeast at the end of Chill');
   }
-  await pitchPlan.locator('.ant-modal-close').click();
+  if (await pitchPlan.getByLabel('What will be added?').inputValue()
+    || await pitchPlan.locator('.ant-form-item').filter({ has: pitchPlan.getByLabel('What will be added?') }).locator('.ant-form-item-required').count()) {
+    throw new Error('Pitch yeast should not require a generic yeast ingredient');
+  }
+  await pitchPlan.getByRole('button', { name: 'Save event' }).click();
+  await pitchPlan.waitFor({ state: 'hidden' });
+  if (await page.locator('.plan-card').filter({ hasText: 'Pitch yeast' }).first().getByText('Yeast', { exact: true }).count()) {
+    throw new Error('Pitch yeast displayed a redundant generic yeast item');
+  }
   await page.locator('.timeline-group').filter({ has: page.getByRole('button', { name: 'Edit planned event Package batch' }) })
     .locator('xpath=preceding-sibling::*[1]').getByText('21 days', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Package batch' }).click();

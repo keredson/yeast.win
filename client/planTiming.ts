@@ -62,6 +62,22 @@ export function effectivePlanTime(plan: TimedPlan, plans: TimedPlan[], events: A
   return startAt + (plan.offset_seconds || 0);
 }
 
+export function timelineGroupStep(plan: TimedPlan, plans: TimedPlan[], eventTimes: ReadonlyMap<string, number | null>,
+  visiting = new Set<string>()): number {
+  const at = eventTimes.get(plan.id);
+  if (at == null || !plan.anchor_event_id || visiting.has(plan.id)) return 0;
+  const anchor = plans.find(item => item.id === plan.anchor_event_id);
+  if (!anchor || eventTimes.get(anchor.id) !== at) return 0;
+  visiting.add(plan.id);
+  const previousStep = timelineGroupStep(anchor, plans, eventTimes, visiting);
+  visiting.delete(plan.id);
+  return previousStep + (anchorPoint(plan) === 'start' && planDuration(anchor) > 0 ? 0 : 1);
+}
+
+export function timelineGroupKey(at: number | null, step: number, id: string): string {
+  return at == null ? `unresolved:${id}` : `time:${at}:${step}`;
+}
+
 export function orderTimelineGroup<T extends { id: string; event_type: string; anchor_event_id?: string | null; details_json?: string | null }>(
   events: readonly T[], eventTimes: ReadonlyMap<string, number | null>): T[] {
   const at = (event: T) => eventTimes.get(event.id) ?? Number.MAX_SAFE_INTEGER;
@@ -104,7 +120,9 @@ export function planDetailsLabel(plan: Pick<Plan, 'event_type'> & { title?: stri
     ? `${details.target_value}${details.measurement_kind === 'gravity' && details.target_unit === 'SG' ? '' : ` ${details.target_unit || ''}`}`.trim() : '';
   const duration = supportsDuration(plan.event_type, String(details.phase || '')) && typeof details.duration_seconds === 'number' && details.duration_seconds > 0
     ? `For ${formatOffset(details.duration_seconds)}` : '';
-  const parts = plan.event_type === 'addition' ? [amount, details.item_name === plan.title ? '' : details.item_name]
+  const genericPitch = plan.title === 'Pitch yeast' && details.item_category === 'Yeast'
+    && details.item_name === 'Yeast' && !details.inventory_item_id && !details.catalog_item_id;
+  const parts = plan.event_type === 'addition' ? [amount, genericPitch || details.item_name === plan.title ? '' : details.item_name]
     : plan.event_type === 'measurement' ? [details.measurement_kind, target]
       : plan.event_type === 'temperature_control' ? [details.mode, target]
         : plan.event_type === 'pressure_control' ? [target]
