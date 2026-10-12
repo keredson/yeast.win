@@ -255,10 +255,10 @@ try {
   if (await page.getByRole('dialog', { name: 'New equipment' }).getByLabel('Capacity (optional)').count()) {
     throw new Error('Measurement equipment was offered vessel capacity');
   }
-  const phCatalog = page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Find in shared equipment catalog' });
-  await phCatalog.fill('pH meter');
-  await phCatalog.press('Enter');
-  await page.getByRole('dialog', { name: 'New equipment' }).getByLabel('Name').fill('Smoke pH meter');
+  const phName = page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Name' });
+  await phName.fill('pH meter');
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'pH meter' }).last().click();
+  await phName.fill('Smoke pH meter');
   await page.getByRole('dialog', { name: 'New equipment' }).getByRole('spinbutton', { name: 'Range minimum' }).fill('0');
   await page.getByRole('dialog', { name: 'New equipment' }).getByRole('spinbutton', { name: 'Range maximum' }).fill('14');
   await page.getByRole('button', { name: 'Create equipment' }).click();
@@ -281,13 +281,14 @@ try {
   await page.getByRole('button', { name: 'New equipment' }).click();
   await page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Type' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Refractometer' }).click();
-  const refractometerCatalog = page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Find in shared equipment catalog' });
-  await refractometerCatalog.fill('Refractometer');
-  await refractometerCatalog.press('Enter');
+  const refractometerName = page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Name' });
+  await refractometerName.fill('Refractometer');
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Refractometer' }).last().click();
+  await refractometerName.fill('Smoke refractometer');
   await page.getByRole('dialog', { name: 'New equipment' }).getByRole('spinbutton', { name: 'Range minimum' }).fill('0');
   await page.getByRole('dialog', { name: 'New equipment' }).getByRole('spinbutton', { name: 'Range maximum' }).fill('32');
   await page.getByRole('button', { name: 'Create equipment' }).click();
-  await page.getByRole('heading', { name: 'Refractometer', exact: true }).waitFor();
+  await page.getByRole('heading', { name: 'Smoke refractometer', exact: true }).waitFor();
   await page.getByText('Measurement range: 0–32 °Brix').waitFor();
   await navigateSection(page, 'Equipment');
   if (await page.locator('.group-table').count() !== 2) throw new Error('Equipment kinds should have separate tables');
@@ -412,9 +413,9 @@ try {
   await page.getByRole('button', { name: 'New inventory item' }).click();
   await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Type' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Grain' }).click();
-  await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Find in shared inventory catalog' }).click();
+  await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Item' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Maris Otter malt' }).last().click();
-  await page.getByLabel('Item', { exact: true }).fill('Smoke grain');
+  await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Item' }).fill('Smoke grain');
   const newGrain = page.getByRole('dialog', { name: 'New inventory item' });
   if (!await newGrain.getByRole('combobox', { name: 'Unit' }).locator('..').getByText('lb + oz', { exact: true }).count()) {
     throw new Error('Preferred compound grain unit default was not set');
@@ -435,7 +436,7 @@ try {
   await page.getByRole('button', { name: 'New inventory item' }).click();
   await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Type' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Packaging' }).click();
-  await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Find in shared inventory catalog' }).click();
+  await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Item' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: '12 oz bottle' }).last().click();
   if (!await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Unit' }).locator('..').getByText('each', { exact: true }).count()) throw new Error('Packaging unit default was not set');
   await page.getByRole('button', { name: 'Create item' }).click();
@@ -450,7 +451,7 @@ try {
   await page.getByRole('button', { name: 'New inventory item' }).click();
   await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Type' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Grain' }).click();
-  await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Find in shared inventory catalog' }).click();
+  await page.getByRole('dialog', { name: 'New inventory item' }).getByRole('combobox', { name: 'Item' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Maris Otter malt' }).waitFor();
   await page.getByRole('dialog', { name: 'New inventory item' }).locator('.ant-modal-close').click();
   await page.getByRole('dialog', { name: 'New inventory item' }).waitFor({ state: 'hidden' });
