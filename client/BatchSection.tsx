@@ -9,7 +9,7 @@ import { PlanForm } from './PlanForm.tsx';
 import { EventForm } from './EventForm.tsx';
 import type { PreferredUnits } from './api.ts';
 import type { CatalogInventory } from '../shared/catalog.ts';
-import { effectivePlanTime, planDetailsLabel, planTimingLabel } from './planTiming.ts';
+import { effectivePlanTime, planDetailsLabel, planDuration, planKindLabel, planTimingLabel } from './planTiming.ts';
 
 interface TimelineGroup {
   key: string; at: number | null; label: string;
@@ -103,7 +103,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   async function editEvent(event: ActualEvent) {
     try {
       setEditingData(await eventFormData(db, event));
-      setEditingEvent(event); setEventPlan(null); setNewEvent(true);
+      setEditingEvent(event); setEventPlan(plans.find(plan => plan.id === event.planned_event_id) || null); setNewEvent(true);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
@@ -114,7 +114,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
         <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${kindLabel(event.event_type)} event`}
           onClick={() => void editEvent(event)} />
         <strong>{event.event_type === 'skipped' ? 'Skipped' : kindLabel(event.event_type)}</strong></div>
-        <div className="muted">{formatTime(event.actual_at)}</div></div><Tag>{event.source_id || 'Manual'}</Tag></div>
+        <div className="muted">{formatTime(event.actual_at)}{event.ended_at ? ` – ${formatTime(event.ended_at)}` : ''}</div></div><Tag>{event.source_id || 'Manual'}</Tag></div>
       {details[event.id] && <p className="event-detail">{details[event.id]}</p>}
       {images.length > 0 && <div className="photo-grid">{images.map(photo => <img key={photo.id} src={photo.url} alt="Batch activity" />)}</div>}
     </div>;
@@ -151,9 +151,9 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
                     <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit planned event ${plan.title}`}
                       onClick={() => setEditingPlan(plan)} />
                     <strong>{plan.title}</strong></div>
-                    <div className="plan-meta">{kindLabel(plan.event_type)} · {planTimingLabel(plan, plans)}</div>
-                    <Tag color={conflicting ? 'orange' : completed.length ? 'green' : skipped.length ? 'default' : 'blue'}>
-                      {conflicting ? 'Conflicting' : completed.length ? 'Done' : skipped.length ? 'Skipped' : 'Planned'}</Tag></div>
+                    <div className="plan-meta">{planKindLabel(plan)} · {planTimingLabel(plan, plans)}</div>
+                    <Tag color={conflicting ? 'orange' : completed.length ? planDuration(plan) && !completed.some(item => item.ended_at) ? 'cyan' : 'green' : skipped.length ? 'default' : 'blue'}>
+                      {conflicting ? 'Conflicting' : completed.length ? planDuration(plan) && !completed.some(item => item.ended_at) ? 'In progress' : 'Done' : skipped.length ? 'Skipped' : 'Planned'}</Tag></div>
                     {!linked.length && <Button type="text" shape="circle" icon={<CheckOutlined />} aria-label={`Record ${plan.title}`}
                       title="Record or skip" onClick={() => { setEditingEvent(null); setEditingData(null); setEventPlan(plan); setNewEvent(true); }} />}</div>
                   {planDetailsLabel(plan) && <p className="event-detail">{planDetailsLabel(plan)}</p>}

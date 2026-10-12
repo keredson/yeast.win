@@ -32,7 +32,7 @@ function eventUnit(kind: string, units: PreferredUnits): string | undefined {
 }
 
 interface Values {
-  event_type: string; measurement_kind?: MeasurementKind; actual_at: string; planned_event_id?: string;
+  event_type: string; measurement_kind?: MeasurementKind; actual_at: string; ended_at?: string; planned_event_id?: string;
   note?: string; value?: number; unit?: string; uncertainty?: number; equipment_id?: string;
   calibration_id?: string; source?: string; item_name?: string; inventory_item_id?: string;
   item_category?: string; quantity?: number; pounds?: number; ounces?: number;
@@ -95,6 +95,7 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
       const input: EventInput = {
         batchId, accountId, eventType: completingPlan ? initialPlan.event_type : values.event_type,
         actualAt: fromDatetimeLocal(values.actual_at),
+        endedAt: values.ended_at ? fromDatetimeLocal(values.ended_at) : null,
         plannedEventId: completingPlan ? initialPlan.id : values.planned_event_id || null, note: values.note || '',
       };
       if (kind === 'measurement') {
@@ -115,7 +116,7 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
         if (values.target_value == null && values.power_watts == null) throw new Error('Enter a target or power');
         payload = { equipment_id: values.equipment_id, mode: values.mode || 'hold',
           target_value: values.target_value ?? null, target_unit: values.target_unit || null,
-          power_watts: values.power_watts ?? null, ended_at: null };
+          power_watts: values.power_watts ?? null, ended_at: values.ended_at ? fromDatetimeLocal(values.ended_at) : null };
       } else if (kind === 'pressure_control') {
         if (!values.equipment_id || values.target_value == null || !values.target_unit) throw new Error('Choose equipment and a pressure target');
         payload = { equipment_id: values.equipment_id, target_value: values.target_value, target_unit: values.target_unit };
@@ -153,6 +154,7 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
 
   return <Form form={form} layout="vertical" onFinish={submit} initialValues={{
     event_type: kind, actual_at: initialEvent ? toDatetimeLocal(initialEvent.actual_at) : toDatetimeLocal(),
+    ended_at: initialEvent?.ended_at ? toDatetimeLocal(initialEvent.ended_at) : undefined,
     planned_event_id: initialEvent?.planned_event_id || initialPlan?.id, note: initialEvent?.note || undefined,
     measurement_kind: initialData?.measurementKind || plannedString('measurement_kind') || measurement,
     mode: initialData?.payload.mode || plannedString('mode') || 'hold', source: initialData?.payload.source || 'manual',
@@ -176,11 +178,13 @@ export function EventForm({ db, batchId, accountId, plans, equipment, inventory,
       }} />
     </Form.Item>}
     <div className={completingPlan ? '' : 'form-pair'}>
-      <Form.Item name="actual_at" label="When" rules={[{ required: true }]}><Input type="datetime-local" /></Form.Item>
+      <Form.Item name="actual_at" label={plannedNumber('duration_seconds') || initialEvent?.ended_at ? 'Started' : 'When'} rules={[{ required: true }]}><Input type="datetime-local" /></Form.Item>
       {!completingPlan && <Form.Item name="planned_event_id" label="Related plan"><Select allowClear placeholder="Unplanned"
         options={plans.map(plan => ({ label: `${plan.title} · ${kindLabel(plan.event_type)}`, value: plan.id }))} /></Form.Item>
       }
     </div>
+    {(!!plannedNumber('duration_seconds') || !!initialEvent?.ended_at || kind === 'temperature_control') &&
+      <Form.Item name="ended_at" label="Ended (optional)"><Input type="datetime-local" /></Form.Item>}
     {kind === 'measurement' && <>
       <Form.Item name="measurement_kind" label="Measurement" rules={[{ required: true }]}>
         <Select disabled={!!initialEvent} options={measurementKinds.map(item => ({ value: item.value, label: item.label }))}

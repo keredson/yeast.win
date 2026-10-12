@@ -3,9 +3,11 @@
 const definitions: Record<string, string> = {
   batches: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, description TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL`,
   recipes: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, description TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL`,
+  recipe_types: `id TEXT PRIMARY KEY NOT NULL, recipe_type TEXT NOT NULL`,
   recipe_events: `id TEXT PRIMARY KEY NOT NULL, recipe_id TEXT NOT NULL, event_type TEXT NOT NULL, title TEXT NOT NULL, planned_at INTEGER, anchor_event_id TEXT, offset_seconds INTEGER, details_json TEXT, sort_order INTEGER NOT NULL`,
   batch_planned_events: `id TEXT PRIMARY KEY NOT NULL, batch_id TEXT NOT NULL, recipe_event_id TEXT, event_type TEXT NOT NULL, title TEXT NOT NULL, planned_at INTEGER, anchor_event_id TEXT, offset_seconds INTEGER, details_json TEXT, supersedes_event_id TEXT, created_at INTEGER NOT NULL, created_by_account_id TEXT`,
   batch_events: `id TEXT PRIMARY KEY NOT NULL, batch_id TEXT NOT NULL, event_type TEXT NOT NULL, actual_at INTEGER NOT NULL, planned_event_id TEXT, note TEXT, created_by_account_id TEXT, source_id TEXT, external_id TEXT, received_at INTEGER, supersedes_event_id TEXT`,
+  event_ends: `id TEXT PRIMARY KEY NOT NULL, ended_at INTEGER NOT NULL`,
   additions: `event_id TEXT PRIMARY KEY NOT NULL, inventory_item_id TEXT, item_name TEXT NOT NULL, quantity REAL NOT NULL, unit TEXT NOT NULL, lot TEXT`,
   temperature_measurements: measurementColumns(),
   ph_measurements: measurementColumns(),
@@ -83,7 +85,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 4;
+export const workspaceSchemaVersion = 5;
 export const workspaceV2Statements = [
   schemaStatements.find(statement => statement.includes('equipment_archives'))!
 ];
@@ -92,6 +94,10 @@ export const workspaceV3Statements = [
 ];
 export const workspaceV4Statements = [
   schemaStatements.find(statement => statement.includes('inventory_display_units'))!
+];
+export const workspaceV5Statements = [
+  schemaStatements.find(statement => statement.includes('recipe_types'))!,
+  schemaStatements.find(statement => statement.includes('event_ends'))!
 ];
 
 export function isValidId(value: unknown): value is string {

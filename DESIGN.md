@@ -53,14 +53,15 @@ The names below are proposed logical tables. A migration can refine names and sp
 | Table | Main fields and role |
 | --- | --- |
 | `batches` | `id`, name, description, status, timestamps. This is the root for the batch timeline. The current UI uses `created_at` as the batch start time (T0); no separate `started` event is required. |
-| `recipes` | `id`, name, description, version/metadata. Reusable editable plans, independent of batches. |
+| `recipes` / `recipe_types` | Name, description, and beer/wine/mead type. Reusable editable plans, independent of batches. New beer recipes seed mash and boil ranges plus yeast pitching; wine and mead seed yeast pitching. |
 | `recipe_events` | Planned actions or milestones in a recipe, including type-specific planned details, order, and timing rule. Editing a recipe does not rewrite existing batches. |
 | `batch_planned_events` | Snapshot of recipe events copied when a batch is created with an optional recipe, plus plans added specifically to that batch. These rows are treated as immutable historical plans; a revised plan supersedes an earlier plan rather than silently editing it. |
 | `batch_events` | Actual events: `id`, `batch_id`, `event_type`, `actual_at`, optional `planned_event_id`, creator/source, `received_at`, and optional supersession metadata. Type-specific rows below carry their payloads. |
+| `event_ends` | Optional actual end timestamp for a ranged event, keyed by its event ID. A range can be in progress until this row exists. |
 
 An actual event can fulfill a planned event, be an unplanned action, or record that a planned event was **skipped** (`event_type = 'skipped'`, with `planned_event_id`). A skip has its own actual timestamp and creator; it is not a nullable `skipped_at` on the plan. More than one actual event may refer to the same plan. That preserves conflicting offline actions for review instead of erasing one of them.
 
-A new plan stores `offset_seconds` from batch start, or `anchor_event_id` plus `offset_seconds` from another event. The default is zero seconds from start, so additions at the beginning group naturally. The anchor identifies a meaningful planned milestone whose corresponding actual event supplies the real-world time; `boil_finished` is one example. Until an anchor has an actual result, the UI estimates its time from the anchor's plan. Recipe anchors are remapped to copied batch plans. Legacy `planned_at` timestamps remain readable, but the UI does not create new absolute planned times. What to do with a skipped or conflicting anchor remains a product rule to define.
+A new plan stores `offset_seconds` from batch start, or `anchor_event_id` plus `offset_seconds` from another event. A planned range stores `duration_seconds` in its details. Anchored plans can refer to the start or end of a range with `anchor_point`. Until an anchor has an actual result, the UI estimates its time from the anchor's plan; an actual end supersedes the estimated end. Recipe anchors are remapped to copied batch plans. Legacy `planned_at` timestamps remain readable, but the UI does not create new absolute planned times. What to do with a skipped or conflicting anchor remains a product rule to define.
 
 ### Actual event payloads
 
@@ -80,14 +81,14 @@ A new plan stores `offset_seconds` from batch start, or `anchor_event_id` plus `
 | `pressure_control_events` | Equipment and pressure setpoint. A setpoint is distinct from a pressure measurement. |
 | `transfers` | From/to vessel or destination and transferred quantity with unit. Transfer is a batch action, not a bare milestone. |
 | `packaging` | Container type/size, count, packaged quantity, and optional inventory item consumed. |
-| `boil_finished` | An actual milestone with no invented temperature-setting end anchor. Its timestamp can resolve downstream plans. |
+| `boil_finished` | Legacy milestone retained for existing data. New plans use a timed boil range and anchor to its start or end. |
 | `notes` | Free-text observations that do not fit a physical measurement or action. |
 
 Planned events need the fields necessary to express their intended action or target. They need not duplicate every actual-only field such as calibration, uncertainty, or receipt time. A planned measurement is valid even if no measurement is eventually taken.
 
 #### Temperature control intervals
 
-The next temperature-control event for the **same batch**, of any mode and on any equipment, implicitly ends the preceding setting. We do not model simultaneous heater and chiller settings for one batch. Keep `ended_at` null for an implicit end; set it only for an explicit stop without a replacement. Query the next setting by `(batch_id, actual_at, id)` to derive the effective end. A late or concurrent setting then changes the derived interval without rewriting a prior event. Since those keys live on `batch_events`, index that table on `(batch_id, event_type, actual_at, id)`.
+The next temperature-control event for the **same batch**, of any mode and on any equipment, implicitly ends the preceding setting. We do not model simultaneous heater and chiller settings for one batch. An explicit end is stored in `event_ends` and the temperature-control payload. Query the next setting by `(batch_id, actual_at, id)` for an implicit end. A late or concurrent setting then changes the derived interval without rewriting a prior event. Since those keys live on `batch_events`, index that table on `(batch_id, event_type, actual_at, id)`.
 
 If one fridge serves several batches, record the relevant temperature-control event in **each batch**. These are duplicate batch observations of one physical setting, not a new shared control-session entity. Joining a batch to an already running fridge records when that batch began experiencing its setting.
 

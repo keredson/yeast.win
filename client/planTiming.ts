@@ -1,7 +1,23 @@
 import type { ActualEvent, Plan } from './db.ts';
 import { formatQuantity } from '../shared/units.ts';
+import { kindLabel } from './constants.ts';
 
-type TimedPlan = Pick<Plan, 'id' | 'title'> & Partial<Pick<Plan, 'planned_at' | 'anchor_event_id' | 'offset_seconds'>>;
+type TimedPlan = Pick<Plan, 'id' | 'title'> & Partial<Pick<Plan, 'planned_at' | 'anchor_event_id' | 'offset_seconds' | 'details_json'>>;
+
+export function planDuration(plan: TimedPlan): number {
+  const value = parsePlanDetails(plan.details_json).duration_seconds;
+  return typeof value === 'number' && value > 0 ? value : 0;
+}
+
+export function anchorPoint(plan: TimedPlan): 'start' | 'end' {
+  return parsePlanDetails(plan.details_json).anchor_point === 'end' ? 'end' : 'start';
+}
+
+export function planKindLabel(plan: { event_type: string; details_json?: string | null }): string {
+  const phase = parsePlanDetails(plan.details_json).phase;
+  return plan.event_type === 'temperature_control' && typeof phase === 'string'
+    ? phase[0].toUpperCase() + phase.slice(1) : kindLabel(plan.event_type);
+}
 
 export function formatOffset(seconds: number): string {
   if (seconds === 0) return 'At batch start';
@@ -16,7 +32,8 @@ export function planTimingLabel(plan: TimedPlan, plans: TimedPlan[]): string {
   if (plan.anchor_event_id) {
     const anchor = plans.find(item => item.id === plan.anchor_event_id);
     const offset = plan.offset_seconds || 0;
-    return `${offset ? `${formatOffset(offset)} ${offset < 0 ? 'before' : 'after'}` : 'With'} ${anchor?.title || 'another event'}`;
+    const point = anchor && planDuration(anchor) ? `${anchorPoint(plan)} of ` : '';
+    return `${offset ? `${formatOffset(offset)} ${offset < 0 ? 'before' : 'after'}` : 'At'} ${point}${anchor?.title || 'another event'}`;
   }
   if (plan.planned_at != null) return 'Scheduled from an older plan';
   return plan.offset_seconds ? `${formatOffset(plan.offset_seconds)} ${plan.offset_seconds < 0 ? 'before' : 'after'} batch start` : 'At batch start';
@@ -30,8 +47,9 @@ export function effectivePlanTime(plan: TimedPlan, plans: TimedPlan[], events: A
     const anchor = plans.find(item => item.id === plan.anchor_event_id);
     if (!anchor) return null;
     const actuals = events.filter(item => item.planned_event_id === anchor.id && item.event_type !== 'skipped');
-    const base = actuals.length ? Math.min(...actuals.map(item => item.actual_at))
-      : effectivePlanTime(anchor, plans, events, startAt, visited);
+    const actual = actuals.sort((a, b) => a.actual_at - b.actual_at)[0];
+    const start = actual ? actual.actual_at : effectivePlanTime(anchor, plans, events, startAt, visited);
+    const base = anchorPoint(plan) === 'end' ? actual?.ended_at ?? (start == null ? null : start + planDuration(anchor)) : start;
     return base == null ? null : base + (plan.offset_seconds || 0);
   }
   if (plan.planned_at != null) return plan.planned_at;
@@ -49,6 +67,8 @@ export function planDetailsLabel(plan: Pick<Plan, 'event_type'> & { title?: stri
   const details = parsePlanDetails(plan.details_json);
   const amount = typeof details.quantity === 'number' ? formatQuantity(details.quantity, String(details.unit || ''), String(details.display_unit || '')) : '';
   const target = details.target_value != null ? `${details.target_value} ${details.target_unit || ''}`.trim() : '';
+  const duration = typeof details.duration_seconds === 'number' && details.duration_seconds > 0
+    ? `For ${formatOffset(details.duration_seconds)}` : '';
   const parts = plan.event_type === 'addition' ? [amount, details.item_name === plan.title ? '' : details.item_name]
     : plan.event_type === 'measurement' ? [details.measurement_kind, target]
       : plan.event_type === 'temperature_control' ? [details.mode, target]
@@ -56,6 +76,7 @@ export function planDetailsLabel(plan: Pick<Plan, 'event_type'> & { title?: stri
           : plan.event_type === 'transfer' ? [amount]
             : plan.event_type === 'packaging' ? [details.container_count,
               details.container_name, details.container_size != null ? `${details.container_size} ${details.unit || ''}`.trim() : ''] : [];
+  if (duration) parts.push(duration);
   if (details.note) parts.push(details.note);
   return parts.filter(Boolean).join(' · ');
 }

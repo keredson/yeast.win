@@ -24,3 +24,22 @@ test('plans use batch start and an actual anchor when it arrives', () => {
   assert.equal(effectivePlanTime(nutrient, plans, [actual], start), start + 5400);
   assert.equal(effectivePlanTime(preparation, plans, [actual], start), start + 4500);
 });
+
+test('a timed process exposes separate start and end anchors', () => {
+  const start = 1_800_000_000;
+  const boil: Plan = { id: 'boil', batch_id: 'batch', title: 'Boil', event_type: 'temperature_control',
+    planned_at: null, anchor_event_id: null, offset_seconds: 600, details_json: JSON.stringify({ phase: 'boil', duration_seconds: 3600 }) };
+  const hops: Plan = { ...boil, id: 'hops', title: 'Add hops', event_type: 'addition', anchor_event_id: 'boil',
+    offset_seconds: 0, details_json: JSON.stringify({ anchor_point: 'start' }) };
+  const yeast: Plan = { ...boil, id: 'yeast', title: 'Pitch yeast', event_type: 'addition', anchor_event_id: 'boil',
+    offset_seconds: 0, details_json: JSON.stringify({ anchor_point: 'end' }) };
+  const plans = [boil, hops, yeast];
+  assert.equal(planTimingLabel(hops, plans), 'At start of Boil');
+  assert.equal(planTimingLabel(yeast, plans), 'At end of Boil');
+  assert.equal(effectivePlanTime(hops, plans, [], start), start + 600);
+  assert.equal(effectivePlanTime(yeast, plans, [], start), start + 4200);
+  const actual: ActualEvent = { id: 'boil-actual', batch_id: 'batch', event_type: 'temperature_control',
+    actual_at: start + 900, ended_at: start + 4500, planned_event_id: 'boil', note: null, source_id: null };
+  assert.equal(effectivePlanTime(hops, plans, [actual], start), start + 900);
+  assert.equal(effectivePlanTime(yeast, plans, [actual], start), start + 4500);
+});

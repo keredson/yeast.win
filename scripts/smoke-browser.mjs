@@ -336,14 +336,34 @@ try {
   await navigateSection(page, 'Recipes');
   await page.getByRole('button', { name: 'New recipe' }).click();
   await page.getByLabel('Recipe name').fill('Smoke recipe');
+  await page.getByRole('dialog', { name: 'New recipe' }).getByRole('combobox', { name: 'Type' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Beer' }).click();
   await page.getByRole('button', { name: 'Create recipe' }).click();
   await page.waitForURL(url => /^\/recipe\/[A-Za-z0-9_-]{10,32}$/.test(url.pathname));
+  await page.getByRole('button', { name: 'Edit planned event Mash' }).waitFor();
+  await page.getByRole('button', { name: 'Edit planned event Boil' }).waitFor();
+  await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
+  await page.getByRole('button', { name: 'Edit planned event Boil' }).click();
+  const boilPlan = page.getByRole('dialog', { name: 'Edit Boil' });
+  if (!await boilPlan.getByRole('spinbutton', { name: 'Duration (optional)' }).inputValue().then(value => Number(value) === 1)) {
+    throw new Error('Seeded boil did not have a one-hour duration');
+  }
+  await boilPlan.locator('.ant-modal-close').click();
+  await page.getByRole('button', { name: 'Add recipe event' }).click();
+  await page.getByRole('menuitem', { name: 'Measurement' }).click();
+  await page.getByRole('menuitem', { name: 'pH', exact: true }).click();
+  const phPlan = page.getByRole('dialog', { name: 'Add ph measurement' });
+  await phPlan.waitFor({ state: 'visible', timeout: 5000 }).catch(async () => {
+    throw new Error(`pH action did not open its modal: ${JSON.stringify(await page.locator('.ant-modal-title').allTextContents())}`);
+  });
+  if (await phPlan.getByRole('combobox', { name: 'Measurement' }).count()) throw new Error('pH modal has a redundant measurement type selector');
+  await phPlan.locator('.ant-modal-close').click();
   if (await page.locator('.content-heading').getByRole('button', { name: 'Add planned event' }).count()) {
     throw new Error('Recipe still has a header add button');
   }
-  await choosePlanKind(page, 'Add recipe event', 'Addition');
-  const recipePlan = page.getByRole('dialog', { name: 'Add addition' });
-  await choosePlanCategory(page, recipePlan, 'Grain');
+  await choosePlanKind(page, 'Add recipe event', 'Ingredient');
+  const recipePlan = page.getByRole('dialog', { name: 'Add ingredient' });
+  if (!await recipePlan.getByText('At or after start of Boil').count()) throw new Error('Ingredient did not default to boil start');
   await recipePlan.getByLabel('What will be added?').fill('2-row');
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: '2-row pale malt' }).click();
   await recipePlan.getByRole('spinbutton', { name: 'Planned quantity' }).fill('5');
@@ -355,7 +375,7 @@ try {
   await page.getByRole('button', { name: 'Edit planned event 2-row pale malt' }).waitFor();
   await page.getByText('5 oz', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event 2-row pale malt' }).click();
-  const editRecipePlan = page.getByRole('dialog', { name: 'Edit addition' });
+  const editRecipePlan = page.getByRole('dialog', { name: 'Edit 2-row pale malt' });
   await editRecipePlan.getByLabel('What will be added?').fill('2-row pale malt extra');
   await editRecipePlan.getByRole('button', { name: 'Save event' }).click();
   await page.getByText('2-row pale malt extra').waitFor();
@@ -372,14 +392,14 @@ try {
   await choosePlanKind(page, 'Add recipe event', 'Notes');
   const recipeReminder = page.getByRole('dialog', { name: 'Add notes' });
   await recipeReminder.getByLabel('Reminder').fill('Check the mash');
-  await recipeReminder.getByRole('combobox', { name: 'Timing' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'After 2-row pale malt extra' }).click();
+  await recipeReminder.getByRole('combobox', { name: 'Timing' }).fill('2-row pale malt extra');
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: '2-row pale malt extra' }).last().click();
   await recipeReminder.getByRole('button', { name: 'Add notes' }).click();
   await recipeReminder.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Delete planned event 2-row pale malt extra' }).click();
   await page.getByText('Also deletes Check the mash').waitFor();
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
-  await page.getByText('Add the first planned event').waitFor();
+  await page.getByRole('button', { name: 'Edit planned event Boil' }).waitFor();
   await navigateSection(page, 'Batches');
   await openBatch(page, 'Batch from recipe');
   await page.locator('.plan-card').getByText('2-row pale malt extra').waitFor();
@@ -597,6 +617,18 @@ try {
   await page.locator('.login-card form button[type="submit"]').click();
   await page.getByRole('heading', { name: 'Batches' }).waitFor();
   console.log('Changed password, revoked other sessions, and signed back in');
+
+  for (const type of ['Wine', 'Mead']) {
+    await navigateSection(page, 'Recipes');
+    await page.getByRole('button', { name: 'New recipe' }).click();
+    const dialog = page.getByRole('dialog', { name: 'New recipe' });
+    await dialog.getByLabel('Recipe name').fill(`${type} smoke recipe`);
+    await dialog.getByRole('combobox', { name: 'Type' }).click();
+    await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: type }).click();
+    await dialog.getByRole('button', { name: 'Create recipe' }).click();
+    await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
+    if (await page.getByRole('button', { name: 'Edit planned event Boil' }).count()) throw new Error(`${type} recipe got a beer boil`);
+  }
 
   if (errors.length) throw new Error(`Browser errors:\n${errors.join('\n')}`);
   console.log('Browser smoke passed');
