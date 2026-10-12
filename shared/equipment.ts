@@ -2,6 +2,7 @@ export const equipmentKinds = [
   { value: 'electric_kettle', label: 'Electric kettle' },
   { value: 'all_in_one', label: 'All-in-one brewing system' },
   { value: 'controlled_fermenter', label: 'Temperature-controlled fermenter' },
+  { value: 'fermentation_temperature_control', label: 'Fermentation temperature control' },
   { value: 'glycol_chiller', label: 'Glycol chiller' },
   { value: 'kettle', label: 'Kettle' },
   { value: 'mash_tun', label: 'Mash tun' },
@@ -23,7 +24,7 @@ export const equipmentKinds = [
 
 export const equipmentGroups = [
   { key: 'control', label: 'Control', kinds: ['electric_kettle', 'all_in_one', 'controlled_fermenter',
-    'refrigerator', 'temperature_controller', 'glycol_chiller', 'chiller', 'pump'] },
+    'fermentation_temperature_control', 'chiller'] },
   { key: 'measurement', label: 'Measurement', kinds: ['hydrometer', 'thermometer', 'refractometer',
     'ph_meter', 'pressure_gauge', 'carbonation_meter', 'dissolved_oxygen_meter', 'scale'] },
   { key: 'passive', label: 'Passive vessels', kinds: ['kettle', 'mash_tun', 'fermenter'] }

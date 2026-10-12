@@ -25,6 +25,9 @@ const calibrationProfiles: Record<string, { method: string; fields: { key: strin
   temperature_controller: { method: 'Temperature °C', fields: [
     { key: 'reference_c', label: 'Reference temperature °C' }, { key: 'observed_c', label: 'Controller reading °C' }
   ] },
+  fermentation_temperature_control: { method: 'Temperature °C', fields: [
+    { key: 'reference_c', label: 'Reference temperature °C' }, { key: 'observed_c', label: 'Controller reading °C' }
+  ] },
   thermometer: { method: 'Temperature °C', fields: [
     { key: 'reference_c', label: 'Reference temperature °C' }, { key: 'observed_c', label: 'Thermometer reading °C' }
   ] },
@@ -149,14 +152,11 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
 
   return <div className="section-page">
     {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
-    {!selectedId ? <section className="record-index equipment-index"><div className="section-heading"><div><span className="eyebrow">Your gear</span><h1>Equipment</h1></div>
-      {equipment.length > 0 && <Dropdown trigger={['click']} menu={addMenu} placement="bottomRight">
-        <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New equipment" title="New equipment" />
-      </Dropdown>}</div>
+    {!selectedId ? <section className="record-index equipment-index"><div className="section-heading"><div><span className="eyebrow">Your gear</span><h1>Equipment</h1></div></div>
       <p className="muted">Measurements, control settings, and transfers can reference your equipment.</p>
-      {equipment.length === 0 && <Dropdown trigger={['click']} menu={addMenu} placement="bottomLeft">
+      <Dropdown trigger={['click']} menu={addMenu} placement="bottomLeft">
         <Button icon={<PlusOutlined />}>Add equipment</Button>
-      </Dropdown>}
+      </Dropdown>
       {equipment.length > 0 && <div className="group-tables">{groupedKinds.map(group => <section key={group.key} className="equipment-category">
         <h2>{group.label}</h2>{group.kinds.map(kind => {
         const rows = equipment.filter(row => row.kind === kind);
