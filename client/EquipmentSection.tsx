@@ -42,12 +42,26 @@ const calibrationProfiles: Record<string, { method: string; fields: { key: strin
   ] }
 };
 
+const equipmentMenuItems = [
+  { key: 'brewing', label: 'Brewing', children: ['kettle', 'mash_tun', 'fermenter', 'chiller', 'pump'] },
+  { key: 'temperature', label: 'Temperature', children: ['refrigerator', 'temperature_controller', 'thermometer'] },
+  { key: 'measuring', label: 'Measuring', children: ['hydrometer', 'refractometer', 'ph_meter', 'pressure_gauge',
+    'carbonation_meter', 'dissolved_oxygen_meter', 'scale'] },
+  { key: 'other_group', label: 'Other', children: ['other'] }
+].map(group => ({ key: group.key, label: group.label,
+  children: group.children.map(kind => ({ key: kind, label: equipmentKindLabel(kind) })) }));
+
+function addEquipmentTitle(kind: string): string {
+  const label = equipmentKindLabel(kind);
+  return `Add ${label[0].toLowerCase()}${label.slice(1)}`;
+}
+
 export function EquipmentSection({ db, basePath, accountId, equipment, catalog, selectedId, onSelect, onChanged }: {
   db: LocalDb; basePath: string; accountId: string; equipment: Equipment[]; catalog: CatalogEquipment[]; selectedId: string | null; onSelect: (id: string | null) => void;
   onChanged: () => Promise<void>;
 }) {
   const [calibrations, setCalibrations] = useState<Calibration[]>([]);
-  const [newEquipment, setNewEquipment] = useState(false);
+  const [creatingKind, setCreatingKind] = useState<string | null>(null);
   const [newCalibration, setNewCalibration] = useState(false);
   const [editCapacity, setEditCapacity] = useState(false);
   const [editRange, setEditRange] = useState(false);
@@ -57,7 +71,6 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
   const [capacityForm] = Form.useForm();
   const [rangeForm] = Form.useForm();
   const item = equipment.find(row => row.id === selectedId) || null;
-  const selectedKind = Form.useWatch('kind', equipmentForm) as string | undefined;
   const newCapacityUnit = Form.useWatch('capacity_unit', equipmentForm) as string | undefined;
   const newRangeUnit = Form.useWatch('measurement_unit', equipmentForm) as string | undefined;
   const editCapacityUnit = Form.useWatch('capacity_unit', capacityForm) as string | undefined;
@@ -80,20 +93,21 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
     return { min, max, unit };
   }
 
-  async function create(values: { name: string; kind: string; catalog_id?: string; capacity?: number; capacity_unit?: string;
+  async function create(values: { name: string; catalog_id?: string; capacity?: number; capacity_unit?: string;
     measurement_min?: number; measurement_max?: number; measurement_unit?: string }) {
+    if (!creatingKind) return;
     try {
       const overrides: EquipmentSpecifications = {};
-      if (capacityKinds.has(values.kind)) {
+      if (capacityKinds.has(creatingKind)) {
         const capacity = capacityInLiters(values.capacity, values.capacity_unit);
         if (capacity != null) overrides.capacity_liters = capacity;
       }
-      if (measurementRangeUnits[values.kind]) {
-        const range = validRange(values.measurement_min, values.measurement_max, values.measurement_unit, values.kind);
+      if (measurementRangeUnits[creatingKind]) {
+        const range = validRange(values.measurement_min, values.measurement_max, values.measurement_unit, creatingKind);
         if (range) Object.assign(overrides, { measurement_min: range.min, measurement_max: range.max, measurement_unit: range.unit });
       }
-      const id = await createEquipment(db, values.name.trim(), values.kind, catalog.find(row => row.id === values.catalog_id), overrides);
-      setNewEquipment(false); equipmentForm.resetFields(); onSelect(id); await onChanged();
+      const id = await createEquipment(db, values.name.trim(), creatingKind, catalog.find(row => row.id === values.catalog_id), overrides);
+      setCreatingKind(null); equipmentForm.resetFields(); onSelect(id); await onChanged();
     }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -133,13 +147,19 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
+  const addMenu = { items: equipmentMenuItems, triggerSubMenuAction: 'click' as const,
+    onClick: ({ key }: { key: string }) => setCreatingKind(key) };
+
   return <div className="section-page">
     {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
     {!selectedId ? <section className="record-index equipment-index"><div className="section-heading"><div><span className="eyebrow">Your gear</span><h1>Equipment</h1></div>
-      {equipment.length > 0 && <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New equipment" title="New equipment"
-        onClick={() => setNewEquipment(true)} />}</div>
+      {equipment.length > 0 && <Dropdown trigger={['click']} menu={addMenu} placement="bottomRight">
+        <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New equipment" title="New equipment" />
+      </Dropdown>}</div>
       <p className="muted">Measurements and control settings can reference a specific item.</p>
-      {equipment.length === 0 && <Button icon={<PlusOutlined />} onClick={() => setNewEquipment(true)}>Add equipment</Button>}
+      {equipment.length === 0 && <Dropdown trigger={['click']} menu={addMenu} placement="bottomLeft">
+        <Button icon={<PlusOutlined />}>Add equipment</Button>
+      </Dropdown>}
       {equipment.length > 0 && <div className="group-tables">{kinds.map(kind => {
         const rows = equipment.filter(row => row.kind === kind);
         return rows.length ? <section key={kind} className="group-table"><h2>{equipmentKindLabel(kind)}</h2>
@@ -176,35 +196,34 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
           <pre className="calibration-data">{row.parameters_json}</pre>
         </Card>)}</div></>}
       </section>}
-    <Modal title="New equipment" open={newEquipment} onCancel={() => setNewEquipment(false)} footer={null} destroyOnHidden>
-      <Form form={equipmentForm} layout="vertical" onFinish={create} initialValues={{ capacity_unit: 'L' }}>
-        <Form.Item name="kind" label="Type" rules={[{ required: true }]}><Select showSearch optionFilterProp="label" placeholder="Choose equipment type" options={[...equipmentKinds]}
-          onChange={() => equipmentForm.setFieldsValue({ catalog_id: undefined, name: undefined, capacity: undefined,
-            measurement_min: undefined, measurement_max: undefined, measurement_unit: undefined })} /></Form.Item>
+    <Modal title={creatingKind ? addEquipmentTitle(creatingKind) : 'Add equipment'} open={!!creatingKind}
+      onCancel={() => setCreatingKind(null)} footer={null} destroyOnHidden>
+      {creatingKind && <Form key={creatingKind} form={equipmentForm} layout="vertical" onFinish={create} preserve={false}
+        initialValues={{ capacity_unit: 'L', measurement_unit: measurementRangeUnits[creatingKind]?.[0] }}>
         <Form.Item name="catalog_id" hidden><Input /></Form.Item>
         <Form.Item name="name" label="Name" rules={[{ required: true, whitespace: true }]}>
-          <AutoComplete disabled={!selectedKind} placeholder={selectedKind ? 'Search shared catalog or enter a name' : 'Choose type first'} maxLength={120}
-            options={catalog.filter(row => row.kind === selectedKind).map(row => ({ value: row.name }))}
+          <AutoComplete placeholder="Search shared catalog or enter a name" maxLength={120}
+            options={catalog.filter(row => row.kind === creatingKind).map(row => ({ value: row.name }))}
             filterOption={(input, option) => String(option?.value || '').toLowerCase().includes(input.toLowerCase())}
-            onSelect={value => { const entry = catalog.find(row => row.kind === selectedKind && row.name === value);
+            onSelect={value => { const entry = catalog.find(row => row.kind === creatingKind && row.name === value);
               if (entry) { const specs = JSON.parse(entry.specification_json || '{}') as EquipmentSpecifications;
                 equipmentForm.setFieldsValue({ catalog_id: entry.id, capacity: specs.capacity_liters, capacity_unit: 'L',
                   measurement_min: specs.measurement_min, measurement_max: specs.measurement_max,
                   measurement_unit: specs.measurement_unit || measurementRangeUnits[entry.kind]?.[0] }); } }} />
         </Form.Item>
-        {selectedKind && capacityKinds.has(selectedKind) && <div className="capacity-fields"><Form.Item name="capacity" label="Capacity (optional)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
+        {capacityKinds.has(creatingKind) && <div className="capacity-fields"><Form.Item name="capacity" label="Capacity (optional)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
           <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]}
             onChange={unit => changeNumberUnit(equipmentForm, ['capacity'], newCapacityUnit || 'L', unit)} /></Form.Item></div>}
-        {selectedKind && measurementRangeUnits[selectedKind] && <div className="form-triple">
+        {measurementRangeUnits[creatingKind] && <div className="form-triple">
           <Form.Item name="measurement_min" label="Range minimum"><InputNumber className="full-width" step="any" /></Form.Item>
           <Form.Item name="measurement_max" label="Range maximum"><InputNumber className="full-width" step="any" /></Form.Item>
-          <Form.Item name="measurement_unit" label="Unit" initialValue={measurementRangeUnits[selectedKind][0]}>
-            <Select options={measurementRangeUnits[selectedKind].map(value => ({ value, label: value }))}
+          <Form.Item name="measurement_unit" label="Unit">
+            <Select options={measurementRangeUnits[creatingKind].map(value => ({ value, label: value }))}
               onChange={unit => changeNumberUnit(equipmentForm, ['measurement_min', 'measurement_max'],
-                newRangeUnit || measurementRangeUnits[selectedKind][0], unit)} /></Form.Item>
+                newRangeUnit || measurementRangeUnits[creatingKind][0], unit)} /></Form.Item>
         </div>}
         <Button type="primary" htmlType="submit">Create equipment</Button>
-      </Form>
+      </Form>}
     </Modal>
     <Modal title="Set equipment capacity" open={editCapacity} onCancel={() => setEditCapacity(false)} footer={null} destroyOnHidden>
       <Form key={item?.id} form={capacityForm} layout="vertical" onFinish={saveCapacity} initialValues={{ capacity: specs.capacity_liters, capacity_unit: 'L' }}>

@@ -59,6 +59,12 @@ async function choosePlanKind(page, buttonName, kind) {
   if (kind === 'Measurement') await page.getByRole('menuitem', { name: 'Temperature', exact: true }).click();
 }
 
+async function chooseEquipmentType(page, buttonName, group, kind) {
+  await page.getByRole('button', { name: buttonName }).click();
+  await page.getByRole('menuitem', { name: group }).click();
+  await page.getByRole('menuitem', { name: kind, exact: true }).click();
+}
+
 async function localBreweryBlocks(page, id) {
   return page.evaluate(async breweryId => {
     const request = indexedDB.open('idb-batch-atomic');
@@ -259,19 +265,22 @@ try {
   if (!await page.locator('.app-nav').evaluate(element => element.classList.contains('ant-layout-sider'))) {
     throw new Error('Desktop navigation is not an Ant Design Sider');
   }
-  await page.getByRole('button', { name: 'New equipment' }).click();
-  const equipmentType = page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Type' });
-  await equipmentType.fill('pH meter');
-  await equipmentType.press('Enter');
-  if (await page.getByRole('dialog', { name: 'New equipment' }).getByLabel('Capacity (optional)').count()) {
+  await chooseEquipmentType(page, 'Add equipment', 'Brewing', 'Kettle');
+  const kettleDialog = page.getByRole('dialog', { name: 'Add kettle' });
+  await kettleDialog.getByLabel('Capacity (optional)').waitFor();
+  if (await kettleDialog.getByLabel('Range minimum').count()) throw new Error('Kettle was offered a measurement range');
+  await kettleDialog.locator('.ant-modal-close').click();
+  await chooseEquipmentType(page, 'Add equipment', 'Measuring', 'pH meter');
+  const phDialog = page.getByRole('dialog', { name: 'Add pH meter' });
+  if (await phDialog.getByLabel('Capacity (optional)').count()) {
     throw new Error('Measurement equipment was offered vessel capacity');
   }
-  const phName = page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Name' });
+  const phName = phDialog.getByRole('combobox', { name: 'Name' });
   await phName.fill('pH meter');
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'pH meter' }).last().click();
   await phName.fill('Smoke pH meter');
-  await page.getByRole('dialog', { name: 'New equipment' }).getByRole('spinbutton', { name: 'Range minimum' }).fill('0');
-  await page.getByRole('dialog', { name: 'New equipment' }).getByRole('spinbutton', { name: 'Range maximum' }).fill('14');
+  await phDialog.getByRole('spinbutton', { name: 'Range minimum' }).fill('0');
+  await phDialog.getByRole('spinbutton', { name: 'Range maximum' }).fill('14');
   await page.getByRole('button', { name: 'Create equipment' }).click();
   await page.getByRole('heading', { name: 'Smoke pH meter' }).waitFor();
   await page.getByText('Measurement range: 0–14 pH').waitFor();
@@ -289,15 +298,14 @@ try {
   await page.getByRole('button', { name: 'Save calibration' }).click();
   await page.getByText('Two-point pH').waitFor();
   await navigateSection(page, 'Equipment');
-  await page.getByRole('button', { name: 'New equipment' }).click();
-  await page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Type' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Refractometer' }).click();
-  const refractometerName = page.getByRole('dialog', { name: 'New equipment' }).getByRole('combobox', { name: 'Name' });
+  await chooseEquipmentType(page, 'New equipment', 'Measuring', 'Refractometer');
+  const refractometerDialog = page.getByRole('dialog', { name: 'Add refractometer' });
+  const refractometerName = refractometerDialog.getByRole('combobox', { name: 'Name' });
   await refractometerName.fill('Refractometer');
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Refractometer' }).last().click();
   await refractometerName.fill('Smoke refractometer');
-  await page.getByRole('dialog', { name: 'New equipment' }).getByRole('spinbutton', { name: 'Range minimum' }).fill('0');
-  await page.getByRole('dialog', { name: 'New equipment' }).getByRole('spinbutton', { name: 'Range maximum' }).fill('32');
+  await refractometerDialog.getByRole('spinbutton', { name: 'Range minimum' }).fill('0');
+  await refractometerDialog.getByRole('spinbutton', { name: 'Range maximum' }).fill('32');
   await page.getByRole('button', { name: 'Create equipment' }).click();
   await page.getByRole('heading', { name: 'Smoke refractometer', exact: true }).waitFor();
   await page.getByText('Measurement range: 0–32 °Brix').waitFor();
@@ -336,7 +344,7 @@ try {
   await page.getByRole('menuitem', { name: 'Delete equipment' }).click();
   await page.getByRole('dialog', { name: 'Delete equipment?' }).getByRole('button', { name: 'Delete' }).click();
   await page.waitForURL('**/equipment');
-  await page.getByText('No equipment yet').waitFor();
+  await page.getByRole('button', { name: 'Add equipment' }).waitFor();
   await navigateSection(page, 'Batches');
   await openBatch(page, batchName);
   await page.getByText('ph 5.2 pH').waitFor();
