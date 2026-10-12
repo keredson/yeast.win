@@ -55,7 +55,8 @@ async function choosePlanCategory(page, dialog, category) {
 
 async function choosePlanKind(page, buttonName, kind) {
   await page.getByRole('button', { name: buttonName }).click();
-  await page.getByRole('menuitem', { name: kind, exact: true }).click();
+  await page.getByRole('menuitem', { name: kind, exact: kind !== 'Measurement' }).click();
+  if (kind === 'Measurement') await page.getByRole('menuitem', { name: 'Temperature', exact: true }).click();
 }
 
 async function localBreweryBlocks(page, id) {
@@ -142,15 +143,17 @@ try {
   await page.locator('.app-nav .ant-menu-item').filter({ hasText: batchName }).click();
   await page.getByRole('heading', { name: batchName }).waitFor();
   console.log('Created batch:', batchName);
+  await page.locator('.timeline-group-heading').getByText('Batch start').waitFor();
+  if (await page.locator('.timeline-group .plan-card').count()) throw new Error('Empty batch start already has actions');
 
-  await choosePlanKind(page, 'Add action', 'Addition');
+  await choosePlanKind(page, 'Add action', 'Ingredient');
   const firstAction = page.getByRole('dialog', { name: 'Add addition' });
   await choosePlanCategory(page, firstAction, 'Nutrient');
   await firstAction.getByLabel('What will be added?').fill('Add nutrient');
   await firstAction.getByRole('spinbutton', { name: 'Quantity' }).fill('1');
   await firstAction.getByRole('button', { name: 'Add addition' }).click();
   await firstAction.waitFor({ state: 'hidden' });
-  await choosePlanKind(page, 'Add action', 'Addition');
+  await choosePlanKind(page, 'Add action', 'Ingredient');
   const yeastAction = page.getByRole('dialog', { name: 'Add addition' });
   await choosePlanCategory(page, yeastAction, 'Yeast');
   await yeastAction.getByLabel('What will be added?').fill('Add yeast');
@@ -356,6 +359,8 @@ try {
   await page.waitForURL(url => /^\/recipe\/[A-Za-z0-9_-]{10,32}$/.test(url.pathname));
   await page.getByRole('button', { name: 'Edit planned event Mash' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Boil' }).waitFor();
+  await page.getByRole('button', { name: 'Edit planned event Chill' }).waitFor();
+  await page.getByRole('button', { name: 'Edit planned event Transfer to fermenter' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Boil' }).click();
   const boilPlan = page.getByRole('dialog', { name: 'Edit Boil' });
@@ -414,9 +419,11 @@ try {
   await recipeReminder.getByRole('button', { name: 'Add notes' }).click();
   await recipeReminder.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Delete planned event 2-row pale malt extra' }).click();
-  await page.getByText('Also deletes Check the mash').waitFor();
+  await page.getByText('Actions timed from this one will become relative to batch start.').waitFor();
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
   await page.getByRole('button', { name: 'Edit planned event Boil' }).waitFor();
+  await page.getByRole('button', { name: 'Edit planned event Check the mash' }).waitFor();
+  await page.locator('.plan-card').filter({ hasText: 'Check the mash' }).getByText(/batch start/).waitFor();
   await navigateSection(page, 'Batches');
   await openBatch(page, 'Batch from recipe');
   await page.locator('.plan-card').getByText('2-row pale malt extra').waitFor();

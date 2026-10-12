@@ -134,6 +134,8 @@ export async function createRecipe(db: DB, name: string, description: string, re
     await tx.exec('INSERT INTO recipe_types(id, recipe_type) VALUES (?, ?)', [id, recipeType]);
     const mashId = nanoid();
     const boilId = nanoid();
+    const chillId = nanoid();
+    const transferId = nanoid();
     const insert = async (eventId: string, eventType: string, title: string, anchorId: string | null,
       details: Record<string, string | number>, order: number) => tx.exec(`INSERT INTO recipe_events
       (id, recipe_id, event_type, title, planned_at, anchor_event_id, offset_seconds, details_json, sort_order)
@@ -143,9 +145,14 @@ export async function createRecipe(db: DB, name: string, description: string, re
         { phase: 'mash', mode: 'hold', target_value: convertUnit(67, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 1800 }, 1);
       await insert(boilId, 'temperature_control', 'Boil', mashId,
         { phase: 'boil', mode: 'heat', target_value: convertUnit(100, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 3600, anchor_point: 'end' }, 2);
+      await insert(chillId, 'temperature_control', 'Chill', boilId,
+        { phase: 'chill', mode: 'chill', target_value: convertUnit(20, '°C', temperatureUnit)!, target_unit: temperatureUnit,
+          duration_seconds: 1200, anchor_point: 'end' }, 3);
+      await insert(transferId, 'transfer', 'Transfer to fermenter', chillId,
+        { anchor_point: 'end' }, 4);
     }
-    await insert(nanoid(), 'addition', 'Pitch yeast', recipeType === 'beer' ? boilId : null,
-      { item_category: 'Yeast', item_name: 'Yeast', ...(recipeType === 'beer' ? { anchor_point: 'end' } : {}) }, recipeType === 'beer' ? 3 : 1);
+    await insert(nanoid(), 'addition', 'Pitch yeast', recipeType === 'beer' ? transferId : null,
+      { item_category: 'Yeast', item_name: 'Yeast' }, recipeType === 'beer' ? 5 : 1);
   });
   return id;
 }
@@ -203,14 +210,26 @@ export async function updateRecipePlan(db: DB, recipeId: string, planId: string,
 export async function deleteRecipePlan(db: DB, recipeId: string, planId: string): Promise<void> {
   const plans = await listRecipePlans(db, recipeId);
   if (!plans.some(plan => plan.id === planId)) throw new Error('Recipe event not found');
-  const removed = new Set([planId]);
-  let size = 0;
-  while (removed.size !== size) {
-    size = removed.size;
-    for (const plan of plans) if (plan.anchor_event_id && removed.has(plan.anchor_event_id)) removed.add(plan.id);
-  }
+  const children = plans.filter(plan => plan.anchor_event_id === planId);
+  const effectiveOffset = (plan: PlanInput & { id: string }, visited = new Set<string>()): number => {
+    if (visited.has(plan.id)) throw new Error('Timing cannot create a cycle');
+    visited.add(plan.id);
+    if (!plan.anchor_event_id) return plan.offset_seconds || 0;
+    const anchor = plans.find(item => item.id === plan.anchor_event_id);
+    if (!anchor) return plan.offset_seconds || 0;
+    const details = JSON.parse(plan.details_json || '{}') as { anchor_point?: string };
+    const anchorDetails = JSON.parse(anchor.details_json || '{}') as { duration_seconds?: number };
+    return effectiveOffset(anchor, visited) + (details.anchor_point === 'end' ? anchorDetails.duration_seconds || 0 : 0)
+      + (plan.offset_seconds || 0);
+  };
   await db.tx(async tx => {
-    for (const id of [...removed].reverse()) await tx.exec('DELETE FROM recipe_events WHERE id = ? AND recipe_id = ?', [id, recipeId]);
+    for (const child of children) {
+      const details = JSON.parse(child.details_json || '{}') as Record<string, string | number>;
+      delete details.anchor_point;
+      await tx.exec(`UPDATE recipe_events SET anchor_event_id = NULL, offset_seconds = ?, details_json = ?
+        WHERE id = ? AND recipe_id = ?`, [effectiveOffset(child), Object.keys(details).length ? JSON.stringify(details) : null, child.id, recipeId]);
+    }
+    await tx.exec('DELETE FROM recipe_events WHERE id = ? AND recipe_id = ?', [planId, recipeId]);
   });
 }
 
