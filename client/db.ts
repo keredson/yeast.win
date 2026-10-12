@@ -177,12 +177,15 @@ export async function createRecipe(db: DB, name: string, description: string, re
       await insert(transferId, 'transfer', 'Transfer to fermenter', chillId,
         {}, 4);
     }
+    const gravityId = nanoid();
+    await insert(gravityId, 'measurement', 'Measure original specific gravity', recipeType === 'beer' ? transferId : null,
+      { measurement_kind: 'gravity', target_unit: 'SG' }, recipeType === 'beer' ? 5 : 1);
     const pitchId = nanoid();
-    await insert(pitchId, 'addition', 'Pitch yeast', recipeType === 'beer' ? transferId : null,
-      { item_category: 'Yeast', item_name: 'Yeast' }, recipeType === 'beer' ? 5 : 1);
+    await insert(pitchId, 'addition', 'Pitch yeast', gravityId,
+      { item_category: 'Yeast', item_name: 'Yeast' }, recipeType === 'beer' ? 6 : 2);
     const packagingDays: Record<RecipeType, number> = { beer: 21, cider: 28, wine: 60, mead: 60 };
     await insert(nanoid(), 'packaging', 'Package batch', pitchId,
-      {}, recipeType === 'beer' ? 6 : 2, packagingDays[recipeType] * 86400);
+      {}, recipeType === 'beer' ? 7 : 3, packagingDays[recipeType] * 86400);
   });
   return id;
 }
@@ -450,7 +453,10 @@ export async function eventDetails(db: DB, event: ActualEvent, preferredMassUnit
     for (const [kind, table] of Object.entries(measurementTables)) {
       const rows = await db.execO<{ value: number; unit: string; uncertainty: number | null }>(
         `SELECT value, unit, uncertainty FROM ${table} WHERE event_id = ?`, [event.id]);
-      if (rows.length) parts.push(`${kind.replaceAll('_', ' ')} ${rows[0].value} ${rows[0].unit}${rows[0].uncertainty == null ? '' : ` ±${rows[0].uncertainty}`}`);
+      if (rows.length) {
+        const scaleOrUnit = kind === 'gravity' && rows[0].unit === 'SG' ? '' : ` ${rows[0].unit}`;
+        parts.push(`${kind.replaceAll('_', ' ')} ${rows[0].value}${scaleOrUnit}${rows[0].uncertainty == null ? '' : ` ±${rows[0].uncertainty}`}`);
+      }
     }
     return parts.join(' · ');
   }

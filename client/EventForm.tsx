@@ -4,7 +4,7 @@ import { kindLabel, measurementKinds, planKinds } from './constants.ts';
 import { fromDatetimeLocal, toDatetimeLocal } from './time.ts';
 import { addPhoto, recordEvent, skipBatchEvent, updateEvent, updatePhotoEvent, type ActualEvent, type Equipment, type EventInput, type InventoryItem, type LocalDb, type MeasurementKind, type Plan } from './db.ts';
 import type { PreferredUnits } from './api.ts';
-import { compoundMassUnit, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions } from '../shared/units.ts';
+import { compoundMassUnit, gravityScales, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions } from '../shared/units.ts';
 import { parsePlanDetails, supportsDuration } from './planTiming.ts';
 import { inventoryCategories } from '../shared/catalog.ts';
 import { QuantityFields } from './QuantityFields.tsx';
@@ -13,7 +13,7 @@ import { vesselKinds } from '../shared/equipment.ts';
 
 function measurementUnits(kind: MeasurementKind): readonly string[] {
   if (kind === 'ph') return ['pH'];
-  if (kind === 'gravity') return unitGroups.gravity;
+  if (kind === 'gravity') return gravityScales;
   if (kind === 'carbonation') return unitGroups.carbonation;
   if (kind === 'dissolved_oxygen') return unitGroups.dissolved_oxygen;
   return unitGroups[kind];
@@ -203,7 +203,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
       </Form.Item>
       <div className="form-pair">
         <Form.Item name="value" label="Corrected value" rules={[{ required: true }]}><InputNumber className="full-width" step="any" /></Form.Item>
-        <Form.Item name="unit" label="Unit" rules={[{ required: true }]}><Select options={unitOptions(measurementUnits(measurement))}
+        <Form.Item name="unit" label={measurement === 'gravity' ? 'Scale' : 'Unit'} rules={[{ required: true }]}><Select options={unitOptions(measurementUnits(measurement))}
           onChange={changeMainUnit} /></Form.Item>
       </div>
       <div className="form-pair">
