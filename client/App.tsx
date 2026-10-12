@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppstoreOutlined, BookOutlined, InboxOutlined, MenuOutlined, ToolOutlined } from '@ant-design/icons';
 import { Alert, Avatar, Button, Card, Drawer, Empty, Form, Input, Layout, Menu, Select, Spin, Tooltip, Typography } from 'antd';
-import { api, ApiError, type PreferredUnits, type Session, type Workspace } from './api.ts';
+import { api, ApiError, ApiUnavailableError, type PreferredUnits, type Session, type Workspace } from './api.ts';
 import { defaultPreferredUnits } from '../shared/units.ts';
 import { forgetLocalDb, openLocalDb, syncNow, type Batch, type Equipment, type InventoryItem, type LocalDb, type Recipe,
   listBatches, listEquipment, listInventory, listRecipes } from './db.ts';
@@ -313,7 +313,9 @@ export function App() {
     } catch (cause) {
       if (activeWorkspaceId.current !== targetWorkspaceId) return;
       setSyncPhase('failed');
-      if (navigator.onLine) setError(cause instanceof Error ? cause.message : 'Sync failed');
+      if (cause instanceof ApiUnavailableError) {
+        setError('Server unavailable. Your changes are saved locally and will sync when it returns.');
+      } else if (navigator.onLine) setError(cause instanceof Error ? cause.message : 'Sync failed');
     }
   }, [refresh]);
 
