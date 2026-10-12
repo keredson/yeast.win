@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppstoreOutlined, BookOutlined, InboxOutlined, MenuOutlined, ToolOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Button, Card, Drawer, Empty, Form, Input, Layout, Menu, Select, Spin, Tooltip, Typography } from 'antd';
+import { AppstoreOutlined, BookOutlined, DisconnectOutlined, InboxOutlined, MenuOutlined, ToolOutlined } from '@ant-design/icons';
+import { Alert, Avatar, Button, Card, Drawer, Empty, Form, Input, Layout, Menu, Popover, Select, Spin, Tooltip, Typography } from 'antd';
 import { api, ApiError, ApiUnavailableError, type PreferredUnits, type Session, type Workspace } from './api.ts';
 import { defaultPreferredUnits } from '../shared/units.ts';
 import { forgetLocalDb, openLocalDb, syncNow, type Batch, type Equipment, type InventoryItem, type LocalDb, type Recipe,
@@ -156,6 +156,7 @@ export function App() {
   const [catalogEquipment, setCatalogEquipment] = useState<CatalogEquipment[]>([]);
   const [catalogInventory, setCatalogInventory] = useState<CatalogInventory[]>([]);
   const [error, setError] = useState('');
+  const [serverDisconnected, setServerDisconnected] = useState(false);
   const [syncPhase, setSyncPhase] = useState<'idle' | 'syncing' | 'synced' | 'failed'>('idle');
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -168,12 +169,14 @@ export function App() {
       return;
     }
     api<Session>('/me').then(result => {
+      setServerDisconnected(false);
       canonicalizeLocation(result.workspaces);
       rememberSession(result);
       setSession(result);
       setWorkspaceId(initialBrewery(result.workspaces));
       setRoute(routeFromPath(location.pathname));
     }).catch(cause => {
+      if (cause instanceof ApiUnavailableError) setServerDisconnected(true);
       if (cause instanceof ApiError && cause.status === 401) localStorage.removeItem(cachedSessionKey);
       const remembered = cause instanceof ApiError && cause.status === 401 ? null : cachedSession();
       if (remembered) canonicalizeLocation(remembered.workspaces);
@@ -182,6 +185,22 @@ export function App() {
       setRoute(routeFromPath(location.pathname));
     }).finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    const checkConnection = () => {
+      void api('/health').then(() => {
+        if (!cancelled) setServerDisconnected(false);
+      }).catch(cause => {
+        if (!cancelled) setServerDisconnected(cause instanceof ApiUnavailableError);
+      });
+    };
+    checkConnection();
+    const timer = window.setInterval(checkConnection, 30_000);
+    window.addEventListener('online', checkConnection);
+    return () => { cancelled = true; window.clearInterval(timer); window.removeEventListener('online', checkConnection); };
+  }, [session?.account.id]);
 
   useEffect(() => {
     setLastSyncedAt(workspaceId ? Number(localStorage.getItem(lastSyncKey(workspaceId))) || null : null);
@@ -309,13 +328,13 @@ export function App() {
       setLastSyncedAt(syncedAt);
       setNow(syncedAt);
       setSyncPhase('synced');
+      setServerDisconnected(false);
       setError('');
     } catch (cause) {
       if (activeWorkspaceId.current !== targetWorkspaceId) return;
       setSyncPhase('failed');
-      if (cause instanceof ApiUnavailableError) {
-        setError('Server unavailable. Your changes are saved locally and will sync when it returns.');
-      } else if (navigator.onLine) setError(cause instanceof Error ? cause.message : 'Sync failed');
+      if (cause instanceof ApiUnavailableError) setServerDisconnected(true);
+      else if (navigator.onLine) setError(cause instanceof Error ? cause.message : 'Sync failed');
     }
   }, [refresh]);
 
@@ -415,6 +434,13 @@ export function App() {
           onChange={value => {
             setWorkspaceId(value); localStorage.setItem(activeBreweryKey, value); setOpenedDb(null); showSection('batches', value);
           }} />
+        {serverDisconnected && <Popover trigger="click" title="Server disconnected" content={<div className="connection-popover">
+          <p>Your brewing entries are saved on this device.</p>
+          <p>{autoSync ? 'They will sync when the server is available again.' : 'Sync them from Settings when the server is available again.'}</p>
+        </div>}>
+          <Button className="connection-button" type="text" shape="circle" aria-label="Server disconnected"
+            icon={<DisconnectOutlined />} />
+        </Popover>}
         <Tooltip title="Account settings">
           <Button className="avatar-button" type="text" shape="circle" aria-label="Account settings" onClick={() => showSection('me')}>
             <Avatar size={32} src={avatarSrc}>{session.account.username[0].toUpperCase()}</Avatar>
