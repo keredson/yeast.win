@@ -9,6 +9,20 @@ export const dataDir = resolve(process.env.BREWLOG_DATA_DIR || './data');
 const extensionPath = resolve('vendor/crsqlite.so');
 mkdirSync(dataDir, { recursive: true });
 
+export function assertCrSqliteAvailable(): void {
+  if (!existsSync(extensionPath)) {
+    throw new Error('CR-SQLite extension missing. Run yarn setup:sqlite first.');
+  }
+  const db = new Database(':memory:');
+  try {
+    db.loadExtension(extensionPath);
+  } catch (cause) {
+    throw new Error('Could not load CR-SQLite. Run yarn setup:sqlite first.', { cause });
+  } finally {
+    db.close();
+  }
+}
+
 export function openAuthDb(): Database.Database {
   const db = new Database(join(dataDir, 'auth.sqlite'));
   db.pragma('journal_mode = WAL');
@@ -115,9 +129,6 @@ export function deleteWorkspace(auth: Database.Database, ownerId: string, id: st
 
 export function openWorkspaceDb(id: string): Database.Database {
   if (!/^[A-Za-z0-9_-]{10,32}$/.test(id)) throw new Error('Invalid workspace ID');
-  if (!existsSync(extensionPath)) {
-    throw new Error('CR-SQLite extension missing. Run yarn setup:sqlite first.');
-  }
   const db = new Database(join(dataDir, `${id}.sqlite`));
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');

@@ -1,8 +1,11 @@
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 if (existsSync('.env')) process.loadEnvFile('.env');
+
+const check = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/check-sqlite.ts'], { stdio: 'inherit' });
+if (check.status !== 0) process.exit(check.status || 1);
 
 function canListen(port) {
   return new Promise((resolve, reject) => {
