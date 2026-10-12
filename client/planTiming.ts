@@ -38,6 +38,7 @@ export function planTimingLabel(plan: TimedPlan, plans: TimedPlan[]): string {
   if (plan.anchor_event_id) {
     const anchor = plans.find(item => item.id === plan.anchor_event_id);
     const offset = plan.offset_seconds || 0;
+    if (!offset && anchor && planDuration(anchor) && anchorPoint(plan) === 'end') return `After ${anchor.title}`;
     const point = anchor && planDuration(anchor) ? `${anchorPoint(plan)} of ` : '';
     return `${offset ? `${formatOffset(offset)} ${offset < 0 ? 'before' : 'after'}` : 'At'} ${point}${anchor?.title || 'another event'}`;
   }

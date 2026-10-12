@@ -168,6 +168,9 @@ try {
   if (await page.locator('.timeline-group').count() !== 1 || await page.locator('.timeline-group .plan-card').count() !== 2) {
     throw new Error('Actions at batch start were not grouped together');
   }
+  if (await page.locator('.timeline-group .plan-meta').count()) {
+    throw new Error('Batch start actions repeat their group timing in each row');
+  }
   await choosePlanKind(page, 'Add action', 'Measurement');
   const measurementAction = page.getByRole('dialog', { name: 'Add measurement' });
   await measurementAction.getByLabel('What will be measured?').fill('Check gravity');
@@ -175,7 +178,8 @@ try {
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'After Add nutrient' }).click();
   await measurementAction.getByRole('spinbutton', { name: 'Time offset' }).fill('10');
   await measurementAction.getByRole('button', { name: 'Add measurement' }).click();
-  await page.locator('.plan-card').filter({ hasText: 'Check gravity' }).getByText('10 minutes after Add nutrient').waitFor();
+  await page.locator('.timeline-group').filter({ hasText: 'Check gravity' }).locator('.timeline-group-heading')
+    .getByText('10 minutes after Add nutrient').waitFor();
   if (!await page.locator('.plan-card').filter({ hasText: 'Add nutrient' }).first()
     .locator('.title-edit-row').getByRole('button', { name: 'Edit Add nutrient' }).count()) {
     throw new Error('Batch edit button moved away from the event title');
@@ -427,7 +431,11 @@ try {
   await page.waitForURL(url => /^\/recipe\/[A-Za-z0-9_-]{10,32}$/.test(url.pathname));
   await page.locator('.recipe-detail-heading .recipe-type-icon[data-recipe-type="beer"]').waitFor();
   await page.getByRole('button', { name: 'Edit planned event Mash' }).waitFor();
+  if (await page.locator('.plan-card').filter({ has: page.getByRole('button', { name: 'Edit planned event Mash' }) })
+    .locator('.plan-meta').count()) throw new Error('Recipe start action repeats its group timing');
   await page.getByRole('button', { name: 'Edit planned event Boil' }).waitFor();
+  await page.locator('.timeline-group').filter({ has: page.getByRole('button', { name: 'Edit planned event Boil' }) })
+    .locator('.timeline-group-heading').getByText('After Mash').waitFor();
   await page.getByRole('button', { name: 'Edit planned event Chill' }).waitFor();
   const recipeAdd = page.getByRole('button', { name: 'Add recipe event' });
   if (await recipeAdd.textContent() !== 'Add'
@@ -510,6 +518,12 @@ try {
   await recipePlan.getByRole('button', { name: 'Add addition' }).click();
   await recipePlan.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Edit planned event 2-row pale malt' }).waitFor();
+  const boilGroup = page.locator('.timeline-group').filter({ has: page.getByRole('button', { name: 'Edit planned event Boil' }) });
+  const boilGroupTitles = await boilGroup.locator('.title-edit-row strong').allTextContents();
+  if (boilGroupTitles.indexOf('2-row pale malt') > boilGroupTitles.indexOf('Boil')
+    || !boilGroupTitles.includes('2-row pale malt')) {
+    throw new Error('An ingredient at boil start should appear before the boil action');
+  }
   await page.getByText('5 oz', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event 2-row pale malt' }).click();
   const editRecipePlan = page.getByRole('dialog', { name: 'Edit 2-row pale malt' });
@@ -534,7 +548,8 @@ try {
   await recordTransfer.getByRole('button', { name: 'Save event' }).click();
   await recordTransfer.waitFor({ state: 'hidden' });
   await page.locator('.plan-card').filter({ hasText: 'Transfer to fermenter' }).getByText('To Smoke fermenter').waitFor();
-  await page.locator('.plan-card').filter({ hasText: 'Package batch' }).getByText('21 days after Pitch yeast').waitFor();
+  await page.locator('.timeline-group').filter({ hasText: 'Package batch' }).locator('.timeline-group-heading')
+    .getByText('21 days after Pitch yeast').waitFor();
   await page.getByRole('button', { name: 'Record Package batch' }).click();
   const recordPackaging = page.getByRole('dialog', { name: 'Record: Package batch' });
   await recordPackaging.getByRole('button', { name: 'Save event' }).click();
