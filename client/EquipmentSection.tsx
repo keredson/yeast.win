@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
-import { Alert, AutoComplete, Button, Dropdown, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Table } from 'antd';
+import { Alert, AutoComplete, Button, Checkbox, Dropdown, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Table } from 'antd';
 import { EditOutlined, PlusOutlined } from '@ant-design/icons';
 import { boilOffKinds, capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
 import { createEquipment, deleteEquipment, updateEquipmentBoilHeatLoss, updateEquipmentCalibration, updateEquipmentIdentity, updateEquipmentRatedPower, updateEquipmentCapacity,
   updateEquipmentTemperatureOffset,
+  updateFermenterCapabilities,
   updateEquipmentMeasurementRange,
   type Equipment, type EquipmentSpecifications, type LocalDb } from './db.ts';
 import { capacityInLiters, capacityLabel, capacityUnits } from '../shared/capacity.ts';
 import { changeNumberUnit } from './unitFields.ts';
 import { equipmentPathSegment, equipmentSlug } from './equipmentRoutes.ts';
 import { heatLossFromBoil, predictedBoilOff } from './boilOff.ts';
+import { convertUnit, unitOptions, unitGroups, type PreferredUnits } from '../shared/units.ts';
 
 const calibrationProfiles: Record<string, { method: string; fields: { key: string; label: string }[] }> = {
   ph_meter: { method: 'Two-point pH', fields: [
@@ -44,8 +46,21 @@ function addEquipmentTitle(kind: string): string {
   return `Add ${label[0].toLowerCase()}${label.slice(1)}`;
 }
 
-export function EquipmentSection({ db, basePath, equipment, catalog, selectedId, onSelect, onChanged }: {
-  db: LocalDb; basePath: string; equipment: Equipment[]; catalog: CatalogEquipment[]; selectedId: string | null; onSelect: (id: string | null) => void;
+function pressureInKpa(value: number | undefined, unit: string | undefined): number | undefined {
+  if (value == null) return undefined;
+  const converted = convertUnit(value, unit || 'kPa', 'kPa');
+  if (converted == null || converted <= 0) throw new Error('Enter a positive pressure rating');
+  return converted;
+}
+
+function pressureLabel(kpa: number | undefined, unit: PreferredUnits['pressure']): string {
+  if (kpa == null) return 'Not set';
+  return `${Number(convertUnit(kpa, 'kPa', unit)!.toFixed(2))} ${unit}`;
+}
+
+export function EquipmentSection({ db, basePath, equipment, catalog, preferredUnits, selectedId, onSelect, onChanged }: {
+  db: LocalDb; basePath: string; equipment: Equipment[]; catalog: CatalogEquipment[]; preferredUnits: PreferredUnits;
+  selectedId: string | null; onSelect: (id: string | null) => void;
   onChanged: () => Promise<void>;
 }) {
   const [creatingKind, setCreatingKind] = useState<string | null>(null);
@@ -56,18 +71,24 @@ export function EquipmentSection({ db, basePath, equipment, catalog, selectedId,
   const [editCapacity, setEditCapacity] = useState(false);
   const [editPower, setEditPower] = useState(false);
   const [editRange, setEditRange] = useState(false);
+  const [editFermenter, setEditFermenter] = useState(false);
   const [error, setError] = useState('');
   const [equipmentForm] = Form.useForm();
   const [capacityForm] = Form.useForm();
   const [powerForm] = Form.useForm();
   const [rangeForm] = Form.useForm();
+  const [fermenterForm] = Form.useForm();
   const item = equipment.find(row => row.id === selectedId) || null;
   const newCapacityUnit = Form.useWatch('capacity_unit', equipmentForm) as string | undefined;
   const newRangeUnit = Form.useWatch('measurement_unit', equipmentForm) as string | undefined;
   const editCapacityUnit = Form.useWatch('capacity_unit', capacityForm) as string | undefined;
   const editRangeUnit = Form.useWatch('measurement_unit', rangeForm) as string | undefined;
+  const newPressureUnit = Form.useWatch('pressure_unit', equipmentForm) as string | undefined;
+  const editPressureUnit = Form.useWatch('pressure_unit', fermenterForm) as string | undefined;
   const profile = item ? calibrationProfiles[item.kind] : undefined;
   const specs = item ? JSON.parse(item.specification_json || '{}') as EquipmentSpecifications : {};
+  const hasTemperatureReading = !!item && (temperatureCalibrationKinds.has(item.kind)
+    || item.kind === 'fermenter' && !!specs.built_in_temperature_control);
   const ratedEstimate = specs.rated_power_watts == null || specs.boil_heat_loss_watts == null
     ? null : predictedBoilOff(specs.rated_power_watts, specs.boil_heat_loss_watts);
   const groupedKinds: { key: string; label: string; kinds: string[] }[] = equipmentGroups.map(group => ({ key: group.key, label: group.label,
@@ -99,7 +120,7 @@ export function EquipmentSection({ db, basePath, equipment, catalog, selectedId,
   }, [db, item?.id, item?.specification_json]);
 
   useEffect(() => {
-    if (!item || !temperatureCalibrationKinds.has(item.kind) || specs.temperature_offset_c != null) return;
+    if (!item || !hasTemperatureReading || specs.temperature_offset_c != null) return;
     let active = true;
     void (async () => {
       const rows = await db.execO<{ parameters_json: string }>(`SELECT parameters_json FROM equipment_calibrations
@@ -138,7 +159,8 @@ export function EquipmentSection({ db, basePath, equipment, catalog, selectedId,
   }
 
   async function create(values: { name: string; catalog_id?: string; capacity?: number; capacity_unit?: string;
-    measurement_min?: number; measurement_max?: number; measurement_unit?: string; rated_power_watts?: number }) {
+    measurement_min?: number; measurement_max?: number; measurement_unit?: string; rated_power_watts?: number;
+    built_in_temperature_control?: boolean; max_pressure?: number; pressure_unit?: string }) {
     if (!creatingKind) return;
     try {
       const overrides: EquipmentSpecifications = {};
@@ -154,10 +176,23 @@ export function EquipmentSection({ db, basePath, equipment, catalog, selectedId,
         if (!Number.isFinite(values.rated_power_watts) || values.rated_power_watts <= 0) throw new Error('Enter a positive power');
         overrides.rated_power_watts = values.rated_power_watts;
       }
+      if (creatingKind === 'fermenter') {
+        overrides.built_in_temperature_control = !!values.built_in_temperature_control;
+        overrides.max_pressure_kpa = pressureInKpa(values.max_pressure, values.pressure_unit);
+      }
       const id = await createEquipment(db, values.name.trim(), creatingKind, catalog.find(row => row.id === values.catalog_id), overrides);
       setCreatingKind(null); equipmentForm.resetFields(); onSelect(id); await onChanged();
     }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
+  async function saveFermenter(values: { built_in_temperature_control?: boolean; max_pressure?: number; pressure_unit?: string }) {
+    if (!item) return;
+    try {
+      await updateFermenterCapabilities(db, item, !!values.built_in_temperature_control,
+        pressureInKpa(values.max_pressure, values.pressure_unit) ?? null);
+      setEditFermenter(false); await onChanged();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
   async function saveCapacity(values: { capacity?: number; capacity_unit?: string }) {
@@ -263,10 +298,14 @@ export function EquipmentSection({ db, basePath, equipment, catalog, selectedId,
         <div className="equipment-parameters">
           {capacityKinds.has(item.kind) && <div className="equipment-parameter"><span>Capacity: {capacityLabel(specs.capacity_liters) || 'Not set'}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit capacity" onClick={() => setEditCapacity(true)} /></div>}
+          {item.kind === 'fermenter' && <div className="equipment-parameter"><span>
+            Built-in temperature control: {specs.built_in_temperature_control ? 'Yes' : 'No'}<br />
+            Pressure rating: {pressureLabel(specs.max_pressure_kpa, preferredUnits.pressure)}</span>
+            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit fermenter capabilities" onClick={() => setEditFermenter(true)} /></div>}
           {boilOffKinds.has(item.kind) && <div className="equipment-parameter"><span>Rated power: {specs.rated_power_watts != null
             ? `${specs.rated_power_watts} W` : 'Not set'}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit rated power" onClick={() => setEditPower(true)} /></div>}
-          {temperatureCalibrationKinds.has(item.kind) && <div className="equipment-parameter"><span>Temperature offset: {specs.temperature_offset_c == null
+          {hasTemperatureReading && <div className="equipment-parameter"><span>Temperature offset: {specs.temperature_offset_c == null
             ? 'Not calibrated' : `${specs.temperature_offset_c > 0 ? '+' : ''}${Number(specs.temperature_offset_c.toFixed(2))} °C`}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit temperature offset" onClick={() => setNewTemperatureCalibration(true)} /></div>}
           {boilOffKinds.has(item.kind) && <div className="equipment-parameter"><span>Heat loss at boil: {specs.boil_heat_loss_watts == null
@@ -288,7 +327,8 @@ export function EquipmentSection({ db, basePath, equipment, catalog, selectedId,
     <Modal title={creatingKind ? addEquipmentTitle(creatingKind) : 'Add equipment'} open={!!creatingKind}
       onCancel={() => setCreatingKind(null)} footer={null} destroyOnHidden>
       {creatingKind && <Form key={creatingKind} form={equipmentForm} layout="vertical" onFinish={create} preserve={false}
-        initialValues={{ capacity_unit: 'L', measurement_unit: measurementRangeUnits[creatingKind]?.[0] }}>
+        initialValues={{ capacity_unit: 'L', measurement_unit: measurementRangeUnits[creatingKind]?.[0],
+          pressure_unit: preferredUnits.pressure }}>
         <Form.Item name="catalog_id" hidden><Input /></Form.Item>
         <Form.Item name="name" label="Name" rules={[{ required: true, whitespace: true }]}>
           <AutoComplete placeholder="Search shared catalog or enter a name" maxLength={120}
@@ -298,12 +338,22 @@ export function EquipmentSection({ db, basePath, equipment, catalog, selectedId,
               if (entry) { const specs = JSON.parse(entry.specification_json || '{}') as EquipmentSpecifications;
                 equipmentForm.setFieldsValue({ catalog_id: entry.id, capacity: specs.capacity_liters, capacity_unit: 'L',
                   rated_power_watts: specs.rated_power_watts,
+                  built_in_temperature_control: specs.built_in_temperature_control || false,
+                  max_pressure: specs.max_pressure_kpa == null ? undefined : convertUnit(specs.max_pressure_kpa, 'kPa', preferredUnits.pressure),
+                  pressure_unit: preferredUnits.pressure,
                   measurement_min: specs.measurement_min, measurement_max: specs.measurement_max,
                   measurement_unit: specs.measurement_unit || measurementRangeUnits[entry.kind]?.[0] }); } }} />
         </Form.Item>
         {capacityKinds.has(creatingKind) && <div className="capacity-fields"><Form.Item name="capacity" label="Capacity (optional)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
           <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]}
             onChange={unit => changeNumberUnit(equipmentForm, ['capacity'], newCapacityUnit || 'L', unit)} /></Form.Item></div>}
+        {creatingKind === 'fermenter' && <>
+          <Form.Item name="built_in_temperature_control" valuePropName="checked"><Checkbox>Built-in temperature control</Checkbox></Form.Item>
+          <div className="form-pair"><Form.Item name="max_pressure" label="Maximum working pressure (optional)">
+            <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
+            <Form.Item name="pressure_unit" label="Unit"><Select options={unitOptions(unitGroups.pressure)}
+              onChange={unit => changeNumberUnit(equipmentForm, ['max_pressure'], newPressureUnit || preferredUnits.pressure, unit)} /></Form.Item></div>
+        </>}
         {boilOffKinds.has(creatingKind) && <Form.Item name="rated_power_watts" label="Rated power (W, optional)">
           <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
         {measurementRangeUnits[creatingKind] && <div className="form-triple">
@@ -323,6 +373,19 @@ export function EquipmentSection({ db, basePath, equipment, catalog, selectedId,
           <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]}
             onChange={unit => changeNumberUnit(capacityForm, ['capacity'], editCapacityUnit || 'L', unit)} /></Form.Item></div>
         <Button type="primary" htmlType="submit">Save capacity</Button>
+      </Form>
+    </Modal>
+    <Modal title="Fermenter capabilities" open={editFermenter} onCancel={() => setEditFermenter(false)} footer={null} destroyOnHidden>
+      <Form key={item?.id} form={fermenterForm} layout="vertical" onFinish={saveFermenter}
+        initialValues={{ built_in_temperature_control: !!specs.built_in_temperature_control,
+          max_pressure: specs.max_pressure_kpa == null ? undefined : convertUnit(specs.max_pressure_kpa, 'kPa', preferredUnits.pressure),
+          pressure_unit: preferredUnits.pressure }}>
+        <Form.Item name="built_in_temperature_control" valuePropName="checked"><Checkbox>Built-in temperature control</Checkbox></Form.Item>
+        <div className="form-pair"><Form.Item name="max_pressure" label="Maximum working pressure (optional)">
+          <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
+          <Form.Item name="pressure_unit" label="Unit"><Select options={unitOptions(unitGroups.pressure)}
+            onChange={unit => changeNumberUnit(fermenterForm, ['max_pressure'], editPressureUnit || preferredUnits.pressure, unit)} /></Form.Item></div>
+        <Button type="primary" htmlType="submit">Save capabilities</Button>
       </Form>
     </Modal>
     <Modal title="Edit rated power" open={editPower} onCancel={() => setEditPower(false)} footer={null} destroyOnHidden>

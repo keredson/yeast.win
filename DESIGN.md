@@ -97,7 +97,7 @@ If one fridge serves several batches, record the relevant temperature-control ev
 
 | Table | Main fields and role |
 | --- | --- |
-| `equipment` | Workspace-owned physical items: kettle, controller, chiller, fermenter, fridge, hydrometer, pH meter, etc. May retain a source catalog model ID and a copied specification. Vessels may store capacity in liters; measuring instruments may store a minimum, maximum, and measurement unit instead. Consumable bottles belong in inventory. |
+| `equipment` | Brewery-owned physical items: kettle, controller, chiller, fermenter, fridge, hydrometer, pH meter, etc. May retain a source catalog model ID and a copied specification. Vessels may store capacity in liters; measuring instruments may store a minimum, maximum, and measurement unit instead. Fermenters use one equipment kind, with optional built-in temperature control and maximum working pressure in kPa. External temperature control remains separate equipment. Temperature and pressure setting actions record what was done during a batch. Consumable bottles belong in inventory. |
 | `equipment_archives` | Hides equipment used by events from active lists while retaining the referenced equipment and calibration rows for history. Unused equipment can be deleted outright. |
 | `equipment_calibrations` | Legacy immutable records retained for existing measurements and sync compatibility. New calibration edits update the equipment specification. |
 | `equipment_characterization_observations` | Legacy boil observations retained in existing schemas for sync compatibility. New calibrations do not write this table. |

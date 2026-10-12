@@ -55,6 +55,16 @@ export function openCatalogDb(dataDir: string): Database.Database {
       db.prepare('UPDATE catalog_meta SET version = 6').run();
     })();
   }
+  if (version < 7) {
+    db.transaction(() => {
+      db.prepare("UPDATE catalog_equipment SET kind = 'fermenter', specification_json = ? WHERE id = 'equipment_grainfather_gf30'")
+        .run('{"built_in_temperature_control":true}');
+      const model = initialCatalogEquipment.find(item => item.id === 'equipment_fermzilla_all_rounder_30l')!;
+      db.prepare('INSERT OR IGNORE INTO catalog_equipment(id, name, kind, specification_json) VALUES (?, ?, ?, ?)')
+        .run(model.id, model.name, model.kind, model.specification_json);
+      db.prepare('UPDATE catalog_meta SET version = 7').run();
+    })();
+  }
   return db;
 }
 

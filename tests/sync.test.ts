@@ -145,10 +145,38 @@ test('schema 7 inventory upgrades and removes an unused duplicate without losing
 
   const db = openWorkspaceDb(id);
   try {
-    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 8);
+    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 9);
     assert.deepEqual(db.prepare("SELECT id FROM inventory_items WHERE name = 'SafAle US-05'").all(), [{ id: stockedId }]);
     assert.equal((db.prepare('SELECT category FROM inventory_items WHERE id = ?').get(acidId) as { category: string }).category, 'Adjunct');
     assert.equal((db.prepare('SELECT quantity FROM inventory_purchases WHERE inventory_item_id = ?').get(stockedId) as { quantity: number }).quantity, 10);
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'inventory_locations'").get());
+  } finally { closeWorkspaceDb(db); }
+});
+
+test('schema 8 consolidates controlled fermenters without losing their specifications', () => {
+  const id = nanoid();
+  const file = join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`);
+  const old = new Database(file);
+  old.loadExtension('vendor/crsqlite.so');
+  old.exec('CREATE TABLE schema_meta(version INTEGER NOT NULL); INSERT INTO schema_meta VALUES (8)');
+  for (const [index, table] of replicatedTables.entries()) {
+    old.exec(schemaStatements[index]);
+    old.prepare('SELECT crsql_as_crr(?)').get(table);
+  }
+  const equipmentId = nanoid();
+  old.prepare('INSERT INTO equipment(id, name, kind, specification_json, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(equipmentId, 'My fermenter', 'controlled_fermenter', '{"capacity_liters":30,"temperature_offset_c":0.5}', 1);
+  old.close();
+
+  const db = openWorkspaceDb(id);
+  try {
+    const row = db.prepare('SELECT kind, specification_json FROM equipment WHERE id = ?').get(equipmentId) as {
+      kind: string; specification_json: string;
+    };
+    assert.equal(row.kind, 'fermenter');
+    assert.deepEqual(JSON.parse(row.specification_json), {
+      capacity_liters: 30, temperature_offset_c: 0.5, built_in_temperature_control: true
+    });
+    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 9);
   } finally { closeWorkspaceDb(db); }
 });
