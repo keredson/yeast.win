@@ -162,9 +162,9 @@ export async function createRecipe(db: DB, name: string, description: string, re
     const chillId = nanoid();
     const transferId = nanoid();
     const insert = async (eventId: string, eventType: string, title: string, anchorId: string | null,
-      details: Record<string, string | number>, order: number) => tx.exec(`INSERT INTO recipe_events
+      details: Record<string, string | number>, order: number, offsetSeconds = 0) => tx.exec(`INSERT INTO recipe_events
       (id, recipe_id, event_type, title, planned_at, anchor_event_id, offset_seconds, details_json, sort_order)
-      VALUES (?, ?, ?, ?, NULL, ?, 0, ?, ?)`, [eventId, id, eventType, title, anchorId, JSON.stringify(details), order]);
+      VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)`, [eventId, id, eventType, title, anchorId, offsetSeconds, JSON.stringify(details), order]);
     if (recipeType === 'beer') {
       await insert(mashId, 'temperature_control', 'Mash', null,
         { phase: 'mash', mode: 'hold', target_value: convertUnit(67, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 1800 }, 1);
@@ -176,8 +176,12 @@ export async function createRecipe(db: DB, name: string, description: string, re
       await insert(transferId, 'transfer', 'Transfer to fermenter', chillId,
         { anchor_point: 'end' }, 4);
     }
-    await insert(nanoid(), 'addition', 'Pitch yeast', recipeType === 'beer' ? transferId : null,
+    const pitchId = nanoid();
+    await insert(pitchId, 'addition', 'Pitch yeast', recipeType === 'beer' ? transferId : null,
       { item_category: 'Yeast', item_name: 'Yeast' }, recipeType === 'beer' ? 5 : 1);
+    const packagingDays: Record<RecipeType, number> = { beer: 21, cider: 28, wine: 60, mead: 60 };
+    await insert(nanoid(), 'packaging', 'Package batch', pitchId,
+      {}, recipeType === 'beer' ? 6 : 2, packagingDays[recipeType] * 86400);
   });
   return id;
 }

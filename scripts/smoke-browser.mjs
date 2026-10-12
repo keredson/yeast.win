@@ -375,6 +375,16 @@ try {
   await page.getByRole('button', { name: 'Edit planned event Chill' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Transfer to fermenter' }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
+  await page.getByRole('button', { name: 'Edit planned event Package batch' }).click();
+  const beerPackaging = page.getByRole('dialog', { name: 'Edit Package batch' });
+  if (await beerPackaging.getByRole('textbox', { name: 'Container' }).inputValue()) {
+    throw new Error('New recipe chose a packaging container in advance');
+  }
+  if (Number(await beerPackaging.getByRole('spinbutton', { name: 'Time offset' }).inputValue()) !== 21
+    || !await beerPackaging.getByRole('combobox', { name: 'Timing' }).locator('..').getByText('At or after Pitch yeast').count()) {
+    throw new Error('Beer packaging was not planned 21 days after pitching yeast');
+  }
+  await beerPackaging.locator('.ant-modal-close').click();
   if (await page.locator('.plan-card').filter({ hasText: 'Pitch yeast' }).first()
     .locator('.title-edit-row').getByRole('button', { name: 'Edit planned event Pitch yeast' }).count()) {
     throw new Error('Recipe edit button is still beside the event title');
@@ -426,6 +436,19 @@ try {
   await page.getByRole('button', { name: 'Create batch' }).click();
   await page.getByRole('heading', { name: 'Batch from recipe' }).waitFor();
   await page.locator('.plan-card').getByText('2-row pale malt extra').waitFor();
+  await page.locator('.plan-card').filter({ hasText: 'Package batch' }).getByText('21 days after Pitch yeast').waitFor();
+  await page.getByRole('button', { name: 'Record Package batch' }).click();
+  const recordPackaging = page.getByRole('dialog', { name: 'Record: Package batch' });
+  await recordPackaging.getByRole('button', { name: 'Save event' }).click();
+  await recordPackaging.locator('.ant-form-item-explain-error').filter({ hasText: 'Container' }).waitFor();
+  await recordPackaging.getByRole('textbox', { name: 'Container' }).fill('Bottle');
+  await recordPackaging.getByRole('combobox', { name: 'Unit' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="US fl oz"]').click();
+  await recordPackaging.getByRole('spinbutton', { name: 'Size' }).fill('12');
+  await recordPackaging.getByRole('spinbutton', { name: 'Count' }).fill('48');
+  await recordPackaging.getByRole('button', { name: 'Save event' }).click();
+  await recordPackaging.waitFor({ state: 'hidden' });
+  await page.locator('.plan-card').filter({ hasText: 'Package batch' }).getByText('Done').waitFor();
   await navigateSection(page, 'Recipes');
   await page.locator('.record-link').filter({ hasText: 'Smoke recipe' }).click();
   await choosePlanKind(page, 'Add recipe event', 'Notes');
@@ -799,6 +822,14 @@ try {
     await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: type }).click();
     await dialog.getByRole('button', { name: 'Create recipe' }).click();
     await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).waitFor();
+    await page.getByRole('button', { name: 'Edit planned event Package batch' }).click();
+    const packaging = page.getByRole('dialog', { name: 'Edit Package batch' });
+    const days = type === 'Cider' ? 28 : 60;
+    if (Number(await packaging.getByRole('spinbutton', { name: 'Time offset' }).inputValue()) !== days
+      || !await packaging.getByRole('combobox', { name: 'Timing' }).locator('..').getByText('At or after Pitch yeast').count()) {
+      throw new Error(`${type} packaging was not planned ${days} days after pitching yeast`);
+    }
+    await packaging.locator('.ant-modal-close').click();
     await page.locator(`.recipe-detail-heading .recipe-type-icon[data-recipe-type="${type.toLowerCase()}"]`).waitFor();
     await page.locator('.app-nav .nav-recent-item').filter({ hasText: `${type} smoke recipe` })
       .locator(`.recipe-type-icon[data-recipe-type="${type.toLowerCase()}"]`).waitFor();
