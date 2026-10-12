@@ -4,7 +4,7 @@ import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import { nanoid } from 'nanoid';
 import { boilOffKinds, capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { createEquipment, deleteEquipment, updateEquipmentIdentity, updateEquipmentRatedPower, updateEquipmentCapacity, updateEquipmentWorkingVolume,
+import { createEquipment, deleteEquipment, updateEquipmentIdentity, updateEquipmentRatedPower, updateEquipmentCapacity,
   updateEquipmentMeasurementRange,
   type Equipment, type EquipmentSpecifications, type LocalDb } from './db.ts';
 import { capacityInLiters, capacityLabel, capacityUnits } from '../shared/capacity.ts';
@@ -75,20 +75,17 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
   const [newBoilObservation, setNewBoilObservation] = useState(false);
   const [editIdentity, setEditIdentity] = useState(false);
   const [editCapacity, setEditCapacity] = useState(false);
-  const [editWorkingVolume, setEditWorkingVolume] = useState(false);
   const [editPower, setEditPower] = useState(false);
   const [editRange, setEditRange] = useState(false);
   const [error, setError] = useState('');
   const [equipmentForm] = Form.useForm();
   const [capacityForm] = Form.useForm();
-  const [workingVolumeForm] = Form.useForm();
   const [powerForm] = Form.useForm();
   const [rangeForm] = Form.useForm();
   const item = equipment.find(row => row.id === selectedId) || null;
   const newCapacityUnit = Form.useWatch('capacity_unit', equipmentForm) as string | undefined;
   const newRangeUnit = Form.useWatch('measurement_unit', equipmentForm) as string | undefined;
   const editCapacityUnit = Form.useWatch('capacity_unit', capacityForm) as string | undefined;
-  const editWorkingVolumeUnit = Form.useWatch('capacity_unit', workingVolumeForm) as string | undefined;
   const editRangeUnit = Form.useWatch('measurement_unit', rangeForm) as string | undefined;
   const profile = item ? calibrationProfiles[item.kind] : undefined;
   const specs = item ? JSON.parse(item.specification_json || '{}') as EquipmentSpecifications : {};
@@ -148,14 +145,6 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
     if (!item) return;
     try { await updateEquipmentCapacity(db, item, capacityInLiters(values.capacity, values.capacity_unit)); setEditCapacity(false); await onChanged(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-  }
-
-  async function saveWorkingVolume(values: { capacity?: number; capacity_unit?: string }) {
-    if (!item) return;
-    try {
-      await updateEquipmentWorkingVolume(db, item, capacityInLiters(values.capacity, values.capacity_unit));
-      setEditWorkingVolume(false); await onChanged();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
   async function savePower(values: { rated_power_watts?: number }) {
@@ -255,8 +244,6 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
         <div className="equipment-parameters">
           {capacityKinds.has(item.kind) && <div className="equipment-parameter"><span>Capacity: {capacityLabel(specs.capacity_liters) || 'Not set'}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit capacity" onClick={() => setEditCapacity(true)} /></div>}
-          {specs.working_volume_liters != null && <div className="equipment-parameter"><span>Brewing volume: {capacityLabel(specs.working_volume_liters)}</span>
-            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit brewing volume" onClick={() => setEditWorkingVolume(true)} /></div>}
           {boilOffKinds.has(item.kind) && <div className="equipment-parameter"><span>Rated power: {specs.rated_power_watts != null
             ? `${specs.rated_power_watts} W` : 'Not set'}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit rated power" onClick={() => setEditPower(true)} /></div>}
@@ -343,15 +330,6 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
         <Form.Item name="slug" label="Slug" rules={[{ required: true }, { pattern: /^[a-z0-9]+(?:-[a-z0-9]+)*$/, message: 'Use lowercase letters, numbers, and hyphens' }]}>
           <Input maxLength={80} /></Form.Item>
         <Button type="primary" htmlType="submit">Save name and slug</Button>
-      </Form>
-    </Modal>
-    <Modal title="Edit brewing volume" open={editWorkingVolume} onCancel={() => setEditWorkingVolume(false)} footer={null} destroyOnHidden>
-      <Form key={item?.id} form={workingVolumeForm} layout="vertical" onFinish={saveWorkingVolume}
-        initialValues={{ capacity: specs.working_volume_liters, capacity_unit: 'L' }}>
-        <div className="capacity-fields"><Form.Item name="capacity" label="Brewing volume"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
-          <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]}
-            onChange={unit => changeNumberUnit(workingVolumeForm, ['capacity'], editWorkingVolumeUnit || 'L', unit)} /></Form.Item></div>
-        <Button type="primary" htmlType="submit">Save brewing volume</Button>
       </Form>
     </Modal>
     <Modal title="Edit measurement range" open={editRange} onCancel={() => setEditRange(false)} footer={null} destroyOnHidden>

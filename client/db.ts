@@ -479,7 +479,6 @@ export interface EquipmentSpecifications {
   measurement_min?: number;
   measurement_max?: number;
   measurement_unit?: string;
-  working_volume_liters?: number;
   boil_off_liters_per_hour?: number;
   rated_power_watts?: number;
 }
@@ -505,6 +504,7 @@ export async function createEquipment(db: DB, name: string, kind: string, catalo
   const id = nanoid();
   const specification = JSON.parse(catalogModel?.specification_json || '{}') as Record<string, unknown>;
   Object.assign(specification, overrides);
+  delete specification.working_volume_liters;
   if (!capacityKinds.has(kind)) delete specification.capacity_liters;
   if (!boilOffKinds.has(kind)) delete specification.boil_off_liters_per_hour;
   if (!measurementRangeUnits[kind]) {
@@ -521,14 +521,6 @@ export async function updateEquipmentCapacity(db: DB, item: Equipment, capacityL
   const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
   if (capacityLiters == null) delete specification.capacity_liters;
   else specification.capacity_liters = capacityLiters;
-  await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?',
-    [Object.keys(specification).length ? JSON.stringify(specification) : null, item.id]);
-}
-
-export async function updateEquipmentWorkingVolume(db: DB, item: Equipment, volumeLiters: number | null): Promise<void> {
-  const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
-  if (volumeLiters == null) delete specification.working_volume_liters;
-  else specification.working_volume_liters = volumeLiters;
   await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?',
     [Object.keys(specification).length ? JSON.stringify(specification) : null, item.id]);
 }

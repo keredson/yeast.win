@@ -44,7 +44,7 @@ export const initialCatalogEquipment: CatalogEquipment[] = [
   { id: 'equipment_refractometer', name: 'Refractometer', kind: 'refractometer', specification_json: null },
   { id: 'equipment_ph_meter', name: 'pH meter', kind: 'ph_meter', specification_json: null },
   { id: 'equipment_scale', name: 'Scale', kind: 'scale', specification_json: null },
-  { id: 'equipment_vevor_35l', name: 'VEVOR Electric Brewing System 9.2 Gal/35 L Brewing Pot', kind: 'all_in_one', specification_json: '{"capacity_liters":35,"working_volume_liters":30}' },
+  { id: 'equipment_vevor_35l', name: 'VEVOR Electric Brewing System 9.2 Gal/35 L Brewing Pot', kind: 'all_in_one', specification_json: '{"capacity_liters":35}' },
   { id: 'equipment_biab_kettle', name: 'Brew in a bag kettle', kind: 'kettle', specification_json: null },
   { id: 'equipment_conical_fermenter', name: 'Conical fermenter', kind: 'fermenter', specification_json: null },
   { id: 'equipment_carboy', name: 'Glass carboy', kind: 'fermenter', specification_json: null },
