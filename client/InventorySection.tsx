@@ -279,7 +279,7 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
     <Modal title="Inventory locations" open={locationsOpen} onCancel={() => { setLocationsOpen(false); setLocationReturn(null); }}
       footer={null} width={620} zIndex={locationReturn ? 1100 : undefined}>
       {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
-      <p className="muted">Create a room, shelf, or building at any level. A parent is optional.</p>
+      <p className="muted">Create a room, shelf, or building at any level.</p>
       {locations.length > 0 && <Table<InventoryLocation> dataSource={locationTree(locations)} rowKey="id" size="small" pagination={false}
         expandable={{ expandedRowKeys: locations.map(location => location.id) }}
         columns={[{ title: 'Location', dataIndex: 'name' },
@@ -289,8 +289,9 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
       <h3>{locationEditing ? 'Edit location' : 'New location'}</h3>
       <Form form={locationForm} layout="vertical" onFinish={saveLocation}>
         <Form.Item name="name" label="Name" rules={[{ required: true, whitespace: true }]}><Input maxLength={100} placeholder="Back room" /></Form.Item>
-        <Form.Item name="parent_id" label="Inside (optional)"><Select allowClear placeholder="Top level"
-          options={locationOptions.filter(option => option.value !== locationEditing)} /></Form.Item>
+        {locationOptions.some(option => option.value !== locationEditing) &&
+          <Form.Item name="parent_id" label="Inside (optional)"><Select allowClear placeholder="Top level"
+            options={locationOptions.filter(option => option.value !== locationEditing)} /></Form.Item>}
         <Button type="primary" htmlType="submit">{locationEditing ? 'Save location' : 'Add location'}</Button>
         {locationEditing && <Button onClick={() => { setLocationEditing(null); locationForm.resetFields(); }}>Cancel edit</Button>}
       </Form>

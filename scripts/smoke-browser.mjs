@@ -674,9 +674,14 @@ try {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole('button', { name: 'Manage locations' }).click();
   const locationsDialog = page.getByRole('dialog', { name: 'Inventory locations' });
+  if (await locationsDialog.getByRole('combobox', { name: 'Inside (optional)' }).count()
+    || await locationsDialog.getByText('A parent is optional.').count()) {
+    throw new Error('Empty location list should not show the parent selector or optional-parent note');
+  }
   await locationsDialog.getByRole('textbox', { name: 'Name' }).fill('Back room');
   await locationsDialog.getByRole('button', { name: 'Add location' }).click();
   await locationsDialog.getByText('Back room').waitFor();
+  await locationsDialog.getByRole('combobox', { name: 'Inside (optional)' }).waitFor();
   await locationsDialog.getByRole('textbox', { name: 'Name' }).fill('Shelf A');
   await locationsDialog.getByRole('combobox', { name: 'Inside' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Back room' }).click();
