@@ -84,11 +84,8 @@ button, input, textarea { font: inherit; }
   border-left: 2px dashed #b8cfc1; pointer-events: none; }
 .timeline-track > .timeline-group { position: relative; }
 .timeline-group .ant-card-body { padding: 0; }
-.timeline-group-heading { position: relative; display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
-  padding: 13px 18px 13px 53px; border-bottom: 1px solid #e6ebe4; background: #f6f8f4; }
-.timeline-group-heading::before { content: ''; position: absolute; top: 15px; left: calc(2rem - 7px);
-  width: 14px; height: 14px; border: 2px solid #528b70; border-radius: 50%; background: #f8f8f3; }
-.timeline-group:first-child .timeline-group-heading::before { background: #528b70; box-shadow: inset 0 0 0 2px #f8f8f3; }
+.timeline-group-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  padding: 13px 18px; border-bottom: 1px solid #e6ebe4; background: #f6f8f4; }
 .timeline-group-heading strong { font-size: 14px; }
 .timeline-empty { padding: 2px 18px; }
 .timeline-empty .ant-empty { margin: 12px 0; }
