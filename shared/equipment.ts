@@ -2,6 +2,7 @@ export const equipmentKinds = [
   { value: 'kettle', label: 'Kettle' },
   { value: 'mash_tun', label: 'Mash tun' },
   { value: 'fermenter', label: 'Fermenter' },
+  { value: 'keg', label: 'Keg' },
   { value: 'chiller', label: 'Chiller' },
   { value: 'refrigerator', label: 'Refrigerator or freezer' },
   { value: 'temperature_controller', label: 'Temperature controller' },
@@ -21,7 +22,8 @@ export function equipmentKindLabel(kind: string): string {
   return equipmentKinds.find(item => item.value === kind)?.label || kind;
 }
 
-export const capacityKinds = new Set<string>(['kettle', 'mash_tun', 'fermenter', 'refrigerator']);
+export const vesselKinds = new Set<string>(['kettle', 'mash_tun', 'fermenter', 'keg']);
+export const capacityKinds = new Set<string>([...vesselKinds, 'refrigerator']);
 
 export const measurementRangeUnits: Record<string, readonly string[]> = {
   hydrometer: ['SG', '°Plato'],

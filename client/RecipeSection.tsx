@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Empty, Form, Input, Modal, Popconfirm, Select } from 'antd';
 import { DeleteOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
 import { addRecipePlan, createRecipe, deleteRecipe, deleteRecipePlan, listRecipePlans, startBatchFromRecipe, updateRecipe, updateRecipePlan,
-  type InventoryItem, type LocalDb, type PlanInput, type Recipe, type RecipeType } from './db.ts';
+  type Equipment, type InventoryItem, type LocalDb, type PlanInput, type Recipe, type RecipeType } from './db.ts';
 import { PlanForm, type PlanPreset } from './PlanForm.tsx';
 import { kindLabel } from './constants.ts';
 import { parsePlanDetails } from './planTiming.ts';
@@ -16,9 +16,9 @@ const recipeTypeOptions = [
   { value: 'mead', label: 'Mead' }, { value: 'cider', label: 'Cider' }
 ];
 
-export function RecipeSection({ db, basePath, accountId, recipes, inventory, catalogInventory, preferredUnits, selectedId, onSelect, onChanged, onBatchStarted }: {
+export function RecipeSection({ db, basePath, accountId, recipes, equipment, inventory, catalogInventory, preferredUnits, selectedId, onSelect, onChanged, onBatchStarted }: {
   db: LocalDb; basePath: string; accountId: string; recipes: Recipe[]; selectedId: string | null; onSelect: (id: string | null) => void;
-  inventory: InventoryItem[]; catalogInventory: CatalogInventory[]; preferredUnits: PreferredUnits;
+  equipment: Equipment[]; inventory: InventoryItem[]; catalogInventory: CatalogInventory[]; preferredUnits: PreferredUnits;
   onChanged: () => Promise<void>; onBatchStarted: (id: string) => void;
 }) {
   const [settingsForm] = Form.useForm<{ name: string; description?: string; recipe_type: RecipeType }>();
@@ -121,7 +121,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
             <Button type="text" shape="circle" icon={<SettingOutlined />} aria-label="Recipe settings"
               title="Recipe settings" onClick={openSettings} /></div>
         </div>
-        <EventTimeline events={plans} onEdit={plan => { setPlanDeleteError(''); setEditingPlan(plan); }}
+        <EventTimeline events={plans} equipment={equipment} onEdit={plan => { setPlanDeleteError(''); setEditingPlan(plan); }}
           onAdd={(kind, settings) => { setEditingPlan(null); setPreset(settings); setCreatingKind(kind); }} />
       </section>}
     <Modal title="New recipe" open={newRecipe} onCancel={() => setNewRecipe(false)} footer={null} destroyOnHidden>
@@ -156,7 +156,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, inventory, cat
       {planDeleteError && <Alert type="error" message={planDeleteError} className="form-alert" />}
       {(editingPlan || creatingKind) && <PlanForm key={editingPlan?.id || creatingKind || 'new'} eventType={editingPlan?.event_type || creatingKind || 'addition'}
         anchors={plans.filter(item => item.id !== editingPlan?.id)} initialPlan={editingPlan || undefined}
-        inventory={inventory} catalog={catalogInventory} preferredUnits={preferredUnits} preset={editingPlan ? undefined : preset} submit={addPlan}
+        equipment={equipment} inventory={inventory} catalog={catalogInventory} preferredUnits={preferredUnits} preset={editingPlan ? undefined : preset} submit={addPlan}
         extraAction={editingPlan && <Popconfirm title={`Delete ${editingPlan.title}?`}
           description="Actions timed from this one will become relative to batch start. Existing batches keep their copies."
           okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => void removePlan(editingPlan.id)}>

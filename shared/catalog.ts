@@ -16,6 +16,7 @@ export const initialCatalogEquipment: CatalogEquipment[] = [
   { id: 'equipment_kettle', name: 'Brew kettle', kind: 'kettle', specification_json: null },
   { id: 'equipment_mash_tun', name: 'Mash tun', kind: 'mash_tun', specification_json: null },
   { id: 'equipment_fermenter', name: 'Fermenter', kind: 'fermenter', specification_json: null },
+  { id: 'equipment_keg', name: 'Keg', kind: 'keg', specification_json: null },
   { id: 'equipment_immersion_chiller', name: 'Immersion chiller', kind: 'chiller', specification_json: null },
   { id: 'equipment_hydrometer', name: 'Hydrometer', kind: 'hydrometer', specification_json: null },
   { id: 'equipment_thermometer', name: 'Thermometer', kind: 'thermometer', specification_json: null },

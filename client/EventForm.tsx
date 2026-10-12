@@ -9,6 +9,7 @@ import { parsePlanDetails } from './planTiming.ts';
 import { inventoryCategories } from '../shared/catalog.ts';
 import { QuantityFields } from './QuantityFields.tsx';
 import { changeNumberUnit, changeQuantityUnit } from './unitFields.ts';
+import { vesselKinds } from '../shared/equipment.ts';
 
 function measurementUnits(kind: MeasurementKind): readonly string[] {
   if (kind === 'ph') return ['pH'];
@@ -74,6 +75,13 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
   const selectedTargetUnit = Form.useWatch('target_unit', form) as string | undefined;
   const selectedContainerUnit = Form.useWatch('container_unit', form) as string | undefined;
   const selectedCategory = Form.useWatch('item_category', form) as string | undefined;
+  const vesselOptions = equipment.filter(item => vesselKinds.has(item.kind)).map(item => ({ value: item.id, label: item.name }));
+  for (const field of ['from_vessel_id', 'to_vessel_id'] as const) {
+    const id = initialData?.payload[field] || plannedString(field);
+    if (typeof id === 'string' && !vesselOptions.some(item => item.value === id)) {
+      vesselOptions.push({ value: id, label: plannedString(field.replace('_id', '_name')) || 'Archived vessel' });
+    }
+  }
 
   function changeMainUnit(next: string) {
     const from = selectedUnit || initialUnit;
@@ -169,6 +177,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
     mode: initialData?.payload.mode || plannedString('mode') || 'hold', source: initialData?.payload.source || 'manual',
     item_name: plannedString('item_name'), item_category: initialCategory,
     inventory_item_id: plannedString('inventory_item_id'),
+    from_vessel_id: plannedString('from_vessel_id'), to_vessel_id: plannedString('to_vessel_id'),
     container_name: plannedString('container_name'), container_size: plannedNumber('container_size'),
     container_count: plannedNumber('container_count'),
     target_value: kind === 'measurement' ? undefined : plannedNumber('target_value'),
@@ -247,8 +256,8 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
       {kind === 'temperature_control' && <Form.Item name="power_watts" label="Power (W), if set"><InputNumber className="full-width" min={0} /></Form.Item>}
     </>}
     {kind === 'transfer' && <>
-      <div className="form-pair"><Form.Item name="from_vessel_id" label="From vessel"><Select allowClear options={equipment.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
-        <Form.Item name="to_vessel_id" label="To vessel"><Select allowClear options={equipment.map(item => ({ value: item.id, label: item.name }))} /></Form.Item></div>
+      <div className="form-pair"><Form.Item name="from_vessel_id" label="From vessel"><Select allowClear showSearch optionFilterProp="label" options={vesselOptions} /></Form.Item>
+        <Form.Item name="to_vessel_id" label="To vessel"><Select allowClear showSearch optionFilterProp="label" options={vesselOptions} /></Form.Item></div>
       <div className="form-pair"><Form.Item name="quantity" label="Quantity"><InputNumber className="full-width" step="any" /></Form.Item>
         <Form.Item name="unit" label="Unit"><Select options={unitOptions(unitGroups.volume)} onChange={changeMainUnit} /></Form.Item></div>
     </>}

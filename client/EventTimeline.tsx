@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Button, Card, Dropdown, Empty, Tag } from 'antd';
 import { CheckOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
-import type { ActualEvent, PlanInput } from './db.ts';
+import type { ActualEvent, Equipment, PlanInput } from './db.ts';
 import { kindLabel, measurementKinds } from './constants.ts';
 import { formatTime } from './time.ts';
 import { effectivePlanTime, parsePlanDetails, planDetailsLabel, planDuration, planKindLabel, planTimingLabel } from './planTiming.ts';
@@ -32,12 +32,13 @@ const actionItems = [
   { key: 'photo', label: 'Photo' }, { key: 'note', label: 'Notes' }
 ];
 
-export function EventTimeline({ events, batchStartAt, details = {}, photos = [], onEdit, onAdd, onRecord }: {
-  events: TimelineEvent[]; batchStartAt?: number; details?: Record<string, string>; photos?: TimelinePhoto[];
+export function EventTimeline({ events, batchStartAt, equipment = [], details = {}, photos = [], onEdit, onAdd, onRecord }: {
+  events: TimelineEvent[]; batchStartAt?: number; equipment?: Equipment[]; details?: Record<string, string>; photos?: TimelinePhoto[];
   onEdit: (event: TimelineEvent) => void; onAdd: (kind: string, preset: PlanPreset) => void;
   onRecord?: (event: ActualEvent) => void;
 }) {
   const isBatch = batchStartAt != null;
+  const equipmentNames = new Map(equipment.map(item => [item.id, item.name]));
   const [menuOpen, setMenuOpen] = useState(false);
   const groups = useMemo(() => {
     const startAt = batchStartAt ?? 0;
@@ -66,7 +67,7 @@ export function EventTimeline({ events, batchStartAt, details = {}, photos = [],
         const happened = item.actual_at != null;
         const skipped = !happened && item.skipped_at != null;
         const detail = happened && ['addition', 'measurement', 'temperature_control', 'note', 'photo'].includes(item.event_type)
-          ? details[item.id] : planDetailsLabel(item) || details[item.id];
+          ? details[item.id] : planDetailsLabel(item, equipmentNames) || details[item.id];
         const images = photos.filter(photo => photo.batch_event_id === item.id);
         return <div key={item.id} className="timeline-entry plan-card">
           <div className="timeline-card"><div><div className="title-edit-row">

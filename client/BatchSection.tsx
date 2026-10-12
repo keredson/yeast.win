@@ -96,7 +96,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
       <div className="content-heading"><div><span className="eyebrow">Batch log</span><h2>{batch.name}</h2>
         <p className="muted">{batch.description || 'A living record of this brew.'}</p>
         <p className="muted">Started {formatTime(batch.created_at)}</p></div></div>
-      <EventTimeline events={events} batchStartAt={batch.created_at} details={details} photos={photos}
+      <EventTimeline events={events} batchStartAt={batch.created_at} equipment={equipment} details={details} photos={photos}
         onEdit={event => event.actual_at != null ? void recordOrEdit(event as ActualEvent) : setEditingPlan(event as ActualEvent)}
         onRecord={event => void recordOrEdit(event)}
         onAdd={(kind, settings) => { setEditingPlan(null); setPreset(settings); setCreatingKind(kind); }} />
@@ -114,7 +114,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
       open={!!(editingPlan || creatingKind)} onCancel={() => { setCreatingKind(null); setEditingPlan(null); }} footer={null} destroyOnHidden>
       {(editingPlan || creatingKind) && <PlanForm key={editingPlan?.id || creatingKind || 'new'}
         eventType={editingPlan?.event_type || creatingKind || 'addition'} anchors={events.filter(item => item.id !== editingPlan?.id)}
-        initialPlan={editingPlan || undefined} inventory={inventory} catalog={catalogInventory}
+        initialPlan={editingPlan || undefined} equipment={equipment} inventory={inventory} catalog={catalogInventory}
         preferredUnits={preferredUnits} preset={editingPlan ? undefined : preset} allowRecordNow submit={saveAction} />}
     </Modal>
     <Modal title={recordingEvent?.actual_at != null ? `Edit: ${recordingEvent.title}` : `Record: ${recordingEvent?.title || ''}`}

@@ -403,6 +403,15 @@ async function updateEventDetails(db: Pick<DB, 'execO' | 'exec'>, id: string, pa
   for (const [key, value] of Object.entries(payload)) {
     if (key !== 'event_id') details[key] = value;
   }
+  if (rows[0]?.event_type === 'transfer') {
+    for (const field of ['from_vessel_id', 'to_vessel_id']) {
+      const equipmentId = payload[field];
+      const nameField = field.replace('_id', '_name');
+      if (typeof equipmentId !== 'string') { delete details[nameField]; continue; }
+      const equipment = await db.execO<{ name: string }>('SELECT name FROM equipment WHERE id = ?', [equipmentId]);
+      if (equipment.length) details[nameField] = equipment[0].name;
+    }
+  }
   if (endedAt != null) delete details.duration_seconds;
   // Once an addition happened, its typed payload is the single source for the
   // quantity and item. Pending actions keep those values in details_json.
@@ -526,6 +535,19 @@ export async function deleteEquipment(db: DB, id: string): Promise<void> {
     used ||= await referenced('temperature_control_events', 'equipment_id = ?', [id])
       || await referenced('pressure_control_events', 'equipment_id = ?', [id])
       || await referenced('transfers', 'from_vessel_id = ? OR to_vessel_id = ?', [id, id]);
+    if (!used) {
+      for (const table of ['recipe_events', 'batch_events']) {
+        const plans = await tx.execO<{ details_json: string | null }>(
+          `SELECT details_json FROM ${table} WHERE event_type = 'transfer' AND details_json IS NOT NULL`);
+        used = plans.some(plan => {
+          try {
+            const details = JSON.parse(plan.details_json || '{}') as Record<string, unknown>;
+            return details.from_vessel_id === id || details.to_vessel_id === id;
+          } catch { return false; }
+        });
+        if (used) break;
+      }
+    }
     if (used) {
       await tx.exec('INSERT INTO equipment_archives(id, equipment_id, archived_at) VALUES (?, ?, ?)',
         [nanoid(), id, nowSeconds()]);

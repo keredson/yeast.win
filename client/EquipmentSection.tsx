@@ -43,7 +43,7 @@ const calibrationProfiles: Record<string, { method: string; fields: { key: strin
 };
 
 const equipmentMenuItems = [
-  { key: 'brewing', label: 'Brewing', children: ['kettle', 'mash_tun', 'fermenter', 'chiller', 'pump'] },
+  { key: 'brewing', label: 'Brewing', children: ['kettle', 'mash_tun', 'fermenter', 'keg', 'chiller', 'pump'] },
   { key: 'temperature', label: 'Temperature', children: ['refrigerator', 'temperature_controller', 'thermometer'] },
   { key: 'measuring', label: 'Measuring', children: ['hydrometer', 'refractometer', 'ph_meter', 'pressure_gauge',
     'carbonation_meter', 'dissolved_oxygen_meter', 'scale'] },

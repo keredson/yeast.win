@@ -80,7 +80,7 @@ Recipes and batches use the same event timeline and add menu. The batch view add
 | `dissolved_oxygen_measurements` | Corrected value, unit, uncertainty, instrument, and calibration. Adding oxygen remains an `addition`. |
 | `temperature_control_events` | Controlled equipment, mode/context, target temperature and/or power setting, and optional `ended_at`. The same kind covers mashing, boiling, chilling, fermentation, and serving. |
 | `pressure_control_events` | Equipment and pressure setpoint. A setpoint is distinct from a pressure measurement. |
-| `transfers` | From/to vessel or destination and transferred quantity with unit. Transfer is a batch action, not a bare milestone. |
+| `transfers` | Optional source and destination vessel equipment IDs, and transferred quantity with unit. Transfer is a batch action, not a bare milestone. Recipe and pending batch actions can select vessels before recording; recording can confirm or change them. Referenced vessel equipment is archived when removed from the active equipment list. |
 | `packaging` | Container type/size, count, packaged quantity, and optional inventory item consumed. |
 | `boil_finished` | Legacy milestone retained for existing data. New plans use a timed boil range and anchor to its start or end. |
 | `notes` | Free-text observations that do not fit a physical measurement or action. |

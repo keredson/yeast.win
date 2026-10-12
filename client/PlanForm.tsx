@@ -2,7 +2,8 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Alert, AutoComplete, Button, Checkbox, Form, Input, InputNumber, Select } from 'antd';
 import { kindLabel, measurementKinds } from './constants.ts';
-import type { InventoryItem, PlanInput } from './db.ts';
+import type { Equipment, InventoryItem, PlanInput } from './db.ts';
+import { vesselKinds } from '../shared/equipment.ts';
 import { compoundMassUnit, convertUnit, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions } from '../shared/units.ts';
 import { parsePlanDetails, planDuration } from './planTiming.ts';
 import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
@@ -32,14 +33,15 @@ interface Values {
   item_category?: string; quantity?: number; unit?: string; pounds?: number; ounces?: number;
   measurement_kind?: string; target_value?: number; target_unit?: string;
   mode?: string; container_name?: string; container_size?: number; container_count?: number;
+  from_vessel_id?: string; to_vessel_id?: string;
   duration_value?: number; duration_unit?: typeof timeUnits[number]['value'];
 }
 
-export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, preferredUnits, preset, allowRecordNow = false, extraAction, submit }: {
+export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory, catalog, preferredUnits, preset, allowRecordNow = false, extraAction, submit }: {
   anchors: Anchor[];
   eventType: string;
   initialPlan?: PlanInput & { id: string };
-  inventory: InventoryItem[]; catalog: CatalogInventory[]; preferredUnits: PreferredUnits;
+  equipment: Equipment[]; inventory: InventoryItem[]; catalog: CatalogInventory[]; preferredUnits: PreferredUnits;
   preset?: PlanPreset;
   allowRecordNow?: boolean;
   extraAction?: ReactNode;
@@ -69,6 +71,13 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
   const selectedTargetUnit = Form.useWatch('target_unit', form) as string | undefined;
   const selectedOffsetUnit = Form.useWatch('offset_unit', form) as string | undefined;
   const selectedDurationUnit = Form.useWatch('duration_unit', form) as string | undefined;
+  const vesselOptions = equipment.filter(item => vesselKinds.has(item.kind)).map(item => ({ value: item.id, label: item.name }));
+  for (const field of ['from_vessel_id', 'to_vessel_id'] as const) {
+    const id = initialDetails[field];
+    if (typeof id === 'string' && !vesselOptions.some(item => item.value === id)) {
+      vesselOptions.push({ value: id, label: String(initialDetails[field.replace('_id', '_name')] || 'Archived vessel') });
+    }
+  }
 
   function changeTimeUnit(field: 'offset_value' | 'duration_value', from: string | undefined, to: string) {
     const oldUnit = timeUnits.find(item => item.value === from);
@@ -104,12 +113,21 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
         measurement: ['measurement_kind', 'target_value', 'target_unit'],
         temperature_control: ['mode', 'target_value', 'target_unit'],
         pressure_control: ['target_value', 'target_unit'],
-        transfer: ['quantity', 'unit'],
+        transfer: ['from_vessel_id', 'to_vessel_id', 'quantity', 'unit'],
         packaging: ['container_name', 'container_size', 'container_count', 'unit']
       };
       for (const key of keysByKind[kind] || []) {
         const value = values[key];
         if (typeof value === 'string' && value || typeof value === 'number') details[key] = value;
+      }
+      if (kind === 'transfer') {
+        for (const field of ['from_vessel_id', 'to_vessel_id'] as const) {
+          const vessel = equipment.find(item => item.id === values[field]);
+          if (vessel) details[field.replace('_id', '_name')] = vessel.name;
+          else if (values[field] === initialDetails[field] && initialDetails[field.replace('_id', '_name')]) {
+            details[field.replace('_id', '_name')] = initialDetails[field.replace('_id', '_name')];
+          }
+        }
       }
       if (kind === 'addition') {
         details.item_name = values.title.trim();
@@ -153,7 +171,8 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
     pounds: initialSplit?.pounds, ounces: initialSplit?.ounces,
     target_value: initialDetails.target_value ?? (phase === 'mash' ? convertUnit(67, '°C', preferredUnits.temperature)
       : phase === 'boil' ? convertUnit(100, '°C', preferredUnits.temperature) : undefined), container_name: initialDetails.container_name,
-    container_size: initialDetails.container_size, container_count: initialDetails.container_count
+    container_size: initialDetails.container_size, container_count: initialDetails.container_count,
+    from_vessel_id: initialDetails.from_vessel_id, to_vessel_id: initialDetails.to_vessel_id
   }}>
     {error && <Alert type="error" message={error} className="form-alert" />}
     {kind === 'addition' && <>
@@ -210,8 +229,12 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
     {kind === 'pressure_control' && <div className="form-pair"><Form.Item name="target_value" label="Target pressure"><InputNumber className="full-width" step="any" /></Form.Item>
       <Form.Item name="target_unit" label="Unit"><Select options={unitOptions(unitGroups.pressure)}
         onChange={unit => changeNumberUnit(form, ['target_value'], selectedTargetUnit, unit)} /></Form.Item></div>}
-    {kind === 'transfer' && <div className="form-pair"><Form.Item name="quantity" label="Volume"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
-      <Form.Item name="unit" label="Unit"><Select options={unitOptions(unitGroups.volume)} onChange={changeMainUnit} /></Form.Item></div>}
+    {kind === 'transfer' && <>
+      <div className="form-pair"><Form.Item name="from_vessel_id" label="From vessel (optional)"><Select allowClear showSearch optionFilterProp="label" options={vesselOptions} /></Form.Item>
+        <Form.Item name="to_vessel_id" label="To vessel (optional)"><Select allowClear showSearch optionFilterProp="label" options={vesselOptions} /></Form.Item></div>
+      <div className="form-pair"><Form.Item name="quantity" label="Volume"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
+        <Form.Item name="unit" label="Unit"><Select options={unitOptions(unitGroups.volume)} onChange={changeMainUnit} /></Form.Item></div>
+    </>}
     {kind === 'packaging' && <>
       <Form.Item name="container_name" label="Container"><Input placeholder="Bottle, keg…" /></Form.Item>
       <div className="form-triple"><Form.Item name="container_size" label="Container size"><InputNumber className="full-width" min={0} step="any" /></Form.Item>

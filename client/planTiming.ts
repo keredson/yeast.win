@@ -62,8 +62,11 @@ export function parsePlanDetails(detailsJson: string | null | undefined): Record
   } catch { return {}; }
 }
 
-export function planDetailsLabel(plan: Pick<Plan, 'event_type'> & { title?: string; details_json?: string | null }): string {
+export function planDetailsLabel(plan: Pick<Plan, 'event_type'> & { title?: string; details_json?: string | null },
+  equipmentNames: ReadonlyMap<string, string> = new Map()): string {
   const details = parsePlanDetails(plan.details_json);
+  const vesselName = (idField: 'from_vessel_id' | 'to_vessel_id') => equipmentNames.get(String(details[idField]))
+    || String(details[idField.replace('_id', '_name')] || 'Archived vessel');
   const amount = typeof details.quantity === 'number' ? formatQuantity(details.quantity, String(details.unit || ''), String(details.display_unit || '')) : '';
   const target = details.target_value != null ? `${details.target_value} ${details.target_unit || ''}`.trim() : '';
   const duration = typeof details.duration_seconds === 'number' && details.duration_seconds > 0
@@ -72,7 +75,12 @@ export function planDetailsLabel(plan: Pick<Plan, 'event_type'> & { title?: stri
     : plan.event_type === 'measurement' ? [details.measurement_kind, target]
       : plan.event_type === 'temperature_control' ? [details.mode, target]
         : plan.event_type === 'pressure_control' ? [target]
-          : plan.event_type === 'transfer' ? [amount]
+          : plan.event_type === 'transfer' ? [
+            details.from_vessel_id && details.to_vessel_id
+              ? `${vesselName('from_vessel_id')} → ${vesselName('to_vessel_id')}`
+              : details.from_vessel_id ? `From ${vesselName('from_vessel_id')}`
+                : details.to_vessel_id ? `To ${vesselName('to_vessel_id')}` : '',
+            amount]
             : plan.event_type === 'packaging' ? [details.container_count,
               details.container_name, details.container_size != null ? `${details.container_size} ${details.container_unit || details.unit || ''}`.trim() : ''] : [];
   if (duration) parts.push(duration);
