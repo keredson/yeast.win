@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, AutoComplete, Button, Card, Dropdown, Empty, Form, Input, InputNumber, Modal, Select, Table, Tag } from 'antd';
 import { DeleteOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
 import { nanoid } from 'nanoid';
-import { capacityKinds, equipmentKindLabel, equipmentKinds, measurementRangeUnits } from '../shared/equipment.ts';
+import { capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
 import { createEquipment, deleteEquipment, updateEquipmentCapacity, updateEquipmentMeasurementRange,
   type Equipment, type EquipmentSpecifications, type LocalDb } from './db.ts';
@@ -42,14 +42,8 @@ const calibrationProfiles: Record<string, { method: string; fields: { key: strin
   ] }
 };
 
-const equipmentMenuItems = [
-  { key: 'brewing', label: 'Brewing', children: ['kettle', 'mash_tun', 'fermenter', 'chiller', 'pump'] },
-  { key: 'temperature', label: 'Temperature', children: ['refrigerator', 'temperature_controller', 'thermometer'] },
-  { key: 'measuring', label: 'Measuring', children: ['hydrometer', 'refractometer', 'ph_meter', 'pressure_gauge',
-    'carbonation_meter', 'dissolved_oxygen_meter', 'scale'] },
-  { key: 'other_group', label: 'Other', children: ['other'] }
-].map(group => ({ key: group.key, label: group.label,
-  children: group.children.map(kind => ({ key: kind, label: equipmentKindLabel(kind) })) }));
+const equipmentMenuItems = equipmentGroups.map(group => ({ key: group.key, label: group.label,
+  children: group.kinds.map(kind => ({ key: kind, label: equipmentKindLabel(kind) })) }));
 
 function addEquipmentTitle(kind: string): string {
   const label = equipmentKindLabel(kind);
@@ -77,8 +71,11 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
   const editRangeUnit = Form.useWatch('measurement_unit', rangeForm) as string | undefined;
   const profile = item ? calibrationProfiles[item.kind] : undefined;
   const specs = item ? JSON.parse(item.specification_json || '{}') as EquipmentSpecifications : {};
-  const kinds = [...equipmentKinds.map(row => row.value), ...equipment.map(row => row.kind).filter(kind =>
-    !equipmentKinds.some(known => known.value === kind))].filter((kind, index, all) => all.indexOf(kind) === index);
+  const groupedKinds: { key: string; label: string; kinds: string[] }[] = equipmentGroups.map(group => ({ key: group.key, label: group.label,
+    kinds: group.kinds.filter(kind => equipment.some(row => row.kind === kind)) })).filter(group => group.kinds.length);
+  const earlierKinds = [...new Set(equipment.map(row => row.kind))].filter(kind =>
+    !equipmentGroups.some(group => (group.kinds as readonly string[]).includes(kind)));
+  if (earlierKinds.length) groupedKinds.push({ key: 'earlier', label: 'Previously added equipment', kinds: earlierKinds });
 
   useEffect(() => {
     if (!selectedId) return;
@@ -156,13 +153,14 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
       {equipment.length > 0 && <Dropdown trigger={['click']} menu={addMenu} placement="bottomRight">
         <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New equipment" title="New equipment" />
       </Dropdown>}</div>
-      <p className="muted">Measurements and control settings can reference a specific item.</p>
+      <p className="muted">Measurements, control settings, and transfers can reference your equipment.</p>
       {equipment.length === 0 && <Dropdown trigger={['click']} menu={addMenu} placement="bottomLeft">
         <Button icon={<PlusOutlined />}>Add equipment</Button>
       </Dropdown>}
-      {equipment.length > 0 && <div className="group-tables">{kinds.map(kind => {
+      {equipment.length > 0 && <div className="group-tables">{groupedKinds.map(group => <section key={group.key} className="equipment-category">
+        <h2>{group.label}</h2>{group.kinds.map(kind => {
         const rows = equipment.filter(row => row.kind === kind);
-        return rows.length ? <section key={kind} className="group-table"><h2>{equipmentKindLabel(kind)}</h2>
+        return rows.length ? <section key={kind} className="group-table"><h3>{equipmentKindLabel(kind)}</h3>
           <Table<Equipment> dataSource={rows} rowKey="id" pagination={false} size="small"
             columns={[{ title: 'Equipment', dataIndex: 'name', render: (_, row) =>
               <a href={`${basePath}/equipment/${row.id}`} onClick={event => { event.preventDefault(); onSelect(row.id); }}>{row.name}</a> },
@@ -174,7 +172,7 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
                   ? `${spec.measurement_min}–${spec.measurement_max} ${spec.measurement_unit || ''}` : '';
               } }] : [])]} />
         </section> : null;
-      })}</div>}
+      })}</section>)}</div>}
     </section> : !item ? <Empty description="Equipment not found" /> : <section className="record-detail">
         <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(item.kind)}</span><h2>{item.name}</h2></div>
           <div className="heading-actions"><Dropdown menu={{ items: [

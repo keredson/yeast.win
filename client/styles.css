@@ -61,7 +61,9 @@ button, input, textarea { font: inherit; }
 .record-link strong, .record-link small { display: block; }
 .record-link small { color: #728079; margin-top: 5px; font-size: 13px; }
 .group-tables { margin-top: 24px; gap: 30px; }
-.group-table h2 { margin: 0; font-size: 20px; }
+.equipment-category { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.equipment-category > h2 { margin: 0; font-size: 22px; }
+.group-table h3 { margin: 0 0 10px; font-size: 18px; }
 .group-table-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .group-table { min-width: 0; width: 100%; }
 .group-table .ant-table-wrapper { width: 100%; }

@@ -9,6 +9,7 @@ import { parsePlanDetails } from './planTiming.ts';
 import { inventoryCategories } from '../shared/catalog.ts';
 import { QuantityFields } from './QuantityFields.tsx';
 import { changeNumberUnit, changeQuantityUnit } from './unitFields.ts';
+import { vesselKinds } from '../shared/equipment.ts';
 
 function measurementUnits(kind: MeasurementKind): readonly string[] {
   if (kind === 'ph') return ['pH'];
@@ -74,6 +75,8 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
   const selectedTargetUnit = Form.useWatch('target_unit', form) as string | undefined;
   const selectedContainerUnit = Form.useWatch('container_unit', form) as string | undefined;
   const selectedCategory = Form.useWatch('item_category', form) as string | undefined;
+  const transferVessels = equipment.filter(item => vesselKinds.has(item.kind)
+    || item.id === initialData?.payload.from_vessel_id || item.id === initialData?.payload.to_vessel_id);
 
   function changeMainUnit(next: string) {
     const from = selectedUnit || initialUnit;
@@ -247,8 +250,8 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
       {kind === 'temperature_control' && <Form.Item name="power_watts" label="Power (W), if set"><InputNumber className="full-width" min={0} /></Form.Item>}
     </>}
     {kind === 'transfer' && <>
-      <div className="form-pair"><Form.Item name="from_vessel_id" label="From vessel"><Select allowClear options={equipment.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
-        <Form.Item name="to_vessel_id" label="To vessel"><Select allowClear options={equipment.map(item => ({ value: item.id, label: item.name }))} /></Form.Item></div>
+      <div className="form-pair"><Form.Item name="from_vessel_id" label="From vessel"><Select allowClear options={transferVessels.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
+        <Form.Item name="to_vessel_id" label="To vessel"><Select allowClear options={transferVessels.map(item => ({ value: item.id, label: item.name }))} /></Form.Item></div>
       <div className="form-pair"><Form.Item name="quantity" label="Quantity"><InputNumber className="full-width" step="any" /></Form.Item>
         <Form.Item name="unit" label="Unit"><Select options={unitOptions(unitGroups.volume)} onChange={changeMainUnit} /></Form.Item></div>
     </>}

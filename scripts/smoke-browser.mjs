@@ -269,12 +269,16 @@ try {
   if (!await page.locator('.app-nav').evaluate(element => element.classList.contains('ant-layout-sider'))) {
     throw new Error('Desktop navigation is not an Ant Design Sider');
   }
-  await chooseEquipmentType(page, 'Add equipment', 'Brewing', 'Kettle');
-  const kettleDialog = page.getByRole('dialog', { name: 'Add kettle' });
+  await chooseEquipmentType(page, 'Add equipment', 'Control', 'Electric kettle');
+  const kettleDialog = page.getByRole('dialog', { name: 'Add electric kettle' });
   await kettleDialog.getByLabel('Capacity (optional)').waitFor();
   if (await kettleDialog.getByLabel('Range minimum').count()) throw new Error('Kettle was offered a measurement range');
   await kettleDialog.locator('.ant-modal-close').click();
-  await chooseEquipmentType(page, 'Add equipment', 'Measuring', 'pH meter');
+  await chooseEquipmentType(page, 'Add equipment', 'Passive vessels', 'Mash tun');
+  const mashTunDialog = page.getByRole('dialog', { name: 'Add mash tun' });
+  await mashTunDialog.getByLabel('Capacity (optional)').waitFor();
+  await mashTunDialog.locator('.ant-modal-close').click();
+  await chooseEquipmentType(page, 'Add equipment', 'Measurement', 'pH meter');
   const phDialog = page.getByRole('dialog', { name: 'Add pH meter' });
   if (await phDialog.getByLabel('Capacity (optional)').count()) {
     throw new Error('Measurement equipment was offered vessel capacity');
@@ -302,7 +306,7 @@ try {
   await page.getByRole('button', { name: 'Save calibration' }).click();
   await page.getByText('Two-point pH').waitFor();
   await navigateSection(page, 'Equipment');
-  await chooseEquipmentType(page, 'New equipment', 'Measuring', 'Refractometer');
+  await chooseEquipmentType(page, 'New equipment', 'Measurement', 'Refractometer');
   const refractometerDialog = page.getByRole('dialog', { name: 'Add refractometer' });
   const refractometerName = refractometerDialog.getByRole('combobox', { name: 'Name' });
   await refractometerName.fill('Refractometer');
