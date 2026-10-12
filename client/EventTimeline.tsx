@@ -58,7 +58,7 @@ export function EventTimeline({ events, batchStartAt, details = {}, photos = [],
   }, [events, batchStartAt, isBatch]);
 
   return <section className="batch-timeline"><div className="column-title"><h3>Timeline</h3><span>{events.length} actions</span></div>
-    <div className="card-stack">{groups.map(group => <Card key={group.key} size="small" className="timeline-group">
+    <div className="card-stack timeline-track">{groups.map(group => <Card key={group.key} size="small" className="timeline-group">
       <div className="timeline-group-heading"><strong>{group.label}</strong>
         {isBatch && group.at != null && <span className="muted">{formatTime(group.at)}</span>}</div>
       {group.events.length === 0 && <div className="timeline-empty"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No actions at the start yet" /></div>}
