@@ -1,17 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Alert, AutoComplete, Button, Card, Dropdown, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Table, Tag } from 'antd';
-import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
+import { EditOutlined, PlusOutlined } from '@ant-design/icons';
 import { nanoid } from 'nanoid';
 import { boilOffKinds, capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { createEquipment, deleteEquipment, updateEquipmentIdentity, updateEquipmentRatedPower, updateEquipmentCapacity,
+import { createEquipment, deleteEquipment, updateEquipmentBoilHeatLoss, updateEquipmentIdentity, updateEquipmentRatedPower, updateEquipmentCapacity,
   updateEquipmentMeasurementRange,
   type Equipment, type EquipmentSpecifications, type LocalDb } from './db.ts';
 import { capacityInLiters, capacityLabel, capacityUnits } from '../shared/capacity.ts';
 import { fromDatetimeLocal, formatTime, toDatetimeLocal } from './time.ts';
 import { changeNumberUnit } from './unitFields.ts';
 import { equipmentPathSegment, equipmentSlug } from './equipmentRoutes.ts';
-import { boilOffByPower, boilOffRate, estimatedBoilOffAtPower, type BoilObservation } from './boilOff.ts';
+import { heatLossFromBoil, predictedBoilOff } from './boilOff.ts';
 
 interface Calibration { id: string; method: string; effective_at: number; parameters_json: string }
 
@@ -72,7 +72,7 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
   const [calibrations, setCalibrations] = useState<Calibration[]>([]);
   const [creatingKind, setCreatingKind] = useState<string | null>(null);
   const [newCalibration, setNewCalibration] = useState(false);
-  const [newBoilObservation, setNewBoilObservation] = useState(false);
+  const [newBoilCalibration, setNewBoilCalibration] = useState(false);
   const [editIdentity, setEditIdentity] = useState(false);
   const [editCapacity, setEditCapacity] = useState(false);
   const [editPower, setEditPower] = useState(false);
@@ -89,9 +89,8 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
   const editRangeUnit = Form.useWatch('measurement_unit', rangeForm) as string | undefined;
   const profile = item ? calibrationProfiles[item.kind] : undefined;
   const specs = item ? JSON.parse(item.specification_json || '{}') as EquipmentSpecifications : {};
-  const [boilObservations, setBoilObservations] = useState<BoilObservation[]>([]);
-  const boilRates = boilOffByPower(boilObservations);
-  const ratedEstimate = specs.rated_power_watts == null ? null : estimatedBoilOffAtPower(boilObservations, specs.rated_power_watts);
+  const ratedEstimate = specs.rated_power_watts == null || specs.boil_heat_loss_watts == null
+    ? null : predictedBoilOff(specs.rated_power_watts, specs.boil_heat_loss_watts);
   const groupedKinds: { key: string; label: string; kinds: string[] }[] = equipmentGroups.map(group => ({ key: group.key, label: group.label,
     kinds: group.kinds.filter(kind => equipment.some(row => row.kind === kind)) })).filter(group => group.kinds.length);
   const earlierKinds = [...new Set(equipment.map(row => row.kind))].filter(kind =>
@@ -105,11 +104,26 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
   }, [db, selectedId, equipment]);
 
   useEffect(() => {
-    if (!selectedId) return;
-    void db.execO<BoilObservation>(`SELECT id, observed_at, power_watts, ambient_c, liquid_c, start_liters, end_liters,
-      duration_seconds FROM equipment_characterization_observations WHERE equipment_id = ? ORDER BY observed_at DESC`, [selectedId])
-      .then(setBoilObservations);
-  }, [db, selectedId, equipment]);
+    if (!item || !boilOffKinds.has(item.kind) || specs.boil_heat_loss_watts != null) return;
+    let active = true;
+    void (async () => {
+      const previous = await db.execO<{ power_watts: number; start_liters: number; end_liters: number; duration_seconds: number }>(
+        `SELECT power_watts, start_liters, end_liters, duration_seconds FROM equipment_characterization_observations
+          WHERE equipment_id = ? ORDER BY observed_at DESC, id DESC`, [item.id]);
+      let heatLoss: number | null = null;
+      for (const row of previous) {
+        try {
+          heatLoss = heatLossFromBoil(row.power_watts, row.start_liters, row.end_liters, row.duration_seconds / 60);
+          break;
+        } catch { /* Skip incomplete legacy observations. */ }
+      }
+      if (active && heatLoss != null) {
+        await updateEquipmentBoilHeatLoss(db, item, heatLoss);
+        await onChanged();
+      }
+    })().catch(cause => { if (active) setError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => { active = false; };
+  }, [db, item?.id, item?.specification_json]);
 
   function validRange(min: number | undefined, max: number | undefined, unit: string | undefined, kind: string) {
     if (min == null && max == null) return null;
@@ -163,21 +177,13 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  async function recordBoilObservation(values: { observed_at: string; power_watts: number; start_liters: number;
-    end_liters: number; duration_minutes: number; ambient_c?: number; liquid_c?: number }) {
+  async function saveBoilCalibration(values: { power_watts: number; start_liters: number;
+    end_liters: number; duration_minutes: number }) {
     if (!item) return;
     try {
-      if (!Number.isFinite(values.power_watts) || values.power_watts <= 0 || !Number.isFinite(values.duration_minutes)
-        || values.duration_minutes <= 0 || !Number.isFinite(values.start_liters) || !Number.isFinite(values.end_liters)
-        || values.start_liters <= values.end_liters || values.end_liters < 0) {
-        throw new Error('Enter positive power and duration, with an end volume below the start volume');
-      }
-      await db.exec(`INSERT INTO equipment_characterization_observations
-        (id, equipment_id, observed_at, power_watts, ambient_c, liquid_c, start_liters, end_liters, duration_seconds)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [nanoid(), item.id, fromDatetimeLocal(values.observed_at), values.power_watts,
-        values.ambient_c ?? null, values.liquid_c ?? null, values.start_liters, values.end_liters,
-        Math.round(values.duration_minutes * 60)]);
-      setNewBoilObservation(false); await onChanged();
+      const heatLoss = heatLossFromBoil(values.power_watts, values.start_liters, values.end_liters, values.duration_minutes);
+      await updateEquipmentBoilHeatLoss(db, item, heatLoss);
+      setNewBoilCalibration(false); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
@@ -252,18 +258,11 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit measurement range" onClick={() => setEditRange(true)} /></div>}
         </div>
         {(profile || boilOffKinds.has(item.kind)) && <div className="equipment-calibration"><div className="equipment-calibration-heading"><h3>Calibration</h3>
-          <div className="heading-actions">{boilOffKinds.has(item.kind) && <Button icon={<PlusOutlined />} onClick={() => setNewBoilObservation(true)}>Record boil observation</Button>}
+          <div className="heading-actions">{boilOffKinds.has(item.kind) && <Button icon={<EditOutlined />} onClick={() => setNewBoilCalibration(true)}>Calibrate boil-off</Button>}
           {profile && <Button icon={<PlusOutlined />} onClick={() => setNewCalibration(true)}>Record calibration</Button>}</div></div>
         {boilOffKinds.has(item.kind) && <>
+          <p>Heat loss at boil: {specs.boil_heat_loss_watts == null ? 'Not calibrated' : `${Math.round(specs.boil_heat_loss_watts)} W`}</p>
           {ratedEstimate != null && <p>Estimated boil-off at rated power: {Number(ratedEstimate.toFixed(2))} L/h</p>}
-          {boilRates.length > 0 ? <div className="card-stack">{boilRates.map(point =>
-            <Card key={point.watts} size="small"><strong>{point.watts} W</strong> · {Number(point.litersPerHour.toFixed(2))} L/h observed</Card>)}</div>
-            : <p className="muted">Record a boil to measure evaporation at its power setting.</p>}
-          {specs.boil_off_liters_per_hour != null && <p className="muted">Previous estimate without power: {specs.boil_off_liters_per_hour} L/h</p>}
-          {boilObservations.length > 0 && <div className="card-stack">{boilObservations.map(row => <Card key={row.id} size="small">
-            {formatTime(row.observed_at)} · {row.power_watts} W · {Number(boilOffRate(row).toFixed(2))} L/h
-            <div className="muted">{row.start_liters} → {row.end_liters} L over {Number((row.duration_seconds / 60).toFixed(1))} min</div>
-          </Card>)}</div>}
         </>}
         {calibrations.length > 0 &&
         <div className="card-stack">{calibrations.map(row => <Card key={row.id} size="small">
@@ -273,7 +272,7 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
         <div className="equipment-delete"><Popconfirm title={`Delete ${item.name}?`}
           description="Used equipment stays in batch history. Unused equipment and calibrations are removed."
           okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => void remove()}>
-          <Button danger icon={<DeleteOutlined />}>Delete equipment</Button>
+          <Button type="text" danger>Delete</Button>
         </Popconfirm></div>
       </section>}
     <Modal title={creatingKind ? addEquipmentTitle(creatingKind) : 'Add equipment'} open={!!creatingKind}
@@ -350,17 +349,15 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
         <Button type="primary" htmlType="submit">Save calibration</Button>
       </Form>
     </Modal>
-    <Modal title="Record boil observation" open={newBoilObservation} onCancel={() => setNewBoilObservation(false)} footer={null} destroyOnHidden>
-      <Form key={item?.id} layout="vertical" onFinish={recordBoilObservation}
-        initialValues={{ observed_at: toDatetimeLocal(), power_watts: specs.rated_power_watts }}>
-        <Form.Item name="observed_at" label="When" rules={[{ required: true }]}><Input type="datetime-local" /></Form.Item>
+    <Modal title="Calibrate boil-off" open={newBoilCalibration} onCancel={() => setNewBoilCalibration(false)} footer={null} destroyOnHidden>
+      <Form key={item?.id} layout="vertical" onFinish={saveBoilCalibration}
+        initialValues={{ power_watts: specs.rated_power_watts }}>
+        <p className="muted">Measure volume loss during a steady boil. Only the derived heat loss is saved.</p>
         <Form.Item name="power_watts" label="Power used (W)" rules={[{ required: true }]}><InputNumber className="full-width" min={1} /></Form.Item>
         <div className="form-pair"><Form.Item name="start_liters" label="Start volume (L)" rules={[{ required: true }]}><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
           <Form.Item name="end_liters" label="End volume (L)" rules={[{ required: true }]}><InputNumber className="full-width" min={0} step="any" /></Form.Item></div>
         <Form.Item name="duration_minutes" label="Boil duration (minutes)" rules={[{ required: true }]}><InputNumber className="full-width" min={0.01} step="any" /></Form.Item>
-        <div className="form-pair"><Form.Item name="ambient_c" label="Ambient temperature (°C, optional)"><InputNumber className="full-width" step="any" /></Form.Item>
-          <Form.Item name="liquid_c" label="Liquid temperature (°C, optional)"><InputNumber className="full-width" step="any" /></Form.Item></div>
-        <Button type="primary" htmlType="submit">Save boil observation</Button>
+        <Button type="primary" htmlType="submit">Save calibration</Button>
       </Form>
     </Modal>
   </div>;

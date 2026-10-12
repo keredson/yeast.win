@@ -1,38 +1,21 @@
-export interface BoilObservation {
-  id: string;
-  observed_at: number;
-  power_watts: number;
-  ambient_c: number | null;
-  liquid_c: number | null;
-  start_liters: number;
-  end_liters: number;
-  duration_seconds: number;
-}
+// At 100 °C, saturated liquid water is 0.95835 kg/L and its latent heat is
+// 2256.4 kJ/kg (NISTIR 5078, Table 1). This is about 600.7 W per L/h.
+// https://nvlpubs.nist.gov/nistpubs/Legacy/IR/nistir5078.pdf
+export const wattsPerLiterPerHour = 600.7;
 
-export function boilOffRate(observation: BoilObservation): number {
-  return (observation.start_liters - observation.end_liters) * 3600 / observation.duration_seconds;
-}
-
-export function boilOffByPower(observations: BoilObservation[]): { watts: number; litersPerHour: number }[] {
-  const groups = new Map<number, { lost: number; seconds: number }>();
-  for (const observation of observations) {
-    if (observation.power_watts <= 0 || observation.duration_seconds <= 0 || observation.start_liters <= observation.end_liters) continue;
-    const group = groups.get(observation.power_watts) || { lost: 0, seconds: 0 };
-    group.lost += observation.start_liters - observation.end_liters;
-    group.seconds += observation.duration_seconds;
-    groups.set(observation.power_watts, group);
+export function heatLossFromBoil(powerWatts: number, startLiters: number, endLiters: number,
+  durationMinutes: number): number {
+  if (!Number.isFinite(powerWatts) || powerWatts <= 0 || !Number.isFinite(startLiters)
+    || !Number.isFinite(endLiters) || startLiters <= endLiters || endLiters < 0
+    || !Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+    throw new Error('Enter positive power and duration, with an end volume below the start volume');
   }
-  return [...groups].map(([watts, group]) => ({ watts, litersPerHour: group.lost * 3600 / group.seconds }))
-    .sort((a, b) => a.watts - b.watts);
+  const evaporatedLitersPerHour = (startLiters - endLiters) * 60 / durationMinutes;
+  const heatLoss = powerWatts - evaporatedLitersPerHour * wattsPerLiterPerHour;
+  if (heatLoss < 0) throw new Error('Measured evaporation exceeds the power used; check the volumes, duration, and wattage');
+  return heatLoss;
 }
 
-export function estimatedBoilOffAtPower(observations: BoilObservation[], watts: number): number | null {
-  const points = boilOffByPower(observations);
-  const exact = points.find(point => point.watts === watts);
-  if (exact) return exact.litersPerHour;
-  const upperIndex = points.findIndex(point => point.watts > watts);
-  if (upperIndex < 1) return null;
-  const lower = points[upperIndex - 1];
-  const upper = points[upperIndex];
-  return lower.litersPerHour + (upper.litersPerHour - lower.litersPerHour) * (watts - lower.watts) / (upper.watts - lower.watts);
+export function predictedBoilOff(powerWatts: number, heatLossWatts: number): number {
+  return Math.max(0, powerWatts - heatLossWatts) / wattsPerLiterPerHour;
 }
