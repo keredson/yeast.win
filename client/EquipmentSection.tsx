@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Dropdown, Empty, Form, Input, InputNumber, Modal, Select, Table, Tag } from 'antd';
+import { Alert, AutoComplete, Button, Card, Dropdown, Empty, Form, Input, InputNumber, Modal, Select, Table, Tag } from 'antd';
 import { DeleteOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
 import { nanoid } from 'nanoid';
 import { capacityKinds, equipmentKindLabel, equipmentKinds, measurementRangeUnits } from '../shared/equipment.ts';
@@ -172,16 +172,17 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
         <Form.Item name="kind" label="Type" rules={[{ required: true }]}><Select showSearch optionFilterProp="label" placeholder="Choose equipment type" options={[...equipmentKinds]}
           onChange={() => equipmentForm.setFieldsValue({ catalog_id: undefined, name: undefined, capacity: undefined,
             measurement_min: undefined, measurement_max: undefined, measurement_unit: undefined })} /></Form.Item>
-        <Form.Item name="catalog_id" label="Find in shared equipment catalog">
-          <Select showSearch allowClear disabled={!selectedKind} placeholder={selectedKind ? 'Search this equipment type' : 'Choose type first'} optionFilterProp="label"
-            options={catalog.filter(row => row.kind === selectedKind).map(row => ({ value: row.id, label: row.name }))}
-            onChange={value => { const entry = catalog.find(row => row.id === value);
+        <Form.Item name="catalog_id" hidden><Input /></Form.Item>
+        <Form.Item name="name" label="Name" rules={[{ required: true, whitespace: true }]}>
+          <AutoComplete disabled={!selectedKind} placeholder={selectedKind ? 'Search shared catalog or enter a name' : 'Choose type first'} maxLength={120}
+            options={catalog.filter(row => row.kind === selectedKind).map(row => ({ value: row.name }))}
+            filterOption={(input, option) => String(option?.value || '').toLowerCase().includes(input.toLowerCase())}
+            onSelect={value => { const entry = catalog.find(row => row.kind === selectedKind && row.name === value);
               if (entry) { const specs = JSON.parse(entry.specification_json || '{}') as EquipmentSpecifications;
-                equipmentForm.setFieldsValue({ name: entry.name, capacity: specs.capacity_liters, capacity_unit: 'L',
+                equipmentForm.setFieldsValue({ catalog_id: entry.id, capacity: specs.capacity_liters, capacity_unit: 'L',
                   measurement_min: specs.measurement_min, measurement_max: specs.measurement_max,
                   measurement_unit: specs.measurement_unit || measurementRangeUnits[entry.kind]?.[0] }); } }} />
         </Form.Item>
-        <Form.Item name="name" label="Name" rules={[{ required: true }]}><Input placeholder="e.g. pH meter #2" /></Form.Item>
         {selectedKind && capacityKinds.has(selectedKind) && <div className="capacity-fields"><Form.Item name="capacity" label="Capacity (optional)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
           <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]} /></Form.Item></div>}
         {selectedKind && measurementRangeUnits[selectedKind] && <div className="form-triple">

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Empty, Form, Input, Modal, Select, Table, Tag } from 'antd';
+import { Alert, AutoComplete, Button, Card, Empty, Form, Input, Modal, Select, Table, Tag } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
 import { addInventoryEntry, createInventoryItem, type InventoryItem, type LocalDb } from './db.ts';
@@ -99,14 +99,14 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
           onChange={value => itemForm.setFieldsValue({ catalog_id: undefined, name: undefined,
             default_unit: unitForCategory(value, preferredUnits.mass), starting_quantity: undefined,
             pounds: undefined, ounces: undefined })} /></Form.Item>
-        <Form.Item name="catalog_id" label="Find in shared inventory catalog">
-          <Select showSearch allowClear disabled={!selectedCategory} placeholder={selectedCategory ? 'Search this inventory type' : 'Choose type first'} optionFilterProp="label"
-            options={catalog.filter(row => row.category === selectedCategory).map(row => ({ value: row.id, label: row.name }))}
-            onChange={value => { const entry = catalog.find(row => row.id === value);
-              if (entry) itemForm.setFieldsValue({ name: entry.name,
-                default_unit: ['Grain', 'Hops', 'Nutrient'].includes(entry.category) ? preferredUnits.mass : entry.unit === 'ml' ? 'mL' : entry.unit }); }} />
+        <Form.Item name="name" label="Item" rules={[{ required: true, whitespace: true }]}>
+          <AutoComplete disabled={!selectedCategory} placeholder={selectedCategory ? 'Search shared catalog or enter an item' : 'Choose type first'} maxLength={120}
+            options={catalog.filter(row => row.category === selectedCategory).map(row => ({ value: row.name }))}
+            filterOption={(input, option) => String(option?.value || '').toLowerCase().includes(input.toLowerCase())}
+            onSelect={value => { const entry = catalog.find(row => row.category === selectedCategory && row.name === value);
+              if (entry) itemForm.setFieldValue('default_unit', ['Grain', 'Hops', 'Nutrient'].includes(entry.category)
+                ? preferredUnits.mass : entry.unit === 'ml' ? 'mL' : entry.unit); }} />
         </Form.Item>
-        <Form.Item name="name" label="Item" rules={[{ required: true }]}><Input placeholder="e.g. Maris Otter, 12 oz bottles" /></Form.Item>
         <Form.Item name="default_unit" label="Unit" rules={[{ required: true }]}>
           <Select showSearch options={unitOptions(quantityUnitsForCategory(selectedCategory || 'Other'))} /></Form.Item>
         <QuantityFields unit={newItemUnit} label="Starting quantity on hand" name="starting_quantity" optional />
