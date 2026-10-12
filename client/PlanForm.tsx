@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { Alert, AutoComplete, Button, Form, Input, InputNumber, Select } from 'antd';
 import { kindLabel, measurementKinds } from './constants.ts';
 import type { InventoryItem, PlanInput } from './db.ts';
-import { quantityUnits, unitGroups, unitOptions } from '../shared/units.ts';
+import { compoundMassUnit, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions } from '../shared/units.ts';
 import { parsePlanDetails } from './planTiming.ts';
 import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
+import { QuantityFields } from './QuantityFields.tsx';
 
 interface Anchor { id: string; title: string; event_type: string }
 const timeUnits = [
@@ -23,7 +24,7 @@ const titleLabels: Record<string, string> = {
 interface Values {
   title: string; timing_key: string; offset_value: number;
   offset_unit: typeof timeUnits[number]['value']; details?: string;
-  item_category?: string; quantity?: number; unit?: string;
+  item_category?: string; quantity?: number; unit?: string; pounds?: number; ounces?: number;
   measurement_kind?: string; target_value?: number; target_unit?: string;
   mode?: string; container_name?: string; container_size?: number; container_count?: number;
 }
@@ -42,11 +43,16 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
   const initialItem = String(initialDetails.item_name || initialPlan?.title || '');
   const initialCategory = String(initialDetails.item_category || inventory.find(item => item.id === initialDetails.inventory_item_id)?.category
     || catalog.find(item => item.id === initialDetails.catalog_item_id || item.name === initialItem)?.category || '');
+  const initialUnit = String(initialDetails.display_unit || initialDetails.unit ||
+    (initialCategory ? unitForCategory(initialCategory, preferredMassUnit) : preferredMassUnit));
+  const initialSplit = initialUnit === compoundMassUnit && typeof initialDetails.quantity === 'number'
+    ? splitOunces(initialDetails.quantity) : null;
   const kind = initialPlan?.event_type || eventType;
   const [measurementKind, setMeasurementKind] = useState(String(initialDetails.measurement_kind || 'temperature'));
   const [itemCategory, setItemCategory] = useState(initialCategory);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const selectedUnit = Form.useWatch('unit', form) as string | undefined;
 
   async function save(values: Values) {
     try {
@@ -58,7 +64,7 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
       const details: Record<string, string | number> = {};
       if (values.details) details.note = values.details;
       const keysByKind: Record<string, (keyof Values)[]> = {
-        addition: ['item_category', 'quantity', 'unit'],
+        addition: ['item_category'],
         measurement: ['measurement_kind', 'target_value', 'target_unit'],
         temperature_control: ['mode', 'target_value', 'target_unit'],
         pressure_control: ['target_value', 'target_unit'],
@@ -71,6 +77,13 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
       }
       if (kind === 'addition') {
         details.item_name = values.title.trim();
+        const amount = quantityForStorage(values.unit || '', values.quantity, values.pounds, values.ounces);
+        if (amount) {
+          if (!values.unit) throw new Error('Choose a unit');
+          details.quantity = amount.quantity;
+          details.unit = amount.unit;
+          if (values.unit === compoundMassUnit) details.display_unit = compoundMassUnit;
+        }
         const owned = inventory.find(item => item.category === values.item_category && item.name.toLowerCase() === values.title.trim().toLowerCase());
         const known = catalog.find(item => item.category === values.item_category && item.name.toLowerCase() === values.title.trim().toLowerCase());
         if (owned) details.inventory_item_id = owned.id;
@@ -91,10 +104,11 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
     timing_key: initialPlan?.anchor_event_id ? `${offset < 0 ? 'before' : 'after'}:${initialPlan.anchor_event_id}` : 'start',
     offset_value: Math.abs(offset) / offsetUnit.multiplier, offset_unit: offsetUnit.value,
     measurement_kind: measurementKind, mode: initialDetails.mode || 'hold',
-    unit: initialDetails.unit || (initialCategory ? unitForCategory(initialCategory, preferredMassUnit) : preferredMassUnit),
+    unit: initialUnit,
     target_unit: initialDetails.target_unit || '°C',
     details: initialDetails.note, item_category: initialCategory,
-    quantity: initialDetails.quantity,
+    quantity: initialUnit === compoundMassUnit ? undefined : initialDetails.quantity,
+    pounds: initialSplit?.pounds, ounces: initialSplit?.ounces,
     target_value: initialDetails.target_value, container_name: initialDetails.container_name,
     container_size: initialDetails.container_size, container_count: initialDetails.container_count
   }}>
@@ -102,7 +116,7 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
     {kind === 'addition' && <>
       <Form.Item name="item_category" label="Type" rules={[{ required: true }]}><Select options={inventoryCategories.map(value => ({ value, label: value }))}
         onChange={(value: string) => { setItemCategory(value); form.setFieldsValue({ title: undefined,
-          unit: unitForCategory(value, preferredMassUnit) }); }} /></Form.Item>
+          unit: unitForCategory(value, preferredMassUnit), quantity: undefined, pounds: undefined, ounces: undefined }); }} /></Form.Item>
       <Form.Item name="title" label="What will be added?" rules={[{ required: true, whitespace: true }]}>
         <AutoComplete placeholder="Search inventory or enter an item" maxLength={120} options={[
           ...inventory.filter(item => item.category === itemCategory).map(item => ({ value: item.name, label: `${item.name} · Your inventory` })),
@@ -114,11 +128,11 @@ export function PlanForm({ anchors, eventType, initialPlan, inventory, catalog, 
             const known = catalog.find(item => item.category === itemCategory && item.name === value);
             const knownUnit = known?.unit && unitGroups.mass.includes(known.unit as typeof unitGroups.mass[number])
               ? preferredMassUnit : known?.unit;
-            form.setFieldValue('unit', owned?.default_unit || knownUnit || unitForCategory(itemCategory, preferredMassUnit));
+            form.setFieldValue('unit', owned?.display_unit || knownUnit || unitForCategory(itemCategory, preferredMassUnit));
           }} />
       </Form.Item>
-      <div className="form-pair"><Form.Item name="quantity" label="Planned quantity"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
-        <Form.Item name="unit" label="Unit"><Select showSearch options={unitOptions(quantityUnits)} /></Form.Item></div>
+      <Form.Item name="unit" label="Unit"><Select showSearch options={unitOptions(quantityUnitsForCategory(itemCategory))} /></Form.Item>
+      <QuantityFields unit={selectedUnit || initialUnit} label="Planned quantity" optional />
     </>}
     {kind !== 'addition' && <Form.Item name="title" label={titleLabels[kind] || 'Action title'} rules={[{ required: true }]}>
       <Input placeholder={`Describe the ${kindLabel(kind).toLowerCase()}`} maxLength={120} />

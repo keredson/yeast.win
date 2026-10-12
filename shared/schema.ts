@@ -23,6 +23,7 @@ const definitions: Record<string, string> = {
   equipment_calibrations: `id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, effective_at INTEGER NOT NULL, method TEXT NOT NULL, parameters_json TEXT NOT NULL, created_by_account_id TEXT`,
   equipment_characterization_observations: `id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, observed_at INTEGER NOT NULL, power_watts REAL, ambient_c REAL, liquid_c REAL, start_liters REAL, end_liters REAL, duration_seconds INTEGER`,
   inventory_items: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL, default_unit TEXT NOT NULL, created_at INTEGER NOT NULL`,
+  inventory_display_units: `id TEXT PRIMARY KEY NOT NULL, display_unit TEXT NOT NULL`,
   inventory_item_specs: `id TEXT PRIMARY KEY NOT NULL, inventory_item_id TEXT NOT NULL, capacity_liters REAL`,
   inventory_purchases: `id TEXT PRIMARY KEY NOT NULL, inventory_item_id TEXT NOT NULL, quantity REAL NOT NULL, unit TEXT NOT NULL, purchased_at INTEGER NOT NULL, supplier TEXT, lot TEXT, cost REAL`,
   inventory_counts: `id TEXT PRIMARY KEY NOT NULL, inventory_item_id TEXT NOT NULL, quantity REAL NOT NULL, unit TEXT NOT NULL, counted_at INTEGER NOT NULL, created_by_account_id TEXT`,
@@ -82,12 +83,15 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 3;
+export const workspaceSchemaVersion = 4;
 export const workspaceV2Statements = [
   schemaStatements.find(statement => statement.includes('equipment_archives'))!
 ];
 export const workspaceV3Statements = [
   schemaStatements.find(statement => statement.includes('inventory_item_specs'))!
+];
+export const workspaceV4Statements = [
+  schemaStatements.find(statement => statement.includes('inventory_display_units'))!
 ];
 
 export function isValidId(value: unknown): value is string {

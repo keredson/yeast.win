@@ -3,8 +3,9 @@ import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { nanoid } from 'nanoid';
 import { capacityKinds, equipmentKinds, measurementRangeUnits } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, workspaceV2Statements, workspaceV3Statements, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
+import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, workspaceV2Statements, workspaceV3Statements, workspaceV4Statements, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
+import { formatQuantity } from '../shared/units.ts';
 
 export type LocalDb = DB;
 export interface Batch { id: string; name: string; description: string | null; status: string; created_at: number }
@@ -18,7 +19,7 @@ export interface ActualEvent {
   note: string | null; source_id: string | null;
 }
 export interface Equipment { id: string; name: string; kind: string; specification_json: string | null }
-export interface InventoryItem { id: string; name: string; category: string; default_unit: string }
+export interface InventoryItem { id: string; name: string; category: string; default_unit: string; display_unit: string }
 
 let sqlitePromise: ReturnType<typeof initWasm> | undefined;
 const opened = new Map<string, Promise<DB>>();
@@ -39,14 +40,18 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
           await tx.exec('CREATE TABLE sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
           await tx.exec('INSERT INTO schema_meta(version) VALUES (?)', [workspaceSchemaVersion]);
         });
-      } else if (version[0].version === 1 || version[0].version === 2) {
+      } else if ([1, 2, 3].includes(version[0].version)) {
         await db.tx(async tx => {
           if (version[0].version < 2) {
             for (const statement of workspaceV2Statements) await tx.exec(statement);
             await tx.exec('SELECT crsql_as_crr(?)', ['equipment_archives']);
           }
-          for (const statement of workspaceV3Statements) await tx.exec(statement);
-          await tx.exec('SELECT crsql_as_crr(?)', ['inventory_item_specs']);
+          if (version[0].version < 3) {
+            for (const statement of workspaceV3Statements) await tx.exec(statement);
+            await tx.exec('SELECT crsql_as_crr(?)', ['inventory_item_specs']);
+          }
+          for (const statement of workspaceV4Statements) await tx.exec(statement);
+          await tx.exec('SELECT crsql_as_crr(?)', ['inventory_display_units']);
           await tx.exec('UPDATE schema_meta SET version = ?', [workspaceSchemaVersion]);
         });
       } else if (version[0].version !== workspaceSchemaVersion) {
@@ -280,7 +285,7 @@ export async function updatePhotoEvent(db: DB, event: ActualEvent, actualAt: num
   });
 }
 
-export async function eventDetails(db: DB, event: ActualEvent): Promise<string> {
+export async function eventDetails(db: DB, event: ActualEvent, preferredMassUnit?: string): Promise<string> {
   if (event.event_type === 'measurement') {
     const parts: string[] = [];
     for (const [kind, table] of Object.entries(measurementTables)) {
@@ -293,7 +298,7 @@ export async function eventDetails(db: DB, event: ActualEvent): Promise<string> 
   if (event.event_type === 'addition') {
     const rows = await db.execO<{ item_name: string; quantity: number; unit: string }>(
       'SELECT item_name, quantity, unit FROM additions WHERE event_id = ?', [event.id]);
-    return rows.length ? `${rows[0].quantity} ${rows[0].unit} ${rows[0].item_name}` : '';
+    return rows.length ? `${formatQuantity(rows[0].quantity, rows[0].unit, preferredMassUnit)} ${rows[0].item_name}` : '';
   }
   if (event.event_type === 'temperature_control') {
     const rows = await db.execO<{ mode: string; target_value: number | null; target_unit: string | null; power_watts: number | null }>(
@@ -386,13 +391,23 @@ export async function deleteEquipment(db: DB, id: string): Promise<void> {
 }
 
 export async function listInventory(db: DB): Promise<InventoryItem[]> {
-  return db.execO<InventoryItem>('SELECT id, name, category, default_unit FROM inventory_items ORDER BY name COLLATE NOCASE');
+  return db.execO<InventoryItem>(`SELECT i.id, i.name, i.category, i.default_unit,
+    COALESCE(d.display_unit, i.default_unit) AS display_unit FROM inventory_items i
+    LEFT JOIN inventory_display_units d ON d.id = i.id ORDER BY i.name COLLATE NOCASE`);
 }
 
-export async function createInventoryItem(db: DB, name: string, category: string, defaultUnit: string): Promise<string> {
+export async function createInventoryItem(db: DB, name: string, category: string, defaultUnit: string,
+  startingQuantity: number | null = null, accountId: string | null = null, displayUnit = defaultUnit): Promise<string> {
   const id = nanoid();
-  await db.exec('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)',
-    [id, name, category, defaultUnit, nowSeconds()]);
+  const now = nowSeconds();
+  await db.tx(async tx => {
+    await tx.exec('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)',
+      [id, name, category, defaultUnit, now]);
+    if (displayUnit !== defaultUnit) await tx.exec('INSERT INTO inventory_display_units(id, display_unit) VALUES (?, ?)',
+      [id, displayUnit]);
+    if (startingQuantity != null) await tx.exec(`INSERT INTO inventory_counts(id, inventory_item_id, quantity, unit, counted_at, created_by_account_id)
+      VALUES (?, ?, ?, ?, ?, ?)`, [nanoid(), id, startingQuantity, defaultUnit, now, accountId]);
+  });
   return id;
 }
 

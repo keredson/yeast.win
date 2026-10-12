@@ -43,7 +43,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
     ]);
     setPlans(nextPlans); setEvents(nextEvents);
     const nextDetails: Record<string, string> = {};
-    for (const event of nextEvents) nextDetails[event.id] = await eventDetails(db, event);
+    for (const event of nextEvents) nextDetails[event.id] = await eventDetails(db, event, preferredUnits.mass);
     setDetails(nextDetails);
     setPhotos(previous => {
       for (const photo of previous) URL.revokeObjectURL(photo.url);

@@ -1,4 +1,5 @@
 import type { ActualEvent, Plan } from './db.ts';
+import { formatQuantity } from '../shared/units.ts';
 
 type TimedPlan = Pick<Plan, 'id' | 'title'> & Partial<Pick<Plan, 'planned_at' | 'anchor_event_id' | 'offset_seconds'>>;
 
@@ -46,7 +47,7 @@ export function parsePlanDetails(detailsJson: string | null | undefined): Record
 
 export function planDetailsLabel(plan: Pick<Plan, 'event_type'> & { title?: string; details_json?: string | null }): string {
   const details = parsePlanDetails(plan.details_json);
-  const amount = details.quantity != null ? `${details.quantity} ${details.unit || ''}`.trim() : '';
+  const amount = typeof details.quantity === 'number' ? formatQuantity(details.quantity, String(details.unit || ''), String(details.display_unit || '')) : '';
   const target = details.target_value != null ? `${details.target_value} ${details.target_unit || ''}`.trim() : '';
   const parts = plan.event_type === 'addition' ? [amount, details.item_name === plan.title ? '' : details.item_name]
     : plan.event_type === 'measurement' ? [details.measurement_kind, target]

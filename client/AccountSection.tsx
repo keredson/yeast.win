@@ -130,7 +130,7 @@ export function AccountSection({ username, avatarSrc, onAvatarUploaded, preferre
           disabled={unitsBusy} options={[{ value: 'L', label: 'L' }, { value: 'US gal', label: 'US gal' }]}
           onChange={value => void updateUnits({ ...preferredUnits, volume: value })} /></label>
         <label>Mass<Select aria-label="Preferred mass unit" value={preferredUnits.mass}
-          disabled={unitsBusy} options={[{ value: 'g', label: 'g' }, { value: 'oz', label: 'oz' }]}
+          disabled={unitsBusy} options={[{ value: 'g', label: 'g' }, { value: 'oz', label: 'oz' }, { value: 'lb + oz', label: 'lb + oz' }]}
           onChange={value => void updateUnits({ ...preferredUnits, mass: value })} /></label>
         <label>Pressure<Select aria-label="Preferred pressure unit" value={preferredUnits.pressure}
           disabled={unitsBusy} options={[{ value: 'kPa', label: 'kPa' }, { value: 'psi', label: 'psi' }]}
