@@ -273,7 +273,25 @@ try {
   const kettleDialog = page.getByRole('dialog', { name: 'Add electric kettle' });
   await kettleDialog.getByLabel('Capacity (optional)').waitFor();
   if (await kettleDialog.getByLabel('Range minimum').count()) throw new Error('Kettle was offered a measurement range');
-  await kettleDialog.locator('.ant-modal-close').click();
+  await kettleDialog.getByRole('combobox', { name: 'Name' }).fill('Smoke electric kettle');
+  await kettleDialog.getByRole('spinbutton', { name: 'Capacity (optional)' }).fill('35');
+  await kettleDialog.getByRole('spinbutton', { name: 'Boil-off rate (L/h, optional)' }).fill('3');
+  await kettleDialog.getByRole('button', { name: 'Create equipment' }).click();
+  await page.getByRole('heading', { name: 'Smoke electric kettle' }).waitFor();
+  await page.getByText('Boil-off rate: 3 L/h').waitFor();
+  await page.getByRole('button', { name: 'Edit capacity' }).click();
+  await page.getByRole('dialog', { name: 'Edit capacity' }).getByRole('spinbutton', { name: 'Capacity' }).fill('36');
+  await page.getByRole('button', { name: 'Save capacity' }).click();
+  await page.getByText('Capacity: 36 L').waitFor();
+  await page.getByRole('button', { name: 'Edit boil-off rate' }).click();
+  await page.getByRole('dialog', { name: 'Edit boil-off rate' }).getByRole('spinbutton', { name: 'Boil-off rate (L/h)' }).fill('3.5');
+  await page.getByRole('button', { name: 'Save boil-off rate' }).click();
+  await page.getByText('Boil-off rate: 3.5 L/h').waitFor();
+  await page.getByRole('button', { name: 'Record calibration' }).waitFor();
+  await page.getByRole('button', { name: 'Equipment settings' }).click();
+  await page.getByRole('menuitem', { name: 'Delete equipment' }).click();
+  await page.getByRole('dialog', { name: 'Delete equipment?' }).getByRole('button', { name: 'Delete' }).click();
+  await page.waitForURL('**/equipment');
   await chooseEquipmentType(page, 'Add equipment', 'Passive vessels', 'Mash tun');
   const mashTunDialog = page.getByRole('dialog', { name: 'Add mash tun' });
   await mashTunDialog.getByLabel('Capacity (optional)').waitFor();
@@ -298,20 +316,20 @@ try {
   await page.getByRole('button', { name: 'Create equipment' }).click();
   await page.getByRole('heading', { name: 'Smoke pH meter' }).waitFor();
   await page.getByText('Measurement range: 0–14 pH').waitFor();
-  await page.getByRole('button', { name: 'Equipment settings' }).click();
-  if (await page.getByRole('menuitem', { name: 'Set capacity' }).count()) throw new Error('pH meter still offers capacity settings');
-  await page.getByRole('menuitem', { name: 'Set measurement range' }).click();
-  await page.getByRole('dialog', { name: 'Set measurement range' }).getByRole('spinbutton', { name: 'Range maximum' }).fill('15');
+  await page.getByRole('button', { name: 'Edit measurement range' }).click();
+  await page.getByRole('dialog', { name: 'Edit measurement range' }).getByRole('spinbutton', { name: 'Range maximum' }).fill('15');
   await page.getByRole('button', { name: 'Save range' }).click();
   await page.getByText('Measurement range: 0–15 pH').waitFor();
-  if (!/^\/equipment\/[A-Za-z0-9_-]{10,32}$/.test(new URL(page.url()).pathname)) throw new Error('Equipment detail URL was not set');
-  await page.getByRole('button', { name: 'Equipment settings' }).click();
-  await page.getByRole('menuitem', { name: 'New calibration' }).click();
+  if (new URL(page.url()).pathname !== '/equipment/smoke-ph-meter') throw new Error('Equipment detail URL should use its name');
+  await page.getByRole('button', { name: 'Record calibration' }).click();
   await page.getByRole('spinbutton', { name: 'pH 4.00 buffer reading' }).fill('4.01');
   await page.getByRole('spinbutton', { name: 'pH 7.00 buffer reading' }).fill('7.02');
   await page.getByRole('button', { name: 'Save calibration' }).click();
   await page.getByText('Two-point pH').waitFor();
   await navigateSection(page, 'Equipment');
+  if (!String(await page.getByRole('link', { name: 'Smoke pH meter' }).getAttribute('href')).endsWith('/equipment/smoke-ph-meter')) {
+    throw new Error('Equipment list link should use its name slug');
+  }
   const addEquipmentButton = page.getByRole('button', { name: 'Add equipment' });
   await addEquipmentButton.waitFor();
   const buttonBelowIntro = await addEquipmentButton.evaluate(button => {

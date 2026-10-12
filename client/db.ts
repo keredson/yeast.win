@@ -2,7 +2,7 @@ import initWasm, { type DB } from '@vlcn.io/crsqlite-wasm';
 import { fetchApi } from './api.ts';
 import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { nanoid } from 'nanoid';
-import { capacityKinds, equipmentKinds, measurementRangeUnits } from '../shared/equipment.ts';
+import { boilOffKinds, capacityKinds, equipmentKinds, measurementRangeUnits } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
 import { changeColumns, indexStatements, inventoryLocationTables, nowSeconds, recategorizeLacticAcid, removeEmptyDuplicateInventory, replicatedTables, schemaStatements, workspaceSchemaVersion, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
@@ -463,6 +463,7 @@ export interface EquipmentSpecifications {
   measurement_max?: number;
   measurement_unit?: string;
   working_volume_liters?: number;
+  boil_off_liters_per_hour?: number;
 }
 
 export async function createEquipment(db: DB, name: string, kind: string, catalogModel?: CatalogEquipment,
@@ -473,6 +474,7 @@ export async function createEquipment(db: DB, name: string, kind: string, catalo
   const specification = JSON.parse(catalogModel?.specification_json || '{}') as Record<string, unknown>;
   Object.assign(specification, overrides);
   if (!capacityKinds.has(kind)) delete specification.capacity_liters;
+  if (!boilOffKinds.has(kind)) delete specification.boil_off_liters_per_hour;
   if (!measurementRangeUnits[kind]) {
     delete specification.measurement_min;
     delete specification.measurement_max;
@@ -487,6 +489,26 @@ export async function updateEquipmentCapacity(db: DB, item: Equipment, capacityL
   const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
   if (capacityLiters == null) delete specification.capacity_liters;
   else specification.capacity_liters = capacityLiters;
+  await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?',
+    [Object.keys(specification).length ? JSON.stringify(specification) : null, item.id]);
+}
+
+export async function updateEquipmentWorkingVolume(db: DB, item: Equipment, volumeLiters: number | null): Promise<void> {
+  const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
+  if (volumeLiters == null) delete specification.working_volume_liters;
+  else specification.working_volume_liters = volumeLiters;
+  await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?',
+    [Object.keys(specification).length ? JSON.stringify(specification) : null, item.id]);
+}
+
+export async function updateEquipmentBoilOffRate(db: DB, item: Equipment, litersPerHour: number | null): Promise<void> {
+  if (!boilOffKinds.has(item.kind)) throw new Error('Boil-off rate applies to electric kettles and all-in-one systems');
+  if (litersPerHour != null && (!Number.isFinite(litersPerHour) || litersPerHour <= 0)) {
+    throw new Error('Enter a positive boil-off rate');
+  }
+  const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
+  if (litersPerHour == null) delete specification.boil_off_liters_per_hour;
+  else specification.boil_off_liters_per_hour = litersPerHour;
   await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?',
     [Object.keys(specification).length ? JSON.stringify(specification) : null, item.id]);
 }

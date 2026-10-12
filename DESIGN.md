@@ -102,7 +102,7 @@ If one fridge serves several batches, record the relevant temperature-control ev
 | `equipment_calibrations` | Immutable records of calibration parameters, method, effective time, and author. Measurements link to the calibration used at capture time. |
 | `equipment_characterization_observations` | Observed power, temperatures, volumes, time, and evaporation/heat-loss data used to fit kettle behavior. |
 
-Measurements store **corrected values** and per-reading uncertainty. The calibration record explains how the correction was obtained; it is not edited after use. Different instruments can therefore have different accuracy, and old readings retain the calibration that applied then. Boil-off modeling should work across wattages and account for temperature-dependent heat loss, rather than storing one boil-off rate or assuming wattage alone determines it. The exact fitting model is a later analysis decision.
+Measurements store **corrected values** and per-reading uncertainty. The calibration record explains how the correction was obtained; it is not edited after use. Different instruments can therefore have different accuracy, and old readings retain the calibration that applied then. Electric kettles and all-in-one systems can store an estimated boil-off rate in liters per hour. Later modeling can refine that estimate across wattages and temperature-dependent heat loss; the fitting model remains a later analysis decision.
 
 ### Inventory
 

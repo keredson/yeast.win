@@ -70,6 +70,11 @@ button, input, textarea { font: inherit; }
 .inventory-add-types { margin: 20px 0 0; color: #728079; font-size: 14px; line-height: 1.6; }
 .inventory-add-types a { color: #1d604f; text-decoration: underline; text-underline-offset: 2px; }
 .capacity-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(110px, 1fr); gap: 12px; }
+.equipment-parameters { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-bottom: 24px; }
+.equipment-parameter { display: flex; align-items: center; gap: 4px; min-height: 34px; color: #455c52; }
+.equipment-calibration { margin-top: 24px; }
+.equipment-calibration-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.equipment-calibration-heading h3 { margin: 0; }
 .section-heading, .content-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
 .section-heading h1, .content-heading h2 { margin: 4px 0 8px; letter-spacing: -.04em; line-height: 1.15; }
 .section-heading h1 { font-size: 34px; }

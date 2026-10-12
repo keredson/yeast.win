@@ -1,18 +1,29 @@
 import { useEffect, useState } from 'react';
 import { Alert, AutoComplete, Button, Card, Dropdown, Empty, Form, Input, InputNumber, Modal, Select, Table, Tag } from 'antd';
-import { DeleteOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EditOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
 import { nanoid } from 'nanoid';
-import { capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits } from '../shared/equipment.ts';
+import { boilOffKinds, capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { createEquipment, deleteEquipment, updateEquipmentCapacity, updateEquipmentMeasurementRange,
+import { createEquipment, deleteEquipment, updateEquipmentBoilOffRate, updateEquipmentCapacity, updateEquipmentWorkingVolume,
+  updateEquipmentMeasurementRange,
   type Equipment, type EquipmentSpecifications, type LocalDb } from './db.ts';
 import { capacityInLiters, capacityLabel, capacityUnits } from '../shared/capacity.ts';
 import { fromDatetimeLocal, formatTime, toDatetimeLocal } from './time.ts';
 import { changeNumberUnit } from './unitFields.ts';
+import { equipmentPathSegment } from './equipmentRoutes.ts';
 
 interface Calibration { id: string; method: string; effective_at: number; parameters_json: string }
 
 const calibrationProfiles: Record<string, { method: string; fields: { key: string; label: string }[] }> = {
+  electric_kettle: { method: 'Temperature °C', fields: [
+    { key: 'reference_c', label: 'Reference temperature °C' }, { key: 'observed_c', label: 'Kettle reading °C' }
+  ] },
+  all_in_one: { method: 'Temperature °C', fields: [
+    { key: 'reference_c', label: 'Reference temperature °C' }, { key: 'observed_c', label: 'System reading °C' }
+  ] },
+  controlled_fermenter: { method: 'Temperature °C', fields: [
+    { key: 'reference_c', label: 'Reference temperature °C' }, { key: 'observed_c', label: 'Fermenter reading °C' }
+  ] },
   ph_meter: { method: 'Two-point pH', fields: [
     { key: 'buffer_4_observed', label: 'pH 4.00 buffer reading' }, { key: 'buffer_7_observed', label: 'pH 7.00 buffer reading' }
   ] },
@@ -61,16 +72,21 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
   const [creatingKind, setCreatingKind] = useState<string | null>(null);
   const [newCalibration, setNewCalibration] = useState(false);
   const [editCapacity, setEditCapacity] = useState(false);
+  const [editWorkingVolume, setEditWorkingVolume] = useState(false);
+  const [editBoilOff, setEditBoilOff] = useState(false);
   const [editRange, setEditRange] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [error, setError] = useState('');
   const [equipmentForm] = Form.useForm();
   const [capacityForm] = Form.useForm();
+  const [workingVolumeForm] = Form.useForm();
+  const [boilOffForm] = Form.useForm();
   const [rangeForm] = Form.useForm();
   const item = equipment.find(row => row.id === selectedId) || null;
   const newCapacityUnit = Form.useWatch('capacity_unit', equipmentForm) as string | undefined;
   const newRangeUnit = Form.useWatch('measurement_unit', equipmentForm) as string | undefined;
   const editCapacityUnit = Form.useWatch('capacity_unit', capacityForm) as string | undefined;
+  const editWorkingVolumeUnit = Form.useWatch('capacity_unit', workingVolumeForm) as string | undefined;
   const editRangeUnit = Form.useWatch('measurement_unit', rangeForm) as string | undefined;
   const profile = item ? calibrationProfiles[item.kind] : undefined;
   const specs = item ? JSON.parse(item.specification_json || '{}') as EquipmentSpecifications : {};
@@ -94,7 +110,7 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
   }
 
   async function create(values: { name: string; catalog_id?: string; capacity?: number; capacity_unit?: string;
-    measurement_min?: number; measurement_max?: number; measurement_unit?: string }) {
+    measurement_min?: number; measurement_max?: number; measurement_unit?: string; boil_off_liters_per_hour?: number }) {
     if (!creatingKind) return;
     try {
       const overrides: EquipmentSpecifications = {};
@@ -106,6 +122,12 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
         const range = validRange(values.measurement_min, values.measurement_max, values.measurement_unit, creatingKind);
         if (range) Object.assign(overrides, { measurement_min: range.min, measurement_max: range.max, measurement_unit: range.unit });
       }
+      if (boilOffKinds.has(creatingKind) && values.boil_off_liters_per_hour != null) {
+        if (!Number.isFinite(values.boil_off_liters_per_hour) || values.boil_off_liters_per_hour <= 0) {
+          throw new Error('Enter a positive boil-off rate');
+        }
+        overrides.boil_off_liters_per_hour = values.boil_off_liters_per_hour;
+      }
       const id = await createEquipment(db, values.name.trim(), creatingKind, catalog.find(row => row.id === values.catalog_id), overrides);
       setCreatingKind(null); equipmentForm.resetFields(); onSelect(id); await onChanged();
     }
@@ -116,6 +138,22 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
     if (!item) return;
     try { await updateEquipmentCapacity(db, item, capacityInLiters(values.capacity, values.capacity_unit)); setEditCapacity(false); await onChanged(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
+  async function saveWorkingVolume(values: { capacity?: number; capacity_unit?: string }) {
+    if (!item) return;
+    try {
+      await updateEquipmentWorkingVolume(db, item, capacityInLiters(values.capacity, values.capacity_unit));
+      setEditWorkingVolume(false); await onChanged();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
+  async function saveBoilOff(values: { boil_off_liters_per_hour?: number }) {
+    if (!item) return;
+    try {
+      await updateEquipmentBoilOffRate(db, item, values.boil_off_liters_per_hour ?? null);
+      setEditBoilOff(false); await onChanged();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
   async function saveRange(values: { measurement_min?: number; measurement_max?: number; measurement_unit?: string }) {
@@ -163,7 +201,8 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
         return rows.length ? <section key={kind} className="group-table"><h3>{equipmentKindLabel(kind)}</h3>
           <Table<Equipment> dataSource={rows} rowKey="id" pagination={false} size="small"
             columns={[{ title: 'Equipment', dataIndex: 'name', render: (_, row) =>
-              <a href={`${basePath}/equipment/${row.id}`} onClick={event => { event.preventDefault(); onSelect(row.id); }}>{row.name}</a> },
+              <a href={`${basePath}/equipment/${equipmentPathSegment(row, equipment)}`}
+                onClick={event => { event.preventDefault(); onSelect(row.id); }}>{row.name}</a> },
               ...(capacityKinds.has(kind) ? [{ title: 'Capacity', key: 'capacity', width: 140, responsive: ['sm' as const], render: (_: unknown, row: Equipment) =>
                 capacityLabel((JSON.parse(row.specification_json || '{}') as EquipmentSpecifications).capacity_liters) }] : []),
               ...(measurementRangeUnits[kind] ? [{ title: 'Measurement range', key: 'range', width: 180, responsive: ['sm' as const], render: (_: unknown, row: Equipment) => {
@@ -176,23 +215,29 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
     </section> : !item ? <Empty description="Equipment not found" /> : <section className="record-detail">
         <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(item.kind)}</span><h2>{item.name}</h2></div>
           <div className="heading-actions"><Dropdown menu={{ items: [
-            ...(profile ? [{ key: 'calibrate', label: 'New calibration' }] : []),
-            ...(capacityKinds.has(item.kind) ? [{ key: 'capacity', label: 'Set capacity' }] : []),
-            ...(measurementRangeUnits[item.kind] ? [{ key: 'range', label: 'Set measurement range' }] : []),
             { key: 'delete', label: 'Delete equipment', icon: <DeleteOutlined />, danger: true }
-          ], onClick: ({ key }) => { if (key === 'calibrate') setNewCalibration(true);
-            else if (key === 'capacity') setEditCapacity(true); else if (key === 'range') setEditRange(true); else setDeleteOpen(true); } }} trigger={['click']}>
+          ], onClick: () => setDeleteOpen(true) }} trigger={['click']}>
             <Button type="text" shape="circle" icon={<SettingOutlined />} aria-label="Equipment settings" title="Equipment settings" />
           </Dropdown></div></div>
-        {capacityKinds.has(item.kind) && specs.capacity_liters != null && <p className="muted">Capacity: {capacityLabel(specs.capacity_liters)}
-          {specs.working_volume_liters != null && ` · Brewing volume: ${capacityLabel(specs.working_volume_liters)}`}</p>}
-        {measurementRangeUnits[item.kind] && specs.measurement_min != null && specs.measurement_max != null &&
-          <p className="muted">Measurement range: {specs.measurement_min}–{specs.measurement_max} {specs.measurement_unit}</p>}
-        {calibrations.length > 0 && <><h3>Calibration history</h3>
+        <div className="equipment-parameters">
+          {capacityKinds.has(item.kind) && <div className="equipment-parameter"><span>Capacity: {capacityLabel(specs.capacity_liters) || 'Not set'}</span>
+            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit capacity" onClick={() => setEditCapacity(true)} /></div>}
+          {specs.working_volume_liters != null && <div className="equipment-parameter"><span>Brewing volume: {capacityLabel(specs.working_volume_liters)}</span>
+            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit brewing volume" onClick={() => setEditWorkingVolume(true)} /></div>}
+          {boilOffKinds.has(item.kind) && <div className="equipment-parameter"><span>Boil-off rate: {specs.boil_off_liters_per_hour != null
+            ? `${Number(specs.boil_off_liters_per_hour.toFixed(3))} L/h` : 'Not set'}</span>
+            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit boil-off rate" onClick={() => setEditBoilOff(true)} /></div>}
+          {measurementRangeUnits[item.kind] && <div className="equipment-parameter"><span>Measurement range: {specs.measurement_min != null && specs.measurement_max != null
+            ? `${specs.measurement_min}–${specs.measurement_max} ${specs.measurement_unit}` : 'Not set'}</span>
+            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit measurement range" onClick={() => setEditRange(true)} /></div>}
+        </div>
+        {profile && <div className="equipment-calibration"><div className="equipment-calibration-heading"><h3>Calibration</h3>
+          <Button icon={<PlusOutlined />} onClick={() => setNewCalibration(true)}>Record calibration</Button></div>
+        {calibrations.length > 0 &&
         <div className="card-stack">{calibrations.map(row => <Card key={row.id} size="small">
           <div className="timeline-card"><div><strong>{row.method}</strong><div className="muted">{formatTime(row.effective_at)}</div></div><Tag>Immutable</Tag></div>
           <pre className="calibration-data">{row.parameters_json}</pre>
-        </Card>)}</div></>}
+        </Card>)}</div>}</div>}
       </section>}
     <Modal title={creatingKind ? addEquipmentTitle(creatingKind) : 'Add equipment'} open={!!creatingKind}
       onCancel={() => setCreatingKind(null)} footer={null} destroyOnHidden>
@@ -206,12 +251,15 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
             onSelect={value => { const entry = catalog.find(row => row.kind === creatingKind && row.name === value);
               if (entry) { const specs = JSON.parse(entry.specification_json || '{}') as EquipmentSpecifications;
                 equipmentForm.setFieldsValue({ catalog_id: entry.id, capacity: specs.capacity_liters, capacity_unit: 'L',
+                  boil_off_liters_per_hour: specs.boil_off_liters_per_hour,
                   measurement_min: specs.measurement_min, measurement_max: specs.measurement_max,
                   measurement_unit: specs.measurement_unit || measurementRangeUnits[entry.kind]?.[0] }); } }} />
         </Form.Item>
         {capacityKinds.has(creatingKind) && <div className="capacity-fields"><Form.Item name="capacity" label="Capacity (optional)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
           <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]}
             onChange={unit => changeNumberUnit(equipmentForm, ['capacity'], newCapacityUnit || 'L', unit)} /></Form.Item></div>}
+        {boilOffKinds.has(creatingKind) && <Form.Item name="boil_off_liters_per_hour" label="Boil-off rate (L/h, optional)">
+          <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
         {measurementRangeUnits[creatingKind] && <div className="form-triple">
           <Form.Item name="measurement_min" label="Range minimum"><InputNumber className="full-width" step="any" /></Form.Item>
           <Form.Item name="measurement_max" label="Range maximum"><InputNumber className="full-width" step="any" /></Form.Item>
@@ -223,7 +271,7 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
         <Button type="primary" htmlType="submit">Create equipment</Button>
       </Form>}
     </Modal>
-    <Modal title="Set equipment capacity" open={editCapacity} onCancel={() => setEditCapacity(false)} footer={null} destroyOnHidden>
+    <Modal title="Edit capacity" open={editCapacity} onCancel={() => setEditCapacity(false)} footer={null} destroyOnHidden>
       <Form key={item?.id} form={capacityForm} layout="vertical" onFinish={saveCapacity} initialValues={{ capacity: specs.capacity_liters, capacity_unit: 'L' }}>
         <div className="capacity-fields"><Form.Item name="capacity" label="Capacity"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
           <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]}
@@ -231,7 +279,24 @@ export function EquipmentSection({ db, basePath, accountId, equipment, catalog, 
         <Button type="primary" htmlType="submit">Save capacity</Button>
       </Form>
     </Modal>
-    <Modal title="Set measurement range" open={editRange} onCancel={() => setEditRange(false)} footer={null} destroyOnHidden>
+    <Modal title="Edit boil-off rate" open={editBoilOff} onCancel={() => setEditBoilOff(false)} footer={null} destroyOnHidden>
+      <Form key={item?.id} form={boilOffForm} layout="vertical" onFinish={saveBoilOff}
+        initialValues={{ boil_off_liters_per_hour: specs.boil_off_liters_per_hour }}>
+        <Form.Item name="boil_off_liters_per_hour" label="Boil-off rate (L/h)">
+          <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
+        <Button type="primary" htmlType="submit">Save boil-off rate</Button>
+      </Form>
+    </Modal>
+    <Modal title="Edit brewing volume" open={editWorkingVolume} onCancel={() => setEditWorkingVolume(false)} footer={null} destroyOnHidden>
+      <Form key={item?.id} form={workingVolumeForm} layout="vertical" onFinish={saveWorkingVolume}
+        initialValues={{ capacity: specs.working_volume_liters, capacity_unit: 'L' }}>
+        <div className="capacity-fields"><Form.Item name="capacity" label="Brewing volume"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
+          <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]}
+            onChange={unit => changeNumberUnit(workingVolumeForm, ['capacity'], editWorkingVolumeUnit || 'L', unit)} /></Form.Item></div>
+        <Button type="primary" htmlType="submit">Save brewing volume</Button>
+      </Form>
+    </Modal>
+    <Modal title="Edit measurement range" open={editRange} onCancel={() => setEditRange(false)} footer={null} destroyOnHidden>
       <Form key={item?.id} form={rangeForm} layout="vertical" onFinish={saveRange} initialValues={{ measurement_min: specs.measurement_min, measurement_max: specs.measurement_max,
         measurement_unit: specs.measurement_unit || (item && measurementRangeUnits[item.kind]?.[0]) }}>
         <div className="form-triple"><Form.Item name="measurement_min" label="Range minimum"><InputNumber className="full-width" step="any" /></Form.Item>
