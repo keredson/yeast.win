@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { join, resolve } from 'node:path';
 import { catalogModelTables, catalogInventoryTable, catalogSchemaVersion,
   catalogTables, initialCatalogEquipment, initialCatalogInventory,
+  vevorModelName,
   type CatalogChanges, type CatalogEquipment, type CatalogInventory } from '../shared/catalog.ts';
 import { boilOffKinds, vesselKinds } from '../shared/equipment.ts';
 import { encodeChange, type SqlChangeRow } from '../shared/wire.ts';
@@ -83,6 +84,9 @@ export function openCatalogDb(dataDir: string): Database.Database {
       db.pragma(`user_version = ${catalogSchemaVersion}`);
     })();
   }
+  db.prepare(`UPDATE equipment_models SET model_name = ?
+    WHERE id = ? AND model_name = ?`).run(vevorModelName, 'equipment_vevor_35l',
+    'VEVOR Electric Brewing System 9.2 Gal/35 L Brewing Pot');
   return db;
 }
 
