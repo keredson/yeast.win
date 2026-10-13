@@ -453,6 +453,10 @@ try {
     await navigateSection(page, 'Equipment');
   }
   await navigateSection(page, 'Recipes');
+  if (await page.locator('.recipe-index-actions .ant-btn-default').count() !== 2
+    || await page.locator('.section-heading').getByRole('button', { name: /New recipe|Import recipes/ }).count()) {
+    throw new Error('Recipe creation and import should be bordered buttons below the list');
+  }
   await page.getByRole('button', { name: 'New recipe' }).click();
   await page.getByLabel('Recipe name').fill('Smoke recipe');
   await page.getByRole('dialog', { name: 'New recipe' }).getByRole('combobox', { name: 'Type' }).click();
@@ -726,6 +730,7 @@ try {
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'lb + oz' }).click();
   await page.waitForFunction(async () => (await (await fetch('/api/me')).json()).preferred_units.mass === 'lb + oz');
   await navigateSection(page, 'Inventory');
+  await page.getByRole('combobox', { name: 'Location' }).waitFor();
   await page.getByRole('link', { name: 'grain', exact: true }).click();
   await page.getByRole('dialog', { name: 'New grain item' }).getByRole('combobox', { name: 'Item' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Maris Otter malt' }).last().click();
@@ -919,6 +924,19 @@ try {
   await locationSettings.getByRole('button', { name: 'Save changes' }).click();
   await page.waitForURL(/\/location\/shelf-b$/);
   await page.getByRole('heading', { name: 'Shelf B' }).waitFor();
+  await navigateSection(page, 'Inventory');
+  await page.getByRole('combobox', { name: 'Location' }).click();
+  await page.locator('.ant-select-tree:visible').getByText('Back room', { exact: true }).click();
+  if (await page.locator('.group-table').getByRole('link', { name: 'Smoke grain' }).count() !== 1) {
+    throw new Error('Filtering by a parent location should include stock in its child locations');
+  }
+  await page.getByRole('button', { name: 'Add grain' }).click();
+  const filteredItemDialog = page.getByRole('dialog', { name: 'New grain item' });
+  await filteredItemDialog.waitFor();
+  await filteredItemDialog.getByRole('combobox', { name: 'Location (optional)' }).locator('..')
+    .getByText('Back room', { exact: true }).waitFor();
+  await filteredItemDialog.locator('.ant-modal-close').click();
+  await filteredItemDialog.waitFor({ state: 'hidden' });
   await page.route('**/api/**', route => route.abort());
   await page.goto(`${baseUrl}/inventory`);
   await page.getByRole('heading', { name: 'Inventory', exact: true }).waitFor();

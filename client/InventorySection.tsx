@@ -13,6 +13,7 @@ import { changeQuantityUnit } from './unitFields.ts';
 import { inventoryPathSegment } from './inventoryRoutes.ts';
 import { LocationFields } from './LocationFields.tsx';
 import { LocationTreeSelect, newLocationOption } from './LocationTreeSelect.tsx';
+import { locationDescendantIds } from './locationRoutes.ts';
 
 function onHandQuantity(item: InventoryItem, balance: number): string {
   if (item.display_unit === compoundMassUnit) return formatQuantity(balance, item.default_unit, compoundMassUnit);
@@ -27,6 +28,7 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
   const [onHand, setOnHand] = useState<Record<string, number | null>>({});
   const [locations, setLocations] = useState<InventoryLocation[]>([]);
+  const [locationFilterId, setLocationFilterId] = useState<string | null>(null);
   const [locationsOpen, setLocationsOpen] = useState(false);
   const [moveItemId, setMoveItemId] = useState<string | null>(null);
   const [locationReturn, setLocationReturn] = useState<'item' | 'move' | null>(null);
@@ -57,7 +59,10 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
     ? compoundMassUnit : item?.display_unit || item?.default_unit;
   const categories = [...inventoryCategories, ...items.map(row => row.category).filter(category =>
     !inventoryCategories.some(known => known === category))].filter((category, index, all) => all.indexOf(category) === index);
-  const missingCategories = categories.filter(category => !items.some(row => row.category === category));
+  const activeLocationId = locations.some(location => location.id === locationFilterId) ? locationFilterId : null;
+  const visibleLocationIds = activeLocationId ? locationDescendantIds(activeLocationId, locations) : null;
+  const visibleItems = visibleLocationIds ? items.filter(row => row.location_id && visibleLocationIds.has(row.location_id)) : items;
+  const missingCategories = categories.filter(category => !visibleItems.some(row => row.category === category));
   const existingItem = items.find(row => row.category === newItemCategory && row.name.trim().toLocaleLowerCase() === newItemName?.trim().toLocaleLowerCase());
   const existingAtLocation = existingItem
     ? stockAtLocation(items, existingItem.name, existingItem.category, newLocationId || null) : undefined;
@@ -68,7 +73,7 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
     itemForm.resetFields();
     const unit = unitForCategory(category, preferredUnits.mass);
     previousItemUnit.current = unit;
-    itemForm.setFieldsValue({ category, default_unit: unit, location_id: undefined });
+    itemForm.setFieldsValue({ category, default_unit: unit, location_id: activeLocationId || undefined });
     setNewItemCategory(category);
   }
 
@@ -179,8 +184,12 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
     {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
     {!selectedId ? <section className="record-index"><div className="section-heading"><div><span className="eyebrow">Stock ledger</span><h1>Inventory</h1></div></div>
       <p className="muted">Purchases, uses from batches, and physical counts.</p>
-      {items.length > 0 && <div className="group-tables">{categories.map(category => {
-        const rows = items.filter(row => row.category === category);
+      {locations.length > 0 && <div className="inventory-filter"><label htmlFor="inventory-location-filter">Location</label>
+        <LocationTreeSelect id="inventory-location-filter" locations={locations} value={activeLocationId}
+          onChange={value => setLocationFilterId(typeof value === 'string' ? value : null)} allowClear placeholder="All locations" />
+      </div>}
+      {visibleItems.length > 0 && <div className="group-tables">{categories.map(category => {
+        const rows = visibleItems.filter(row => row.category === category);
         return rows.length ? <section key={category} className="group-table"><div className="group-table-heading"><h2>{category}</h2>
           <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label={`Add ${category.toLowerCase()}`} title={`Add ${category.toLowerCase()}`}
             onClick={() => openCreate(category)} /></div>

@@ -166,9 +166,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
   return <div className="section-page">
     {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
     {!selectedId ? <section className="record-index">
-      <div className="section-heading"><div><span className="eyebrow">Planning</span><h1>Recipes</h1></div>
-        <div className="heading-actions"><Button type="text" shape="circle" icon={<UploadOutlined />} aria-label="Import recipes" title="Import recipes" onClick={() => setImportOpen(true)} />
-          <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New recipe" title="New recipe" onClick={() => setNewRecipe(true)} /></div></div>
+      <div className="section-heading"><div><span className="eyebrow">Planning</span><h1>Recipes</h1></div></div>
       <p className="muted">Reusable event plans for your batches.</p>
       {recipes.length > 0 && <div className="record-list">{recipes.map(item =>
         <a key={item.id} className="record-link recipe-link" href={`${basePath}/recipe/${item.id}`}
@@ -176,6 +174,10 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
           <RecipeTypeIcon type={item.recipe_type} />
           <span className="recipe-link-copy"><strong>{item.name}</strong><small>{item.description || 'No description'}</small></span>
         </a>)}</div>}
+      <div className="recipe-index-actions">
+        <Button icon={<PlusOutlined />} onClick={() => setNewRecipe(true)}>New recipe</Button>
+        <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>Import recipes</Button>
+      </div>
     </section> : !recipe ? <Empty description="Recipe not found" /> : <section className="record-detail">
         <div className="content-heading"><div className="recipe-detail-heading"><RecipeTypeIcon type={recipe.recipe_type} large />
           <div><h2>{recipe.name}</h2>
