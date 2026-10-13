@@ -34,9 +34,26 @@ export interface PlanDetails {
 }
 export interface Equipment { id: string; name: string; kind: string; specification_json: string | null }
 export interface InventoryItem { id: string; name: string; category: string; default_unit: string; display_unit: string;
-  location_id: string | null; location_name?: string | null; properties_json?: string | null }
+  location_id: string | null; location_name?: string | null;
+  yield_pct?: number | null; color_lovibond?: number | null; alpha_acid_pct?: number | null;
+  hop_form?: IngredientProperties['hop_form'] | null; attenuation_pct?: number | null }
 export interface IngredientProperties { yield_pct?: number; color_lovibond?: number; alpha_acid_pct?: number;
   hop_form?: 'pellet' | 'whole' | 'plug'; attenuation_pct?: number }
+const ingredientPropertyColumns = ['yield_pct', 'color_lovibond', 'alpha_acid_pct', 'hop_form', 'attenuation_pct'] as const;
+
+export function ingredientProperties(item: InventoryItem | null | undefined): IngredientProperties {
+  if (!item) return {};
+  return Object.fromEntries(ingredientPropertyColumns.filter(column => item[column] != null)
+    .map(column => [column, item[column]])) as IngredientProperties;
+}
+
+async function writeIngredientProperties(db: Pick<DB, 'exec'>, id: string, values: IngredientProperties): Promise<void> {
+  const columns = ingredientPropertyColumns;
+  await db.exec(`INSERT INTO inventory_ingredient_properties(id, ${columns.join(', ')})
+    VALUES (?, ${columns.map(() => '?').join(', ')})
+    ON CONFLICT(id) DO UPDATE SET ${columns.map(column => `${column} = excluded.${column}`).join(', ')}`,
+  [id, ...columns.map(column => values[column] ?? null)]);
+}
 export interface InventoryLocation { id: string; name: string; parent_id: string | null }
 export interface InventoryMovement { id: string; kind: 'Purchased' | 'Counted' | 'Used' | 'Discarded' | 'Moved in' | 'Moved out'; quantity: number; unit: string; at: number }
 
@@ -311,8 +328,7 @@ export async function importRecipes(db: DB, source: {
             : ingredient.category === 'Yeast' ? { attenuation_pct: numeric('attenuation') } : {};
         const validProperties = Object.fromEntries(Object.entries(properties).filter(([, value]) => value != null
           && (typeof value !== 'number' || Number.isFinite(value)))) as IngredientProperties;
-        if (Object.keys(validProperties).length) await tx.exec('INSERT INTO inventory_ingredient_properties(id, properties_json) VALUES (?, ?)',
-          [id, JSON.stringify(validProperties)]);
+        if (Object.keys(validProperties).length) await writeIngredientProperties(tx, id, validProperties);
         if (choice.unit !== storageUnit(choice.unit)) await tx.exec(
           'INSERT INTO inventory_display_units(id, display_unit) VALUES (?, ?)', [id, choice.unit]);
         ingredientIds.set(ingredient.key, id);
@@ -568,9 +584,9 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
         }
       }
       if (typeof details.inventory_item_id === 'string') {
-        const rows = await tx.execO<{ properties_json: string }>(
-          'SELECT properties_json FROM inventory_ingredient_properties WHERE id = ?', [details.inventory_item_id]);
-        if (rows.length) snapshot.ingredient_properties = JSON.parse(rows[0].properties_json);
+        const rows = await tx.execO<InventoryItem>(
+          'SELECT * FROM inventory_ingredient_properties WHERE id = ?', [details.inventory_item_id]);
+        if (rows.length) snapshot.ingredient_properties = ingredientProperties(rows[0]);
       }
       if (Object.keys(snapshot).length) await tx.exec('INSERT INTO batch_event_inputs(id, inputs_json) VALUES (?, ?)',
         [ids.get(plan.id)!, JSON.stringify(snapshot)]);
@@ -968,7 +984,7 @@ export async function deleteEquipment(db: DB, id: string): Promise<void> {
 export async function listInventory(db: DB): Promise<InventoryItem[]> {
   return db.execO<InventoryItem>(`SELECT i.id, i.name, i.category, i.default_unit,
     COALESCE(d.display_unit, i.default_unit) AS display_unit, l.location_id, places.name AS location_name,
-    p.properties_json FROM inventory_items i
+    p.yield_pct, p.color_lovibond, p.alpha_acid_pct, p.hop_form, p.attenuation_pct FROM inventory_items i
     LEFT JOIN inventory_ingredient_properties p ON p.id = i.id
     LEFT JOIN inventory_display_units d ON d.id = i.id
     LEFT JOIN inventory_item_locations l ON l.id = i.id
@@ -989,8 +1005,7 @@ export async function updateIngredientProperties(db: DB, item: InventoryItem, pr
     } else if (typeof value !== 'number' || !Number.isFinite(value) || value < 0
       || key !== 'color_lovibond' && value > 100) throw new Error(`Enter a valid ${key.replaceAll('_', ' ')}`);
   }
-  if (Object.keys(values).length) await db.exec(`INSERT INTO inventory_ingredient_properties(id, properties_json) VALUES (?, ?)
-    ON CONFLICT(id) DO UPDATE SET properties_json = excluded.properties_json`, [item.id, JSON.stringify(values)]);
+  if (Object.keys(values).length) await writeIngredientProperties(db, item.id, values);
   else await db.exec('DELETE FROM inventory_ingredient_properties WHERE id = ?', [item.id]);
 }
 
@@ -1148,8 +1163,8 @@ export async function moveInventoryStock(db: DB, source: InventoryItem, destinat
       if (destinationId) await tx.exec('INSERT INTO inventory_item_locations(id, location_id) VALUES (?, ?)', [target.id, destinationId]);
       if (target.display_unit !== target.default_unit) await tx.exec('INSERT INTO inventory_display_units(id, display_unit) VALUES (?, ?)',
         [target.id, target.display_unit]);
-      if (source.properties_json) await tx.exec('INSERT INTO inventory_ingredient_properties(id, properties_json) VALUES (?, ?)',
-        [target.id, source.properties_json]);
+      await tx.exec(`INSERT INTO inventory_ingredient_properties(id, ${ingredientPropertyColumns.join(', ')})
+        SELECT ?, ${ingredientPropertyColumns.join(', ')} FROM inventory_ingredient_properties WHERE id = ?`, [target.id, source.id]);
     }
     await tx.exec('INSERT INTO inventory_moves(id, from_item_id, to_item_id, quantity, unit, moved_at) VALUES (?, ?, ?, ?, ?, ?)',
       [nanoid(), source.id, target.id, quantity, unit, Math.max(nowSeconds(), (latest[0]?.at ?? 0) + 1)]);

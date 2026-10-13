@@ -137,6 +137,7 @@ Electric kettles and all-in-one systems store rated power and one calibrated hea
 | Table | Main fields and role |
 | --- | --- |
 | `inventory_items` | Distinct stock identities, such as a specific grain variety, yeast, nutrient, bottle, or other supply; category and default display unit. |
+| `inventory_ingredient_properties` | Optional typed defaults for extract yield, Lovibond color, hop alpha acid, hop form, and yeast attenuation. Each property is a separate column. |
 | `inventory_item_specs` | Deprecated compatibility table from schema version 3. New inventory items do not use it; capacity belongs to equipment. |
 | `inventory_purchases` | Quantity and unit added, date, supplier/lot/cost when known. |
 | `inventory_counts` | A dated assertion that a quantity of an item was physically on hand. This anchors later balance calculations. |

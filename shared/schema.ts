@@ -37,7 +37,7 @@ const definitions: Record<string, string> = {
   equipment_calibrations: `id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, effective_at INTEGER NOT NULL, method TEXT NOT NULL, parameters_json TEXT NOT NULL, created_by_account_id TEXT`,
   equipment_characterization_observations: `id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, observed_at INTEGER NOT NULL, power_watts REAL, ambient_c REAL, liquid_c REAL, start_liters REAL, end_liters REAL, duration_seconds INTEGER`,
   inventory_items: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL, default_unit TEXT NOT NULL, created_at INTEGER NOT NULL`,
-  inventory_ingredient_properties: `id TEXT PRIMARY KEY NOT NULL, properties_json TEXT NOT NULL`,
+  inventory_ingredient_properties: `id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL, alpha_acid_pct REAL, hop_form TEXT, attenuation_pct REAL`,
   inventory_locations: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, parent_id TEXT, created_at INTEGER NOT NULL`,
   inventory_item_locations: `id TEXT PRIMARY KEY NOT NULL, location_id TEXT`,
   inventory_moves: `id TEXT PRIMARY KEY NOT NULL, from_item_id TEXT NOT NULL, to_item_id TEXT NOT NULL, quantity REAL NOT NULL, unit TEXT NOT NULL, moved_at INTEGER NOT NULL`,
@@ -103,7 +103,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 12;
+export const workspaceSchemaVersion = 13;
 
 export function isValidId(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{10,32}$/.test(value);

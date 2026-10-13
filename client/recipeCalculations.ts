@@ -1,4 +1,4 @@
-import type { Equipment, IngredientProperties, InventoryItem, PlanInput } from './db.ts';
+import type { Equipment, InventoryItem, PlanInput } from './db.ts';
 import { convertUnit } from '../shared/units.ts';
 
 type Event = PlanInput & { id: string };
@@ -16,11 +16,6 @@ function positive(value: unknown): number | null {
   if (value == null || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : null;
-}
-
-function properties(item: InventoryItem | undefined): IngredientProperties {
-  if (!item?.properties_json) return {};
-  try { return JSON.parse(item.properties_json) as IngredientProperties; } catch { return {}; }
 }
 
 // Estimates deliberately use only explicit inputs. In particular, mash efficiency
@@ -76,9 +71,9 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
     if (details.item_category === 'Grain') grainCount++;
     const item = inventory.find(row => row.id === details.inventory_item_id);
     const source = eventInputs[event.id] || {};
-    const yieldPct = positive(item ? properties(item).yield_pct : source.yield);
+    const yieldPct = positive(item ? item.yield_pct : source.yield);
     const pounds = convertUnit(Number(details.quantity), String(details.unit), 'lb');
-    const rawColor = item ? properties(item).color_lovibond : source.color;
+    const rawColor = item ? item.color_lovibond : source.color;
     const color = rawColor == null || rawColor === '' ? null : Number(rawColor);
     if (pounds == null || pounds <= 0 || color == null || !Number.isFinite(color) || color < 0) colorReady = false;
     else maltColorUnits += pounds * color;
@@ -106,7 +101,7 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
   const attenuations = yeasts.map(event => {
     const details = event.details;
     const item = inventory.find(row => row.id === details.inventory_item_id);
-    return positive(item ? properties(item).attenuation_pct : eventInputs[event.id]?.attenuation);
+    return positive(item ? item.attenuation_pct : eventInputs[event.id]?.attenuation);
   });
   const attenuation = attenuations.length === 1 && attenuations[0] != null && attenuations[0] <= 100 ? attenuations[0] : null;
   if (!attenuation) missing.push('Select one yeast with an attenuation value to estimate FG and ABV.');

@@ -4,9 +4,9 @@ import { calculateRecipe } from '../client/recipeCalculations.ts';
 import type { Equipment, InventoryItem, PlanInput } from '../client/db.ts';
 
 const grain = { id: 'grain', name: 'Pale malt', category: 'Grain', default_unit: 'kg', display_unit: 'kg',
-  location_id: null, properties_json: '{"yield_pct":80,"color_lovibond":2}' } satisfies InventoryItem;
+  location_id: null, yield_pct: 80, color_lovibond: 2 } satisfies InventoryItem;
 const yeast = { id: 'yeast', name: 'Ale yeast', category: 'Yeast', default_unit: 'packet', display_unit: 'packet',
-  location_id: null, properties_json: '{"attenuation_pct":75}' } satisfies InventoryItem;
+  location_id: null, attenuation_pct: 75 } satisfies InventoryItem;
 const events: (PlanInput & { id: string })[] = [
   { id: 'mash', event_type: 'temperature_control', title: 'Mash', details: { phase: 'mash', equipment_id: 'tun' } },
   { id: 'drain', event_type: 'transfer', title: 'Drain grain', anchor_event_id: 'mash',
@@ -44,7 +44,7 @@ test('incomplete equipment or ingredient inputs do not produce misleading gravit
     { target_fermenter_volume_liters: 20 }, {});
   assert.equal(missingRetention.originalGravity, null);
   assert.ok(missingRetention.missing.some(message => message.includes('kettle retention')));
-  const missingYield = calculateRecipe(events, [{ ...grain, properties_json: null }, yeast], equipment,
+  const missingYield = calculateRecipe(events, [{ ...grain, yield_pct: null, color_lovibond: null }, yeast], equipment,
     { target_fermenter_volume_liters: 20 }, { 'grain-add': { yield: 80 } });
   assert.equal(missingYield.originalGravity, null);
   assert.ok(missingYield.missing.some(message => message.includes('extract yield')));

@@ -127,11 +127,36 @@ test('pre-release workspace schemas reset without carrying old event JSON', () =
   old.close();
   const db = openWorkspaceDb(id);
   try {
-    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 12);
+    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 13);
     assert.equal((db.prepare('SELECT COUNT(*) AS count FROM batch_events').get() as { count: number }).count, 0);
     assert.equal((db.pragma('table_info(batch_events)') as { name: string }[])
       .some(column => column.name === 'details_json'), false);
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'recipe_temperature_control_events'").get());
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'inventory_ingredient_properties'").get());
+    const columns = db.pragma('table_info(inventory_ingredient_properties)') as { name: string }[];
+    assert.ok(columns.some(column => column.name === 'yield_pct'));
+    assert.equal(columns.some(column => column.name === 'properties_json'), false);
+  } finally { closeWorkspaceDb(db); }
+});
+
+test('version 12 ingredient JSON is replaced by typed columns', () => {
+  const id = nanoid();
+  const file = join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`);
+  const old = new Database(file);
+  old.loadExtension('vendor/crsqlite.so');
+  old.exec(`CREATE TABLE schema_meta(version INTEGER NOT NULL);
+    INSERT INTO schema_meta VALUES (12);
+    CREATE TABLE inventory_ingredient_properties(id TEXT PRIMARY KEY NOT NULL, properties_json TEXT)`);
+  old.prepare('SELECT crsql_as_crr(?)').get('inventory_ingredient_properties');
+  old.prepare('INSERT INTO inventory_ingredient_properties(id, properties_json) VALUES (?, ?)')
+    .run(nanoid(), '{"yield_pct":80}');
+  old.close();
+  const db = openWorkspaceDb(id);
+  try {
+    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 13);
+    const columns = db.pragma('table_info(inventory_ingredient_properties)') as { name: string }[];
+    assert.deepEqual(columns.map(column => column.name),
+      ['id', 'yield_pct', 'color_lovibond', 'alpha_acid_pct', 'hop_form', 'attenuation_pct']);
+    assert.equal((db.prepare('SELECT COUNT(*) AS count FROM inventory_ingredient_properties').get() as { count: number }).count, 0);
   } finally { closeWorkspaceDb(db); }
 });

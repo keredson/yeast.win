@@ -4,7 +4,7 @@ import { MoreOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
 import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
 import { addInventoryEntry, convertInventoryUnit, createInventoryItem, deleteInventoryLocation, inventoryBalance, inventoryLocationPath,
   listInventoryBalances, listInventoryLocations, listInventoryMovements, moveInventoryStock, saveInventoryLocation, stockAtLocation,
-  updateIngredientProperties, type IngredientProperties, type InventoryItem, type InventoryLocation, type InventoryMovement, type LocalDb } from './db.ts';
+  updateIngredientProperties, ingredientProperties, type IngredientProperties, type InventoryItem, type InventoryLocation, type InventoryMovement, type LocalDb } from './db.ts';
 import { formatTime } from './time.ts';
 import type { PreferredUnits } from './api.ts';
 import { compoundMassUnit, formatQuantity, quantityForStorage, quantityUnitsForCategory, storageUnit, unitOptions } from '../shared/units.ts';
@@ -51,7 +51,7 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
   const previousItemUnit = useRef<string | undefined>(undefined);
   const previousEntryUnit = useRef<string | undefined>(undefined);
   const item = items.find(row => row.id === selectedId) || null;
-  const ingredientProperties = item?.properties_json ? JSON.parse(item.properties_json) as IngredientProperties : {};
+  const currentIngredientProperties = ingredientProperties(item);
   const entryItem = items.find(row => row.id === entryItemId) || item;
   const newItemUnit = Form.useWatch('default_unit', itemForm) as string | undefined;
   const newItemName = Form.useWatch('name', itemForm) as string | undefined;
@@ -230,12 +230,12 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
             <Button onClick={() => void openEntry(item, 'discard')}>Discard</Button>
             <Button onClick={() => setMoveItemId(item.id)}>Move stock</Button>
             <Button type="primary" onClick={() => void openEntry(item, 'count')}>Count stock</Button></div></div>
-        {Object.keys(ingredientProperties).length > 0 && <p className="muted">{[
-          ingredientProperties.yield_pct != null && `Yield ${ingredientProperties.yield_pct}%`,
-          ingredientProperties.color_lovibond != null && `Color ${ingredientProperties.color_lovibond} °L`,
-          ingredientProperties.alpha_acid_pct != null && `Alpha acid ${ingredientProperties.alpha_acid_pct}%`,
-          ingredientProperties.hop_form && `${ingredientProperties.hop_form} hops`,
-          ingredientProperties.attenuation_pct != null && `Attenuation ${ingredientProperties.attenuation_pct}%`
+        {Object.keys(currentIngredientProperties).length > 0 && <p className="muted">{[
+          currentIngredientProperties.yield_pct != null && `Yield ${currentIngredientProperties.yield_pct}%`,
+          currentIngredientProperties.color_lovibond != null && `Color ${currentIngredientProperties.color_lovibond} °L`,
+          currentIngredientProperties.alpha_acid_pct != null && `Alpha acid ${currentIngredientProperties.alpha_acid_pct}%`,
+          currentIngredientProperties.hop_form && `${currentIngredientProperties.hop_form} hops`,
+          currentIngredientProperties.attenuation_pct != null && `Attenuation ${currentIngredientProperties.attenuation_pct}%`
         ].filter(Boolean).join(' · ')}</p>}
         {movements.length > 0 && <><h3>Stock history</h3>
         <Table<InventoryMovement> className="inventory-history" dataSource={movements} rowKey={row => `${row.kind}-${row.id}`}
@@ -248,7 +248,7 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
     <Modal title={item ? `${item.name} properties` : 'Ingredient properties'} open={ingredientSettingsOpen}
       onCancel={() => setIngredientSettingsOpen(false)} footer={null} destroyOnHidden>
       {error && <Alert type="error" message={error} className="form-alert" />}
-      <Form key={item?.id} layout="vertical" initialValues={ingredientProperties} onFinish={saveIngredientProperties}>
+      <Form key={item?.id} layout="vertical" initialValues={currentIngredientProperties} onFinish={saveIngredientProperties}>
         {['Grain', 'Adjunct'].includes(item?.category || '') && <><Form.Item name="yield_pct" label="Extract yield (%)">
           <InputNumber className="full-width" min={0} max={100} step="any" /></Form.Item>
           <Form.Item name="color_lovibond" label="Color (°L)"><InputNumber className="full-width" min={0} step="any" /></Form.Item></>}
