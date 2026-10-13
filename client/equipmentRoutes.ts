@@ -8,8 +8,7 @@ export function equipmentPathSegment(item: Equipment, items: Equipment[]): strin
 }
 
 export function equipmentSlug(item: Equipment): string {
-  const specification = JSON.parse(item.specification_json || '{}') as { slug?: string };
-  return specification.slug || recordSlug(item.name);
+  return item.slug || recordSlug(item.name);
 }
 
 export function equipmentItemForPath(segment: string, items: Equipment[]): Equipment | undefined {

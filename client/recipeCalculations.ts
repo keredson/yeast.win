@@ -1,4 +1,4 @@
-import type { Equipment, InventoryItem, PlanInput } from './db.ts';
+import type { Equipment, EquipmentSpecifications, InventoryItem, PlanInput } from './db.ts';
 import { convertUnit } from '../shared/units.ts';
 
 type Event = PlanInput & { id: string };
@@ -34,7 +34,7 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
   const mash = events.find(event => event.id === drain?.anchor_event_id);
   const mashEquipmentId = String(drainDetails.mash_equipment_id || mash?.details.equipment_id || '');
   const mashEquipment = equipment.find(item => item.id === mashEquipmentId);
-  const mashSpecs = JSON.parse(mashEquipment?.specification_json || '{}') as { mash_efficiency_pct?: number; kettle_retention_liters?: number };
+  const mashSpecs: EquipmentSpecifications = mashEquipment || {};
   const importedBrewhouseEfficiency = positive(recipeInputs.brewhouse_efficiency_pct);
   const mashEfficiency = positive(mashSpecs.mash_efficiency_pct) ?? positive(recentMashEfficiency[mashEquipmentId]);
   let efficiencyLabel: string | null = null;
@@ -43,7 +43,7 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
   if (mashEfficiency != null) {
     const kettleId = String(drainDetails.to_vessel_id || mashEquipmentId);
     const kettle = equipment.find(item => item.id === kettleId);
-    const kettleSpecs = JSON.parse(kettle?.specification_json || '{}') as { kettle_retention_liters?: number };
+    const kettleSpecs: EquipmentSpecifications = kettle || {};
     const retention = kettleSpecs.kettle_retention_liters ?? (kettleId === mashEquipmentId ? mashSpecs.kettle_retention_liters : undefined);
     if (retention != null && Number.isFinite(retention) && retention >= 0) {
       efficiency = mashEfficiency;

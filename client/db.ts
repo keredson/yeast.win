@@ -5,7 +5,7 @@ import { nanoid } from 'nanoid';
 import { boilOffKinds, capacityKinds, equipmentKinds, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import { equipmentSlug } from './equipmentRoutes.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
+import { changeColumns, indexStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements, workspaceSchemaVersion, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 import { convertUnit, formatQuantity, storageUnit } from '../shared/units.ts';
 import type { ImportedRecipe } from './recipeImport.ts';
@@ -32,7 +32,28 @@ export interface PlanDetails {
   purpose?: string; mash_equipment_id?: string; equipment_id?: string;
   container_name?: string; container_size?: number; container_count?: number; container_unit?: string;
 }
-export interface Equipment { id: string; name: string; kind: string; specification_json: string | null }
+export interface EquipmentSpecifications {
+  slug?: string | null; capacity_liters?: number | null; built_in_temperature_control?: number | boolean | null;
+  max_pressure_kpa?: number | null; measurement_min?: number | null; measurement_max?: number | null;
+  measurement_unit?: string | null; boil_heat_loss_watts?: number | null; rated_power_watts?: number | null;
+  mash_efficiency_pct?: number | null; grain_absorption_l_per_kg?: number | null;
+  mash_deadspace_liters?: number | null; kettle_retention_liters?: number | null; temperature_offset_c?: number | null;
+  buffer_4_observed?: number | null; buffer_7_observed?: number | null;
+  reference_sg?: number | null; observed_sg?: number | null;
+  reference_brix?: number | null; observed_brix?: number | null;
+  reference_g?: number | null; observed_g?: number | null;
+  reference_kpa?: number | null; observed_kpa?: number | null;
+  reference_volumes?: number | null; observed_volumes?: number | null;
+  reference_mg_l?: number | null; observed_mg_l?: number | null;
+}
+export interface Equipment extends EquipmentSpecifications { id: string; name: string; kind: string }
+const equipmentSettingColumns = ['slug', 'capacity_liters', 'built_in_temperature_control', 'max_pressure_kpa',
+  'measurement_min', 'measurement_max', 'measurement_unit', 'boil_heat_loss_watts', 'rated_power_watts',
+  'mash_efficiency_pct', 'grain_absorption_l_per_kg', 'mash_deadspace_liters', 'kettle_retention_liters',
+  'temperature_offset_c'] as const;
+const equipmentCalibrationColumns = ['buffer_4_observed', 'buffer_7_observed', 'reference_sg', 'observed_sg',
+  'reference_brix', 'observed_brix', 'reference_g', 'observed_g', 'reference_kpa', 'observed_kpa',
+  'reference_volumes', 'observed_volumes', 'reference_mg_l', 'observed_mg_l'] as const;
 export interface InventoryItem { id: string; name: string; category: string; default_unit: string; display_unit: string;
   location_id: string | null; location_name?: string | null;
   yield_pct?: number | null; color_lovibond?: number | null; alpha_acid_pct?: number | null;
@@ -108,7 +129,7 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
         });
       } else if (version[0].version < workspaceSchemaVersion) {
         await db.tx(async tx => {
-          for (const table of replicatedTables) {
+          for (const table of [...replicatedTables, ...retiredReplicatedTables]) {
             const exists = await tx.execO<{ name: string }>(
               "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [table]);
             if (!exists.length) continue;
@@ -587,9 +608,9 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
       const details = plan.details;
       const assumptionEquipmentId = details.purpose === 'drain_grain' ? details.mash_equipment_id : details.equipment_id;
       if (typeof assumptionEquipmentId === 'string') {
-        const rows = await tx.execO<{ specification_json: string | null }>('SELECT specification_json FROM equipment WHERE id = ?', [assumptionEquipmentId]);
+        const rows = await tx.execO<Equipment>('SELECT * FROM equipment WHERE id = ?', [assumptionEquipmentId]);
         if (rows.length) {
-          const specs = JSON.parse(rows[0].specification_json || '{}') as EquipmentSpecifications;
+          const specs = rows[0];
           for (const column of equipmentAssumptionColumns) snapshot[column] = specs[column] ?? null;
           if (details.purpose === 'drain_grain' && specs.mash_efficiency_pct == null) {
             const recent = latestEfficiencies.get(assumptionEquipmentId);
@@ -776,26 +797,8 @@ export async function eventDetails(db: DB, event: ActualEvent, preferredMassUnit
 }
 
 export async function listEquipment(db: DB): Promise<Equipment[]> {
-  return db.execO<Equipment>(`SELECT id, name, kind, specification_json FROM equipment
+  return db.execO<Equipment>(`SELECT * FROM equipment
     WHERE id NOT IN (SELECT equipment_id FROM equipment_archives) ORDER BY name COLLATE NOCASE`);
-}
-
-export interface EquipmentSpecifications {
-  slug?: string;
-  capacity_liters?: number;
-  built_in_temperature_control?: boolean;
-  max_pressure_kpa?: number;
-  measurement_min?: number;
-  measurement_max?: number;
-  measurement_unit?: string;
-  boil_heat_loss_watts?: number;
-  rated_power_watts?: number;
-  mash_efficiency_pct?: number;
-  grain_absorption_l_per_kg?: number;
-  mash_deadspace_liters?: number;
-  kettle_retention_liters?: number;
-  temperature_offset_c?: number;
-  current_calibration?: Record<string, number>;
 }
 
 export async function updateBrewingLosses(db: DB, item: Equipment, values: Pick<EquipmentSpecifications,
@@ -806,12 +809,8 @@ export async function updateBrewingLosses(db: DB, item: Equipment, values: Pick<
       throw new Error(`Enter a valid ${key.replaceAll('_', ' ')}`);
     }
   }
-  const specification = JSON.parse(item.specification_json || '{}') as EquipmentSpecifications;
-  for (const [key, value] of Object.entries(values)) {
-    if (value == null) delete (specification as Record<string, unknown>)[key];
-    else (specification as Record<string, unknown>)[key] = value;
-  }
-  await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?', [JSON.stringify(specification), item.id]);
+  await db.exec(`UPDATE equipment SET ${equipmentAssumptionColumns.map(column => `${column} = ?`).join(', ')} WHERE id = ?`,
+    [...equipmentAssumptionColumns.map(column => values[column] ?? null), item.id]);
 }
 
 export async function latestMeasuredMashEfficiency(db: DB, equipmentId: string): Promise<number | null> {
@@ -858,10 +857,7 @@ export async function updateEquipmentIdentity(db: DB, item: Equipment, name: str
   if (equipment.some(row => row.id !== item.id && (equipmentSlug(row) === slug || row.id === slug))) {
     throw new Error('That slug is already used by another equipment item');
   }
-  const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
-  specification.slug = slug;
-  await db.exec('UPDATE equipment SET name = ?, specification_json = ? WHERE id = ?',
-    [trimmed, JSON.stringify(specification), item.id]);
+  await db.exec('UPDATE equipment SET name = ?, slug = ? WHERE id = ?', [trimmed, slug, item.id]);
 }
 
 export async function createEquipment(db: DB, name: string, kind: string, catalogModel?: CatalogEquipment,
@@ -869,15 +865,12 @@ export async function createEquipment(db: DB, name: string, kind: string, catalo
   if (!equipmentKinds.some(item => item.value === kind)) throw new Error('Choose a valid equipment kind');
   if (catalogModel && catalogModel.kind !== kind) throw new Error('Catalog kind does not match equipment kind');
   const id = nanoid();
-  const specification = JSON.parse(catalogModel?.specification_json || '{}') as Record<string, unknown>;
-  Object.assign(specification, overrides);
-  delete specification.working_volume_liters;
+  const specification: EquipmentSpecifications = { ...catalogModel, ...overrides };
   if (!capacityKinds.has(kind)) delete specification.capacity_liters;
   if (kind !== 'fermenter') {
     delete specification.built_in_temperature_control;
     delete specification.max_pressure_kpa;
   }
-  delete specification.boil_off_liters_per_hour;
   if (!boilOffKinds.has(kind)) delete specification.boil_heat_loss_watts;
   if (!temperatureCalibrationKinds.has(kind) && !(kind === 'fermenter' && specification.built_in_temperature_control)) {
     delete specification.temperature_offset_c;
@@ -887,8 +880,11 @@ export async function createEquipment(db: DB, name: string, kind: string, catalo
     delete specification.measurement_max;
     delete specification.measurement_unit;
   }
-  await db.exec('INSERT INTO equipment(id, name, kind, catalog_model_id, specification_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    [id, name, kind, catalogModel?.id || null, Object.keys(specification).length ? JSON.stringify(specification) : null, nowSeconds()]);
+  await db.exec(`INSERT INTO equipment(id, name, kind, catalog_model_id, ${equipmentSettingColumns.join(', ')}, created_at)
+    VALUES (?, ?, ?, ?, ${equipmentSettingColumns.map(() => '?').join(', ')}, ?)`,
+  [id, name, kind, catalogModel?.id || null,
+    ...equipmentSettingColumns.map(column => column === 'built_in_temperature_control'
+      ? Number(!!specification[column]) : specification[column] ?? null), nowSeconds()]);
   return id;
 }
 
@@ -898,77 +894,48 @@ export async function updateFermenterCapabilities(db: DB, item: Equipment,
   if (maxPressureKpa != null && (!Number.isFinite(maxPressureKpa) || maxPressureKpa <= 0)) {
     throw new Error('Enter a positive pressure rating');
   }
-  const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
-  if (builtInTemperatureControl) specification.built_in_temperature_control = true;
-  else delete specification.built_in_temperature_control;
-  if (maxPressureKpa == null) delete specification.max_pressure_kpa;
-  else specification.max_pressure_kpa = maxPressureKpa;
-  await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?',
-    [Object.keys(specification).length ? JSON.stringify(specification) : null, item.id]);
+  await db.exec('UPDATE equipment SET built_in_temperature_control = ?, max_pressure_kpa = ? WHERE id = ?',
+    [Number(builtInTemperatureControl), maxPressureKpa, item.id]);
 }
 
 export async function updateEquipmentCapacity(db: DB, item: Equipment, capacityLiters: number | null): Promise<void> {
-  const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
-  if (capacityLiters == null) delete specification.capacity_liters;
-  else specification.capacity_liters = capacityLiters;
-  await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?',
-    [Object.keys(specification).length ? JSON.stringify(specification) : null, item.id]);
+  await db.exec('UPDATE equipment SET capacity_liters = ? WHERE id = ?', [capacityLiters, item.id]);
 }
 
 export async function updateEquipmentBoilHeatLoss(db: DB, item: Equipment, watts: number): Promise<void> {
   if (!boilOffKinds.has(item.kind)) throw new Error('Boil calibration applies to electric kettles and all-in-one systems');
   if (!Number.isFinite(watts) || watts < 0) throw new Error('Enter a valid heat loss');
-  const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
-  specification.boil_heat_loss_watts = watts;
-  delete specification.boil_off_liters_per_hour;
-  await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?',
-    [JSON.stringify(specification), item.id]);
+  await db.exec('UPDATE equipment SET boil_heat_loss_watts = ? WHERE id = ?', [watts, item.id]);
 }
 
 export async function updateEquipmentTemperatureOffset(db: DB, item: Equipment, offsetC: number): Promise<void> {
-  const current = JSON.parse(item.specification_json || '{}') as EquipmentSpecifications;
-  if (!temperatureCalibrationKinds.has(item.kind) && !(item.kind === 'fermenter' && current.built_in_temperature_control)) {
+  if (!temperatureCalibrationKinds.has(item.kind) && !(item.kind === 'fermenter' && item.built_in_temperature_control)) {
     throw new Error('This equipment has no temperature reading to calibrate');
   }
   if (!Number.isFinite(offsetC)) throw new Error('Enter valid temperatures');
-  const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
-  specification.temperature_offset_c = offsetC;
-  await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?', [JSON.stringify(specification), item.id]);
+  await db.exec('UPDATE equipment SET temperature_offset_c = ? WHERE id = ?', [offsetC, item.id]);
 }
 
 export async function updateEquipmentCalibration(db: DB, item: Equipment, values: Record<string, number>): Promise<void> {
   if (!Object.keys(values).length || Object.values(values).some(value => !Number.isFinite(value))) {
     throw new Error('Enter valid calibration values');
   }
-  const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
-  specification.current_calibration = values;
-  await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?', [JSON.stringify(specification), item.id]);
+  const keys = Object.keys(values);
+  if (keys.some(key => !(equipmentCalibrationColumns as readonly string[]).includes(key))) throw new Error('Unknown calibration field');
+  await db.exec(`UPDATE equipment SET ${keys.map(key => `${key} = ?`).join(', ')} WHERE id = ?`,
+    [...keys.map(key => values[key]), item.id]);
 }
 
 export async function updateEquipmentRatedPower(db: DB, item: Equipment, watts: number | null): Promise<void> {
   if (!boilOffKinds.has(item.kind)) throw new Error('Rated power applies to electric kettles and all-in-one systems');
   if (watts != null && (!Number.isFinite(watts) || watts <= 0)) throw new Error('Enter a positive power');
-  const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
-  if (watts == null) delete specification.rated_power_watts;
-  else specification.rated_power_watts = watts;
-  await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?', [JSON.stringify(specification), item.id]);
+  await db.exec('UPDATE equipment SET rated_power_watts = ? WHERE id = ?', [watts, item.id]);
 }
 
 export async function updateEquipmentMeasurementRange(db: DB, item: Equipment,
   range: { min: number; max: number; unit: string } | null): Promise<void> {
-  const specification = JSON.parse(item.specification_json || '{}') as Record<string, unknown>;
-  if (range) {
-    specification.measurement_min = range.min;
-    specification.measurement_max = range.max;
-    specification.measurement_unit = range.unit;
-    delete specification.capacity_liters;
-  } else {
-    delete specification.measurement_min;
-    delete specification.measurement_max;
-    delete specification.measurement_unit;
-  }
-  await db.exec('UPDATE equipment SET specification_json = ? WHERE id = ?',
-    [Object.keys(specification).length ? JSON.stringify(specification) : null, item.id]);
+  await db.exec(`UPDATE equipment SET measurement_min = ?, measurement_max = ?, measurement_unit = ?, capacity_liters = NULL
+    WHERE id = ?`, [range?.min ?? null, range?.max ?? null, range?.unit ?? null, item.id]);
 }
 
 export async function deleteEquipment(db: DB, id: string): Promise<void> {
@@ -977,7 +944,7 @@ export async function deleteEquipment(db: DB, id: string): Promise<void> {
       (await tx.execO<{ used: number }>(`SELECT 1 AS used FROM ${table} WHERE ${where} LIMIT 1`, binds)).length > 0;
     let used = false;
     for (const table of Object.values(measurementTables)) {
-      if (await referenced(table, 'equipment_id = ? OR calibration_id IN (SELECT id FROM equipment_calibrations WHERE equipment_id = ?)', [id, id])) {
+      if (await referenced(table, 'equipment_id = ?', [id])) {
         used = true;
         break;
       }
@@ -985,13 +952,13 @@ export async function deleteEquipment(db: DB, id: string): Promise<void> {
     used ||= await referenced('temperature_control_events', 'equipment_id = ?', [id])
       || await referenced('pressure_control_events', 'equipment_id = ?', [id])
       || await referenced('transfers', 'from_vessel_id = ? OR to_vessel_id = ?', [id, id]);
-    used ||= await referenced('recipe_transfers', 'to_vessel_id = ?', [id]);
+    used ||= await referenced('recipe_transfers', 'to_vessel_id = ? OR mash_equipment_id = ?', [id, id])
+      || await referenced('recipe_temperature_control_events', 'equipment_id = ?', [id]);
     if (used) {
       await tx.exec('INSERT INTO equipment_archives(id, equipment_id, archived_at) VALUES (?, ?, ?)',
         [nanoid(), id, nowSeconds()]);
       return;
     }
-    await tx.exec('DELETE FROM equipment_calibrations WHERE equipment_id = ?', [id]);
     await tx.exec('DELETE FROM equipment_characterization_observations WHERE equipment_id = ?', [id]);
     await tx.exec('DELETE FROM equipment WHERE id = ?', [id]);
   });

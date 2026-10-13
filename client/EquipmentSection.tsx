@@ -18,26 +18,26 @@ function rangeLabel(min: number, max: number, scale: string | undefined): string
   return `${min}–${max}${scale === 'SG' ? ' (specific gravity)' : ` ${scale || ''}`}`;
 }
 
-const calibrationProfiles: Record<string, { method: string; fields: { key: string; label: string }[] }> = {
-  ph_meter: { method: 'Two-point pH', fields: [
+const calibrationProfiles: Record<string, { fields: { key: string; label: string }[] }> = {
+  ph_meter: { fields: [
     { key: 'buffer_4_observed', label: 'pH 4.00 buffer reading' }, { key: 'buffer_7_observed', label: 'pH 7.00 buffer reading' }
   ] },
-  hydrometer: { method: 'Hydrometer SG', fields: [
+  hydrometer: { fields: [
     { key: 'reference_sg', label: 'Reference specific gravity' }, { key: 'observed_sg', label: 'Hydrometer reading' }
   ] },
-  refractometer: { method: 'Refractometer Brix', fields: [
+  refractometer: { fields: [
     { key: 'reference_brix', label: 'Reference °Brix' }, { key: 'observed_brix', label: 'Refractometer reading °Brix' }
   ] },
-  scale: { method: 'Scale g', fields: [
+  scale: { fields: [
     { key: 'reference_g', label: 'Reference weight g' }, { key: 'observed_g', label: 'Scale reading g' }
   ] },
-  pressure_gauge: { method: 'Pressure kPa', fields: [
+  pressure_gauge: { fields: [
     { key: 'reference_kpa', label: 'Reference pressure kPa' }, { key: 'observed_kpa', label: 'Gauge reading kPa' }
   ] },
-  carbonation_meter: { method: 'Carbonation volumes', fields: [
+  carbonation_meter: { fields: [
     { key: 'reference_volumes', label: 'Reference CO₂ volumes' }, { key: 'observed_volumes', label: 'Meter reading CO₂ volumes' }
   ] },
-  dissolved_oxygen_meter: { method: 'Dissolved oxygen mg/L', fields: [
+  dissolved_oxygen_meter: { fields: [
     { key: 'reference_mg_l', label: 'Reference oxygen mg/L' }, { key: 'observed_mg_l', label: 'Meter reading mg/L' }
   ] }
 };
@@ -57,7 +57,7 @@ function pressureInKpa(value: number | undefined, unit: string | undefined): num
   return converted;
 }
 
-function pressureLabel(kpa: number | undefined, unit: PreferredUnits['pressure']): string {
+function pressureLabel(kpa: number | null | undefined, unit: PreferredUnits['pressure']): string {
   if (kpa == null) return 'Not set';
   return `${Number(convertUnit(kpa, 'kPa', unit)!.toFixed(2))} ${unit}`;
 }
@@ -92,7 +92,9 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
   const newPressureUnit = Form.useWatch('pressure_unit', equipmentForm) as string | undefined;
   const editPressureUnit = Form.useWatch('pressure_unit', fermenterForm) as string | undefined;
   const profile = item ? calibrationProfiles[item.kind] : undefined;
-  const specs = item ? JSON.parse(item.specification_json || '{}') as EquipmentSpecifications : {};
+  const specs: EquipmentSpecifications = item || {};
+  const calibrationValues = Object.fromEntries((profile?.fields || []).map(field => [field.key,
+    (specs as Record<string, unknown>)[field.key]]));
   const hasTemperatureReading = !!item && (temperatureCalibrationKinds.has(item.kind)
     || item.kind === 'fermenter' && !!specs.built_in_temperature_control);
   const ratedEstimate = specs.rated_power_watts == null || specs.boil_heat_loss_watts == null
@@ -131,39 +133,7 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
       }
     })().catch(cause => { if (active) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => { active = false; };
-  }, [db, item?.id, item?.specification_json]);
-
-  useEffect(() => {
-    if (!item || !hasTemperatureReading || specs.temperature_offset_c != null) return;
-    let active = true;
-    void (async () => {
-      const rows = await db.execO<{ parameters_json: string }>(`SELECT parameters_json FROM equipment_calibrations
-        WHERE equipment_id = ? AND method = 'Temperature °C' ORDER BY effective_at DESC, id DESC LIMIT 1`, [item.id]);
-      if (!rows.length) return;
-      const values = JSON.parse(rows[0].parameters_json) as { reference_c?: number; observed_c?: number };
-      if (active && Number.isFinite(values.reference_c) && Number.isFinite(values.observed_c)) {
-        await updateEquipmentTemperatureOffset(db, item, Number(values.reference_c) - Number(values.observed_c));
-        await onChanged();
-      }
-    })().catch(cause => { if (active) setError(cause instanceof Error ? cause.message : String(cause)); });
-    return () => { active = false; };
-  }, [db, item?.id, item?.specification_json]);
-
-  useEffect(() => {
-    if (!item || !profile || specs.current_calibration) return;
-    let active = true;
-    void (async () => {
-      const rows = await db.execO<{ parameters_json: string }>(`SELECT parameters_json FROM equipment_calibrations
-        WHERE equipment_id = ? AND method = ? ORDER BY effective_at DESC, id DESC LIMIT 1`, [item.id, profile.method]);
-      if (!rows.length) return;
-      const values = JSON.parse(rows[0].parameters_json) as Record<string, number>;
-      if (active && profile.fields.every(field => Number.isFinite(values[field.key]))) {
-        await updateEquipmentCalibration(db, item, Object.fromEntries(profile.fields.map(field => [field.key, values[field.key]])));
-        await onChanged();
-      }
-    })().catch(cause => { if (active) setError(cause instanceof Error ? cause.message : String(cause)); });
-    return () => { active = false; };
-  }, [db, item?.id, item?.specification_json]);
+  }, [db, item?.id, item?.boil_heat_loss_watts]);
 
   function validRange(min: number | undefined, max: number | undefined, unit: string | undefined, kind: string) {
     if (min == null && max == null) return null;
@@ -303,11 +273,10 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
               <a href={`${basePath}/equipment/${equipmentPathSegment(row, equipment)}`}
                 onClick={event => { event.preventDefault(); onSelect(row.id); }}>{row.name}</a> },
               ...(capacityKinds.has(kind) ? [{ title: 'Capacity', key: 'capacity', width: 140, responsive: ['sm' as const], render: (_: unknown, row: Equipment) =>
-                capacityLabel((JSON.parse(row.specification_json || '{}') as EquipmentSpecifications).capacity_liters) }] : []),
+                capacityLabel(row.capacity_liters ?? undefined) }] : []),
               ...(measurementRangeUnits[kind] ? [{ title: 'Measurement range', key: 'range', width: 180, responsive: ['sm' as const], render: (_: unknown, row: Equipment) => {
-                const spec = JSON.parse(row.specification_json || '{}') as EquipmentSpecifications;
-                return spec.measurement_min != null && spec.measurement_max != null
-                  ? rangeLabel(spec.measurement_min, spec.measurement_max, spec.measurement_unit) : '';
+                return row.measurement_min != null && row.measurement_max != null
+                  ? rangeLabel(row.measurement_min, row.measurement_max, row.measurement_unit ?? undefined) : '';
               } }] : [])]} />
         </section> : null;
       })}</section>)}</div>}
@@ -317,7 +286,7 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit equipment name and slug" onClick={() => setEditIdentity(true)} /></div>
           <div className="muted">Slug: {equipmentPathSegment(item, equipment)}</div></div></div>
         <div className="equipment-parameters">
-          {capacityKinds.has(item.kind) && <div className="equipment-parameter"><span>Capacity: {capacityLabel(specs.capacity_liters) || 'Not set'}</span>
+          {capacityKinds.has(item.kind) && <div className="equipment-parameter"><span>Capacity: {capacityLabel(specs.capacity_liters ?? undefined) || 'Not set'}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit capacity" onClick={() => setEditCapacity(true)} /></div>}
           {item.kind === 'fermenter' && <div className="equipment-parameter"><span>
             Built-in temperature control: {specs.built_in_temperature_control ? 'Yes' : 'No'}<br />
@@ -341,9 +310,9 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
               Kettle retention: {specs.kettle_retention_liters == null ? 'Not set' : `${specs.kettle_retention_liters} L`}</span>
               <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit brewing losses" onClick={() => setEditBrewingLosses(true)} /></div>}
           {measurementRangeUnits[item.kind] && <div className="equipment-parameter"><span>Measurement range: {specs.measurement_min != null && specs.measurement_max != null
-            ? rangeLabel(specs.measurement_min, specs.measurement_max, specs.measurement_unit) : 'Not set'}</span>
+            ? rangeLabel(specs.measurement_min, specs.measurement_max, specs.measurement_unit ?? undefined) : 'Not set'}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit measurement range" onClick={() => setEditRange(true)} /></div>}
-          {profile?.fields.map(field => <div key={field.key} className="equipment-parameter"><span>{field.label}: {specs.current_calibration?.[field.key] ?? 'Not calibrated'}</span>
+          {profile?.fields.map(field => <div key={field.key} className="equipment-parameter"><span>{field.label}: {calibrationValues[field.key] == null ? 'Not calibrated' : String(calibrationValues[field.key])}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${field.label}`} onClick={() => setEditCalibration(true)} /></div>)}
         </div>
         <div className="equipment-delete"><Popconfirm title={`Delete ${item.name}?`}
@@ -363,7 +332,7 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
             options={catalog.filter(row => row.kind === creatingKind).map(row => ({ value: row.name }))}
             filterOption={(input, option) => String(option?.value || '').toLowerCase().includes(input.toLowerCase())}
             onSelect={value => { const entry = catalog.find(row => row.kind === creatingKind && row.name === value);
-              if (entry) { const specs = JSON.parse(entry.specification_json || '{}') as EquipmentSpecifications;
+              if (entry) { const specs = entry;
                 equipmentForm.setFieldsValue({ catalog_id: entry.id, capacity: specs.capacity_liters, capacity_unit: 'L',
                   rated_power_watts: specs.rated_power_watts,
                   built_in_temperature_control: specs.built_in_temperature_control || false,
@@ -452,7 +421,7 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
       </Form>
     </Modal>
     <Modal title={profile ? `Calibrate ${equipmentKindLabel(item?.kind || '')}` : 'Edit calibration'} open={editCalibration} onCancel={() => setEditCalibration(false)} footer={null} destroyOnHidden>
-      <Form key={item?.id} layout="vertical" onFinish={saveCalibration} initialValues={{ parameters: specs.current_calibration }}>
+      <Form key={item?.id} layout="vertical" onFinish={saveCalibration} initialValues={{ parameters: calibrationValues }}>
         {profile?.fields.map(field => <Form.Item key={field.key} name={['parameters', field.key]} label={field.label} rules={[{ required: true }]}>
           <InputNumber className="full-width" step="any" /></Form.Item>)}
         <Button type="primary" htmlType="submit">Save calibration</Button>

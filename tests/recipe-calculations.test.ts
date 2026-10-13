@@ -17,8 +17,8 @@ const events: (PlanInput & { id: string })[] = [
     details: { item_category: 'Yeast', inventory_item_id: 'yeast' } }
 ];
 const equipment: Equipment[] = [
-  { id: 'tun', kind: 'mash_tun', name: 'Tun', specification_json: '{"mash_efficiency_pct":75}' },
-  { id: 'kettle', kind: 'kettle', name: 'Kettle', specification_json: '{"kettle_retention_liters":2}' }
+  { id: 'tun', kind: 'mash_tun', name: 'Tun', mash_efficiency_pct: 75 },
+  { id: 'kettle', kind: 'kettle', name: 'Kettle', kettle_retention_liters: 2 }
 ];
 
 test('estimates OG, FG and ABV using mash efficiency and the retained kettle volume', () => {

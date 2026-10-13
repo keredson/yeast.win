@@ -20,18 +20,20 @@ test('existing catalog gains new equipment and inventory without item capacity',
     const snapshot = catalogSnapshot(db, 1);
     assert.ok(!('unchanged' in snapshot));
     if ('unchanged' in snapshot) return;
-    assert.equal(snapshot.version, 7);
+    assert.equal(snapshot.version, 8);
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_brewzilla_35l_g4')?.kind, 'all_in_one');
     const gf30 = snapshot.equipment.find(row => row.id === 'equipment_grainfather_gf30');
     assert.equal(gf30?.kind, 'fermenter');
-    assert.equal(JSON.parse(gf30?.specification_json || '{}').built_in_temperature_control, true);
+    assert.equal(gf30?.built_in_temperature_control, 1);
     const pressureFermenter = snapshot.equipment.find(row => row.id === 'equipment_fermzilla_all_rounder_30l');
     assert.equal(pressureFermenter?.kind, 'fermenter');
-    assert.ok(JSON.parse(pressureFermenter?.specification_json || '{}').max_pressure_kpa > 0);
+    assert.ok((pressureFermenter?.max_pressure_kpa || 0) > 0);
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_inkbird_itc_308')?.kind, 'fermentation_temperature_control');
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_vevor_35l')?.name,
       'VEVOR Electric Brewing System 9.2 Gal/35 L Brewing Pot');
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_vevor_35l')?.kind, 'all_in_one');
+    assert.equal((db.pragma('table_info(catalog_equipment)') as { name: string }[])
+      .some(column => column.name === 'specification_json'), false);
     assert.deepEqual(snapshot.inventory.find(row => row.id === 'inventory_bottle_12oz'),
       { id: 'inventory_bottle_12oz', name: '12 oz bottle', category: 'Packaging', unit: 'each' });
     assert.ok(snapshot.inventory.length > 20);
@@ -54,9 +56,9 @@ test('existing catalog models use the combined fermentation control choice', () 
     const snapshot = catalogSnapshot(db, 4);
     assert.ok(!('unchanged' in snapshot));
     if ('unchanged' in snapshot) return;
-    assert.equal(snapshot.version, 7);
-    assert.deepEqual(snapshot.equipment.filter(row => row.id !== 'equipment_fermzilla_all_rounder_30l').map(row => row.kind),
-      ['fermentation_temperature_control', 'fermentation_temperature_control']);
+    assert.equal(snapshot.version, 8);
+    assert.equal(snapshot.equipment.find(row => row.id === 'equipment_rapt_chamber')?.kind, 'fermentation_temperature_control');
+    assert.equal(snapshot.equipment.find(row => row.id === 'equipment_grainfather_gc4')?.kind, 'fermentation_temperature_control');
   } finally { db.close(); }
 });
 
@@ -74,7 +76,7 @@ test('version 5 catalog restores VEVOR as an all-in-one system', () => {
     const snapshot = catalogSnapshot(db, 5);
     assert.ok(!('unchanged' in snapshot));
     if ('unchanged' in snapshot) return;
-    assert.equal(snapshot.version, 7);
+    assert.equal(snapshot.version, 8);
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_vevor_35l')?.kind, 'all_in_one');
   } finally { db.close(); }
 });

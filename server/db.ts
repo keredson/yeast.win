@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nanoid } from 'nanoid';
-import { indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion } from '../shared/schema.ts';
+import { indexStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements, workspaceSchemaVersion } from '../shared/schema.ts';
 
 export const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const envPath = resolve(projectRoot, '.env');
@@ -154,7 +154,7 @@ export function openWorkspaceDb(id: string): Database.Database {
   } else if (row.version < workspaceSchemaVersion) {
     db.exec('BEGIN');
     try {
-      for (const table of replicatedTables) {
+      for (const table of [...replicatedTables, ...retiredReplicatedTables]) {
         const exists = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
         if (!exists) continue;
         db.prepare('SELECT crsql_as_table(?)').get(table);

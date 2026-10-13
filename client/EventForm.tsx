@@ -112,8 +112,6 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
         input.measurementKind = values.measurement_kind || measurement;
         payload = { value: values.value, unit: values.unit || '', uncertainty: values.uncertainty ?? null,
           equipment_id: values.equipment_id || null,
-          calibration_id: values.equipment_id === initialData?.payload.equipment_id
-            && typeof initialData?.payload.calibration_id === 'string' ? initialData.payload.calibration_id : null,
           source: values.source || 'manual' };
       } else if (kind === 'addition') {
         const itemName = values.item_name || plannedString('item_name') || initialPlan?.title;

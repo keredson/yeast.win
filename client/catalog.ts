@@ -1,6 +1,7 @@
 import initWasm, { type DB } from '@vlcn.io/crsqlite-wasm';
 import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
-import type { CatalogEquipment, CatalogInventory, CatalogSnapshot } from '../shared/catalog.ts';
+import { catalogEquipmentColumns, catalogEquipmentTable, type CatalogEquipment, type CatalogInventory,
+  type CatalogSnapshot } from '../shared/catalog.ts';
 
 let opened: Promise<DB> | undefined;
 let syncing: Promise<void> | undefined;
@@ -10,7 +11,12 @@ export function openLocalCatalog(): Promise<DB> {
     const sqlite = await initWasm(() => wasmUrl);
     const db = await sqlite.open('brewlog-catalog');
     await db.exec('CREATE TABLE IF NOT EXISTS catalog_meta(version INTEGER NOT NULL)');
-    await db.exec('CREATE TABLE IF NOT EXISTS catalog_equipment(id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, specification_json TEXT)');
+    const columns = await db.execO<{ name: string }>('PRAGMA table_info(catalog_equipment)');
+    if (columns.some(column => column.name === 'specification_json')) {
+      await db.exec('DROP TABLE catalog_equipment');
+      await db.exec('DELETE FROM catalog_meta');
+    }
+    await db.exec(catalogEquipmentTable);
     await db.exec('CREATE TABLE IF NOT EXISTS catalog_inventory(id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, unit TEXT NOT NULL)');
     return db;
   })().catch(error => { opened = undefined; throw error; });
@@ -19,7 +25,7 @@ export function openLocalCatalog(): Promise<DB> {
 
 export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEquipment[]; inventory: CatalogInventory[] }> {
   const [equipment, inventory] = await Promise.all([
-    db.execO<CatalogEquipment>('SELECT id, name, kind, specification_json FROM catalog_equipment ORDER BY name COLLATE NOCASE'),
+    db.execO<CatalogEquipment>('SELECT * FROM catalog_equipment ORDER BY name COLLATE NOCASE'),
     db.execO<CatalogInventory>('SELECT id, name, category, unit FROM catalog_inventory ORDER BY name COLLATE NOCASE')
   ]);
   return { equipment, inventory };
@@ -40,8 +46,10 @@ export function syncLocalCatalog(db: DB): Promise<void> {
       await tx.exec('DELETE FROM catalog_equipment');
       await tx.exec('DELETE FROM catalog_inventory');
       for (const item of result.equipment) await tx.exec(
-        'INSERT INTO catalog_equipment(id, name, kind, specification_json) VALUES (?, ?, ?, ?)',
-        [item.id, item.name, item.kind, item.specification_json]);
+        `INSERT INTO catalog_equipment(id, name, kind, ${catalogEquipmentColumns.join(', ')})
+          VALUES (?, ?, ?, ${catalogEquipmentColumns.map(() => '?').join(', ')})`,
+        [item.id, item.name, item.kind, ...catalogEquipmentColumns.map(column => column === 'built_in_temperature_control'
+          ? Number(!!item[column]) : item[column] ?? null)]);
       for (const item of result.inventory) await tx.exec(
         'INSERT INTO catalog_inventory(id, name, category, unit) VALUES (?, ?, ?, ?)',
         [item.id, item.name, item.category, item.unit]);

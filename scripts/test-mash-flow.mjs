@@ -16,7 +16,7 @@ try {
     const session = await fetch('/api/me').then(response => response.json());
     const db = await api.openLocalDb(session.workspaces[0].id);
     const equipmentId = await api.createEquipment(db, 'Mash system', 'all_in_one');
-    const equipment = { id: equipmentId, name: 'Mash system', kind: 'all_in_one', specification_json: null };
+    const equipment = { id: equipmentId, name: 'Mash system', kind: 'all_in_one' };
     await api.updateBrewingLosses(db, equipment, { mash_efficiency_pct: 75,
       grain_absorption_l_per_kg: 0.8, mash_deadspace_liters: 0.5, kettle_retention_liters: 1 });
     const itemId = await api.createInventoryItem(db, 'Test malt', 'Grain', 'kg');

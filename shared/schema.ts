@@ -32,9 +32,16 @@ const definitions: Record<string, string> = {
   pressure_control_events: `event_id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, target_value REAL NOT NULL, target_unit TEXT NOT NULL`,
   transfers: `event_id TEXT PRIMARY KEY NOT NULL, purpose TEXT, mash_equipment_id TEXT, from_vessel_id TEXT, to_vessel_id TEXT, to_vessel_name TEXT, quantity REAL, unit TEXT`,
   packaging: `event_id TEXT PRIMARY KEY NOT NULL, container_name TEXT NOT NULL, container_size REAL NOT NULL, container_unit TEXT NOT NULL, container_count INTEGER NOT NULL, inventory_item_id TEXT`,
-  equipment: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, catalog_model_id TEXT, specification_json TEXT, created_at INTEGER NOT NULL`,
+  equipment: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, catalog_model_id TEXT, slug TEXT,
+    capacity_liters REAL, built_in_temperature_control INTEGER, max_pressure_kpa REAL,
+    measurement_min REAL, measurement_max REAL, measurement_unit TEXT,
+    boil_heat_loss_watts REAL, rated_power_watts REAL, mash_efficiency_pct REAL,
+    grain_absorption_l_per_kg REAL, mash_deadspace_liters REAL, kettle_retention_liters REAL, temperature_offset_c REAL,
+    buffer_4_observed REAL, buffer_7_observed REAL, reference_sg REAL, observed_sg REAL,
+    reference_brix REAL, observed_brix REAL, reference_g REAL, observed_g REAL,
+    reference_kpa REAL, observed_kpa REAL, reference_volumes REAL, observed_volumes REAL,
+    reference_mg_l REAL, observed_mg_l REAL, created_at INTEGER NOT NULL`,
   equipment_archives: `id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, archived_at INTEGER NOT NULL`,
-  equipment_calibrations: `id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, effective_at INTEGER NOT NULL, method TEXT NOT NULL, parameters_json TEXT NOT NULL, created_by_account_id TEXT`,
   equipment_characterization_observations: `id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, observed_at INTEGER NOT NULL, power_watts REAL, ambient_c REAL, liquid_c REAL, start_liters REAL, end_liters REAL, duration_seconds INTEGER`,
   inventory_items: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL, default_unit TEXT NOT NULL, created_at INTEGER NOT NULL`,
   inventory_ingredient_properties: `id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL, alpha_acid_pct REAL, hop_form TEXT, attenuation_pct REAL`,
@@ -51,7 +58,7 @@ const definitions: Record<string, string> = {
 };
 
 function measurementColumns(extra = ''): string {
-  return `event_id TEXT PRIMARY KEY NOT NULL, value REAL NOT NULL, unit TEXT NOT NULL, uncertainty REAL, equipment_id TEXT, calibration_id TEXT, source TEXT${extra ? `, ${extra}` : ''}`;
+  return `event_id TEXT PRIMARY KEY NOT NULL, value REAL NOT NULL, unit TEXT NOT NULL, uncertainty REAL, equipment_id TEXT, source TEXT${extra ? `, ${extra}` : ''}`;
 }
 
 export const replicatedTables = Object.keys(definitions);
@@ -103,7 +110,8 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 14;
+export const workspaceSchemaVersion = 15;
+export const retiredReplicatedTables = ['equipment_calibrations'] as const;
 
 export function isValidId(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{10,32}$/.test(value);
