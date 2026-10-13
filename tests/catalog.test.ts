@@ -7,7 +7,10 @@ import Database from 'better-sqlite3';
 import { catalogChanges, openCatalogDb } from '../server/catalog.ts';
 import { decodeChange } from '../shared/wire.ts';
 import { changeColumns } from '../shared/schema.ts';
-import { catalogModelTables, catalogInventoryTable, catalogTables, catalogSchemaVersion } from '../shared/catalog.ts';
+import { catalogModelTables, catalogSupplyTables, catalogTables, catalogSchemaVersion } from '../shared/catalog.ts';
+
+const legacyInventoryTable = `CREATE TABLE inventory(id TEXT PRIMARY KEY NOT NULL, name TEXT, category TEXT, unit TEXT)`;
+const legacyCatalogTables = [...Object.keys(catalogModelTables).filter(table => table !== 'model_boil_characterization'), 'inventory'];
 
 function rows(db: Database.Database) {
   return {
@@ -17,7 +20,7 @@ function rows(db: Database.Database) {
       LEFT JOIN model_temperature_control control ON control.model_id = m.id
       LEFT JOIN model_pressure_rating pressure ON pressure.model_id = m.id`).all() as {
       id: string; name: string; kind: string; built_in_temperature_control: number | null; max_pressure_kpa: number | null }[],
-    inventory: db.prepare('SELECT * FROM inventory').all() as { id: string; name: string; category: string; unit: string }[]
+    inventory: db.prepare('SELECT * FROM supplies').all() as { id: string; name: string; category: string; unit: string }[]
   };
 }
 
@@ -68,8 +71,8 @@ test('version 11 catalog adds Anton Paar instruments without replacing existing 
   const old = new Database(join(dir, 'catalog.sqlite'));
   old.loadExtension(join(process.cwd(), 'vendor/crsqlite.so'));
   for (const statement of Object.values(catalogModelTables)) old.exec(statement);
-  old.exec(catalogInventoryTable);
-  for (const table of catalogTables) old.prepare('SELECT crsql_as_crr(?)').get(table);
+  old.exec(legacyInventoryTable);
+  for (const table of legacyCatalogTables) old.prepare('SELECT crsql_as_crr(?)').get(table);
   old.prepare('INSERT INTO equipment_models(id, model_name, kind) VALUES (?, ?, ?)')
     .run('my_meter', 'My meter', 'hydrometer');
   old.prepare('INSERT INTO inventory(id, name, category, unit) VALUES (?, ?, ?, ?)')
@@ -82,7 +85,7 @@ test('version 11 catalog adds Anton Paar instruments without replacing existing 
     assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
     assert.equal((db.prepare('SELECT model_name FROM equipment_models WHERE id = ?')
       .get('my_meter') as { model_name: string }).model_name, 'My meter');
-    assert.equal((db.prepare('SELECT name FROM inventory WHERE id = ?')
+    assert.equal((db.prepare('SELECT name FROM supplies WHERE id = ?')
       .get('my_grain') as { name: string }).name, 'My grain');
     assert.equal((db.prepare('SELECT measurement_scale FROM model_measurement_channels WHERE id = ?')
       .get('equipment_anton_paar_easydens:gravity') as { measurement_scale: string }).measurement_scale, 'SG');
@@ -102,8 +105,8 @@ test('version 12 catalog adds replicated boil defaults while preserving catalog 
   for (const [name, statement] of Object.entries(catalogModelTables)) {
     if (name !== 'model_boil_characterization') old.exec(statement);
   }
-  old.exec(catalogInventoryTable);
-  for (const table of catalogTables) {
+  old.exec(legacyInventoryTable);
+  for (const table of legacyCatalogTables) {
     if (table !== 'model_boil_characterization') old.prepare('SELECT crsql_as_crr(?)').get(table);
   }
   old.prepare('INSERT INTO equipment_models(id, model_name, kind) VALUES (?, ?, ?)')
@@ -118,7 +121,7 @@ test('version 12 catalog adds replicated boil defaults while preserving catalog 
     assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
     assert.equal((db.prepare('SELECT model_name FROM equipment_models WHERE id = ?')
       .get('my_kettle') as { model_name: string }).model_name, 'My edited kettle');
-    assert.equal((db.prepare('SELECT name FROM inventory WHERE id = ?')
+    assert.equal((db.prepare('SELECT name FROM supplies WHERE id = ?')
       .get('my_grain') as { name: string }).name, 'My grain');
     const cursor = BigInt(catalogChanges(db, 0n).serverCursor);
     db.prepare('INSERT INTO model_boil_characterization(model_id, heat_loss_watts) VALUES (?, ?)')
@@ -145,6 +148,29 @@ test('partially upgraded catalog preserves boil defaults when enabling replicati
     assert.equal((upgraded.prepare('SELECT heat_loss_watts FROM model_boil_characterization WHERE model_id = ?')
       .get('equipment_vevor_35l') as { heat_loss_watts: number }).heat_loss_watts, 325);
     assert.ok(upgraded.prepare("SELECT 1 FROM sqlite_master WHERE name = 'model_boil_characterization__crsql_clock'").get());
+  } finally { upgraded.close(); }
+});
+
+test('partially upgraded supply catalog preserves existing supply specs and old inventory rows', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
+  const db = openCatalogDb(dir);
+  db.prepare('INSERT INTO supplies(id, name, category, unit) VALUES (?, ?, ?, ?)')
+    .run('custom_supply', 'Custom hops', 'Hops', 'g');
+  db.prepare('INSERT INTO supply_hop_specs(supply_id, alpha_acid_pct) VALUES (?, ?)')
+    .run('custom_supply', 12.5);
+  db.exec(legacyInventoryTable);
+  db.prepare("SELECT crsql_as_crr('inventory')").get();
+  db.prepare('INSERT INTO inventory(id, name, category, unit) VALUES (?, ?, ?, ?)')
+    .run('old_supply', 'Old grain', 'Grain', 'g');
+  db.pragma('user_version = 13');
+  db.close();
+  const upgraded = openCatalogDb(dir);
+  try {
+    assert.equal((upgraded.prepare('SELECT name FROM supplies WHERE id = ?')
+      .get('old_supply') as { name: string }).name, 'Old grain');
+    assert.equal((upgraded.prepare('SELECT alpha_acid_pct FROM supply_hop_specs WHERE supply_id = ?')
+      .get('custom_supply') as { alpha_acid_pct: number }).alpha_acid_pct, 12.5);
+    assert.equal(upgraded.prepare("SELECT name FROM sqlite_master WHERE name = 'inventory'").get(), undefined);
   } finally { upgraded.close(); }
 });
 
@@ -232,11 +258,11 @@ test('version 9 CRR catalog keeps direct server edits when removing prefixes', (
   try {
     assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
     assert.deepEqual(db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'catalog_%'").all(), []);
-    assert.equal((db.prepare('SELECT name FROM inventory WHERE id = ?').get('inventory_maris_otter') as { name: string }).name,
+    assert.equal((db.prepare('SELECT name FROM supplies WHERE id = ?').get('inventory_maris_otter') as { name: string }).name,
       'My edited malt');
-    assert.equal((db.prepare('SELECT name FROM inventory WHERE id = ?').get('custom_ingredient') as { name: string }).name,
+    assert.equal((db.prepare('SELECT name FROM supplies WHERE id = ?').get('custom_ingredient') as { name: string }).name,
       'My custom grain');
-    assert.ok(catalogChanges(db, 0n).changes.some(change => change.table === 'inventory'));
+    assert.ok(catalogChanges(db, 0n).changes.some(change => change.table === 'supplies'));
   } finally { db.close(); }
 });
 
@@ -247,7 +273,7 @@ test('catalog sends only CR-SQLite changes after the client cursor', () => {
   replica.loadExtension(join(process.cwd(), 'vendor/crsqlite.so'));
   try {
     for (const statement of Object.values(catalogModelTables)) replica.exec(statement);
-    replica.exec(catalogInventoryTable);
+    for (const statement of Object.values(catalogSupplyTables)) replica.exec(statement);
     for (const table of catalogTables) replica.prepare('SELECT crsql_as_crr(?)').get(table);
     const apply = replica.prepare(`INSERT INTO crsql_changes (${changeColumns.map(column => `"${column}"`).join(', ')})
       VALUES (${changeColumns.map(() => '?').join(', ')})`);
@@ -257,17 +283,17 @@ test('catalog sends only CR-SQLite changes after the client cursor', () => {
     assert.deepEqual(rows(replica), rows(db));
 
     // A local-only row remains when the server updates a different row.
-    replica.prepare('INSERT INTO inventory(id, name, category, unit) VALUES (?, ?, ?, ?)')
+    replica.prepare('INSERT INTO supplies(id, name, category, unit) VALUES (?, ?, ?, ?)')
       .run('personal_ingredient', 'My grain', 'Grain', 'g');
-    db.prepare('UPDATE inventory SET name = ? WHERE id = ?')
+    db.prepare('UPDATE supplies SET name = ? WHERE id = ?')
       .run('Updated Maris Otter', 'inventory_maris_otter');
     const delta = catalogChanges(db, BigInt(initial.serverCursor));
     assert.equal(delta.changes.length, 1);
-    assert.equal(delta.changes[0].table, 'inventory');
+    assert.equal(delta.changes[0].table, 'supplies');
     for (const change of delta.changes) apply.run(...decodeChange(change));
-    assert.equal((replica.prepare('SELECT name FROM inventory WHERE id = ?')
+    assert.equal((replica.prepare('SELECT name FROM supplies WHERE id = ?')
       .get('inventory_maris_otter') as { name: string }).name, 'Updated Maris Otter');
-    assert.equal((replica.prepare('SELECT name FROM inventory WHERE id = ?')
+    assert.equal((replica.prepare('SELECT name FROM supplies WHERE id = ?')
       .get('personal_ingredient') as { name: string }).name, 'My grain');
     assert.deepEqual(catalogChanges(db, BigInt(delta.serverCursor)).changes, []);
 
@@ -288,12 +314,12 @@ test('catalog sends only CR-SQLite changes after the client cursor', () => {
     assert.equal((replica.prepare('SELECT heat_loss_watts FROM model_boil_characterization WHERE model_id = ?')
       .get('equipment_vevor_35l') as { heat_loss_watts: number }).heat_loss_watts, 320);
 
-    db.prepare('DELETE FROM inventory WHERE id = ?').run('inventory_maris_otter');
+    db.prepare('DELETE FROM supplies WHERE id = ?').run('inventory_maris_otter');
     const deletion = catalogChanges(db, BigInt(boilDelta.serverCursor));
     assert.ok(deletion.changes.length > 0);
     for (const change of deletion.changes) apply.run(...decodeChange(change));
-    assert.equal(replica.prepare('SELECT id FROM inventory WHERE id = ?').get('inventory_maris_otter'), undefined);
-    assert.equal((replica.prepare('SELECT name FROM inventory WHERE id = ?')
+    assert.equal(replica.prepare('SELECT id FROM supplies WHERE id = ?').get('inventory_maris_otter'), undefined);
+    assert.equal((replica.prepare('SELECT name FROM supplies WHERE id = ?')
       .get('personal_ingredient') as { name: string }).name, 'My grain');
   } finally { replica.close(); db.close(); }
 });

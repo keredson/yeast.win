@@ -119,6 +119,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
         const amount = quantityForStorage(values.unit || '', values.quantity, values.pounds, values.ounces);
         if (!itemName || !amount) throw new Error('Enter an item and quantity');
         payload = { item_name: itemName, inventory_item_id: itemId || null,
+          supply_id: inventory.find(item => item.id === itemId)?.supply_id || plannedString('supply_id') || null,
           quantity: amount.quantity, unit: amount.unit };
       } else if (kind === 'temperature_control') {
         if (!values.equipment_id) throw new Error('Choose controlled equipment');
@@ -219,7 +220,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
             quantity: undefined, pounds: undefined, ounces: undefined })} /></Form.Item>
         <Form.Item name="inventory_item_id" label="Inventory item"><Select allowClear placeholder="Optional"
           options={inventory.filter(item => item.category === (selectedCategory || initialCategory)).map(item =>
-            ({ value: item.id, label: item.location_name ? `${item.name} · ${item.location_name}` : item.name }))}
+            ({ value: item.id, label: [item.name, item.lot_code && `Lot ${item.lot_code}`, item.location_name].filter(Boolean).join(' · ') }))}
           onChange={id => { const item = inventory.find(row => row.id === id);
             if (item) { changeQuantityUnit(form, selectedUnit || initialUnit, item.display_unit);
               form.setFieldsValue({ item_name: item.name, item_category: item.category, unit: item.display_unit }); } }} /></Form.Item>

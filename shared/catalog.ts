@@ -13,10 +13,12 @@ export interface CatalogEquipment { id: string; name: string; kind: string; manu
   min_temperature_c?: number | null; max_temperature_c?: number | null;
   measurement_min?: number | null; measurement_max?: number | null;
   measurement_unit?: string | null; measurement_channels?: CatalogMeasurementChannel[] }
-export interface CatalogInventory { id: string; name: string; category: string; unit: string }
+export interface CatalogInventory { id: string; name: string; category: string; unit: string;
+  yield_pct?: number | null; color_lovibond?: number | null; alpha_acid_pct?: number | null;
+  hop_form?: string | null; attenuation_pct?: number | null }
 
 export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
-export const catalogSchemaVersion = 13;
+export const catalogSchemaVersion = 14;
 export const vevorModelName = 'VEVOR Electric Brewing System 9.2 Gal/35 L';
 export const catalogModelTables = {
   equipment_models: `CREATE TABLE IF NOT EXISTS equipment_models (
@@ -37,9 +39,17 @@ export const catalogModelTables = {
     id TEXT PRIMARY KEY NOT NULL, model_id TEXT, measurement_kind TEXT,
     measurement_min REAL, measurement_max REAL, measurement_unit TEXT, measurement_scale TEXT)`
 } as const;
-export const catalogTables = [...Object.keys(catalogModelTables), 'inventory'] as const;
-export const catalogInventoryTable = `CREATE TABLE IF NOT EXISTS inventory (
-  id TEXT PRIMARY KEY NOT NULL, name TEXT, category TEXT, unit TEXT)`;
+export const catalogSupplyTables = {
+  supplies: `CREATE TABLE IF NOT EXISTS supplies (
+    id TEXT PRIMARY KEY NOT NULL, name TEXT, category TEXT, unit TEXT)`,
+  supply_grain_specs: `CREATE TABLE IF NOT EXISTS supply_grain_specs (
+    supply_id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL)`,
+  supply_hop_specs: `CREATE TABLE IF NOT EXISTS supply_hop_specs (
+    supply_id TEXT PRIMARY KEY NOT NULL, alpha_acid_pct REAL, hop_form TEXT)`,
+  supply_yeast_specs: `CREATE TABLE IF NOT EXISTS supply_yeast_specs (
+    supply_id TEXT PRIMARY KEY NOT NULL, attenuation_pct REAL)`
+} as const;
+export const catalogTables = [...Object.keys(catalogModelTables), ...Object.keys(catalogSupplyTables)] as const;
 
 export const inventoryCategories = ['Grain', 'Hops', 'Yeast', 'Nutrient', 'Adjunct', 'Chemical', 'Packaging', 'Other'] as const;
 

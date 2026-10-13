@@ -5,7 +5,7 @@ const definitions: Record<string, string> = {
   recipes: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, description TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL`,
   recipe_types: `id TEXT PRIMARY KEY NOT NULL, recipe_type TEXT NOT NULL`,
   recipe_events: `id TEXT PRIMARY KEY NOT NULL, recipe_id TEXT NOT NULL, event_type TEXT NOT NULL, title TEXT NOT NULL, planned_at INTEGER, anchor_event_id TEXT, offset_seconds INTEGER, anchor_point TEXT, duration_seconds INTEGER, instructions TEXT, sort_order INTEGER NOT NULL`,
-  recipe_additions: `event_id TEXT PRIMARY KEY NOT NULL, item_category TEXT, item_name TEXT, catalog_item_id TEXT, inventory_item_id TEXT, quantity REAL, unit TEXT, display_unit TEXT`,
+  recipe_additions: `event_id TEXT PRIMARY KEY NOT NULL, item_category TEXT, item_name TEXT, catalog_item_id TEXT, inventory_item_id TEXT, supply_id TEXT, quantity REAL, unit TEXT, display_unit TEXT`,
   recipe_temperature_control_events: `event_id TEXT PRIMARY KEY NOT NULL, phase TEXT, mode TEXT, target_value REAL, target_unit TEXT, equipment_id TEXT`,
   recipe_pressure_control_events: `event_id TEXT PRIMARY KEY NOT NULL, target_value REAL, target_unit TEXT, equipment_id TEXT`,
   recipe_measurement_targets: `event_id TEXT PRIMARY KEY NOT NULL, measurement_kind TEXT, target_value REAL, target_unit TEXT`,
@@ -19,7 +19,7 @@ const definitions: Record<string, string> = {
   batch_recipe_inputs: `id TEXT PRIMARY KEY NOT NULL, target_fermenter_volume_liters REAL, brewhouse_efficiency_pct REAL, wort_loss_liters REAL`,
   batch_event_inputs: `id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL, alpha_acid_pct REAL, hop_form TEXT, attenuation_pct REAL, mash_efficiency_pct REAL, grain_absorption_l_per_kg REAL`,
   event_ends: `id TEXT PRIMARY KEY NOT NULL, ended_at INTEGER NOT NULL`,
-  additions: `event_id TEXT PRIMARY KEY NOT NULL, item_category TEXT, catalog_item_id TEXT, inventory_item_id TEXT, item_name TEXT, quantity REAL, unit TEXT, display_unit TEXT, lot TEXT`,
+  additions: `event_id TEXT PRIMARY KEY NOT NULL, item_category TEXT, catalog_item_id TEXT, inventory_item_id TEXT, supply_id TEXT, item_name TEXT, quantity REAL, unit TEXT, display_unit TEXT, lot TEXT`,
   batch_measurement_targets: `event_id TEXT PRIMARY KEY NOT NULL, measurement_kind TEXT, target_value REAL, target_unit TEXT`,
   temperature_measurements: measurementColumns(),
   ph_measurements: measurementColumns(),
@@ -62,7 +62,18 @@ const definitions: Record<string, string> = {
     mash_efficiency_pct REAL, grain_absorption_l_per_kg REAL`,
   equipment_archives: `id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, archived_at INTEGER NOT NULL`,
   equipment_use_events: `event_id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL`,
-  inventory_items: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL, default_unit TEXT NOT NULL, created_at INTEGER NOT NULL`,
+  supplies: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL,
+    default_unit TEXT NOT NULL, catalog_supply_id TEXT, created_at INTEGER NOT NULL`,
+  supply_grain_specs: `supply_id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL`,
+  supply_hop_specs: `supply_id TEXT PRIMARY KEY NOT NULL, alpha_acid_pct REAL, hop_form TEXT`,
+  supply_yeast_specs: `supply_id TEXT PRIMARY KEY NOT NULL, attenuation_pct REAL`,
+  supply_lots: `id TEXT PRIMARY KEY NOT NULL, supply_id TEXT NOT NULL, lot_code TEXT,
+    crop_year INTEGER, best_before INTEGER, created_at INTEGER NOT NULL`,
+  lot_grain_specs: `lot_id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL`,
+  lot_hop_specs: `lot_id TEXT PRIMARY KEY NOT NULL, alpha_acid_pct REAL, hop_form TEXT`,
+  lot_yeast_specs: `lot_id TEXT PRIMARY KEY NOT NULL, attenuation_pct REAL`,
+  inventory_items: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL,
+    default_unit TEXT NOT NULL, supply_id TEXT, lot_id TEXT, created_at INTEGER NOT NULL`,
   inventory_ingredient_properties: `id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL, alpha_acid_pct REAL, hop_form TEXT, attenuation_pct REAL`,
   inventory_locations: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, parent_id TEXT, created_at INTEGER NOT NULL`,
   inventory_location_slugs: `id TEXT PRIMARY KEY NOT NULL, slug TEXT NOT NULL`,
@@ -204,6 +215,55 @@ export function legacyEquipmentModelStatements(columns: string[]): string[] {
       WHERE to_vessel_id IN (SELECT id FROM equipment)`
   ];
 }
+
+export const supplyMigrationStatements = [
+  `INSERT OR IGNORE INTO supplies(id, name, category, default_unit, created_at)
+    SELECT 'supply:' || lower(trim(category)) || ':' || lower(trim(name)),
+      MIN(name), MIN(category), MIN(default_unit), MIN(created_at)
+    FROM inventory_items GROUP BY lower(trim(category)), lower(trim(name))`,
+  `UPDATE inventory_items SET supply_id = 'supply:' || lower(trim(category)) || ':' || lower(trim(name))
+    WHERE supply_id IS NULL`,
+  `INSERT OR IGNORE INTO supply_lots(id, supply_id, created_at)
+    SELECT id || ':legacy-lot', supply_id, created_at FROM inventory_items WHERE supply_id IS NOT NULL`,
+  `UPDATE inventory_items SET lot_id = id || ':legacy-lot' WHERE lot_id IS NULL`,
+  `UPDATE supply_lots SET lot_code = (
+    SELECT MIN(trim(p.lot)) FROM inventory_purchases p
+    WHERE p.inventory_item_id = substr(supply_lots.id, 1, length(supply_lots.id) - length(':legacy-lot'))
+      AND p.lot IS NOT NULL AND trim(p.lot) <> ''
+    HAVING COUNT(DISTINCT trim(p.lot)) = 1)
+    WHERE id LIKE '%:legacy-lot' AND lot_code IS NULL
+      AND 1 = (SELECT COUNT(DISTINCT trim(p.lot)) FROM inventory_purchases p
+        WHERE p.inventory_item_id = substr(supply_lots.id, 1, length(supply_lots.id) - length(':legacy-lot'))
+          AND p.lot IS NOT NULL AND trim(p.lot) <> '')`,
+  `INSERT OR IGNORE INTO supply_grain_specs(supply_id, yield_pct, color_lovibond)
+    SELECT i.supply_id, p.yield_pct, p.color_lovibond FROM inventory_items i
+    JOIN inventory_ingredient_properties p ON p.id = i.id
+    WHERE i.category IN ('Grain', 'Adjunct') AND (p.yield_pct IS NOT NULL OR p.color_lovibond IS NOT NULL)
+    ORDER BY i.id`,
+  `INSERT OR IGNORE INTO supply_hop_specs(supply_id, alpha_acid_pct, hop_form)
+    SELECT i.supply_id, p.alpha_acid_pct, p.hop_form FROM inventory_items i
+    JOIN inventory_ingredient_properties p ON p.id = i.id
+    WHERE i.category = 'Hops' AND (p.alpha_acid_pct IS NOT NULL OR p.hop_form IS NOT NULL) ORDER BY i.id`,
+  `INSERT OR IGNORE INTO supply_yeast_specs(supply_id, attenuation_pct)
+    SELECT i.supply_id, p.attenuation_pct FROM inventory_items i
+    JOIN inventory_ingredient_properties p ON p.id = i.id
+    WHERE i.category = 'Yeast' AND p.attenuation_pct IS NOT NULL ORDER BY i.id`,
+  `INSERT OR IGNORE INTO lot_grain_specs(lot_id, yield_pct, color_lovibond)
+    SELECT i.lot_id, p.yield_pct, p.color_lovibond FROM inventory_items i
+    JOIN inventory_ingredient_properties p ON p.id = i.id WHERE i.category IN ('Grain', 'Adjunct')`,
+  `INSERT OR IGNORE INTO lot_hop_specs(lot_id, alpha_acid_pct, hop_form)
+    SELECT i.lot_id, p.alpha_acid_pct, p.hop_form FROM inventory_items i
+    JOIN inventory_ingredient_properties p ON p.id = i.id WHERE i.category = 'Hops'`,
+  `INSERT OR IGNORE INTO lot_yeast_specs(lot_id, attenuation_pct)
+    SELECT i.lot_id, p.attenuation_pct FROM inventory_items i
+    JOIN inventory_ingredient_properties p ON p.id = i.id WHERE i.category = 'Yeast'`,
+  `UPDATE recipe_additions SET supply_id =
+    (SELECT supply_id FROM inventory_items WHERE id = recipe_additions.inventory_item_id)
+    WHERE supply_id IS NULL AND inventory_item_id IN (SELECT id FROM inventory_items)`,
+  `UPDATE additions SET supply_id =
+    (SELECT supply_id FROM inventory_items WHERE id = additions.inventory_item_id)
+    WHERE supply_id IS NULL AND inventory_item_id IN (SELECT id FROM inventory_items)`
+];
 export const schemaStatements = Object.entries(definitions).map(
   // CR-SQLite permits NOT NULL on the primary key, but requires a DEFAULT for
   // other NOT NULL columns so older peers can accept newly added fields.
@@ -219,7 +279,9 @@ export const indexStatements = [
   `CREATE INDEX IF NOT EXISTS pill_bindings_by_pill ON pill_bindings(pill_id, valid_from)`,
   `CREATE INDEX IF NOT EXISTS equipment_use_events_by_equipment ON equipment_use_events(equipment_id, event_id)`,
   `CREATE INDEX IF NOT EXISTS equipment_by_model ON equipment(model_id, removed_at, id)`,
-  `CREATE INDEX IF NOT EXISTS equipment_by_stock_id ON equipment(stock_id)`
+  `CREATE INDEX IF NOT EXISTS equipment_by_stock_id ON equipment(stock_id)`,
+  `CREATE INDEX IF NOT EXISTS inventory_items_by_supply ON inventory_items(supply_id, lot_id)`,
+  `CREATE INDEX IF NOT EXISTS supply_lots_by_supply ON supply_lots(supply_id, lot_code)`
 ];
 
 export const changeColumns = [

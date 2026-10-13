@@ -71,7 +71,7 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
       missing.push('Adjuncts need a separate extract model before gravity can be estimated.');
     }
     if (details.item_category === 'Grain') grainCount++;
-    const item = inventory.find(row => row.id === details.inventory_item_id);
+    const item = inventory.find(row => row.id === (details.supply_id || details.inventory_item_id));
     const source = eventInputs[event.id] || {};
     const yieldPct = positive(item ? item.yield_pct : source.yield_pct);
     const pounds = convertUnit(Number(details.quantity), String(details.unit), 'lb');
@@ -102,7 +102,7 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
   const yeasts = events.filter(event => event.event_type === 'addition' && event.details.item_category === 'Yeast');
   const attenuations = yeasts.map(event => {
     const details = event.details;
-    const item = inventory.find(row => row.id === details.inventory_item_id);
+    const item = inventory.find(row => row.id === (details.supply_id || details.inventory_item_id));
     return positive(item ? item.attenuation_pct : eventInputs[event.id]?.attenuation_pct);
   });
   const attenuation = attenuations.length === 1 && attenuations[0] != null && attenuations[0] <= 100 ? attenuations[0] : null;
