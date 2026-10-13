@@ -136,9 +136,9 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  async function saveLocation(values: { name: string; parent_id?: string }) {
+  async function saveLocation(values: { name: string; parent_id?: string; address?: string }) {
     try {
-      const id = await saveInventoryLocation(db, values.name, values.parent_id || null);
+      const id = await saveInventoryLocation(db, values.name, values.parent_id || null, undefined, undefined, values.address);
       setLocations(await listInventoryLocations(db));
       if (locationReturn === 'item') itemForm.setFieldValue('location_id', id);
       if (locationReturn === 'move') moveForm.setFieldValue('location_id', id);

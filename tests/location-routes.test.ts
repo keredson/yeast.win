@@ -4,9 +4,9 @@ import { locationAncestors, locationDescendantIds, locationForPath } from '../cl
 import type { InventoryLocation } from '../client/db.ts';
 
 const locations: InventoryLocation[] = [
-  { id: 'room', name: 'Back room', parent_id: null, slug: 'back-room-abc' },
-  { id: 'shelf', name: 'Shelf A', parent_id: 'room', slug: 'shelf-a-def' },
-  { id: 'bin', name: 'Bin 1', parent_id: 'shelf', slug: 'bin-1-ghi' }
+  { id: 'room', name: 'Back room', parent_id: null, slug: 'back-room-abc', address: null },
+  { id: 'shelf', name: 'Shelf A', parent_id: 'room', slug: 'shelf-a-def', address: null },
+  { id: 'bin', name: 'Bin 1', parent_id: 'shelf', slug: 'bin-1-ghi', address: null }
 ];
 
 test('location links resolve by stable slug and legacy ID', () => {

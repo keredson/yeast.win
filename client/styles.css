@@ -78,19 +78,22 @@ button, input, textarea { font: inherit; }
 .recipe-detail-heading > div { min-width: 0; }
 .location-index { max-width: 900px; }
 .location-add { margin-top: 20px; }
-.location-map { margin-top: 20px; padding: 16px 18px; border: 1px solid #dce4d9; border-radius: 12px; background: #fff; }
-.location-tree { margin: 0; padding: 0; list-style: none; }
-.location-tree .location-tree { margin-left: 23px; padding-left: 22px; border-left: 2px solid #c4d7c8; }
-.location-tree li { position: relative; margin: 0; padding: 3px 0; }
-.location-tree .location-tree > li::before { content: ''; position: absolute; top: 25px; left: -22px; width: 17px; border-top: 2px solid #c4d7c8; }
-.location-tree .location-tree > li:last-child::after { content: ''; position: absolute; top: 27px; bottom: 0; left: -24px; width: 4px; background: #fff; }
-.location-node { display: flex; align-items: center; gap: 12px; width: fit-content; max-width: 100%; min-height: 48px; padding: 6px 11px;
-  border-radius: 9px; color: #263c36; text-decoration: none; }
-.location-node:hover { background: #f1f7f1; color: #1d604f; }
-.location-node > svg { flex: none; color: #518065; font-size: 19px; }
-.location-node-text { display: flex; flex-direction: column; min-width: 0; }
-.location-node-text strong { overflow-wrap: anywhere; }
-.location-node-text small { color: #728079; font-size: 12px; }
+.location-map { margin-top: 20px; }
+.location-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 16px; }
+.location-card { min-width: 0; padding: 16px; border: 1px solid #dce4d9; border-radius: 12px; background: #fff; }
+.location-card .location-cards { grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 14px; }
+.location-card .location-card { padding: 13px; background: #f8faf7; }
+.location-card .location-card .location-card { background: #fff; }
+.location-card-heading { display: flex; align-items: flex-start; gap: 11px; color: #263c36; text-decoration: none; }
+.location-card-heading:hover { color: #1d604f; }
+.location-card-heading > svg { flex: none; margin-top: 2px; color: #518065; font-size: 19px; }
+.location-card-text { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
+.location-card-text strong { overflow-wrap: anywhere; }
+.location-card-text small { color: #728079; font-size: 12px; }
+.location-card-address, .location-detail-address { white-space: pre-line; overflow-wrap: anywhere; color: #61766a; }
+.location-card-address { margin: 10px 0 0 30px; font-size: 13px; }
+.location-detail-address { margin: 0 0 22px; }
+.location-detail-address svg { margin-right: 5px; color: #518065; }
 .location-breadcrumb { margin: 0 0 14px; color: #728079; font-size: 13px; }
 .location-breadcrumb a { color: #356b53; }
 .location-stock-section { margin-top: 28px; }

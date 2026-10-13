@@ -94,7 +94,7 @@ async function writeIngredientProperties(db: Pick<DB, 'exec'>, id: string, value
     ON CONFLICT(id) DO UPDATE SET ${columns.map(column => `${column} = excluded.${column}`).join(', ')}`,
   [id, ...columns.map(column => values[column] ?? null)]);
 }
-export interface InventoryLocation { id: string; name: string; parent_id: string | null; slug: string }
+export interface InventoryLocation { id: string; name: string; parent_id: string | null; slug: string; address: string | null }
 export interface InventoryMovement { id: string; kind: 'Purchased' | 'Counted' | 'Used' | 'Discarded' | 'Moved in' | 'Moved out'; quantity: number; unit: string; at: number }
 
 const inventoryMassInGrams: Record<string, number> = { g: 1, kg: 1000, oz: 28.349523125, lb: 453.59237, 'lb + oz': 28.349523125 };
@@ -135,9 +135,13 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
         });
       } else if (version < workspaceSchemaVersion) {
         await db.tx(async tx => {
-          if (version === 15) {
-            await tx.exec(schemaStatements[replicatedTables.indexOf('inventory_location_slugs')]);
-            await tx.exec("SELECT crsql_as_crr('inventory_location_slugs')");
+          if (version >= 15) {
+            for (const table of version === 15
+              ? ['inventory_location_slugs', 'inventory_location_addresses']
+              : ['inventory_location_addresses']) {
+              await tx.exec(schemaStatements[replicatedTables.indexOf(table)]);
+              await tx.exec('SELECT crsql_as_crr(?)', [table]);
+            }
           } else {
             for (const table of [...replicatedTables, ...retiredReplicatedTables]) {
               const exists = await tx.execO<{ name: string }>(
@@ -1021,8 +1025,9 @@ export async function listInventoryLocations(db: DB): Promise<InventoryLocation[
     if (row.slug) await db.exec('UPDATE inventory_location_slugs SET slug = ? WHERE id = ?', [slug, row.id]);
     else await db.exec('INSERT OR IGNORE INTO inventory_location_slugs(id, slug) VALUES (?, ?)', [row.id, slug]);
   }
-  return db.execO<InventoryLocation>(`SELECT l.id, l.name, l.parent_id, s.slug FROM inventory_locations l
-    JOIN inventory_location_slugs s ON s.id = l.id ORDER BY l.name COLLATE NOCASE, l.id`);
+  return db.execO<InventoryLocation>(`SELECT l.id, l.name, l.parent_id, s.slug, a.address FROM inventory_locations l
+    JOIN inventory_location_slugs s ON s.id = l.id
+    LEFT JOIN inventory_location_addresses a ON a.id = l.id ORDER BY l.name COLLATE NOCASE, l.id`);
 }
 
 export function inventoryLocationPath(locationId: string | null, locations: InventoryLocation[]): string {
@@ -1041,9 +1046,12 @@ export function inventoryLocationPath(locationId: string | null, locations: Inve
   return names.join(' / ') || 'Unknown location';
 }
 
-export async function saveInventoryLocation(db: DB, name: string, parentId: string | null, id?: string, slug?: string): Promise<string> {
+export async function saveInventoryLocation(db: DB, name: string, parentId: string | null, id?: string, slug?: string,
+  address?: string): Promise<string> {
   const clean = name.trim();
   if (!clean) throw new Error('Enter a location name');
+  const cleanAddress = address?.trim() || null;
+  if (cleanAddress && cleanAddress.length > 500) throw new Error('Keep the address under 500 characters');
   const locations = await listInventoryLocations(db);
   const chosenSlug = slug?.trim() || (id ? locations.find(location => location.id === id)?.slug
     : locationSlug(clean, new Set(locations.flatMap(location => [location.id, location.slug]))));
@@ -1063,6 +1071,11 @@ export async function saveInventoryLocation(db: DB, name: string, parentId: stri
     await db.tx(async tx => {
       await tx.exec('UPDATE inventory_locations SET name = ?, parent_id = ? WHERE id = ?', [clean, parentId, id]);
       await tx.exec('UPDATE inventory_location_slugs SET slug = ? WHERE id = ?', [chosenSlug, id]);
+      if (cleanAddress) {
+        if (locations.find(location => location.id === id)?.address)
+          await tx.exec('UPDATE inventory_location_addresses SET address = ? WHERE id = ?', [cleanAddress, id]);
+        else await tx.exec('INSERT INTO inventory_location_addresses(id, address) VALUES (?, ?)', [id, cleanAddress]);
+      } else await tx.exec('DELETE FROM inventory_location_addresses WHERE id = ?', [id]);
     });
     return id;
   }
@@ -1070,6 +1083,7 @@ export async function saveInventoryLocation(db: DB, name: string, parentId: stri
   await db.tx(async tx => {
     await tx.exec('INSERT INTO inventory_locations(id, name, parent_id, created_at) VALUES (?, ?, ?, ?)', [nextId, clean, parentId, nowSeconds()]);
     await tx.exec('INSERT INTO inventory_location_slugs(id, slug) VALUES (?, ?)', [nextId, chosenSlug]);
+    if (cleanAddress) await tx.exec('INSERT INTO inventory_location_addresses(id, address) VALUES (?, ?)', [nextId, cleanAddress]);
   });
   return nextId;
 }
@@ -1081,6 +1095,7 @@ export async function deleteInventoryLocation(db: DB, id: string): Promise<void>
   ]);
   if (children.length || stock.length) throw new Error('Move stock and child locations before deleting this location');
   await db.tx(async tx => {
+    await tx.exec('DELETE FROM inventory_location_addresses WHERE id = ?', [id]);
     await tx.exec('DELETE FROM inventory_location_slugs WHERE id = ?', [id]);
     await tx.exec('DELETE FROM inventory_locations WHERE id = ?', [id]);
   });
