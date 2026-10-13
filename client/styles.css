@@ -129,7 +129,7 @@ button, input, textarea { font: inherit; }
 .group-tables { margin-top: 24px; gap: 30px; }
 .inventory-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
 .inventory-filter label { color: #61766a; font-weight: 600; }
-.inventory-filter .ant-select { width: min(100%, 360px); }
+.location-tree-popup .ant-select-tree-treenode:has(> .ant-select-tree-indent:empty) > .ant-select-tree-switcher-noop { display: none; }
 .equipment-category { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .equipment-category > h2 { margin: 0; font-size: 22px; }
 .group-table h3 { margin: 0 0 10px; font-size: 18px; }

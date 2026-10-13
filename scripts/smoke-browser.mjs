@@ -730,7 +730,9 @@ try {
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'lb + oz' }).click();
   await page.waitForFunction(async () => (await (await fetch('/api/me')).json()).preferred_units.mass === 'lb + oz');
   await navigateSection(page, 'Inventory');
-  await page.getByRole('combobox', { name: 'Location' }).waitFor();
+  if (await page.getByRole('combobox', { name: 'Location' }).count()) {
+    throw new Error('Inventory should hide the location filter when there are no locations');
+  }
   await page.getByRole('link', { name: 'grain', exact: true }).click();
   await page.getByRole('dialog', { name: 'New grain item' }).getByRole('combobox', { name: 'Item' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Maris Otter malt' }).last().click();
@@ -925,6 +927,8 @@ try {
   await page.waitForURL(/\/location\/shelf-b$/);
   await page.getByRole('heading', { name: 'Shelf B' }).waitFor();
   await navigateSection(page, 'Inventory');
+  const locationFilterWidth = (await page.locator('.inventory-filter .ant-select').boundingBox())?.width || 0;
+  if (locationFilterWidth > 240) throw new Error(`Location filter is too wide: ${locationFilterWidth}px`);
   await page.getByRole('combobox', { name: 'Location' }).click();
   await page.locator('.ant-select-tree:visible').getByText('Back room', { exact: true }).click();
   if (await page.locator('.group-table').getByRole('link', { name: 'Smoke grain' }).count() !== 1) {

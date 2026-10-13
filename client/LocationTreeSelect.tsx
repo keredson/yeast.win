@@ -25,5 +25,5 @@ export function LocationTreeSelect({ locations, excludedIds, includeCreate = fal
   locations: InventoryLocation[]; excludedIds?: Set<string>; includeCreate?: boolean;
 } & Omit<React.ComponentProps<typeof TreeSelect>, 'treeData'>) {
   return <TreeSelect {...props} treeData={locationTreeData(locations, excludedIds, includeCreate)}
-    treeDefaultExpandAll showSearch treeNodeFilterProp="title" treeNodeLabelProp="label" />;
+    popupClassName="location-tree-popup" treeDefaultExpandAll showSearch={false} treeNodeLabelProp="label" />;
 }
