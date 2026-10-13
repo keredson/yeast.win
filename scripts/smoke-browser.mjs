@@ -938,8 +938,8 @@ try {
   await page.waitForURL(url => url.pathname === '/inventory/smoke-grain');
   await page.getByRole('heading', { name: 'Lots and locations' }).waitFor();
   await page.getByRole('button', { name: 'Actions for Unspecified lot' }).click();
-  await page.getByRole('menuitem', { name: 'Bought' }).click();
-  const bought = page.getByRole('dialog', { name: 'Bought Smoke grain' });
+  await page.getByRole('menuitem', { name: 'Buy' }).click();
+  const bought = page.getByRole('dialog', { name: 'Buy Smoke grain' });
   await bought.getByRole('spinbutton', { name: 'Quantity · pounds' }).fill('1');
   await bought.getByRole('button', { name: 'Save' }).click();
   await bought.waitFor({ state: 'hidden' });
@@ -1012,8 +1012,8 @@ try {
   await navigateSection(page, 'Inventory');
   await grainRow.getByRole('link', { name: 'Smoke grain' }).click();
   await page.getByRole('button', { name: 'Actions for Unspecified lot' }).click();
-  await page.getByRole('menuitem', { name: 'Bought' }).click();
-  const refill = page.getByRole('dialog', { name: 'Bought Smoke grain' });
+  await page.getByRole('menuitem', { name: 'Buy' }).click();
+  const refill = page.getByRole('dialog', { name: 'Buy Smoke grain' });
   await refill.getByRole('spinbutton', { name: 'Quantity · pounds' }).fill('2');
   await refill.getByRole('button', { name: 'Save' }).click();
   await refill.waitFor({ state: 'hidden' });

@@ -329,7 +329,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
               ...(row.lotItem && ['Grain', 'Adjunct', 'Hops', 'Yeast'].includes(item.category)
                 ? [{ key: 'lot', label: 'Edit lot properties' }] : []),
               ...(row.lotItem ? [{ key: 'add', label: 'Add stock' }] : []),
-              ...(row.stockItem ? [{ key: 'purchase', label: 'Bought' }, { key: 'count', label: 'Counted' },
+              ...(row.stockItem ? [{ key: 'purchase', label: 'Buy' }, { key: 'count', label: 'Count' },
                 { key: 'discard', label: 'Discard' }, { key: 'move', label: 'Move' }] : [])],
             onClick: ({ key }) => {
               if (key === 'lot' && row.lotItem) {
@@ -439,7 +439,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
       </Form>
     </Modal>
     <Modal title={entryKind === 'count' ? `Count ${entryItem?.name || 'stock'}` : entryKind === 'discard'
-      ? `Discard ${entryItem?.name || 'stock'}` : `Bought ${entryItem?.name || 'stock'}`} open={!!entryKind}
+      ? `Discard ${entryItem?.name || 'stock'}` : `Buy ${entryItem?.name || 'stock'}`} open={!!entryKind}
       onCancel={() => { setEntryKind(null); setEntryItemId(null); }} footer={null} destroyOnHidden>
       <Form key={`${entryItem?.id || 'none'}-${entryKind}-${preferredUnits.mass}`} form={entryForm} layout="vertical" onFinish={addEntry}
         initialValues={{ unit: entryDisplayUnit }}>
