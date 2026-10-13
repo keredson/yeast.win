@@ -5,9 +5,9 @@ import { CloudOutlined, ContainerOutlined, ControlOutlined, DashboardOutlined, E
 import { boilOffKinds, capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
 import { assignEquipmentToBatch, createEquipment, deleteEquipment, listCurrentEquipmentUses, releaseEquipmentUse,
-  updateEquipmentBoilHeatLoss, updateEquipmentCalibration, updateEquipmentIdentity, updateEquipmentRatedPower, updateEquipmentCapacity,
+  addEquipmentCapability, updateEquipmentBoilHeatLoss, updateEquipmentCalibration, updateEquipmentIdentity,
+  updateEquipmentRatedPower, updateEquipmentCapacity, updateEquipmentPressureRating,
   updateEquipmentTemperatureOffset, updateEquipmentThermalCapabilities, updateBrewingLosses, latestMeasuredMashEfficiency,
-  updateFermenterCapabilities,
   updateEquipmentMeasurementRange,
   type Batch, type Equipment, type EquipmentSpecifications, type EquipmentUse, type LocalDb } from './db.ts';
 import { capacityInLiters, capacityLabel, capacityUnits } from '../shared/capacity.ts';
@@ -15,10 +15,44 @@ import { changeNumberUnit } from './unitFields.ts';
 import { equipmentPathSegment, equipmentSlug } from './equipmentRoutes.ts';
 import { heatLossFromBoil, predictedBoilOff } from './boilOff.ts';
 import { convertUnit, unitOptions, unitGroups, type PreferredUnits } from '../shared/units.ts';
+import { measurementKinds } from './constants.ts';
 
 function rangeLabel(min: number, max: number, scale: string | undefined): string {
   return `${min}–${max}${scale === 'SG' ? ' (specific gravity)' : ` ${scale || ''}`}`;
 }
+
+function measurementLabel(kind: string): string {
+  if (kind === 'mass') return 'Mass';
+  return measurementKinds.find(item => item.value === kind)?.label || kind;
+}
+
+function measurementSentenceLabel(kind: string): string {
+  const label = measurementLabel(kind);
+  return label[0].toLowerCase() + label.slice(1);
+}
+
+function channelSummary(channels: { measurement_kind: string }[] | undefined): string {
+  return [...new Set((channels || []).map(channel => measurementLabel(channel.measurement_kind)))].join(' · ');
+}
+
+const primaryMeasurementKinds: Record<string, string> = {
+  hydrometer: 'gravity', refractometer: 'gravity', ph_meter: 'ph', scale: 'mass',
+  pressure_gauge: 'pressure', carbonation_meter: 'carbonation',
+  dissolved_oxygen_meter: 'dissolved_oxygen', thermometer: 'temperature'
+};
+
+const channelEquipmentKinds: Record<string, string> = {
+  gravity: 'hydrometer', temperature: 'thermometer', ph: 'ph_meter', mass: 'scale',
+  pressure: 'pressure_gauge', carbonation: 'carbonation_meter',
+  dissolved_oxygen: 'dissolved_oxygen_meter'
+};
+
+function channelUnits(kind: string): readonly string[] {
+  if (kind === 'volume') return unitGroups.volume;
+  return measurementRangeUnits[channelEquipmentKinds[kind]] || [];
+}
+
+const measurementCapabilityKinds = [...measurementKinds, { value: 'mass', label: 'Mass', unit: 'g' }];
 
 const calibrationProfiles: Record<string, { fields: { key: string; label: string }[] }> = {
   ph_meter: { fields: [
@@ -66,16 +100,16 @@ function pressureLabel(kpa: number | null | undefined, unit: PreferredUnits['pre
 
 function equipmentCapabilities(row: Equipment): ReactNode {
   const capabilities: { label: string; icon: ReactNode }[] = [];
-  if (capacityKinds.has(row.kind)) capabilities.push({ label: 'Holds liquid', icon: <ContainerOutlined /> });
+  if (row.has_liquid_containment) capabilities.push({ label: 'Holds liquid', icon: <ContainerOutlined /> });
   if (row.has_heating) capabilities.push({ label: 'Heating', icon: <FireOutlined /> });
-  if (row.has_cooling || ['chiller', 'glycol_chiller', 'refrigerator'].includes(row.kind)) {
+  if (row.has_cooling) {
     capabilities.push({ label: 'Cooling', icon: <CloudOutlined /> });
   }
   if (row.has_temperature_control) capabilities.push({ label: 'Temperature control', icon: <ControlOutlined /> });
-  if (row.max_pressure_kpa != null) capabilities.push({ label: 'Pressure rated', icon: <DashboardOutlined /> });
+  if (row.has_pressure_rating) capabilities.push({ label: 'Pressure rated', icon: <DashboardOutlined /> });
   if (row.kind === 'pump') capabilities.push({ label: 'Moves liquid', icon: <SwapOutlined /> });
   const measured = [...new Set(row.measurement_channels?.map(channel => channel.measurement_kind) || [])];
-  if (measured.length || measurementRangeUnits[row.kind]) {
+  if (measured.length) {
     capabilities.push({ label: measured.length ? `Measures ${measured.join(', ')}` : 'Measures', icon: <ExperimentOutlined /> });
   }
   return capabilities.length ? <div className="equipment-capabilities">{capabilities.map(({ label, icon }) =>
@@ -97,32 +131,34 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const [newTemperatureCalibration, setNewTemperatureCalibration] = useState(false);
   const [editIdentity, setEditIdentity] = useState(false);
   const [editCapacity, setEditCapacity] = useState(false);
+  const [editPressure, setEditPressure] = useState(false);
   const [editPower, setEditPower] = useState(false);
   const [editThermal, setEditThermal] = useState(false);
   const [editBrewingLosses, setEditBrewingLosses] = useState(false);
   const [recentMashEfficiency, setRecentMashEfficiency] = useState<number | null>(null);
-  const [editRange, setEditRange] = useState(false);
-  const [editFermenter, setEditFermenter] = useState(false);
+  const [editRange, setEditRange] = useState<string | null>(null);
+  const [addingCapability, setAddingCapability] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [uses, setUses] = useState<EquipmentUse[]>([]);
   const [assignBatchId, setAssignBatchId] = useState<string | undefined>();
   const [equipmentForm] = Form.useForm();
   const [capacityForm] = Form.useForm();
+  const [pressureForm] = Form.useForm();
   const [powerForm] = Form.useForm();
   const [thermalForm] = Form.useForm();
   const [rangeForm] = Form.useForm();
-  const [fermenterForm] = Form.useForm();
+  const [capabilityForm] = Form.useForm();
   const item = equipment.find(row => row.id === selectedId) || null;
   const newCapacityUnit = Form.useWatch('capacity_unit', equipmentForm) as string | undefined;
   const newRangeUnit = Form.useWatch('measurement_unit', equipmentForm) as string | undefined;
   const editCapacityUnit = Form.useWatch('capacity_unit', capacityForm) as string | undefined;
+  const editPressureRatingUnit = Form.useWatch('pressure_unit', pressureForm) as string | undefined;
   const editRangeUnit = Form.useWatch('measurement_unit', rangeForm) as string | undefined;
+  const addChannelUnit = Form.useWatch('measurement_unit', capabilityForm) as string | undefined;
   const newPressureUnit = Form.useWatch('pressure_unit', equipmentForm) as string | undefined;
   const newHeating = Form.useWatch('has_heating', equipmentForm) as boolean | undefined;
   const newCooling = Form.useWatch('has_cooling', equipmentForm) as boolean | undefined;
-  const editCooling = Form.useWatch('has_cooling', thermalForm) as boolean | undefined;
   const newFermenterControl = Form.useWatch('built_in_temperature_control', equipmentForm) as boolean | undefined;
-  const editPressureUnit = Form.useWatch('pressure_unit', fermenterForm) as string | undefined;
   const profile = item ? calibrationProfiles[item.kind] : undefined;
   const specs: EquipmentSpecifications = item || {};
   const calibrationValues = Object.fromEntries((profile?.fields || []).map(field => [field.key,
@@ -130,14 +166,45 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const hasTemperatureReading = !!item && (temperatureCalibrationKinds.has(item.kind)
     || item.measurement_channels?.some(channel => channel.measurement_kind === 'temperature')
     || !!item.has_temperature_control);
+  const createPrimaryMeasurement = !!creatingKind && !selectedCatalogModel && !!measurementRangeUnits[creatingKind];
+  const catalogCreationChannels = selectedCatalogModel?.measurement_channels || [];
+  const editingChannel = item?.measurement_channels?.find(channel => channel.measurement_kind === editRange);
   const ratedEstimate = specs.rated_power_watts == null || specs.boil_heat_loss_watts == null
     ? null : predictedBoilOff(specs.rated_power_watts, specs.boil_heat_loss_watts);
-  const thermalKind = !!item && (boilOffKinds.has(item.kind) || item.kind === 'fermenter'
-    || item.kind === 'fermentation_temperature_control');
-  const coolingAvailableForNew = creatingKind === 'fermenter' || creatingKind === 'fermentation_temperature_control'
-    || !!selectedCatalogModel?.has_cooling;
-  const coolingAvailableForItem = item?.kind === 'fermenter' || item?.kind === 'fermentation_temperature_control'
-    || !!specs.has_cooling;
+  const thermalKind = !!item && (!!item.has_cooling || !!item.has_temperature_control);
+  const showCooling = !!item?.has_cooling;
+  const createCapacity = !!creatingKind && (selectedCatalogModel
+    ? !!selectedCatalogModel.has_liquid_containment : capacityKinds.has(creatingKind));
+  const createHeating = !!creatingKind && (selectedCatalogModel
+    ? !!selectedCatalogModel.has_heating : boilOffKinds.has(creatingKind)
+      || ['fermenter', 'fermentation_temperature_control'].includes(creatingKind));
+  const createCooling = !!creatingKind && (selectedCatalogModel
+    ? !!selectedCatalogModel.has_cooling : ['fermenter', 'fermentation_temperature_control'].includes(creatingKind));
+  const newTemperatureControl = !!creatingKind && (selectedCatalogModel
+    ? !!selectedCatalogModel.has_temperature_control : boilOffKinds.has(creatingKind)
+      || creatingKind === 'fermentation_temperature_control');
+  const newThermal = createHeating || createCooling || newTemperatureControl
+    || !!creatingKind && !selectedCatalogModel && creatingKind === 'fermenter';
+  const initialEquipmentValues = {
+    name: selectedCatalogModel?.name, capacity: selectedCatalogModel?.capacity_liters,
+    capacity_unit: 'L', measurement_min: selectedCatalogModel?.measurement_min,
+    measurement_max: selectedCatalogModel?.measurement_max,
+    measurement_unit: selectedCatalogModel?.measurement_unit || measurementRangeUnits[creatingKind || '']?.[0],
+    channel_ranges: Object.fromEntries(catalogCreationChannels.map(channel => [channel.measurement_kind, {
+      min: channel.measurement_min, max: channel.measurement_max,
+      unit: channel.measurement_scale || channel.measurement_unit || channelUnits(channel.measurement_kind)[0]
+    }])),
+    rated_power_watts: selectedCatalogModel?.rated_power_watts,
+    has_heating: !!selectedCatalogModel?.has_heating || !!creatingKind && !selectedCatalogModel && boilOffKinds.has(creatingKind),
+    has_cooling: !!selectedCatalogModel?.has_cooling,
+    rated_heat_removal_watts: selectedCatalogModel?.rated_heat_removal_watts,
+    min_temperature_c: selectedCatalogModel?.min_temperature_c,
+    max_temperature_c: selectedCatalogModel?.max_temperature_c,
+    built_in_temperature_control: selectedCatalogModel?.built_in_temperature_control || false,
+    max_pressure: selectedCatalogModel?.max_pressure_kpa == null ? undefined
+      : convertUnit(selectedCatalogModel.max_pressure_kpa, 'kPa', preferredUnits.pressure),
+    pressure_unit: preferredUnits.pressure
+  };
   const itemUses = uses.filter(use => use.equipment_id === item?.id);
   const availableBatches = batches.filter(batch => !itemUses.some(use => use.batch_id === batch.id));
 
@@ -162,6 +229,40 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   }
 
   useEffect(() => {
+    if (!creatingKind) return;
+    equipmentForm.resetFields();
+    equipmentForm.setFieldsValue(initialEquipmentValues);
+  }, [creatingKind, selectedCatalogModel?.id, preferredUnits.pressure, equipmentForm]);
+
+  useEffect(() => {
+    if (!editRange || !editingChannel) return;
+    rangeForm.resetFields();
+    rangeForm.setFieldsValue({
+      measurement_min: editingChannel.measurement_min,
+      measurement_max: editingChannel.measurement_max,
+      measurement_unit: editingChannel.measurement_scale || editingChannel.measurement_unit || channelUnits(editRange)[0]
+    });
+  }, [editRange, item?.id, rangeForm]);
+
+  useEffect(() => {
+    if (!addingCapability) return;
+    capabilityForm.resetFields();
+    if (addingCapability.startsWith('measurement:')) {
+      capabilityForm.setFieldValue('measurement_unit', channelUnits(addingCapability.slice('measurement:'.length))[0]);
+    }
+  }, [addingCapability, item?.id, capabilityForm]);
+
+  useEffect(() => {
+    if (!editThermal || !item) return;
+    thermalForm.resetFields();
+    thermalForm.setFieldsValue({
+      rated_heat_removal_watts: item.rated_heat_removal_watts,
+      min_temperature_c: item.min_temperature_c,
+      max_temperature_c: item.max_temperature_c
+    });
+  }, [editThermal, item?.id, thermalForm]);
+
+  useEffect(() => {
     if (!item || !['all_in_one', 'mash_tun', 'kettle', 'electric_kettle'].includes(item.kind)) return;
     let active = true;
     setRecentMashEfficiency(null);
@@ -172,41 +273,46 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   function validRange(min: number | undefined, max: number | undefined, unit: string | undefined, kind: string) {
     if (min == null && max == null) return null;
     if (min == null || max == null || !Number.isFinite(min) || !Number.isFinite(max) || min >= max
-      || !unit || !measurementRangeUnits[kind]?.includes(unit)) throw new Error('Enter a valid measurement range and unit');
+      || !unit || !(measurementRangeUnits[kind] || channelUnits(kind)).includes(unit)) {
+      throw new Error('Enter a valid measurement range and unit');
+    }
     return { min, max, unit };
   }
 
   async function create(values: { name: string; capacity?: number; capacity_unit?: string;
     measurement_min?: number; measurement_max?: number; measurement_unit?: string; rated_power_watts?: number;
+    channel_ranges?: Record<string, { min?: number; max?: number; unit?: string }>;
     built_in_temperature_control?: boolean; max_pressure?: number; pressure_unit?: string;
     has_heating?: boolean; has_cooling?: boolean; rated_heat_removal_watts?: number;
     min_temperature_c?: number; max_temperature_c?: number }) {
     if (!creatingKind) return;
     try {
       const overrides: EquipmentSpecifications = {};
-      if (capacityKinds.has(creatingKind)) {
+      if (createCapacity) {
         const capacity = capacityInLiters(values.capacity, values.capacity_unit);
         if (capacity != null) overrides.capacity_liters = capacity;
       }
-      if (measurementRangeUnits[creatingKind]) {
+      if (createPrimaryMeasurement) {
         const range = validRange(values.measurement_min, values.measurement_max, values.measurement_unit, creatingKind);
         if (range) Object.assign(overrides, { measurement_min: range.min, measurement_max: range.max, measurement_unit: range.unit });
       }
-      if (boilOffKinds.has(creatingKind) && values.rated_power_watts != null) {
+      if (boilOffKinds.has(creatingKind) && createHeating && values.rated_power_watts != null) {
         if (!Number.isFinite(values.rated_power_watts) || values.rated_power_watts <= 0) throw new Error('Enter a positive power');
         overrides.rated_power_watts = values.rated_power_watts;
       }
-      if (creatingKind === 'fermenter') {
+      if (creatingKind === 'fermenter' && !selectedCatalogModel || selectedCatalogModel?.has_temperature_control) {
         overrides.built_in_temperature_control = !!values.built_in_temperature_control;
+      }
+      if (selectedCatalogModel?.has_pressure_rating || !selectedCatalogModel && creatingKind === 'fermenter') {
         overrides.max_pressure_kpa = pressureInKpa(values.max_pressure, values.pressure_unit);
       }
-      if (['all_in_one', 'electric_kettle', 'fermentation_temperature_control', 'fermenter'].includes(creatingKind)) {
-        overrides.has_heating = !!values.has_heating;
-        overrides.has_cooling = !!values.has_cooling;
+      if (newThermal) {
+        overrides.has_heating = createHeating && (!!values.has_heating || boilOffKinds.has(creatingKind));
+        overrides.has_cooling = createCooling && !!values.has_cooling;
         overrides.has_temperature_control = creatingKind === 'fermenter'
-          ? !!values.built_in_temperature_control : true;
-        if (values.has_heating && values.rated_power_watts != null) overrides.rated_power_watts = values.rated_power_watts;
-        if (values.has_cooling && values.rated_heat_removal_watts != null) {
+          ? !!values.built_in_temperature_control : newTemperatureControl;
+        if (createHeating && values.rated_power_watts != null) overrides.rated_power_watts = values.rated_power_watts;
+        if (createCooling && values.has_cooling && values.rated_heat_removal_watts != null) {
           if (!Number.isFinite(values.rated_heat_removal_watts) || values.rated_heat_removal_watts <= 0) {
             throw new Error('Enter a positive heat removal rate');
           }
@@ -219,25 +325,32 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           overrides.max_temperature_c = values.max_temperature_c;
         }
       }
-      const id = await createEquipment(db, values.name.trim(), creatingKind, selectedCatalogModel || undefined, overrides);
+      const channelRanges: Record<string, { min: number; max: number; unit: string }> = {};
+      for (const channel of catalogCreationChannels) {
+        const value = values.channel_ranges?.[channel.measurement_kind];
+        const range = validRange(value?.min, value?.max, value?.unit,
+          channelEquipmentKinds[channel.measurement_kind]);
+        if (range) channelRanges[channel.measurement_kind] = range;
+      }
+      const id = await createEquipment(db, values.name.trim(), creatingKind,
+        selectedCatalogModel || undefined, overrides, channelRanges);
       setCreatingKind(null); setSelectedCatalogModel(null); onSelect(id); await onChanged();
     }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-  }
-
-  async function saveFermenter(values: { built_in_temperature_control?: boolean; max_pressure?: number; pressure_unit?: string }) {
-    if (!item) return;
-    try {
-      await updateFermenterCapabilities(db, item, !!values.built_in_temperature_control,
-        pressureInKpa(values.max_pressure, values.pressure_unit) ?? null);
-      setEditFermenter(false); await onChanged();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
   async function saveCapacity(values: { capacity?: number; capacity_unit?: string }) {
     if (!item) return;
     try { await updateEquipmentCapacity(db, item, capacityInLiters(values.capacity, values.capacity_unit)); setEditCapacity(false); await onChanged(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
+  async function savePressure(values: { max_pressure?: number; pressure_unit?: string }) {
+    if (!item) return;
+    try {
+      await updateEquipmentPressureRating(db, item, pressureInKpa(values.max_pressure, values.pressure_unit) ?? null);
+      setEditPressure(false); await onChanged();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
   async function savePower(values: { rated_power_watts?: number }) {
@@ -254,10 +367,10 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     if (!item) return;
     try {
       await updateEquipmentThermalCapabilities(db, item, {
-        has_heating: !!values.has_heating, rated_power_watts: values.has_heating ? values.rated_power_watts ?? null : null,
-        has_cooling: !!values.has_cooling,
-        rated_heat_removal_watts: values.has_cooling ? values.rated_heat_removal_watts ?? null : null,
-        has_temperature_control: !!item.has_temperature_control || thermalKind && item.kind !== 'fermenter',
+        has_heating: !!item.has_heating, rated_power_watts: item.rated_power_watts ?? null,
+        has_cooling: !!item.has_cooling,
+        rated_heat_removal_watts: item.has_cooling ? values.rated_heat_removal_watts ?? null : null,
+        has_temperature_control: !!item.has_temperature_control,
         min_temperature_c: values.min_temperature_c ?? null, max_temperature_c: values.max_temperature_c ?? null
       });
       setEditThermal(false); await onChanged();
@@ -299,11 +412,33 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   }
 
   async function saveRange(values: { measurement_min?: number; measurement_max?: number; measurement_unit?: string }) {
-    if (!item) return;
+    if (!item || !editRange) return;
     try {
-      const range = validRange(values.measurement_min, values.measurement_max, values.measurement_unit, item.kind);
-      await updateEquipmentMeasurementRange(db, item, range);
-      setEditRange(false); await onChanged();
+      const range = validRange(values.measurement_min, values.measurement_max, values.measurement_unit,
+        channelEquipmentKinds[editRange]);
+      await updateEquipmentMeasurementRange(db, item, range, editRange);
+      setEditRange(null); await onChanged();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
+  async function saveAddedCapability(values: { capacity_liters?: number; max_pressure_kpa?: number;
+    rated_power_watts?: number; rated_heat_removal_watts?: number;
+    min_temperature_c?: number; max_temperature_c?: number;
+    measurement_min?: number; measurement_max?: number; measurement_unit?: string }) {
+    if (!item || !addingCapability) return;
+    try {
+      if (addingCapability.startsWith('measurement:')) {
+        const kind = addingCapability.slice('measurement:'.length);
+        const range = validRange(values.measurement_min, values.measurement_max, values.measurement_unit,
+          channelEquipmentKinds[kind] || kind);
+        await addEquipmentCapability(db, item, addingCapability, {
+          measurement_min: range?.min, measurement_max: range?.max,
+          measurement_unit: values.measurement_unit || channelUnits(kind)[0]
+        });
+      } else {
+        await addEquipmentCapability(db, item, addingCapability, values);
+      }
+      setAddingCapability(null); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
@@ -332,6 +467,16 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const query = catalogQuery.trim().toLocaleLowerCase();
   const matchingModels = catalog.filter(model => (!catalogKind || model.kind === catalogKind)
     && (!query || `${model.name} ${equipmentKindLabel(model.kind)}`.toLocaleLowerCase().includes(query)));
+  const missingCapabilities = item ? [
+    ...(!item.has_liquid_containment ? [{ key: 'liquid_containment', label: 'Liquid capacity' }] : []),
+    ...(!item.has_pressure_rating ? [{ key: 'pressure_rating', label: 'Pressure rating' }] : []),
+    ...(!item.has_heating ? [{ key: 'heating', label: 'Heating' }] : []),
+    ...(!item.has_cooling ? [{ key: 'cooling', label: 'Cooling' }] : []),
+    ...(!item.has_temperature_control ? [{ key: 'temperature_control', label: 'Temperature control' }] : []),
+    { key: 'measurement', label: 'Measurement channel', children: measurementCapabilityKinds
+      .filter(kind => !item.measurement_channels?.some(channel => channel.measurement_kind === kind.value))
+      .map(kind => ({ key: `measurement:${kind.value}`, label: kind.label })) }
+  ].filter(entry => entry.key !== 'measurement' || entry.children?.length) : [];
   function chooseCatalogModel(model: CatalogEquipment) {
     setCatalogPickerOpen(false);
     setSelectedCatalogModel(model);
@@ -383,23 +528,21 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
               <Button disabled={!assignBatchId} onClick={() => void assignBatch()}>Assign</Button>
             </div>}
           </div>
-          {capacityKinds.has(item.kind) && <div className="equipment-parameter"><span>Capacity: {capacityLabel(specs.capacity_liters ?? undefined) || 'Not set'}</span>
+          {item.has_liquid_containment && <div className="equipment-parameter"><span>Capacity: {capacityLabel(specs.capacity_liters ?? undefined) || 'Not set'}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit capacity" onClick={() => setEditCapacity(true)} /></div>}
-          {item.kind === 'fermenter' && <div className="equipment-parameter"><span>
-            Built-in temperature control: {specs.built_in_temperature_control ? 'Yes' : 'No'}<br />
+          {item.has_pressure_rating && <div className="equipment-parameter"><span>
             Pressure rating: {pressureLabel(specs.max_pressure_kpa, preferredUnits.pressure)}</span>
-            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit fermenter capabilities" onClick={() => setEditFermenter(true)} /></div>}
-          {boilOffKinds.has(item.kind) && <div className="equipment-parameter"><span>Rated power: {specs.rated_power_watts != null
+            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit pressure rating" onClick={() => setEditPressure(true)} /></div>}
+          {item.has_heating && <div className="equipment-parameter"><span>Rated power: {specs.rated_power_watts != null
             ? `${specs.rated_power_watts} W` : 'Not set'}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit rated power" onClick={() => setEditPower(true)} /></div>}
           {thermalKind && <div className="equipment-parameter"><span>
-            {(item.kind !== 'fermenter' || specs.has_temperature_control) && <>Temperature range: {
+            {specs.has_temperature_control && <>Temperature range: {
               specs.min_temperature_c == null && specs.max_temperature_c == null ? 'Not set'
                 : `${specs.min_temperature_c ?? '—'}–${specs.max_temperature_c ?? '—'} °C`}<br /></>}
-            {!boilOffKinds.has(item.kind) && <>Heating: {specs.has_heating
-              ? specs.rated_power_watts == null ? 'Available' : `${specs.rated_power_watts} W` : 'Not configured'}<br /></>}
-            Cooling: {specs.has_cooling ? specs.rated_heat_removal_watts == null
-              ? 'Available' : `${specs.rated_heat_removal_watts} W heat removal` : 'Not configured'}</span>
+            {showCooling &&
+              <>Rated heat removal: {specs.rated_heat_removal_watts == null
+                ? 'Not set' : `${specs.rated_heat_removal_watts} W`}</>}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit thermal capabilities" onClick={() => setEditThermal(true)} /></div>}
           {hasTemperatureReading && <div className="equipment-parameter"><span>Temperature offset: {specs.temperature_offset_c == null
             ? 'Not calibrated' : `${specs.temperature_offset_c > 0 ? '+' : ''}${Number(specs.temperature_offset_c.toFixed(2))} °C`}</span>
@@ -415,18 +558,23 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
               Mash dead space: {specs.mash_deadspace_liters == null ? 'Not set' : `${specs.mash_deadspace_liters} L`}<br />
               Kettle retention: {specs.kettle_retention_liters == null ? 'Not set' : `${specs.kettle_retention_liters} L`}</span>
               <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit brewing losses" onClick={() => setEditBrewingLosses(true)} /></div>}
-          {measurementRangeUnits[item.kind] && <div className="equipment-parameter"><span>Measurement range: {specs.measurement_min != null && specs.measurement_max != null
-            ? rangeLabel(specs.measurement_min, specs.measurement_max, specs.measurement_unit ?? undefined) : 'Not set'}</span>
-            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit measurement range" onClick={() => setEditRange(true)} /></div>}
-          {item.measurement_channels?.filter(channel => channel.measurement_kind === 'temperature'
-            && item.kind !== 'thermometer').map(channel => <div key={channel.id} className="equipment-parameter">
-              Temperature measurement: {channel.measurement_min != null && channel.measurement_max != null
+          {item.measurement_channels?.map(channel => <div key={channel.id} className="equipment-parameter"><span>
+              {measurementLabel(channel.measurement_kind)}: {channel.measurement_min != null && channel.measurement_max != null
                 ? rangeLabel(channel.measurement_min, channel.measurement_max,
-                  channel.measurement_scale || channel.measurement_unit || undefined) : 'Available'}
+                  channel.measurement_scale || channel.measurement_unit || undefined) : 'Available'}</span>
+              <Button type="text" size="small" icon={<EditOutlined />}
+                aria-label={channel.measurement_kind === primaryMeasurementKinds[item.kind]
+                  ? 'Edit measurement range' : `Edit ${measurementSentenceLabel(channel.measurement_kind)} range`}
+                onClick={() => setEditRange(channel.measurement_kind)} />
             </div>)}
           {profile?.fields.map(field => <div key={field.key} className="equipment-parameter"><span>{field.label}: {calibrationValues[field.key] == null ? 'Not calibrated' : String(calibrationValues[field.key])}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${field.label}`} onClick={() => setEditCalibration(true)} /></div>)}
         </div>
+        {missingCapabilities.length > 0 && <Dropdown trigger={['click']} placement="bottomLeft"
+          menu={{ items: missingCapabilities, triggerSubMenuAction: 'click',
+            onClick: ({ key }) => setAddingCapability(key) }}>
+          <Button icon={<PlusOutlined />}>Add capability</Button>
+        </Dropdown>}
         <div className="equipment-delete"><Popconfirm title={`Delete ${item.name}?`}
           description="Used equipment stays in batch history. Unused equipment and calibrations are removed."
           okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => void remove()}>
@@ -444,7 +592,8 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       {matchingModels.length ? <div className="equipment-catalog-list" role="list">
         {matchingModels.map(model => <div key={model.id} role="listitem">
           <button type="button" className="equipment-catalog-option" onClick={() => chooseCatalogModel(model)}>
-            <strong>{model.name}</strong><span>{equipmentKindLabel(model.kind)}</span>
+            <strong>{model.name}</strong><span>{equipmentKindLabel(model.kind)}{model.measurement_channels?.length
+              ? ` · ${channelSummary(model.measurement_channels)}` : ''}</span>
           </button>
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching equipment' : 'No catalog equipment available'} />}
@@ -452,54 +601,43 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     <Modal title={creatingKind ? addEquipmentTitle(creatingKind) : 'Add equipment'} open={!!creatingKind}
       onCancel={closeCreation} footer={null} destroyOnHidden>
       {creatingKind && <Form key={`${creatingKind}:${selectedCatalogModel?.id || 'custom'}`} form={equipmentForm} layout="vertical" onFinish={create} preserve={false}
-        initialValues={{ name: selectedCatalogModel?.name, capacity: selectedCatalogModel?.capacity_liters,
-          capacity_unit: 'L', measurement_min: selectedCatalogModel?.measurement_min,
-          measurement_max: selectedCatalogModel?.measurement_max,
-          measurement_unit: selectedCatalogModel?.measurement_unit || measurementRangeUnits[creatingKind]?.[0],
-          rated_power_watts: selectedCatalogModel?.rated_power_watts,
-          has_heating: !!selectedCatalogModel?.has_heating || boilOffKinds.has(creatingKind),
-          has_cooling: !!selectedCatalogModel?.has_cooling,
-          rated_heat_removal_watts: selectedCatalogModel?.rated_heat_removal_watts,
-          min_temperature_c: selectedCatalogModel?.min_temperature_c,
-          max_temperature_c: selectedCatalogModel?.max_temperature_c,
-          built_in_temperature_control: selectedCatalogModel?.built_in_temperature_control || false,
-          max_pressure: selectedCatalogModel?.max_pressure_kpa == null ? undefined
-            : convertUnit(selectedCatalogModel.max_pressure_kpa, 'kPa', preferredUnits.pressure),
-          pressure_unit: preferredUnits.pressure }}>
+        initialValues={initialEquipmentValues}>
         {selectedCatalogModel && <p className="muted">Based on {selectedCatalogModel.name}. Review the settings before adding it.</p>}
         <Form.Item name="name" label="Name" rules={[{ required: true, whitespace: true }]}>
           <Input placeholder="Equipment name" maxLength={120} />
         </Form.Item>
-        {capacityKinds.has(creatingKind) && <div className="capacity-fields"><Form.Item name="capacity" label="Capacity (optional)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
+        {selectedCatalogModel && (selectedCatalogModel.measurement_channels?.length || 0) > 1 &&
+          <p className="muted">Measures {channelSummary(selectedCatalogModel.measurement_channels)}.</p>}
+        {createCapacity && <div className="capacity-fields"><Form.Item name="capacity" label="Capacity (optional)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
           <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]}
             onChange={unit => changeNumberUnit(equipmentForm, ['capacity'], newCapacityUnit || 'L', unit)} /></Form.Item></div>}
-        {creatingKind === 'fermenter' && <>
+        {creatingKind === 'fermenter' && (!selectedCatalogModel || selectedCatalogModel.has_temperature_control) && <>
           <Form.Item name="built_in_temperature_control" valuePropName="checked"><Checkbox
             disabled={!!selectedCatalogModel?.has_temperature_control}>Built-in temperature control</Checkbox></Form.Item>
+        </>}
+        {(!selectedCatalogModel && creatingKind === 'fermenter' || selectedCatalogModel?.has_pressure_rating) &&
           <div className="form-pair"><Form.Item name="max_pressure" label="Maximum working pressure (optional)">
             <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
             <Form.Item name="pressure_unit" label="Unit"><Select options={unitOptions(unitGroups.pressure)}
               onChange={unit => changeNumberUnit(equipmentForm, ['max_pressure'], newPressureUnit || preferredUnits.pressure, unit)} /></Form.Item></div>
-        </>}
-        {boilOffKinds.has(creatingKind) && <Form.Item name="rated_power_watts" label="Rated power (W, optional)">
+        }
+        {boilOffKinds.has(creatingKind) && createHeating && <Form.Item name="rated_power_watts" label="Rated power (W, optional)">
           <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
-        {['fermentation_temperature_control', 'fermenter'].includes(creatingKind) && <>
+        {createHeating && !boilOffKinds.has(creatingKind) && <>
           <Form.Item name="has_heating" valuePropName="checked"><Checkbox disabled={!!selectedCatalogModel?.has_heating}>Heating</Checkbox></Form.Item>
           {newHeating && <Form.Item name="rated_power_watts" label="Rated heating power (W, optional)">
             <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
         </>}
-        {coolingAvailableForNew && <>
-          <Form.Item name="has_cooling" valuePropName="checked"><Checkbox disabled={!!selectedCatalogModel?.has_cooling}>Cooling</Checkbox></Form.Item>
-          {newCooling && <Form.Item name="rated_heat_removal_watts" label="Rated heat removal (W, optional)">
+        {newThermal && <>
+          {createCooling && <Form.Item name="has_cooling" valuePropName="checked"><Checkbox disabled={!!selectedCatalogModel?.has_cooling}>Cooling</Checkbox></Form.Item>}
+          {createCooling && newCooling && <Form.Item name="rated_heat_removal_watts" label="Rated heat removal (W, optional)">
             <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
-        </>}
-        {['fermentation_temperature_control', 'fermenter', 'electric_kettle', 'all_in_one'].includes(creatingKind) && <>
-          {(creatingKind !== 'fermenter' || newFermenterControl) && <div className="form-pair">
+          {(newTemperatureControl || creatingKind === 'fermenter' && newFermenterControl) && <div className="form-pair">
             <Form.Item name="min_temperature_c" label="Minimum temperature (°C)"><InputNumber className="full-width" step="any" /></Form.Item>
             <Form.Item name="max_temperature_c" label="Maximum temperature (°C)"><InputNumber className="full-width" step="any" /></Form.Item>
           </div>}
         </>}
-        {measurementRangeUnits[creatingKind] && <div className="form-triple">
+        {createPrimaryMeasurement && <div className="form-triple">
           <Form.Item name="measurement_min" label="Range minimum"><InputNumber className="full-width" step="any" /></Form.Item>
           <Form.Item name="measurement_max" label="Range maximum"><InputNumber className="full-width" step="any" /></Form.Item>
           <Form.Item name="measurement_unit" label="Scale">
@@ -507,8 +645,68 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
               onChange={unit => changeNumberUnit(equipmentForm, ['measurement_min', 'measurement_max'],
                 newRangeUnit || measurementRangeUnits[creatingKind][0], unit)} /></Form.Item>
         </div>}
+        {catalogCreationChannels.map(channel => <div key={channel.measurement_kind}>
+          <p className="muted">{measurementLabel(channel.measurement_kind)}</p>
+          <div className="form-triple">
+            <Form.Item name={['channel_ranges', channel.measurement_kind, 'min']}
+              label={`${measurementLabel(channel.measurement_kind)} range minimum`}>
+              <InputNumber className="full-width" step="any" /></Form.Item>
+            <Form.Item name={['channel_ranges', channel.measurement_kind, 'max']}
+              label={`${measurementLabel(channel.measurement_kind)} range maximum`}>
+              <InputNumber className="full-width" step="any" /></Form.Item>
+            <Form.Item name={['channel_ranges', channel.measurement_kind, 'unit']}
+              label={`${measurementLabel(channel.measurement_kind)} unit`}>
+              <Select options={unitOptions(channelUnits(channel.measurement_kind))} onChange={unit => {
+                const previous = equipmentForm.getFieldValue(['channel_ranges', channel.measurement_kind, 'unit']);
+                if (!previous || previous === unit) return;
+                const changes: Record<string, number> = {};
+                for (const field of ['min', 'max']) {
+                  const value = equipmentForm.getFieldValue(['channel_ranges', channel.measurement_kind, field]);
+                  if (typeof value === 'number') {
+                    const converted = convertUnit(value, previous, unit);
+                    if (converted != null) changes[field] = converted;
+                  }
+                }
+                equipmentForm.setFieldValue(['channel_ranges', channel.measurement_kind], {
+                  ...equipmentForm.getFieldValue(['channel_ranges', channel.measurement_kind]), ...changes, unit
+                });
+              }} /></Form.Item>
+          </div>
+        </div>)}
         <Button type="primary" htmlType="submit">Create equipment</Button>
       </Form>}
+    </Modal>
+    <Modal title={addingCapability?.startsWith('measurement:')
+      ? `Add ${measurementSentenceLabel(addingCapability.slice('measurement:'.length))} measurement`
+      : `Add ${missingCapabilities.find(capability => capability.key === addingCapability)?.label || 'capability'}`}
+      open={!!addingCapability} onCancel={() => setAddingCapability(null)} footer={null} destroyOnHidden>
+      <Form key={`${item?.id}:${addingCapability}`} form={capabilityForm} layout="vertical" onFinish={saveAddedCapability}
+        initialValues={{ measurement_unit: addingCapability?.startsWith('measurement:')
+          ? channelUnits(addingCapability.slice('measurement:'.length))[0] : undefined }}>
+        {addingCapability === 'liquid_containment' && <Form.Item name="capacity_liters" label="Capacity (L, optional)">
+          <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
+        {addingCapability === 'pressure_rating' && <Form.Item name="max_pressure_kpa" label="Maximum working pressure (kPa, optional)">
+          <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
+        {addingCapability === 'heating' && <Form.Item name="rated_power_watts" label="Rated heating power (W, optional)">
+          <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
+        {addingCapability === 'cooling' && <Form.Item name="rated_heat_removal_watts" label="Rated heat removal (W, optional)">
+          <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
+        {addingCapability === 'temperature_control' && <div className="form-pair">
+          <Form.Item name="min_temperature_c" label="Minimum temperature (°C)">
+            <InputNumber className="full-width" step="any" /></Form.Item>
+          <Form.Item name="max_temperature_c" label="Maximum temperature (°C)">
+            <InputNumber className="full-width" step="any" /></Form.Item>
+        </div>}
+        {addingCapability?.startsWith('measurement:') && <div className="form-triple">
+          <Form.Item name="measurement_min" label="Range minimum"><InputNumber className="full-width" step="any" /></Form.Item>
+          <Form.Item name="measurement_max" label="Range maximum"><InputNumber className="full-width" step="any" /></Form.Item>
+          <Form.Item name="measurement_unit" label="Unit" rules={[{ required: true }]}>
+            <Select options={unitOptions(channelUnits(addingCapability.slice('measurement:'.length)))}
+              onChange={unit => changeNumberUnit(capabilityForm, ['measurement_min', 'measurement_max'],
+                addChannelUnit || channelUnits(addingCapability.slice('measurement:'.length))[0], unit)} /></Form.Item>
+        </div>}
+        <Button type="primary" htmlType="submit">Add capability</Button>
+      </Form>
     </Modal>
     <Modal title="Edit capacity" open={editCapacity} onCancel={() => setEditCapacity(false)} footer={null} destroyOnHidden>
       <Form key={item?.id} form={capacityForm} layout="vertical" onFinish={saveCapacity} initialValues={{ capacity: specs.capacity_liters, capacity_unit: 'L' }}>
@@ -518,17 +716,16 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <Button type="primary" htmlType="submit">Save capacity</Button>
       </Form>
     </Modal>
-    <Modal title="Fermenter capabilities" open={editFermenter} onCancel={() => setEditFermenter(false)} footer={null} destroyOnHidden>
-      <Form key={item?.id} form={fermenterForm} layout="vertical" onFinish={saveFermenter}
-        initialValues={{ built_in_temperature_control: !!specs.built_in_temperature_control,
-          max_pressure: specs.max_pressure_kpa == null ? undefined : convertUnit(specs.max_pressure_kpa, 'kPa', preferredUnits.pressure),
-          pressure_unit: preferredUnits.pressure }}>
-        <Form.Item name="built_in_temperature_control" valuePropName="checked"><Checkbox disabled={!!specs.built_in_temperature_control}>Built-in temperature control</Checkbox></Form.Item>
-        <div className="form-pair"><Form.Item name="max_pressure" label="Maximum working pressure (optional)">
+    <Modal title="Edit pressure rating" open={editPressure} onCancel={() => setEditPressure(false)} footer={null} destroyOnHidden>
+      <Form key={item?.id} form={pressureForm} layout="vertical" onFinish={savePressure}
+        initialValues={{ max_pressure: specs.max_pressure_kpa == null ? undefined
+          : convertUnit(specs.max_pressure_kpa, 'kPa', preferredUnits.pressure), pressure_unit: preferredUnits.pressure }}>
+        <div className="form-pair"><Form.Item name="max_pressure" label="Maximum working pressure">
           <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
           <Form.Item name="pressure_unit" label="Unit"><Select options={unitOptions(unitGroups.pressure)}
-            onChange={unit => changeNumberUnit(fermenterForm, ['max_pressure'], editPressureUnit || preferredUnits.pressure, unit)} /></Form.Item></div>
-        <Button type="primary" htmlType="submit">Save capabilities</Button>
+            onChange={unit => changeNumberUnit(pressureForm, ['max_pressure'],
+              editPressureRatingUnit || preferredUnits.pressure, unit)} /></Form.Item></div>
+        <Button type="primary" htmlType="submit">Save pressure rating</Button>
       </Form>
     </Modal>
     <Modal title="Edit rated power" open={editPower} onCancel={() => setEditPower(false)} footer={null} destroyOnHidden>
@@ -544,14 +741,9 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         initialValues={{ has_heating: !!specs.has_heating, rated_power_watts: specs.rated_power_watts,
           has_cooling: !!specs.has_cooling, rated_heat_removal_watts: specs.rated_heat_removal_watts,
           min_temperature_c: specs.min_temperature_c, max_temperature_c: specs.max_temperature_c }}>
-        <Form.Item name="has_heating" valuePropName="checked"><Checkbox disabled={!!specs.has_heating}>Heating</Checkbox></Form.Item>
-        <Form.Item name="rated_power_watts" label="Rated heating power (W)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
-        {coolingAvailableForItem && <>
-          <Form.Item name="has_cooling" valuePropName="checked"><Checkbox disabled={!!specs.has_cooling}>Cooling</Checkbox></Form.Item>
-          {editCooling && <Form.Item name="rated_heat_removal_watts" label="Rated heat removal (W)">
-            <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
-        </>}
-        {(item?.kind !== 'fermenter' || specs.has_temperature_control) && <div className="form-pair">
+        {showCooling && <Form.Item name="rated_heat_removal_watts" label="Rated heat removal (W)">
+          <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
+        {specs.has_temperature_control && <div className="form-pair">
           <Form.Item name="min_temperature_c" label="Minimum temperature (°C)"><InputNumber className="full-width" step="any" /></Form.Item>
           <Form.Item name="max_temperature_c" label="Maximum temperature (°C)"><InputNumber className="full-width" step="any" /></Form.Item>
         </div>}
@@ -575,12 +767,15 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <Button type="primary" htmlType="submit">Save name and slug</Button>
       </Form>
     </Modal>
-    <Modal title="Edit measurement range" open={editRange} onCancel={() => setEditRange(false)} footer={null} destroyOnHidden>
-      <Form key={item?.id} form={rangeForm} layout="vertical" onFinish={saveRange} initialValues={{ measurement_min: specs.measurement_min, measurement_max: specs.measurement_max,
-        measurement_unit: specs.measurement_unit || (item && measurementRangeUnits[item.kind]?.[0]) }}>
+    <Modal title={editRange ? `Edit ${measurementSentenceLabel(editRange)} range` : 'Edit measurement range'}
+      open={!!editRange} onCancel={() => setEditRange(null)} footer={null} destroyOnHidden>
+      <Form key={`${item?.id}:${editRange}`} form={rangeForm} layout="vertical" onFinish={saveRange}
+        initialValues={{ measurement_min: editingChannel?.measurement_min, measurement_max: editingChannel?.measurement_max,
+          measurement_unit: editingChannel?.measurement_scale || editingChannel?.measurement_unit ||
+            (editRange ? channelUnits(editRange)[0] : undefined) }}>
         <div className="form-triple"><Form.Item name="measurement_min" label="Range minimum"><InputNumber className="full-width" step="any" /></Form.Item>
           <Form.Item name="measurement_max" label="Range maximum"><InputNumber className="full-width" step="any" /></Form.Item>
-          <Form.Item name="measurement_unit" label="Scale"><Select options={unitOptions(item && measurementRangeUnits[item.kind] || [])}
+          <Form.Item name="measurement_unit" label="Scale"><Select options={unitOptions(editRange ? channelUnits(editRange) : [])}
             onChange={unit => changeNumberUnit(rangeForm, ['measurement_min', 'measurement_max'], editRangeUnit, unit)} /></Form.Item></div>
         <Button type="primary" htmlType="submit">Save range</Button>
       </Form>

@@ -5,6 +5,7 @@ export interface MeasurementChannel { id: string; measurement_kind: string;
   measurement_unit?: string | null; measurement_scale?: string | null }
 export interface CatalogMeasurementChannel extends MeasurementChannel { model_id: string }
 export interface CatalogEquipment { id: string; name: string; kind: string; manufacturer?: string | null;
+  has_liquid_containment?: boolean; has_pressure_rating?: boolean;
   has_heating?: boolean; has_cooling?: boolean; has_temperature_control?: boolean;
   capacity_liters?: number | null; built_in_temperature_control?: number | boolean | null; max_pressure_kpa?: number | null;
   rated_power_watts?: number | null; rated_heat_removal_watts?: number | null;
