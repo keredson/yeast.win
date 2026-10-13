@@ -174,6 +174,27 @@ test('current schema data survives the move from schema_meta to user_version', (
   } finally { closeWorkspaceDb(reopened); }
 });
 
+test('current workspace repairs a missing capability table without losing existing rows', () => {
+  const id = nanoid();
+  const batchId = nanoid();
+  const first = openWorkspaceDb(id);
+  try {
+    first.prepare('INSERT INTO batches(id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+      .run(batchId, 'Keep this batch', 'active', 1, 1);
+    first.prepare('SELECT crsql_as_table(?)').get('equipment_liquid_containment');
+    first.exec('DROP TABLE equipment_liquid_containment');
+  } finally { closeWorkspaceDb(first); }
+  const reopened = openWorkspaceDb(id);
+  try {
+    assert.equal(reopened.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.equal((reopened.prepare('SELECT name FROM batches WHERE id = ?').get(batchId) as { name: string }).name,
+      'Keep this batch');
+    assert.ok((reopened.pragma('table_info(equipment_liquid_containment)') as { name: string }[])
+      .some(column => column.name === 'capacity_liters'));
+    assert.ok(reopened.prepare("SELECT name FROM sqlite_master WHERE name = 'equipment_liquid_containment__crsql_clock'").get());
+  } finally { closeWorkspaceDb(reopened); }
+});
+
 test('version 12 ingredient JSON is replaced by typed columns', () => {
   const id = nanoid();
   const file = join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`);

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppstoreOutlined, BookOutlined, DisconnectOutlined, EnvironmentOutlined, InboxOutlined, MenuOutlined, ToolOutlined } from '@ant-design/icons';
 import { Alert, Avatar, Button, Card, Drawer, Empty, Form, Input, Layout, Menu, Popover, Select, Spin, Tooltip, Typography } from 'antd';
 import { api, ApiError, ApiUnavailableError, type PreferredUnits, type Session, type Workspace } from './api.ts';
 import { defaultPreferredUnits } from '../shared/units.ts';
 import { forgetLocalDb, openLocalDb, syncNow, type Batch, type Equipment, type InventoryItem, type InventoryLocation, type LocalDb, type Recipe, type RecipeType,
-  listBatches, listEquipment, listInventory, listInventoryLocations, listRecipes, resolveEquipmentModels } from './db.ts';
+  listBatches, listEquipment, listInventory, listInventoryLocations, listRecipes } from './db.ts';
 import { BatchSection } from './BatchSection.tsx';
 import { RecipeSection } from './RecipeSection.tsx';
 import { RecipeTypeIcon } from './RecipeTypeIcon.tsx';
@@ -162,11 +162,10 @@ export function App() {
   const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [inventoryWorkspaceId, setInventoryWorkspaceId] = useState<string | null>(null);
   const [equipmentWorkspaceId, setEquipmentWorkspaceId] = useState<string | null>(null);
-  const [workspaceEquipment, setEquipment] = useState<Equipment[]>([]);
+  const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [recent, setRecent] = useState<RecentItems>(emptyRecents);
   const [catalogEquipment, setCatalogEquipment] = useState<CatalogEquipment[]>([]);
-  const equipment = useMemo(() => resolveEquipmentModels(workspaceEquipment, catalogEquipment),
-    [workspaceEquipment, catalogEquipment]);
+  const [catalogRevision, setCatalogRevision] = useState(0);
   const [catalogInventory, setCatalogInventory] = useState<CatalogInventory[]>([]);
   const [error, setError] = useState('');
   const [serverDisconnected, setServerDisconnected] = useState(false);
@@ -235,7 +234,11 @@ export function App() {
       try {
         await syncLocalCatalog(catalogDb);
         const updated = await readLocalCatalog(catalogDb);
-        if (!cancelled) { setCatalogEquipment(updated.equipment); setCatalogInventory(updated.inventory); }
+        if (!cancelled) {
+          setCatalogEquipment(updated.equipment);
+          setCatalogInventory(updated.inventory);
+          setCatalogRevision(revision => revision + 1);
+        }
       } catch { /* Cached catalog remains searchable offline. */ }
     };
     const refreshCatalog = () => {
@@ -246,6 +249,15 @@ export function App() {
     window.addEventListener('online', refreshCatalog);
     return () => { cancelled = true; window.clearInterval(timer); window.removeEventListener('online', refreshCatalog); };
   }, [session?.account.id]);
+
+  useEffect(() => {
+    if (!db || !workspaceId || !catalogRevision) return;
+    let cancelled = false;
+    void listEquipment(db).then(items => {
+      if (!cancelled && activeWorkspaceId.current === workspaceId) setEquipment(items);
+    }).catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => { cancelled = true; };
+  }, [db, workspaceId, catalogRevision]);
 
   useEffect(() => {
     if (location.pathname === '/') history.replaceState(null, '', '/batches');

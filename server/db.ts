@@ -193,6 +193,18 @@ export function openWorkspaceDb(id: string): Database.Database {
       db.pragma(`user_version = ${workspaceSchemaVersion}`);
     })();
   }
+  const present = new Set((db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+    .all() as { name: string }[]).map(row => row.name));
+  const missing = replicatedTables.filter(table => !present.has(table));
+  if (missing.length) db.transaction(() => {
+    for (const table of missing) {
+      db.exec(schemaStatements[replicatedTables.indexOf(table)]);
+      db.prepare('SELECT crsql_as_crr(?)').get(table);
+    }
+    for (const statement of indexStatements) db.exec(statement);
+  })();
+  const catalogPath = join(dataDir, 'catalog.sqlite');
+  if (existsSync(catalogPath)) db.prepare('ATTACH DATABASE ? AS catalog').run(catalogPath);
   return db;
 }
 
