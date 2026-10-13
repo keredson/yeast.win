@@ -99,12 +99,17 @@ function parseBeerXmlRecipe(element: Element, sourceIndex: number): ImportedReci
     firstMash ||= id;
     lastMash = id;
   }
+  const drain = lastMash ? build.action('transfer', 'Drain grain', lastMash, 0,
+    { purpose: 'drain_grain', anchor_point: 'end' }) : null;
+  if (drain) {
+    build.action('measurement', 'Measure pre-boil gravity', drain, 0, { measurement_kind: 'gravity', target_unit: 'SG' });
+  }
   const boilMinutes = tagNumber(element, 'BOIL_TIME');
   let boil: string | null = null;
   if (boilMinutes != null && boilMinutes > 0) {
-    boil = build.action('temperature_control', 'Boil', lastMash, 0,
+    boil = build.action('temperature_control', 'Boil', drain || lastMash, 0,
       { phase: 'boil', mode: 'heat', duration_seconds: Math.round(boilMinutes * 60),
-        ...(lastMash ? { anchor_point: 'end' } : {}) }, { boil_time_minutes: boilMinutes });
+        ...(!drain && lastMash ? { anchor_point: 'end' } : {}) }, { boil_time_minutes: boilMinutes });
   }
   for (const item of children(element, 'FERMENTABLES', 'FERMENTABLE')) {
     const itemName = tag(item, 'NAME');
@@ -215,11 +220,16 @@ function parseBrewfatherRecipe(value: Record<string, unknown>, sourceIndex: numb
     firstMash ||= id;
     lastMash = id;
   }
+  const drain = lastMash ? build.action('transfer', 'Drain grain', lastMash, 0,
+    { purpose: 'drain_grain', anchor_point: 'end' }) : null;
+  if (drain) {
+    build.action('measurement', 'Measure pre-boil gravity', drain, 0, { measurement_kind: 'gravity', target_unit: 'SG' });
+  }
   const boilMinutes = number(value.boilTime);
   const boil = boilMinutes != null && boilMinutes > 0
-    ? build.action('temperature_control', 'Boil', lastMash, 0,
+    ? build.action('temperature_control', 'Boil', drain || lastMash, 0,
       { phase: 'boil', mode: 'heat', duration_seconds: Math.round(boilMinutes * 60),
-        ...(lastMash ? { anchor_point: 'end' } : {}) }, { boil_time_minutes: boilMinutes }) : null;
+        ...(!drain && lastMash ? { anchor_point: 'end' } : {}) }, { boil_time_minutes: boilMinutes }) : null;
   for (const item of records(value.fermentables)) {
     const itemName = text(item.name);
     if (!itemName) continue;

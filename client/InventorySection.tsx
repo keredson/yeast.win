@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, AutoComplete, Button, Checkbox, Dropdown, Empty, Form, Input, Modal, Select, Table } from 'antd';
-import { MoreOutlined, PlusOutlined } from '@ant-design/icons';
+import { Alert, AutoComplete, Button, Checkbox, Dropdown, Empty, Form, Input, InputNumber, Modal, Select, Table } from 'antd';
+import { MoreOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
 import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
 import { addInventoryEntry, convertInventoryUnit, createInventoryItem, deleteInventoryLocation, inventoryBalance, inventoryLocationPath,
   listInventoryBalances, listInventoryLocations, listInventoryMovements, moveInventoryStock, saveInventoryLocation, stockAtLocation,
-  type InventoryItem, type InventoryLocation, type InventoryMovement, type LocalDb } from './db.ts';
+  updateIngredientProperties, type IngredientProperties, type InventoryItem, type InventoryLocation, type InventoryMovement, type LocalDb } from './db.ts';
 import { formatTime } from './time.ts';
 import type { PreferredUnits } from './api.ts';
 import { compoundMassUnit, formatQuantity, quantityForStorage, quantityUnitsForCategory, storageUnit, unitOptions } from '../shared/units.ts';
@@ -39,6 +39,7 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
   const [moveItemId, setMoveItemId] = useState<string | null>(null);
   const [locationReturn, setLocationReturn] = useState<'item' | 'move' | null>(null);
   const [newItemCategory, setNewItemCategory] = useState<string | null>(null);
+  const [ingredientSettingsOpen, setIngredientSettingsOpen] = useState(false);
   const [entryKind, setEntryKind] = useState<'purchase' | 'count' | 'discard' | null>(null);
   const [entryItemId, setEntryItemId] = useState<string | null>(null);
   const [entryAvailable, setEntryAvailable] = useState<number | null>(null);
@@ -50,6 +51,7 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
   const previousItemUnit = useRef<string | undefined>(undefined);
   const previousEntryUnit = useRef<string | undefined>(undefined);
   const item = items.find(row => row.id === selectedId) || null;
+  const ingredientProperties = item?.properties_json ? JSON.parse(item.properties_json) as IngredientProperties : {};
   const entryItem = items.find(row => row.id === entryItemId) || item;
   const newItemUnit = Form.useWatch('default_unit', itemForm) as string | undefined;
   const newItemName = Form.useWatch('name', itemForm) as string | undefined;
@@ -79,6 +81,12 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
     previousItemUnit.current = unit;
     itemForm.setFieldsValue({ category, default_unit: unit, location_id: undefined });
     setNewItemCategory(category);
+  }
+
+  async function saveIngredientProperties(values: IngredientProperties) {
+    if (!item) return;
+    try { await updateIngredientProperties(db, item, values); setIngredientSettingsOpen(false); await onChanged(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
   function openLocationCreate(returnTo: 'item' | 'move') {
@@ -215,10 +223,20 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
         <div className="content-heading"><div><span className="eyebrow">{item.category}</span><h2>{item.name}</h2>
           <p className="muted">{item.location_id ? `${inventoryLocationPath(item.location_id, locations)} · ` : ''}{balance == null ? 'Balance needs unit conversion'
             : `${formatQuantity(balance ?? 0, item.default_unit, itemDisplayUnit)} estimated on hand`}</p></div>
-          <div className="heading-actions"><Button onClick={() => void openEntry(item, 'purchase')}>Bought some</Button>
+          <div className="heading-actions">{['Grain', 'Adjunct', 'Hops', 'Yeast'].includes(item.category) &&
+            <Button type="text" shape="circle" icon={<SettingOutlined />} aria-label="Ingredient properties"
+              title="Ingredient properties" onClick={() => { setError(''); setIngredientSettingsOpen(true); }} />}
+            <Button onClick={() => void openEntry(item, 'purchase')}>Bought some</Button>
             <Button onClick={() => void openEntry(item, 'discard')}>Discard</Button>
             <Button onClick={() => setMoveItemId(item.id)}>Move stock</Button>
             <Button type="primary" onClick={() => void openEntry(item, 'count')}>Count stock</Button></div></div>
+        {Object.keys(ingredientProperties).length > 0 && <p className="muted">{[
+          ingredientProperties.yield_pct != null && `Yield ${ingredientProperties.yield_pct}%`,
+          ingredientProperties.color_lovibond != null && `Color ${ingredientProperties.color_lovibond} °L`,
+          ingredientProperties.alpha_acid_pct != null && `Alpha acid ${ingredientProperties.alpha_acid_pct}%`,
+          ingredientProperties.hop_form && `${ingredientProperties.hop_form} hops`,
+          ingredientProperties.attenuation_pct != null && `Attenuation ${ingredientProperties.attenuation_pct}%`
+        ].filter(Boolean).join(' · ')}</p>}
         {movements.length > 0 && <><h3>Stock history</h3>
         <Table<InventoryMovement> className="inventory-history" dataSource={movements} rowKey={row => `${row.kind}-${row.id}`}
           pagination={false} size="small" scroll={{ x: 480 }}
@@ -227,6 +245,23 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
             { title: 'Quantity', key: 'quantity', align: 'right', render: (_, row) =>
               `${row.kind === 'Purchased' || row.kind === 'Moved in' ? '+' : row.kind === 'Used' || row.kind === 'Discarded' || row.kind === 'Moved out' ? '−' : 'Set to '}${formatQuantity(row.quantity, row.unit, itemDisplayUnit)}` }]} /></>}
       </section>}
+    <Modal title={item ? `${item.name} properties` : 'Ingredient properties'} open={ingredientSettingsOpen}
+      onCancel={() => setIngredientSettingsOpen(false)} footer={null} destroyOnHidden>
+      {error && <Alert type="error" message={error} className="form-alert" />}
+      <Form key={item?.id} layout="vertical" initialValues={ingredientProperties} onFinish={saveIngredientProperties}>
+        {['Grain', 'Adjunct'].includes(item?.category || '') && <><Form.Item name="yield_pct" label="Extract yield (%)">
+          <InputNumber className="full-width" min={0} max={100} step="any" /></Form.Item>
+          <Form.Item name="color_lovibond" label="Color (°L)"><InputNumber className="full-width" min={0} step="any" /></Form.Item></>}
+        {item?.category === 'Hops' && <><Form.Item name="alpha_acid_pct" label="Alpha acid (%)">
+          <InputNumber className="full-width" min={0} max={100} step="any" /></Form.Item>
+          <Form.Item name="hop_form" label="Form"><Select allowClear options={[
+            { value: 'pellet', label: 'Pellet' }, { value: 'whole', label: 'Whole leaf' }, { value: 'plug', label: 'Plug' }
+          ]} /></Form.Item></>}
+        {item?.category === 'Yeast' && <Form.Item name="attenuation_pct" label="Apparent attenuation (%)">
+          <InputNumber className="full-width" min={0} max={100} step="any" /></Form.Item>}
+        <Button type="primary" htmlType="submit">Save properties</Button>
+      </Form>
+    </Modal>
     <Modal title={newItemCategory ? `New ${newItemCategory.toLowerCase()} item` : 'New inventory item'} open={!!newItemCategory}
       onCancel={() => setNewItemCategory(null)} footer={null} destroyOnHidden>
       {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}

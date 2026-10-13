@@ -127,10 +127,11 @@ test('pre-release workspace schemas reset without carrying old event JSON', () =
   old.close();
   const db = openWorkspaceDb(id);
   try {
-    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 11);
+    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 12);
     assert.equal((db.prepare('SELECT COUNT(*) AS count FROM batch_events').get() as { count: number }).count, 0);
     assert.equal((db.pragma('table_info(batch_events)') as { name: string }[])
       .some(column => column.name === 'details_json'), false);
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'recipe_temperature_control_events'").get());
+    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'inventory_ingredient_properties'").get());
   } finally { closeWorkspaceDb(db); }
 });

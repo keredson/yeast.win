@@ -4,7 +4,7 @@ import { EditOutlined, PlusOutlined } from '@ant-design/icons';
 import { boilOffKinds, capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
 import { createEquipment, deleteEquipment, updateEquipmentBoilHeatLoss, updateEquipmentCalibration, updateEquipmentIdentity, updateEquipmentRatedPower, updateEquipmentCapacity,
-  updateEquipmentTemperatureOffset,
+  updateEquipmentTemperatureOffset, updateBrewingLosses, latestMeasuredMashEfficiency,
   updateFermenterCapabilities,
   updateEquipmentMeasurementRange,
   type Equipment, type EquipmentSpecifications, type LocalDb } from './db.ts';
@@ -74,6 +74,8 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
   const [editIdentity, setEditIdentity] = useState(false);
   const [editCapacity, setEditCapacity] = useState(false);
   const [editPower, setEditPower] = useState(false);
+  const [editBrewingLosses, setEditBrewingLosses] = useState(false);
+  const [recentMashEfficiency, setRecentMashEfficiency] = useState<number | null>(null);
   const [editRange, setEditRange] = useState(false);
   const [editFermenter, setEditFermenter] = useState(false);
   const [error, setError] = useState('');
@@ -100,6 +102,14 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
   const earlierKinds = [...new Set(equipment.map(row => row.kind))].filter(kind =>
     !equipmentGroups.some(group => (group.kinds as readonly string[]).includes(kind)));
   if (earlierKinds.length) groupedKinds.push({ key: 'earlier', label: 'Previously added equipment', kinds: earlierKinds });
+
+  useEffect(() => {
+    if (!item || !['all_in_one', 'mash_tun', 'kettle', 'electric_kettle'].includes(item.kind)) return;
+    let active = true;
+    setRecentMashEfficiency(null);
+    void latestMeasuredMashEfficiency(db, item.id).then(value => { if (active) setRecentMashEfficiency(value); });
+    return () => { active = false; };
+  }, [db, item?.id]);
 
   useEffect(() => {
     if (!item || !boilOffKinds.has(item.kind) || specs.boil_heat_loss_watts != null) return;
@@ -213,6 +223,13 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
+  async function saveBrewingLosses(values: { mash_efficiency_pct?: number; grain_absorption_l_per_kg?: number;
+    mash_deadspace_liters?: number; kettle_retention_liters?: number }) {
+    if (!item) return;
+    try { await updateBrewingLosses(db, item, values); setEditBrewingLosses(false); await onChanged(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
   async function saveIdentity(values: { name: string; slug: string }) {
     if (!item) return;
     try {
@@ -316,6 +333,13 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
             ? 'Not calibrated' : `${Math.round(specs.boil_heat_loss_watts)} W`}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit boil heat loss" onClick={() => setNewBoilCalibration(true)} /></div>}
           {ratedEstimate != null && <div className="equipment-parameter">Estimated boil-off at rated power: {Number(ratedEstimate.toFixed(2))} L/h</div>}
+          {['all_in_one', 'mash_tun', 'kettle', 'electric_kettle'].includes(item.kind) &&
+            <div className="equipment-parameter"><span>Mash efficiency: {specs.mash_efficiency_pct != null
+              ? `${specs.mash_efficiency_pct}% (set)` : recentMashEfficiency != null ? `${recentMashEfficiency}% (recent batch)` : 'Not set'}<br />
+              Grain absorption: {specs.grain_absorption_l_per_kg == null ? 'Not set' : `${specs.grain_absorption_l_per_kg} L/kg`}<br />
+              Mash dead space: {specs.mash_deadspace_liters == null ? 'Not set' : `${specs.mash_deadspace_liters} L`}<br />
+              Kettle retention: {specs.kettle_retention_liters == null ? 'Not set' : `${specs.kettle_retention_liters} L`}</span>
+              <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit brewing losses" onClick={() => setEditBrewingLosses(true)} /></div>}
           {measurementRangeUnits[item.kind] && <div className="equipment-parameter"><span>Measurement range: {specs.measurement_min != null && specs.measurement_max != null
             ? rangeLabel(specs.measurement_min, specs.measurement_max, specs.measurement_unit) : 'Not set'}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit measurement range" onClick={() => setEditRange(true)} /></div>}
@@ -398,6 +422,15 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
         <Form.Item name="rated_power_watts" label="Rated power (W)">
           <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
         <Button type="primary" htmlType="submit">Save rated power</Button>
+      </Form>
+    </Modal>
+    <Modal title="Mash efficiency and liquid losses" open={editBrewingLosses} onCancel={() => setEditBrewingLosses(false)} footer={null} destroyOnHidden>
+      <Form key={item?.id} layout="vertical" onFinish={saveBrewingLosses} initialValues={specs}>
+        <Form.Item name="mash_efficiency_pct" label="Mash efficiency (%)"><InputNumber className="full-width" min={0} max={100} step="any" /></Form.Item>
+        <Form.Item name="grain_absorption_l_per_kg" label="Grain absorption (L per kg)"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
+        <Form.Item name="mash_deadspace_liters" label="Mash dead space (L)"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
+        <Form.Item name="kettle_retention_liters" label="Wort left in kettle after transfer (L)"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
+        <Button type="primary" htmlType="submit">Save</Button>
       </Form>
     </Modal>
     <Modal title="Edit equipment name and slug" open={editIdentity} onCancel={() => setEditIdentity(false)} footer={null} destroyOnHidden>

@@ -6,10 +6,10 @@ const definitions: Record<string, string> = {
   recipe_types: `id TEXT PRIMARY KEY NOT NULL, recipe_type TEXT NOT NULL`,
   recipe_events: `id TEXT PRIMARY KEY NOT NULL, recipe_id TEXT NOT NULL, event_type TEXT NOT NULL, title TEXT NOT NULL, planned_at INTEGER, anchor_event_id TEXT, offset_seconds INTEGER, anchor_point TEXT, duration_seconds INTEGER, instructions TEXT, sort_order INTEGER NOT NULL`,
   recipe_additions: `event_id TEXT PRIMARY KEY NOT NULL, item_category TEXT, item_name TEXT, catalog_item_id TEXT, inventory_item_id TEXT, quantity REAL, unit TEXT, display_unit TEXT`,
-  recipe_temperature_control_events: `event_id TEXT PRIMARY KEY NOT NULL, phase TEXT, mode TEXT, target_value REAL, target_unit TEXT`,
-  recipe_pressure_control_events: `event_id TEXT PRIMARY KEY NOT NULL, target_value REAL, target_unit TEXT`,
+  recipe_temperature_control_events: `event_id TEXT PRIMARY KEY NOT NULL, phase TEXT, mode TEXT, target_value REAL, target_unit TEXT, equipment_id TEXT`,
+  recipe_pressure_control_events: `event_id TEXT PRIMARY KEY NOT NULL, target_value REAL, target_unit TEXT, equipment_id TEXT`,
   recipe_measurement_targets: `event_id TEXT PRIMARY KEY NOT NULL, measurement_kind TEXT, target_value REAL, target_unit TEXT`,
-  recipe_transfers: `event_id TEXT PRIMARY KEY NOT NULL, to_vessel_id TEXT, to_vessel_name TEXT, quantity REAL, unit TEXT`,
+  recipe_transfers: `event_id TEXT PRIMARY KEY NOT NULL, purpose TEXT, mash_equipment_id TEXT, to_vessel_id TEXT, to_vessel_name TEXT, quantity REAL, unit TEXT`,
   recipe_packaging: `event_id TEXT PRIMARY KEY NOT NULL, container_name TEXT, container_size REAL, container_count INTEGER, container_unit TEXT`,
   recipe_import_sources: `id TEXT PRIMARY KEY NOT NULL, filename TEXT NOT NULL, format TEXT NOT NULL, sha256 TEXT NOT NULL, byte_count INTEGER NOT NULL, content BLOB NOT NULL, imported_at INTEGER NOT NULL`,
   recipe_import_links: `id TEXT PRIMARY KEY NOT NULL, source_id TEXT NOT NULL, source_index INTEGER NOT NULL, external_id TEXT`,
@@ -30,13 +30,14 @@ const definitions: Record<string, string> = {
   dissolved_oxygen_measurements: measurementColumns(),
   temperature_control_events: `event_id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT, phase TEXT, mode TEXT, target_value REAL, target_unit TEXT, power_watts REAL, ended_at INTEGER`,
   pressure_control_events: `event_id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, target_value REAL NOT NULL, target_unit TEXT NOT NULL`,
-  transfers: `event_id TEXT PRIMARY KEY NOT NULL, from_vessel_id TEXT, to_vessel_id TEXT, to_vessel_name TEXT, quantity REAL, unit TEXT`,
+  transfers: `event_id TEXT PRIMARY KEY NOT NULL, purpose TEXT, mash_equipment_id TEXT, from_vessel_id TEXT, to_vessel_id TEXT, to_vessel_name TEXT, quantity REAL, unit TEXT`,
   packaging: `event_id TEXT PRIMARY KEY NOT NULL, container_name TEXT NOT NULL, container_size REAL NOT NULL, container_unit TEXT NOT NULL, container_count INTEGER NOT NULL, inventory_item_id TEXT`,
   equipment: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, catalog_model_id TEXT, specification_json TEXT, created_at INTEGER NOT NULL`,
   equipment_archives: `id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, archived_at INTEGER NOT NULL`,
   equipment_calibrations: `id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, effective_at INTEGER NOT NULL, method TEXT NOT NULL, parameters_json TEXT NOT NULL, created_by_account_id TEXT`,
   equipment_characterization_observations: `id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, observed_at INTEGER NOT NULL, power_watts REAL, ambient_c REAL, liquid_c REAL, start_liters REAL, end_liters REAL, duration_seconds INTEGER`,
   inventory_items: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL, default_unit TEXT NOT NULL, created_at INTEGER NOT NULL`,
+  inventory_ingredient_properties: `id TEXT PRIMARY KEY NOT NULL, properties_json TEXT NOT NULL`,
   inventory_locations: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, parent_id TEXT, created_at INTEGER NOT NULL`,
   inventory_item_locations: `id TEXT PRIMARY KEY NOT NULL, location_id TEXT`,
   inventory_moves: `id TEXT PRIMARY KEY NOT NULL, from_item_id TEXT NOT NULL, to_item_id TEXT NOT NULL, quantity REAL NOT NULL, unit TEXT NOT NULL, moved_at INTEGER NOT NULL`,
@@ -102,7 +103,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 11;
+export const workspaceSchemaVersion = 12;
 
 export function isValidId(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{10,32}$/.test(value);
