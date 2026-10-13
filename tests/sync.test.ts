@@ -189,6 +189,52 @@ test('unversioned workspace tables are upgraded without clearing their rows', ()
   } finally { closeWorkspaceDb(upgraded); }
 });
 
+test('version 24 workspace adds batch origins while preserving existing batches and packaging', () => {
+  const id = nanoid();
+  const sourceId = nanoid();
+  const eventId = nanoid();
+  const db = openWorkspaceDb(id);
+  db.prepare('INSERT INTO batches(id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+    .run(sourceId, 'Prior brew', 'active', 1, 1);
+  db.prepare('INSERT INTO batch_events(id, batch_id, event_type, created_at) VALUES (?, ?, ?, ?)')
+    .run(eventId, sourceId, 'packaging', 1);
+  db.prepare('INSERT INTO packaging(event_id, container_name, container_size, container_unit, container_count) VALUES (?, ?, ?, ?, ?)')
+    .run(eventId, 'bottle', 0.5, 'L', 12);
+  db.prepare("SELECT crsql_as_table('batch_origins')").get();
+  db.exec('DROP TABLE batch_origins');
+  db.pragma('user_version = 24');
+  closeWorkspaceDb(db);
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.equal((upgraded.prepare('SELECT name FROM batches WHERE id = ?').get(sourceId) as { name: string }).name, 'Prior brew');
+    const packageRow = upgraded.prepare('SELECT container_count FROM packaging WHERE event_id = ?')
+      .get(eventId) as { container_count: number };
+    assert.equal(packageRow.container_count, 12);
+    upgraded.prepare('INSERT INTO batch_origins(id, source_batch_id) VALUES (?, ?)').run(nanoid(), sourceId);
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
+test('partial version 25 upgrade keeps existing batch origin links', () => {
+  const id = nanoid();
+  const sourceId = nanoid();
+  const copyId = nanoid();
+  const db = openWorkspaceDb(id);
+  for (const batchId of [sourceId, copyId]) db.prepare(
+    'INSERT INTO batches(id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+    .run(batchId, batchId, 'active', 1, 1);
+  db.prepare('INSERT INTO batch_origins(id, source_batch_id) VALUES (?, ?)').run(copyId, sourceId);
+  db.pragma('user_version = 24');
+  closeWorkspaceDb(db);
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    const origin = upgraded.prepare('SELECT source_batch_id FROM batch_origins WHERE id = ?')
+      .get(copyId) as { source_batch_id: string };
+    assert.equal(origin.source_batch_id, sourceId);
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
 test('current schema data survives the move from schema_meta to user_version', () => {
   const id = nanoid();
   const batchId = nanoid();

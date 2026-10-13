@@ -15,9 +15,11 @@ import { changeTuple, decodeItem, encodeItem, maxSequence, readSequence, syncCon
 import { convertUnit, formatQuantity, storageUnit } from '../shared/units.ts';
 import type { ImportedRecipe } from './recipeImport.ts';
 import { mashEfficiencyPct, type MashGrain } from './mashEfficiency.ts';
+import { repeatBatchActions } from './batchRepeat.ts';
 
 export type LocalDb = DB;
-export interface Batch { id: string; name: string; description: string | null; status: string; created_at: number }
+export interface Batch { id: string; name: string; description: string | null; status: string; created_at: number;
+  source_batch_id?: string | null; source_batch_name?: string | null }
 export type RecipeType = 'beer' | 'wine' | 'mead' | 'cider';
 export interface Recipe { id: string; name: string; description: string | null; recipe_type: RecipeType | null }
 export interface BatchEvent {
@@ -362,7 +364,10 @@ export async function forgetLocalDb(workspaceId: string): Promise<void> {
 }
 
 export async function listBatches(db: DB): Promise<Batch[]> {
-  return db.execO<Batch>('SELECT id, name, description, status, created_at FROM batches ORDER BY created_at DESC, id DESC');
+  return db.execO<Batch>(`SELECT b.id, b.name, b.description, b.status, b.created_at,
+    o.source_batch_id, source.name AS source_batch_name FROM batches b
+    LEFT JOIN batch_origins o ON o.id = b.id LEFT JOIN batches source ON source.id = o.source_batch_id
+    ORDER BY b.created_at DESC, b.id DESC`);
 }
 
 export async function listCurrentEquipmentUses(db: DB): Promise<EquipmentUse[]> {
@@ -407,6 +412,29 @@ export async function createBatch(db: DB, name: string, description: string, acc
       [id, name, description || null, 'active', now, now]);
     await tx.exec(`INSERT INTO batch_recipe_inputs(id, wort_loss_liters)
       VALUES (?, (SELECT wort_loss_liters FROM brewery_process_defaults WHERE id = 'brewery'))`, [id]);
+  });
+  return id;
+}
+
+export async function startBatchFromTemplate(db: DB, recipeType: RecipeType, name: string,
+  description: string, accountId: string, temperatureUnit: '°C' | '°F'): Promise<string> {
+  const plans = recipeTemplatePlans(recipeType, temperatureUnit);
+  const id = nanoid();
+  const now = nowSeconds();
+  await db.tx(async tx => {
+    await tx.exec('INSERT INTO batches(id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [id, name, description || null, 'active', now, now]);
+    await tx.exec(`INSERT INTO batch_recipe_inputs(id, wort_loss_liters)
+      VALUES (?, (SELECT wort_loss_liters FROM brewery_process_defaults WHERE id = 'brewery'))`, [id]);
+    for (const plan of plans) {
+      await tx.exec(`INSERT INTO batch_events(id, batch_id, event_type, title, anchor_event_id,
+        offset_seconds, anchor_point, duration_seconds, instructions, created_at, created_by_account_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [plan.id, id, plan.event_type, plan.title, plan.anchor_event_id ?? null, plan.offset_seconds ?? 0,
+        plan.details.anchor_point ?? null, plan.details.duration_seconds ?? null,
+        plan.details.note ?? null, now, accountId]);
+      await writePlanPayload(tx, 'batch', plan.id, plan.event_type, plan.details);
+    }
   });
   return id;
 }
@@ -539,6 +567,13 @@ async function writePlanPayload(db: Pick<DB, 'exec'>, scope: PlanScope, id: stri
   }
   if (!payload) return;
   const [table, columns] = payload;
+  // A package reminder may exist before its container details are chosen.
+  if (scope === 'batch' && eventType === 'packaging' &&
+    ['container_name', 'container_size', 'container_unit', 'container_count']
+      .some(column => details[column as keyof PlanDetails] == null)) {
+    await db.exec('DELETE FROM packaging WHERE event_id = ?', [id]);
+    return;
+  }
   const values = columns.map(column => details[column as keyof PlanDetails] ?? null);
   await db.exec(`INSERT INTO ${table}(event_id, ${columns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')})
     ON CONFLICT(event_id) DO UPDATE SET ${columns.map(column => `${column} = excluded.${column}`).join(', ')}`,
@@ -682,55 +717,66 @@ export async function hasRecipeImport(db: DB, recipeId: string): Promise<boolean
   return (await db.execO<{ id: string }>('SELECT id FROM recipe_import_links WHERE id = ?', [recipeId])).length > 0;
 }
 
-export async function createRecipe(db: DB, name: string, description: string, recipeType: RecipeType,
-  temperatureUnit: '°C' | '°F' = '°C'): Promise<string> {
-  const id = nanoid();
-  const now = nowSeconds();
+export function recipeTemplatePlans(recipeType: RecipeType, temperatureUnit: '°C' | '°F' = '°C'):
+  (PlanInput & { id: string; sort_order: number })[] {
   if (!['beer', 'wine', 'mead', 'cider'].includes(recipeType)) throw new Error('Choose a recipe type');
-  await db.tx(async tx => {
-    await tx.exec('INSERT INTO recipes(id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-      [id, name, description || null, now, now]);
-    await tx.exec('INSERT INTO recipe_types(id, recipe_type) VALUES (?, ?)', [id, recipeType]);
+  const plans: (PlanInput & { id: string; sort_order: number })[] = [];
     const mashId = nanoid();
     const drainId = nanoid();
     const boilId = nanoid();
     const chillId = nanoid();
     const transferId = nanoid();
-    const insert = async (eventId: string, eventType: string, title: string, anchorId: string | null,
+    const insert = (eventId: string, eventType: string, title: string, anchorId: string | null,
       details: PlanDetails, order: number, offsetSeconds = 0) => {
-      await tx.exec(`INSERT INTO recipe_events
-        (id, recipe_id, event_type, title, planned_at, anchor_event_id, offset_seconds, anchor_point, duration_seconds, instructions, sort_order)
-        VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
-      [eventId, id, eventType, title, anchorId, offsetSeconds, details.anchor_point ?? null,
-        details.duration_seconds ?? null, details.note ?? null, order]);
-      await writePlanPayload(tx, 'recipe', eventId, eventType, details);
+      plans.push({ id: eventId, event_type: eventType, title, anchor_event_id: anchorId,
+        offset_seconds: offsetSeconds, details, sort_order: order });
     };
     if (recipeType === 'beer') {
-      await insert(mashId, 'temperature_control', 'Mash', null,
+      insert(mashId, 'temperature_control', 'Mash', null,
         { phase: 'mash', mode: 'hold', target_value: convertUnit(67, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 1800 }, 2);
-      await insert(nanoid(), 'addition', 'Add fermentable', mashId,
+      insert(nanoid(), 'addition', 'Add fermentable', mashId,
         { item_category: 'Grain', anchor_point: 'start' }, 1);
-      await insert(drainId, 'transfer', 'Drain grain', mashId,
+      insert(drainId, 'transfer', 'Drain grain', mashId,
         { purpose: 'drain_grain', anchor_point: 'end' }, 3);
-      await insert(nanoid(), 'measurement', 'Measure pre-boil gravity', drainId,
+      insert(nanoid(), 'measurement', 'Measure pre-boil gravity', drainId,
         { measurement_kind: 'gravity', target_unit: 'SG' }, 4);
-      await insert(boilId, 'temperature_control', 'Boil', drainId,
+      insert(boilId, 'temperature_control', 'Boil', drainId,
         { phase: 'boil', mode: 'heat', target_value: convertUnit(100, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 3600 }, 5);
-      await insert(chillId, 'temperature_control', 'Chill', boilId,
+      insert(chillId, 'temperature_control', 'Chill', boilId,
         { phase: 'chill', mode: 'chill', target_value: convertUnit(20, '°C', temperatureUnit)!, target_unit: temperatureUnit,
           anchor_point: 'end' }, 6);
-      await insert(transferId, 'transfer', 'Transfer to fermenter', chillId,
+      insert(transferId, 'transfer', 'Transfer to fermenter', chillId,
         { anchor_point: 'end' }, 7);
     }
     const gravityId = nanoid();
-    await insert(gravityId, 'measurement', 'Measure original specific gravity', recipeType === 'beer' ? transferId : null,
+    insert(gravityId, 'measurement', 'Measure original specific gravity', recipeType === 'beer' ? transferId : null,
       { measurement_kind: 'gravity', target_unit: 'SG' }, recipeType === 'beer' ? 8 : 1);
     const pitchId = nanoid();
-    await insert(pitchId, 'addition', 'Pitch yeast', recipeType === 'beer' ? chillId : gravityId,
+    insert(pitchId, 'addition', 'Pitch yeast', recipeType === 'beer' ? chillId : gravityId,
       { item_category: 'Yeast', ...(recipeType === 'beer' ? { anchor_point: 'end' } : {}) }, recipeType === 'beer' ? 9 : 2);
     const packagingDays: Record<RecipeType, number> = { beer: 21, cider: 28, wine: 60, mead: 60 };
-    await insert(nanoid(), 'packaging', 'Package batch', pitchId,
+    insert(nanoid(), 'packaging', 'Package batch', pitchId,
       {}, recipeType === 'beer' ? 10 : 3, packagingDays[recipeType] * 86400);
+  return plans.sort((a, b) => a.sort_order - b.sort_order);
+}
+
+export async function createRecipe(db: DB, name: string, description: string, recipeType: RecipeType,
+  temperatureUnit: '°C' | '°F' = '°C'): Promise<string> {
+  const id = nanoid();
+  const now = nowSeconds();
+  const plans = recipeTemplatePlans(recipeType, temperatureUnit);
+  await db.tx(async tx => {
+    await tx.exec('INSERT INTO recipes(id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+      [id, name, description || null, now, now]);
+    await tx.exec('INSERT INTO recipe_types(id, recipe_type) VALUES (?, ?)', [id, recipeType]);
+    for (const plan of plans) {
+      await tx.exec(`INSERT INTO recipe_events
+        (id, recipe_id, event_type, title, planned_at, anchor_event_id, offset_seconds, anchor_point, duration_seconds, instructions, sort_order)
+        VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+        [plan.id, id, plan.event_type, plan.title, plan.anchor_event_id ?? null, plan.offset_seconds ?? 0,
+          plan.details.anchor_point ?? null, plan.details.duration_seconds ?? null, plan.details.note ?? null, plan.sort_order]);
+      await writePlanPayload(tx, 'recipe', plan.id, plan.event_type, plan.details);
+    }
   });
   return id;
 }
@@ -953,6 +999,74 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
         await tx.exec(`INSERT INTO batch_event_inputs(id, ${columns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')})`,
           [ids.get(plan.id)!, ...columns.map(column => snapshot[column] ?? null)]);
       }
+    }
+  });
+  return batchId;
+}
+
+export async function startBatchFromPrevious(db: DB, sourceBatchId: string, name: string,
+  accountId: string, description: string, unitIds: Record<string, string> = {},
+  stockIds: Record<string, string> = {}): Promise<string> {
+  const source = (await db.execO<Batch>('SELECT id, name, description, status, created_at FROM batches WHERE id = ?',
+    [sourceBatchId]))[0];
+  if (!source) throw new Error('Choose an available previous batch');
+  const sourceEvents = await listEvents(db, sourceBatchId);
+  const plans = repeatBatchActions(sourceEvents, source.created_at);
+  const equipment = await db.execO<{ id: string; model_id: string; name: string; removed_at: number | null }>(
+    'SELECT id, model_id, name, removed_at FROM equipment');
+  const stock = await listInventory(db);
+  const mapEquipment = (sourceId?: string): string | undefined => {
+    if (!sourceId) return undefined;
+    const original = equipment.find(item => item.id === sourceId);
+    const selected = unitIds[sourceId];
+    if (selected === 'unlinked') return undefined;
+    if (selected) {
+      const choice = equipment.find(item => item.id === selected && item.removed_at == null);
+      if (!choice || original && choice.model_id !== original.model_id) throw new Error('Choose a matching equipment unit');
+      return choice.id;
+    }
+    if (original && original.removed_at == null) return original.id;
+    const matches = equipment.filter(item => item.removed_at == null && item.model_id === original?.model_id);
+    return matches.length === 1 ? matches[0].id : undefined;
+  };
+  const mapStock = (details: PlanDetails): string | undefined => {
+    const key = details.inventory_item_id || details.supply_id;
+    if (!key) return undefined;
+    const selected = stockIds[key];
+    if (selected === 'unlinked') return undefined;
+    if (selected) {
+      const choice = stock.find(item => item.id === selected);
+      if (!choice || details.supply_id && choice.supply_id !== details.supply_id)
+        throw new Error('Choose stock for the same ingredient');
+      return choice.id;
+    }
+    const matches = details.supply_id ? stock.filter(item => item.supply_id === details.supply_id)
+      : stock.filter(item => item.id === details.inventory_item_id);
+    return matches.length === 1 ? matches[0].id : undefined;
+  };
+  const batchId = nanoid();
+  const now = nowSeconds();
+  await db.tx(async tx => {
+    await tx.exec('INSERT INTO batches(id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [batchId, name, description || null, 'active', now, now]);
+    await tx.exec('INSERT INTO batch_origins(id, source_batch_id) VALUES (?, ?)', [batchId, sourceBatchId]);
+    await tx.exec(`INSERT INTO batch_recipe_inputs(id, target_fermenter_volume_liters, brewhouse_efficiency_pct, wort_loss_liters)
+      SELECT ?, target_fermenter_volume_liters, brewhouse_efficiency_pct, wort_loss_liters
+      FROM batch_recipe_inputs WHERE id = ?`, [batchId, sourceBatchId]);
+    await tx.exec(`INSERT OR IGNORE INTO batch_recipe_inputs(id, wort_loss_liters)
+      VALUES (?, (SELECT wort_loss_liters FROM brewery_process_defaults WHERE id = 'brewery'))`, [batchId]);
+    for (const plan of plans) {
+      const details: PlanDetails = { ...plan.details,
+        inventory_item_id: plan.event_type === 'addition' ? mapStock(plan.details) : undefined,
+        equipment_id: mapEquipment(plan.details.equipment_id),
+        mash_equipment_id: mapEquipment(plan.details.mash_equipment_id),
+        to_vessel_id: mapEquipment(plan.details.to_vessel_id) };
+      await tx.exec(`INSERT INTO batch_events(id, batch_id, event_type, title, planned_at, anchor_event_id,
+        offset_seconds, anchor_point, duration_seconds, instructions, created_at, created_by_account_id)
+        VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+        [plan.id, batchId, plan.event_type, plan.title, plan.anchor_event_id, plan.offset_seconds,
+          details.anchor_point ?? null, details.duration_seconds ?? null, details.note ?? null, now, accountId]);
+      await writePlanPayload(tx, 'batch', plan.id, plan.event_type, details);
     }
   });
   return batchId;

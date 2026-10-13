@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Select } from 'antd';
 import { PlusOutlined, SettingOutlined } from '@ant-design/icons';
 import { addBatchPlan, createBatch, eventDetails, eventFormData, listEvents, listPhotos, releaseEquipmentUse,
-  startBatchFromRecipe, updateBatchPlan, batchWortLoss, updateBatchWortLoss,
+  startBatchFromRecipe, startBatchFromTemplate, startBatchFromPrevious, updateBatchPlan, batchWortLoss, updateBatchWortLoss,
   type ActualEvent, type Batch, type Equipment, type InventoryItem,
-  type LocalDb, type MeasurementKind, type PlanInput, type Recipe } from './db.ts';
+  type LocalDb, type MeasurementKind, type PlanInput, type Recipe, type RecipeType } from './db.ts';
 import { kindLabel } from './constants.ts';
 import { formatTime } from './time.ts';
 import { PlanForm, repeatPreset, type PlanPreset } from './PlanForm.tsx';
@@ -24,7 +24,10 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   const [details, setDetails] = useState<Record<string, string>>({});
   const [photos, setPhotos] = useState<{ id: string; url: string; batch_event_id: string | null; created_at: number }[]>([]);
   const [newBatch, setNewBatch] = useState(false);
-  const [selectedRecipeId, setSelectedRecipeId] = useState<string | undefined>();
+  const [newBatchForm] = Form.useForm();
+  const startFrom = Form.useWatch('start_from', newBatchForm) as string | undefined;
+  const selectedRecipeId = Form.useWatch('recipe_id', newBatchForm) as string | undefined;
+  const selectedPreviousId = Form.useWatch('source_batch_id', newBatchForm) as string | undefined;
   const [creatingKind, setCreatingKind] = useState<string | null>(null);
   const [preset, setPreset] = useState<PlanPreset>({});
   const [editingPlan, setEditingPlan] = useState<ActualEvent | null>(null);
@@ -57,13 +60,25 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
 
   async function changed() { await refreshDetail(); await onChanged(); }
 
-  async function create(values: { name: string; description?: string; recipe_id?: string;
-    unit_ids?: Record<string, string>; wort_loss?: number }) {
+  async function create(values: { name: string; description?: string; start_from: string; recipe_id?: string;
+    source_batch_id?: string; unit_ids?: Record<string, string>; stock_ids?: Record<string, string>; wort_loss?: number }) {
     try {
-      const recipe = recipes.find(item => item.id === values.recipe_id);
-      if (values.recipe_id && !recipe) throw new Error('Choose an available recipe');
-      const id = recipe ? await startBatchFromRecipe(db, recipe, values.name.trim(), accountId, values.description || '', values.unit_ids)
-        : await createBatch(db, values.name.trim(), values.description || '', accountId);
+      let id: string;
+      if (values.start_from === 'recipe') {
+        const recipe = recipes.find(item => item.id === values.recipe_id);
+        if (!recipe) throw new Error('Choose an available recipe');
+        id = await startBatchFromRecipe(db, recipe, values.name.trim(), accountId, values.description || '', values.unit_ids);
+      } else if (values.start_from === 'previous') {
+        if (!values.source_batch_id || !batches.some(item => item.id === values.source_batch_id))
+          throw new Error('Choose an available previous batch');
+        id = await startBatchFromPrevious(db, values.source_batch_id, values.name.trim(), accountId,
+          values.description || '', values.unit_ids, values.stock_ids);
+      } else if (values.start_from.startsWith('template:')) {
+        id = await startBatchFromTemplate(db, values.start_from.slice(9) as RecipeType, values.name.trim(),
+          values.description || '', accountId, preferredUnits.temperature);
+      } else {
+        id = await createBatch(db, values.name.trim(), values.description || '', accountId);
+      }
       if (values.wort_loss != null) await updateBatchWortLoss(db, id,
         convertUnit(values.wort_loss, preferredUnits.volume, 'L'));
       onSelect(id); setNewBatch(false); await onChanged();
@@ -115,6 +130,10 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
       <div className="content-heading"><div><span className="eyebrow">Batch log</span><h2>{batch.name}</h2>
         <p className="muted">{batch.description || 'A living record of this brew.'}</p>
         <p className="muted">Started {formatTime(batch.created_at)}</p>
+        {batch.source_batch_id && <p className="muted">Started from {batch.source_batch_name
+          ? <a href={`${basePath}/batch/${batch.source_batch_id}`}
+            onClick={event => { event.preventDefault(); onSelect(batch.source_batch_id!); }}>{batch.source_batch_name}</a>
+          : 'a previous batch'}</p>}
         <div className="equipment-parameter"><span>Expected wort loss to fermenter: {wortLoss == null ? 'Not set'
           : `${Number((convertUnit(wortLoss, 'L', preferredUnits.volume) || 0).toFixed(2))} ${preferredUnits.volume}`}</span>
           <Button type="text" size="small" icon={<SettingOutlined />} aria-label="Edit batch wort loss"
@@ -126,13 +145,27 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
           setError(cause instanceof Error ? cause.message : String(cause))); }}
         onAdd={(kind, settings) => { setEditingPlan(null); setPreset(settings); setCreatingKind(kind); }} />
     </section>}
-    <Modal title="New batch" open={newBatch} onCancel={() => setNewBatch(false)} footer={null} destroyOnHidden>
-      <Form layout="vertical" onFinish={create}>
+    <Modal title="New batch" open={newBatch} onCancel={() => setNewBatch(false)} afterClose={() => newBatchForm.resetFields()}
+      footer={null} destroyOnHidden>
+      <Form form={newBatchForm} layout="vertical" onFinish={create} initialValues={{ start_from: 'empty' }}>
         <Form.Item name="name" label="Batch name" rules={[{ required: true }]}><Input maxLength={100} /></Form.Item>
-        <Form.Item name="recipe_id" label="Recipe (optional)"><Select allowClear showSearch optionFilterProp="label"
-          placeholder="Choose a recipe" options={recipes.map(recipe => ({ value: recipe.id, label: recipe.name }))}
-          onChange={setSelectedRecipeId} /></Form.Item>
-        <RecipeEquipmentFields db={db} recipeId={selectedRecipeId} equipment={equipment} models={equipmentModels} />
+        <Form.Item name="start_from" label="Start from"><Select options={[
+          { value: 'empty', label: 'Empty batch' },
+          { value: 'template:beer', label: 'Beer template' },
+          { value: 'template:wine', label: 'Wine template' },
+          { value: 'template:mead', label: 'Mead template' },
+          { value: 'template:cider', label: 'Cider template' },
+          { value: 'recipe', label: 'Recipe' },
+          { value: 'previous', label: 'Previous batch' }
+        ]} /></Form.Item>
+        {startFrom === 'recipe' && <><Form.Item name="recipe_id" label="Recipe" rules={[{ required: true }]}>
+          <Select showSearch optionFilterProp="label" placeholder="Choose a recipe"
+            options={recipes.map(recipe => ({ value: recipe.id, label: recipe.name }))} /></Form.Item>
+          <RecipeEquipmentFields db={db} recipeId={selectedRecipeId} equipment={equipment} models={equipmentModels} /></>}
+        {startFrom === 'previous' && <><Form.Item name="source_batch_id" label="Previous batch" rules={[{ required: true }]}>
+          <Select showSearch optionFilterProp="label" placeholder="Choose a batch"
+            options={batches.map(previous => ({ value: previous.id, label: previous.name }))} /></Form.Item>
+          <PreviousBatchFields db={db} batchId={selectedPreviousId} equipment={equipment} inventory={inventory} /></>}
         <Form.Item name="wort_loss" label={`Wort loss override (${preferredUnits.volume}, optional)`}>
           <InputNumber className="full-width" min={0} step="any" /></Form.Item>
         <Form.Item name="description" label="Description"><Input.TextArea rows={2} /></Form.Item>
@@ -165,4 +198,52 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
         onSaved={async () => { setRecordingEvent(null); setEditingData(null); await changed(); }} />}
     </Modal>
   </div>;
+}
+
+function PreviousBatchFields({ db, batchId, equipment, inventory }: {
+  db: LocalDb; batchId?: string; equipment: Equipment[]; inventory: InventoryItem[];
+}) {
+  const [events, setEvents] = useState<ActualEvent[]>([]);
+  const [sourceUnits, setSourceUnits] = useState<{ id: string; model_id: string; name: string }[]>([]);
+  useEffect(() => {
+    if (!batchId) { setEvents([]); return; }
+    let active = true;
+    void Promise.all([listEvents(db, batchId),
+      db.execO<{ id: string; model_id: string; name: string }>('SELECT id, model_id, name FROM equipment')])
+      .then(([nextEvents, nextUnits]) => { if (active) { setEvents(nextEvents); setSourceUnits(nextUnits); } });
+    return () => { active = false; };
+  }, [db, batchId]);
+  const equipmentIds = [...new Set(events.flatMap(event =>
+    [event.details.equipment_id, event.details.mash_equipment_id, event.details.to_vessel_id]
+      .filter((id): id is string => typeof id === 'string' && !!id)))];
+  const ingredients = [...new Map(events.filter(event => event.event_type === 'addition'
+    && (event.actual_at != null || event.skipped_at == null))
+    .map(event => [event.details.inventory_item_id || event.details.supply_id, event.details] as const)
+    .filter(([key]) => !!key)).values()];
+  return <>
+    {equipmentIds.map(sourceId => {
+      const source = sourceUnits.find(unit => unit.id === sourceId);
+      const choices = equipment.filter(unit => unit.model_id === source?.model_id && unit.removed_at == null);
+      const defaultId = choices.some(unit => unit.id === sourceId) ? sourceId
+        : choices.length === 1 ? choices[0].id : 'unlinked';
+      return <Form.Item key={sourceId} name={['unit_ids', sourceId]} initialValue={defaultId}
+        label={`${source?.name || 'Equipment'} for this batch`}>
+        <Select options={[{ value: 'unlinked', label: 'Choose later' }, ...choices.map(unit => ({
+          value: unit.id, label: unit.stock_id ? `${unit.name} · ${unit.stock_id}` : unit.name
+        }))]} />
+      </Form.Item>;
+    })}
+    {ingredients.map(details => {
+      const key = details.inventory_item_id || details.supply_id!;
+      const choices = details.supply_id ? inventory.filter(item => item.supply_id === details.supply_id)
+        : inventory.filter(item => item.id === details.inventory_item_id);
+      return <Form.Item key={key} name={['stock_ids', key]}
+        initialValue={choices.length === 1 ? choices[0].id : 'unlinked'}
+        label={`Stock for ${details.item_name || choices[0]?.name || 'ingredient'}`}>
+        <Select options={[{ value: 'unlinked', label: 'Choose later' }, ...choices.map(item => ({
+          value: item.id, label: item.lot_code ? `${item.name} · Lot ${item.lot_code}` : item.name
+        }))]} />
+      </Form.Item>;
+    })}
+  </>;
 }
