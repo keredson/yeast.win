@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { nanoid } from 'nanoid';
 import Database from 'better-sqlite3';
-import { changeColumns, nowSeconds, type SyncRequest, validateChange, } from '../shared/schema.ts';
+import { changeColumns, nowSeconds, workspaceSchemaVersion, type SyncRequest, validateChange, } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 
 process.env.BREWLOG_DATA_DIR = mkdtempSync(join(tmpdir(), 'brewlog-sync-'));
@@ -127,7 +127,7 @@ test('pre-release workspace schemas reset without carrying old event JSON', () =
   old.close();
   const db = openWorkspaceDb(id);
   try {
-    assert.equal(db.pragma('user_version', { simple: true }), 15);
+    assert.equal(db.pragma('user_version', { simple: true }), workspaceSchemaVersion);
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'schema_meta'").get(), undefined);
     assert.equal((db.prepare('SELECT COUNT(*) AS count FROM batch_events').get() as { count: number }).count, 0);
     assert.equal((db.pragma('table_info(batch_events)') as { name: string }[])
@@ -161,7 +161,7 @@ test('current workspace data survives the move from schema_meta to user_version'
   } finally { closeWorkspaceDb(first); }
   const reopened = openWorkspaceDb(id);
   try {
-    assert.equal(reopened.pragma('user_version', { simple: true }), 15);
+    assert.equal(reopened.pragma('user_version', { simple: true }), workspaceSchemaVersion);
     assert.equal(reopened.prepare("SELECT name FROM sqlite_master WHERE name = 'schema_meta'").get(), undefined);
     assert.equal((reopened.prepare('SELECT name FROM batches WHERE id = ?').get(batchId) as { name: string }).name,
       'Existing batch');
@@ -182,7 +182,7 @@ test('version 12 ingredient JSON is replaced by typed columns', () => {
   old.close();
   const db = openWorkspaceDb(id);
   try {
-    assert.equal(db.pragma('user_version', { simple: true }), 15);
+    assert.equal(db.pragma('user_version', { simple: true }), workspaceSchemaVersion);
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'schema_meta'").get(), undefined);
     const columns = db.pragma('table_info(inventory_ingredient_properties)') as { name: string }[];
     assert.deepEqual(columns.map(column => column.name),
@@ -203,8 +203,36 @@ test('version 14 calibration JSON table is removed on reset', () => {
   old.close();
   const db = openWorkspaceDb(id);
   try {
-    assert.equal(db.pragma('user_version', { simple: true }), 15);
+    assert.equal(db.pragma('user_version', { simple: true }), workspaceSchemaVersion);
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'schema_meta'").get(), undefined);
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'equipment_calibrations'").get(), undefined);
+  } finally { closeWorkspaceDb(db); }
+});
+
+test('version 15 adds location slugs without deleting existing locations or stock', () => {
+  const id = nanoid();
+  const file = join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`);
+  const old = new Database(file);
+  old.loadExtension('vendor/crsqlite.so');
+  old.exec(`CREATE TABLE schema_meta(version INTEGER NOT NULL);
+    INSERT INTO schema_meta VALUES (15);
+    CREATE TABLE inventory_locations(id TEXT PRIMARY KEY NOT NULL, name TEXT, parent_id TEXT, created_at INTEGER);
+    CREATE TABLE inventory_items(id TEXT PRIMARY KEY NOT NULL, name TEXT, category TEXT, default_unit TEXT, created_at INTEGER);
+    CREATE TABLE inventory_item_locations(id TEXT PRIMARY KEY NOT NULL, location_id TEXT)`);
+  for (const table of ['inventory_locations', 'inventory_items', 'inventory_item_locations']) old.prepare('SELECT crsql_as_crr(?)').get(table);
+  const locationId = nanoid();
+  const itemId = nanoid();
+  old.prepare('INSERT INTO inventory_locations(id, name, created_at) VALUES (?, ?, ?)').run(locationId, 'Cellar', nowSeconds());
+  old.prepare('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(itemId, 'Malt', 'Grain', 'kg', nowSeconds());
+  old.prepare('INSERT INTO inventory_item_locations(id, location_id) VALUES (?, ?)').run(itemId, locationId);
+  old.close();
+  const db = openWorkspaceDb(id);
+  try {
+    assert.equal(db.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'schema_meta'").get(), undefined);
+    assert.equal((db.prepare('SELECT name FROM inventory_locations WHERE id = ?').get(locationId) as { name: string }).name, 'Cellar');
+    assert.equal((db.prepare('SELECT location_id FROM inventory_item_locations WHERE id = ?').get(itemId) as { location_id: string }).location_id, locationId);
+    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'inventory_location_slugs'").get());
   } finally { closeWorkspaceDb(db); }
 });

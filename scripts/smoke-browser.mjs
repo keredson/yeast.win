@@ -800,22 +800,33 @@ try {
   await page.setViewportSize({ width: 320, height: 720 });
   if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw new Error('Grouped inventory tables overflow a narrow phone');
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.getByRole('button', { name: 'Manage locations' }).click();
-  const locationsDialog = page.getByRole('dialog', { name: 'Inventory locations' });
+  await navigateSection(page, 'Locations');
+  await page.getByRole('heading', { name: 'Locations' }).waitFor();
+  if (await page.locator('.location-index .ant-empty').count() || await page.getByText('No locations yet').count()) {
+    throw new Error('Locations should not show an empty-state illustration or placeholder message');
+  }
+  await page.getByRole('button', { name: 'Add location' }).click();
+  const locationsDialog = page.getByRole('dialog', { name: 'New location' });
   if (await locationsDialog.getByRole('combobox', { name: 'Inside (optional)' }).count()
     || await locationsDialog.getByText('A parent is optional.').count()) {
     throw new Error('Empty location list should not show the parent selector or optional-parent note');
   }
   await locationsDialog.getByRole('textbox', { name: 'Name' }).fill('Back room');
   await locationsDialog.getByRole('button', { name: 'Add location' }).click();
-  await locationsDialog.getByText('Back room').waitFor();
-  await locationsDialog.getByRole('combobox', { name: 'Inside (optional)' }).waitFor();
-  await locationsDialog.getByRole('textbox', { name: 'Name' }).fill('Shelf A');
-  await locationsDialog.getByRole('combobox', { name: 'Inside' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Back room' }).click();
-  await locationsDialog.getByRole('button', { name: 'Add location' }).click();
-  await locationsDialog.getByText('Shelf A').waitFor();
-  await locationsDialog.locator('.ant-modal-close').click();
+  await locationsDialog.waitFor({ state: 'hidden' });
+  await page.getByRole('link', { name: /Back room.*0 here/ }).waitFor();
+  await page.getByRole('link', { name: /Back room.*0 here/ }).click();
+  await page.waitForURL(/\/location\/back-room-/);
+  await page.getByRole('button', { name: 'New sublocation' }).click();
+  const childDialog = page.getByRole('dialog', { name: 'New location' });
+  await childDialog.getByRole('textbox', { name: 'Name' }).fill('Shelf A');
+  await childDialog.getByRole('button', { name: 'Add location' }).click();
+  await childDialog.waitFor({ state: 'hidden' });
+  await page.getByRole('link', { name: /Shelf A.*0 here/ }).waitFor();
+  await page.setViewportSize({ width: 320, height: 720 });
+  if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw new Error('Location hierarchy overflows a narrow phone');
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await navigateSection(page, 'Inventory');
   await grainRow.getByRole('button', { name: 'Actions for Smoke grain' }).click();
   await page.getByRole('menuitem', { name: 'Bought' }).click();
   const refill = page.getByRole('dialog', { name: 'Bought Smoke grain' });
@@ -830,7 +841,7 @@ try {
   }
   await moveDialog.getByRole('combobox', { name: 'To location (optional)' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'New location…' }).click();
-  const moveLocationDialog = page.getByRole('dialog', { name: 'Inventory locations' });
+  const moveLocationDialog = page.getByRole('dialog', { name: 'New location' });
   await moveLocationDialog.getByRole('textbox', { name: 'Name' }).fill('Spare shelf');
   await moveLocationDialog.getByRole('button', { name: 'Add location' }).click();
   await moveLocationDialog.waitFor({ state: 'hidden' });
@@ -860,7 +871,7 @@ try {
   }
   await shelvedGrain.locator('input#location_id').click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'New location…' }).click();
-  const itemLocationDialog = page.getByRole('dialog', { name: 'Inventory locations' });
+  const itemLocationDialog = page.getByRole('dialog', { name: 'New location' });
   await itemLocationDialog.getByRole('textbox', { name: 'Name' }).fill('Stock cabinet');
   await itemLocationDialog.getByRole('button', { name: 'Add location' }).click();
   await itemLocationDialog.waitFor({ state: 'hidden' });
@@ -877,6 +888,18 @@ try {
   if (await page.locator('.group-table').getByRole('link', { name: 'Smoke grain' }).count() !== 2) {
     throw new Error('Buying more at a location created another stock row');
   }
+  await navigateSection(page, 'Locations');
+  await page.locator('.location-node').filter({ hasText: 'Shelf A' }).click();
+  await page.getByRole('heading', { name: 'Shelf A' }).waitFor();
+  await page.getByRole('heading', { name: 'Stock here' }).waitFor();
+  await page.getByRole('link', { name: /Smoke grain.*3 lb/ }).waitFor();
+  await page.getByRole('button', { name: 'Location settings' }).click();
+  const locationSettings = page.getByRole('dialog', { name: 'Location settings' });
+  await locationSettings.getByRole('textbox', { name: 'Name' }).fill('Shelf B');
+  await locationSettings.getByRole('textbox', { name: 'URL slug' }).fill('shelf-b');
+  await locationSettings.getByRole('button', { name: 'Save changes' }).click();
+  await page.waitForURL(/\/location\/shelf-b$/);
+  await page.getByRole('heading', { name: 'Shelf B' }).waitFor();
   await page.route('**/api/**', route => route.abort());
   await page.goto(`${baseUrl}/inventory`);
   await page.getByRole('heading', { name: 'Inventory', exact: true }).waitFor();

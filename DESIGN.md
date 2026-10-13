@@ -142,8 +142,12 @@ Electric kettles and all-in-one systems store rated power and one calibrated hea
 | `inventory_item_specs` | Deprecated compatibility table from schema version 3. New inventory items do not use it; capacity belongs to equipment. |
 | `inventory_purchases` | Quantity and unit added, date, supplier/lot/cost when known. |
 | `inventory_counts` | A dated assertion that a quantity of an item was physically on hand. This anchors later balance calculations. |
+| `inventory_locations` / `inventory_location_slugs` | Hierarchical physical storage places with stable brewery-local URL slugs. A location can be renamed or moved without changing its URL. |
 
 Inventory is a ledger, not a mutable `quantity_on_hand` field. Additions and packaging can consume inventory directly via their linked item and quantity; they should not generate a second, independently editable "used" movement. Balance after a count is that count plus purchases and other receipts minus linked uses after it. Conversions require compatible dimensions; counts, packets, and mass are not silently mixed. Photos may attach to inventory items as well as batches.
+
+Locations have their own top-level navigation. `/locations` visualizes the hierarchy and unassigned stock; `/location/:slug` shows a place's child locations and direct stock grouped by category. Named breweries prefix these paths with `/brewery/:brewerySlug`. Location settings manage name, slug, parent, and deletion; a location with stock or children must be emptied first. Inventory creation and stock moves retain a contextual “New location…” option. Equipment placement is not yet modeled.
+The Locations index leaves empty sections blank and puts its Add location action after the content; it does not use an empty-state illustration or “No locations yet” message.
 
 ### Photos
 
