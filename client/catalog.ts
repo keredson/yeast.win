@@ -57,8 +57,10 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
     db.execO<CatalogInventory>('SELECT id, name, category, unit FROM inventory ORDER BY name COLLATE NOCASE')
   ]);
   const byId = new Map(models.map(model => [model.id, { ...model, measurement_channels: [] as CatalogMeasurementChannel[] }]));
-  for (const row of liquid) Object.assign(byId.get(row.model_id) || {}, { capacity_liters: row.capacity_liters });
-  for (const row of pressure) Object.assign(byId.get(row.model_id) || {}, { max_pressure_kpa: row.max_pressure_kpa });
+  for (const row of liquid) Object.assign(byId.get(row.model_id) || {},
+    { has_liquid_containment: true, capacity_liters: row.capacity_liters });
+  for (const row of pressure) Object.assign(byId.get(row.model_id) || {},
+    { has_pressure_rating: true, max_pressure_kpa: row.max_pressure_kpa });
   for (const row of heating) Object.assign(byId.get(row.model_id) || {},
     { has_heating: true, rated_power_watts: row.rated_power_watts });
   for (const row of cooling) Object.assign(byId.get(row.model_id) || {},
