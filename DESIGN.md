@@ -155,6 +155,8 @@ Initially, sync all CRR changes between an account's device and each private wor
 
 The shared catalog uses unprefixed `equipment` and `inventory` CRR tables and the same change encoding. Devices request changes after their stored server cursor and apply them locally; they never upload catalog changes. The browser stores this checkpoint in `sync_state`, while SQLite `user_version` records the catalog schema version. Normal updates transfer changed rows only. A new device receives the full history once. Schema upgrades may reset a pre-release local catalog and its checkpoint.
 
+Use SQLite `PRAGMA user_version` for numbered schema migrations in the auth, catalog, and workspace databases. Browser and server copies of a workspace use the same schema version. Sync checkpoints remain in the browser's `sync_state` table and are updated transactionally with received changes.
+
 ### Later: sharing and filtered sync
 
 For a batch follower, the server must authorize **each incoming and outgoing change**. It may scan a workspace changeset and filter in memory, then stream authorized changes, provided benchmarks show this is acceptable. Every child row, photo, and delete must be mapped to its batch even if a deletion change carries only an opaque row ID. Keep the mapping/tombstone information needed for that decision, and avoid syncing unrelated recipes, inventory, private equipment details, or other batches as accidental dependencies. Batch membership in a row cannot be mutable without reworking this scheme.
