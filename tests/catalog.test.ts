@@ -42,6 +42,8 @@ test('existing catalog gains new equipment and inventory without item capacity',
     assert.equal(pressureFermenter?.kind, 'fermenter');
     assert.ok((pressureFermenter?.max_pressure_kpa || 0) > 0);
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_inkbird_itc_308')?.kind, 'fermentation_temperature_control');
+    assert.equal(snapshot.equipment.some(row => row.id === 'equipment_inkbird_itc_308_wifi'), false);
+    assert.equal(snapshot.equipment.find(row => row.id === 'equipment_anton_paar_easydens')?.kind, 'hydrometer');
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_vevor_35l')?.name,
       'VEVOR Electric Brewing System 9.2 Gal/35 L');
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_vevor_35l')?.kind, 'all_in_one');
@@ -58,6 +60,38 @@ test('existing catalog gains new equipment and inventory without item capacity',
       { id: 'inventory_bottle_12oz', name: '12 oz bottle', category: 'Packaging', unit: 'each' });
     assert.ok(snapshot.inventory.length > 20);
     assert.equal(snapshot.inventory.find(row => row.id === 'inventory_lactic_acid')?.category, 'Adjunct');
+  } finally { db.close(); }
+});
+
+test('version 11 catalog adds Anton Paar instruments without replacing existing rows', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
+  const old = new Database(join(dir, 'catalog.sqlite'));
+  old.loadExtension(join(process.cwd(), 'vendor/crsqlite.so'));
+  for (const statement of Object.values(catalogModelTables)) old.exec(statement);
+  old.exec(catalogInventoryTable);
+  for (const table of catalogTables) old.prepare('SELECT crsql_as_crr(?)').get(table);
+  old.prepare('INSERT INTO equipment_models(id, model_name, kind) VALUES (?, ?, ?)')
+    .run('my_meter', 'My meter', 'hydrometer');
+  old.prepare('INSERT INTO inventory(id, name, category, unit) VALUES (?, ?, ?, ?)')
+    .run('my_grain', 'My grain', 'Grain', 'g');
+  old.pragma('user_version = 11');
+  old.close();
+
+  const db = openCatalogDb(dir);
+  try {
+    assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
+    assert.equal((db.prepare('SELECT model_name FROM equipment_models WHERE id = ?')
+      .get('my_meter') as { model_name: string }).model_name, 'My meter');
+    assert.equal((db.prepare('SELECT name FROM inventory WHERE id = ?')
+      .get('my_grain') as { name: string }).name, 'My grain');
+    assert.equal((db.prepare('SELECT measurement_scale FROM model_measurement_channels WHERE id = ?')
+      .get('equipment_anton_paar_easydens:gravity') as { measurement_scale: string }).measurement_scale, 'SG');
+    assert.equal((db.prepare('SELECT measurement_kind FROM model_measurement_channels WHERE id = ?')
+      .get('equipment_anton_paar_cboxqc:dissolved_oxygen') as { measurement_kind: string }).measurement_kind,
+      'dissolved_oxygen');
+    assert.equal(db.prepare('SELECT id FROM equipment_models WHERE id = ?')
+      .get('equipment_inkbird_itc_308_wifi'), undefined);
+    assert.ok(catalogChanges(db, 0n).changes.some(change => change.table === 'equipment_models'));
   } finally { db.close(); }
 });
 

@@ -14,7 +14,7 @@ export interface CatalogEquipment { id: string; name: string; kind: string; manu
 export interface CatalogInventory { id: string; name: string; category: string; unit: string }
 
 export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
-export const catalogSchemaVersion = 11;
+export const catalogSchemaVersion = 12;
 export const vevorModelName = 'VEVOR Electric Brewing System 9.2 Gal/35 L';
 export const catalogModelTables = {
   equipment_models: `CREATE TABLE IF NOT EXISTS equipment_models (
@@ -39,6 +39,22 @@ export const catalogInventoryTable = `CREATE TABLE IF NOT EXISTS inventory (
 
 export const inventoryCategories = ['Grain', 'Hops', 'Yeast', 'Nutrient', 'Adjunct', 'Chemical', 'Packaging', 'Other'] as const;
 
+export const antonPaarEquipment: CatalogEquipment[] = [
+  { id: 'equipment_anton_paar_easydens', name: 'Anton Paar EasyDens', kind: 'hydrometer',
+    measurement_min: 0.7, measurement_max: 1.2, measurement_unit: 'SG' },
+  { id: 'equipment_anton_paar_smartref', name: 'Anton Paar SmartRef', kind: 'refractometer',
+    measurement_min: 0, measurement_max: 85, measurement_unit: '°Brix' },
+  { id: 'equipment_anton_paar_dma_35', name: 'Anton Paar DMA 35', kind: 'hydrometer' },
+  { id: 'equipment_anton_paar_carboqc', name: 'Anton Paar CarboQC', kind: 'carbonation_meter' },
+  { id: 'equipment_anton_paar_cboxqc', name: 'Anton Paar CboxQC', kind: 'carbonation_meter',
+    measurement_channels: [{ id: 'equipment_anton_paar_cboxqc:dissolved_oxygen',
+      model_id: 'equipment_anton_paar_cboxqc', measurement_kind: 'dissolved_oxygen', measurement_unit: 'mg/L' }] },
+  { id: 'equipment_anton_paar_oxyqc', name: 'Anton Paar OxyQC', kind: 'dissolved_oxygen_meter',
+    measurement_min: 0, measurement_max: 4, measurement_unit: 'ppm' },
+  { id: 'equipment_anton_paar_oxyqc_wide_range', name: 'Anton Paar OxyQC Wide Range', kind: 'dissolved_oxygen_meter',
+    measurement_min: 0.015, measurement_max: 45, measurement_unit: 'ppm' }
+];
+
 export function unitForCategory(category: string, preferredMass: string): string {
   if (category === 'Yeast') return 'packet';
   if (category === 'Packaging') return 'each';
@@ -60,8 +76,6 @@ export const initialCatalogEquipment: CatalogEquipment[] = [
   { id: 'equipment_fermzilla_all_rounder_30l', name: 'KegLand FermZilla All Rounder 30 L', kind: 'fermenter', capacity_liters: 30, max_pressure_kpa: 241.316505 },
   { id: 'equipment_rapt_chamber', name: 'KegLand RAPT Fermentation Chamber', kind: 'fermentation_temperature_control' },
   { id: 'equipment_inkbird_itc_308', name: 'Inkbird ITC-308', kind: 'fermentation_temperature_control' },
-  // Retain this legacy model for equipment already linked to it, but do not offer it for new imports.
-  { id: 'equipment_inkbird_itc_308_wifi', name: 'Inkbird ITC-308-WIFI', kind: 'fermentation_temperature_control' },
   { id: 'equipment_rapt_controller', name: 'KegLand RAPT Temperature Controller', kind: 'fermentation_temperature_control' },
   { id: 'equipment_grainfather_gc4', name: 'Grainfather GC4 Glycol Chiller', kind: 'fermentation_temperature_control' },
   { id: 'equipment_rapt_glycol', name: 'KegLand RAPT Glycol Chiller', kind: 'fermentation_temperature_control' },
@@ -92,7 +106,8 @@ export const initialCatalogEquipment: CatalogEquipment[] = [
   { id: 'equipment_temperature_controller', name: 'Temperature controller', kind: 'fermentation_temperature_control' },
   { id: 'equipment_wort_pump', name: 'Wort pump', kind: 'pump' },
   { id: 'equipment_co2_meter', name: 'CO₂ meter', kind: 'carbonation_meter' },
-  { id: 'equipment_do_meter', name: 'Dissolved oxygen meter', kind: 'dissolved_oxygen_meter' }
+  { id: 'equipment_do_meter', name: 'Dissolved oxygen meter', kind: 'dissolved_oxygen_meter' },
+  ...antonPaarEquipment
 ];
 
 export const initialCatalogInventory: CatalogInventory[] = [

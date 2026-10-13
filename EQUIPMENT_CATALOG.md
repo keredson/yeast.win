@@ -17,4 +17,7 @@ roles, and any preset capacity. Brewers can enter any other model by name.
 | Temperature controllers | [Inkbird ITC-308 series](https://www.inkbird.com/collections/smart-appliances/products/temperature-controller-itc-308), [KegLand RAPT Controller](https://kegland.com.au/products/rapt-temperature-controller-standard-10amp-socket) |
 | Glycol chillers | [Grainfather GC4](https://us.grainfather.com/products/gc4-glycol-chiller), [KegLand RAPT Glycol Chiller](https://kegland.com.au/products/rapt-bluetooth-glycol-chiller) |
 | Gravity instruments | [Tilt hydrometer](https://tilthydrometer.com/), [KegLand RAPT Pill](https://kegland.com.au/products/yellow-rapt-pill-hydrometer-thermometer-wifi-bluetooth) |
+| Anton Paar gravity and extract instruments | [EasyDens](https://www.anton-paar.com/ca-en/products/details/beer-hydrometer-easydens/), [DMA 35](https://www.anton-paar.com/us-en/products/details/dma-35/) |
+| Anton Paar refractometer | [SmartRef](https://www.anton-paar.com/be-en/products/details/smartref/) |
+| Anton Paar carbonation and oxygen instruments | [CarboQC](https://www.anton-paar.com/corp-en/products/details/carboqc/), [CboxQC](https://www.anton-paar.com/corp-en/products/details/cboxqc/), [OxyQC and OxyQC Wide Range](https://www.anton-paar.com/uk-en/products/details/o2-meter-oxyqc-oxyqc-wide-range/) |
 | Other instruments | [ThermoWorks Thermapen ONE](https://www.thermoworks.com/products/thermapen-one), [Apera PH60](https://aperainst.de/produkt-kategorie/pocket-testers-products-en/60-series-premium/?lang=en), [Escali Primo](https://escali.com/) |

@@ -13,7 +13,9 @@ export function openLocalCatalog(): Promise<DB> {
     const sqlite = await initWasm(() => wasmUrl);
     const db = await sqlite.open('brewlog-catalog');
     const version = (await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version;
-    if (version < catalogSchemaVersion) {
+    if (version === 11) {
+      await db.exec(`PRAGMA user_version = ${catalogSchemaVersion}`);
+    } else if (version < catalogSchemaVersion) {
       const oldClocks = await db.execO<{ name: string }>(`SELECT name FROM sqlite_master
         WHERE name LIKE '%__crsql_clock'`);
       await db.tx(async tx => {
