@@ -227,6 +227,18 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
           await tx.exec(`PRAGMA user_version = ${workspaceSchemaVersion}`);
         });
       }
+      // Some development databases already report this version but lack a
+      // capability table. Repair only missing tables, leaving existing rows.
+      const present = new Set((await db.execO<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'table'")).map(row => row.name));
+      const missing = replicatedTables.filter(table => !present.has(table));
+      if (missing.length) await db.tx(async tx => {
+        for (const table of missing) {
+          await tx.exec(schemaStatements[replicatedTables.indexOf(table)]);
+          await tx.exec('SELECT crsql_as_crr(?)', [table]);
+        }
+        for (const statement of indexStatements) await tx.exec(statement);
+      });
       await openLocalCatalog();
       await db.exec("ATTACH DATABASE 'brewlog-catalog' AS catalog");
       await db.exec(effectiveEquipmentView);
