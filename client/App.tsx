@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppstoreOutlined, BookOutlined, DisconnectOutlined, EnvironmentOutlined, InboxOutlined, MenuOutlined, ToolOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Button, Card, Drawer, Empty, Form, Input, Layout, Menu, Popover, Select, Spin, Tooltip, Typography } from 'antd';
+import { Alert, Avatar, Button, Card, Drawer, Empty, Form, Input, Layout, Menu, Popover, Progress, Select, Spin, Tooltip, Typography } from 'antd';
 import { api, ApiError, ApiUnavailableError, type PreferredUnits, type Session, type Workspace } from './api.ts';
 import { defaultPreferredUnits } from '../shared/units.ts';
-import { forgetLocalDb, openLocalDb, syncNow, type Batch, type Equipment, type InventoryItem, type InventoryLocation, type LocalDb, type Recipe, type RecipeType,
+import { forgetLocalDb, openLocalDb, syncNow, type SyncProgress, type Batch, type Equipment, type InventoryItem, type InventoryLocation, type LocalDb, type Recipe, type RecipeType,
   listBatches, listEquipment, listEquipmentModels, listInventory, listSupplies, listInventoryLocations, listRecipes } from './db.ts';
 import { BatchSection } from './BatchSection.tsx';
 import { RecipeSection } from './RecipeSection.tsx';
@@ -212,6 +212,8 @@ export function App() {
   const [error, setError] = useState('');
   const [serverDisconnected, setServerDisconnected] = useState(false);
   const [syncPhase, setSyncPhase] = useState<'idle' | 'syncing' | 'synced' | 'failed'>('idle');
+  const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
+  const [catalogSyncProgress, setCatalogSyncProgress] = useState<{ applied: number; total: number } | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
   const [menuOpen, setMenuOpen] = useState(false);
@@ -258,7 +260,10 @@ export function App() {
       const cached = await readLocalCatalog(catalogDb);
       if (!cancelled) { setCatalogEquipment(cached.equipment); setCatalogInventory(cached.inventory); }
       try {
-        const refreshed = await syncLocalCatalog(catalogDb);
+        const refreshed = await syncLocalCatalog(catalogDb, (applied, total) => {
+          if (!cancelled) setCatalogSyncProgress({ applied, total });
+        });
+        if (!cancelled) setCatalogSyncProgress(null);
         if (!refreshed || cancelled) return;
         setServerDisconnected(false);
         const updated = await readLocalCatalog(catalogDb);
@@ -267,6 +272,7 @@ export function App() {
         setCatalogInventory(updated.inventory);
         setCatalogRevision(revision => revision + 1);
       } catch (cause) {
+        if (!cancelled) setCatalogSyncProgress(null);
         if (!cancelled && cause instanceof ApiUnavailableError) setServerDisconnected(true);
         // Cached catalog remains searchable offline.
       }
@@ -405,8 +411,11 @@ export function App() {
   const runSync = useCallback(async (activeDb: LocalDb, targetWorkspaceId: string) => {
     if (activeWorkspaceId.current !== targetWorkspaceId) return;
     setSyncPhase('syncing');
+    setSyncProgress(null);
     try {
-      await syncNow(activeDb, targetWorkspaceId);
+      await syncNow(activeDb, targetWorkspaceId, progress => {
+        if (activeWorkspaceId.current === targetWorkspaceId) setSyncProgress(progress);
+      });
       if (activeWorkspaceId.current !== targetWorkspaceId) return;
       await refresh(activeDb, targetWorkspaceId);
       const syncedAt = Date.now();
@@ -414,11 +423,13 @@ export function App() {
       setLastSyncedAt(syncedAt);
       setNow(syncedAt);
       setSyncPhase('synced');
+      setSyncProgress(null);
       setServerDisconnected(false);
       setError('');
     } catch (cause) {
       if (activeWorkspaceId.current !== targetWorkspaceId) return;
       setSyncPhase('failed');
+      setSyncProgress(null);
       if (cause instanceof ApiUnavailableError) setServerDisconnected(true);
       else if (navigator.onLine) setError(cause instanceof Error ? cause.message : 'Sync failed');
     }
@@ -553,6 +564,16 @@ export function App() {
           onNavigate={(name, id) => { id ? showItem(name, id) : showSection(name); setMenuOpen(false); }} /></div>
       </Drawer>
       <main className="app-main">
+        {syncPhase === 'syncing' && syncProgress && <div className="sync-progress" role="status" aria-live="polite">
+          <span>{syncProgress.phase === 'uploading' ? 'Sending' : 'Applying'} {syncProgress.applied} of {syncProgress.total} changes</span>
+          <Progress percent={syncProgress.total ? Math.round(syncProgress.applied / syncProgress.total * 100) : 100}
+            showInfo={false} size="small" />
+        </div>}
+        {catalogSyncProgress && syncPhase !== 'syncing' && <div className="sync-progress" role="status" aria-live="polite">
+          <span>Updating shared catalog: {catalogSyncProgress.applied} of {catalogSyncProgress.total} changes</span>
+          <Progress percent={catalogSyncProgress.total ? Math.round(catalogSyncProgress.applied / catalogSyncProgress.total * 100) : 100}
+            showInfo={false} size="small" />
+        </div>}
         {error && <Alert type="warning" showIcon closable onClose={() => setError('')} message={error} className="page-alert" />}
         {section === 'me' ? <AccountSection username={session.account.username} avatarSrc={avatarSrc}
           workspaces={session.workspaces} activeWorkspaceId={workspaceId} db={db} onWorkspaceDataChanged={changed}

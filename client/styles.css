@@ -49,6 +49,7 @@ button, input, textarea { font: inherit; }
 .setting-description { margin: 4px 0 0 !important; max-width: 500px; }
 .account-page > .ant-btn { align-self: flex-start; }
 .page-alert { margin-bottom: 22px; }
+.sync-progress { max-width: 420px; margin: 0 0 20px; color: #496059; font-size: 0.875rem; }
 .form-alert { margin-bottom: 16px; }
 .app-main { min-height: 65vh; }
 .section-page { min-width: 0; }

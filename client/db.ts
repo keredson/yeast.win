@@ -8,8 +8,10 @@ import { openLocalCatalog } from './catalog.ts';
 import { hasGeneratedLocationSuffix, locationSlug } from './locationSlug.ts';
 import type { CatalogEquipment, MeasurementChannel } from '../shared/catalog.ts';
 import { changeColumns, indexStatements, legacyEquipmentCopyStatements, legacyEquipmentModelStatements, supplyMigrationStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements,
-  workspaceSchemaVersion, workspaceTableColumns, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
-import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
+  workspaceSchemaVersion, workspaceTableColumns } from '../shared/schema.ts';
+import type { SqlChangeRow } from '../shared/wire.ts';
+import { changeTuple, decodeItem, encodeItem, maxSequence, readSequence, syncContentType,
+  syncProtocolVersion, validChangeTuple, type ChangeTuple } from '../shared/cborSync.ts';
 import { convertUnit, formatQuantity, storageUnit } from '../shared/units.ts';
 import type { ImportedRecipe } from './recipeImport.ts';
 import { mashEfficiencyPct, type MashGrain } from './mashEfficiency.ts';
@@ -2002,33 +2004,103 @@ function stateValue(db: DB, key: string): Promise<string> {
 
 const syncQueues = new WeakMap<DB, Promise<void>>();
 
-export function syncNow(db: DB, workspaceId: string): Promise<number> {
+export interface SyncProgress { phase: 'uploading' | 'applying'; applied: number; total: number }
+
+export function syncNow(db: DB, workspaceId: string, onProgress?: (progress: SyncProgress) => void): Promise<number> {
   const previous = syncQueues.get(db) || Promise.resolve();
-  const current = previous.catch(() => undefined).then(() => performSync(db, workspaceId));
+  const current = previous.catch(() => undefined).then(() => performSync(db, workspaceId, onProgress));
   syncQueues.set(db, current.then(() => undefined, () => undefined));
   return current;
 }
 
-async function performSync(db: DB, workspaceId: string): Promise<number> {
-  const [serverCursor, localCursor] = await Promise.all([
-    stateValue(db, 'serverCursor'), stateValue(db, 'localCursor')
-  ]);
-  const rows = await db.execO<SqlChangeRow>(`SELECT "table", pk, cid, val, col_version, db_version,
-    COALESCE(site_id, crsql_site_id()) AS site_id, cl, seq FROM crsql_changes
-    WHERE db_version > ? AND site_id = crsql_site_id() ORDER BY db_version, seq`, [BigInt(localCursor)]);
-  const request: SyncRequest = { serverCursor, localCursor, changes: rows.map(encodeChange) };
-  const response = await fetchApi(`/api/workspaces/${workspaceId}/sync`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(request)
-  });
-  if (!response.ok) throw new Error((await response.json() as { error?: string }).error || 'Sync failed');
-  const result = await response.json() as SyncResponse;
+async function performSync(db: DB, workspaceId: string, onProgress?: (progress: SyncProgress) => void): Promise<number> {
+  const localVersion = await stateValue(db, 'localCursor');
+  let uploadVersion = localVersion;
+  let uploadSeq = await stateValue(db, 'localSeq');
+  if (uploadSeq === '0' && localVersion !== '0') uploadSeq = maxSequence;
+  const uploadWhere = 'db_version >= ? AND (db_version > ? OR seq > ?) AND site_id = crsql_site_id()';
+  const uploadArgs = (version: string, seq: string) => [BigInt(version), BigInt(version), BigInt(seq)];
+  const uploadTotal = (await db.execO<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM crsql_changes WHERE ${uploadWhere}`, uploadArgs(uploadVersion, uploadSeq)))[0].count;
+  let uploaded = 0;
+  onProgress?.({ phase: 'uploading', applied: 0, total: uploadTotal });
+  while (uploaded < uploadTotal) {
+    const candidates = await db.execO<{ bytes: number }>(`SELECT length(val) AS bytes FROM crsql_changes
+      WHERE ${uploadWhere} ORDER BY db_version, seq LIMIT 128`, uploadArgs(uploadVersion, uploadSeq));
+    if (!candidates.length) break;
+    let count = 0;
+    let bytes = 0;
+    for (const candidate of candidates) {
+      if (count && bytes + (candidate.bytes || 0) > 12 * 1024 * 1024) break;
+      bytes += candidate.bytes || 0;
+      count++;
+    }
+    const rows = await db.execO<SqlChangeRow>(`SELECT "table", pk, cid, val, col_version, db_version,
+      COALESCE(site_id, crsql_site_id()) AS site_id, cl, seq FROM crsql_changes
+      WHERE ${uploadWhere} ORDER BY db_version, seq LIMIT ${count}`, uploadArgs(uploadVersion, uploadSeq));
+    const response = await fetchApi(`/api/workspaces/${workspaceId}/sync/upload`, {
+      method: 'POST', headers: { 'Content-Type': syncContentType }, credentials: 'same-origin',
+      body: encodeItem([syncProtocolVersion, uploadVersion, uploadSeq, rows.map(changeTuple)]) as BodyInit
+    });
+    if (!response.ok) throw new Error((await response.json() as { error?: string }).error || 'Sync upload failed');
+    const ack = decodeItem(new Uint8Array(await response.arrayBuffer()));
+    if (!Array.isArray(ack) || ack[0] !== syncProtocolVersion || !/^\d+$/.test(ack[1]) || !/^\d+$/.test(ack[2]))
+      throw new Error('Invalid sync upload acknowledgement');
+    uploadVersion = ack[1] as string;
+    uploadSeq = ack[2] as string;
+    await db.tx(async tx => {
+      await tx.exec('INSERT INTO sync_state(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', ['localCursor', uploadVersion]);
+      await tx.exec('INSERT INTO sync_state(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', ['localSeq', uploadSeq]);
+    });
+    uploaded += rows.length;
+    onProgress?.({ phase: 'uploading', applied: uploaded, total: uploadTotal });
+  }
+  const serverVersion = await stateValue(db, 'serverCursor');
+  let serverSeq = await stateValue(db, 'serverSeq');
+  if (serverSeq === '0' && serverVersion !== '0') serverSeq = maxSequence;
+  const response = await fetchApi(`/api/workspaces/${workspaceId}/sync/download?version=${serverVersion}&seq=${serverSeq}`,
+    { credentials: 'same-origin' });
+  if (!response.ok) throw new Error((await response.json() as { error?: string }).error || 'Sync download failed');
+  if (!response.body) throw new Error('Sync response cannot be streamed');
+  const stream = readSequence(response.body);
+  const first = await stream.next();
+  const header = first.value;
+  if (first.done || !Array.isArray(header) || header.length !== 3 || header[0] !== syncProtocolVersion
+    || !Number.isSafeInteger(header[1]) || header[1] < 0 || !/^\d+$/.test(header[2]))
+    throw new Error('Invalid sync stream header');
+  const total = header[1] as number;
+  const targetVersion = header[2] as string;
+  onProgress?.({ phase: 'applying', applied: 0, total });
   const insert = `INSERT INTO crsql_changes (${changeColumns.map(name => `"${name}"`).join(', ')}) VALUES (${changeColumns.map(() => '?').join(', ')})`;
+  let applied = 0;
+  let batch: ChangeTuple[] = [];
+  const apply = async () => {
+    if (!batch.length) return;
+    const changes = batch;
+    batch = [];
+    const last = changes.at(-1)!;
+    await db.tx(async tx => {
+      for (const change of changes) await tx.exec(insert, change);
+      await tx.exec('INSERT INTO sync_state(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+        ['serverCursor', String(last[5])]);
+      await tx.exec('INSERT INTO sync_state(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+        ['serverSeq', String(last[8])]);
+    });
+    applied += changes.length;
+    onProgress?.({ phase: 'applying', applied, total });
+  };
+  for await (const item of stream) {
+    if (!validChangeTuple(item)) throw new Error('Invalid change in sync stream');
+    batch.push(item);
+    if (batch.length >= 64) await apply();
+  }
+  await apply();
+  if (applied !== total) throw new Error('Incomplete sync stream');
   await db.tx(async tx => {
-    for (const change of result.changes) await tx.exec(insert, decodeChange(change));
-    await tx.exec('INSERT INTO sync_state(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-      ['serverCursor', result.serverCursor]);
-    await tx.exec('INSERT INTO sync_state(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-      ['localCursor', result.acceptedLocalCursor]);
+    await tx.exec('INSERT INTO sync_state(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+      ['serverCursor', targetVersion]);
+    await tx.exec('INSERT INTO sync_state(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+      ['serverSeq', maxSequence]);
   });
-  return result.changes.length;
+  return applied;
 }

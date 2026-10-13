@@ -19,6 +19,7 @@
     "@vlcn.io/crsqlite-wasm": "0.16.0",
     "antd": "6.6.5",
     "better-sqlite3": "13.0.3",
+    "cbor-x": "^1.6.5",
     "dayjs": "1.11.13",
     "nanoid": "6.0.2",
     "react": "19.3.0",
