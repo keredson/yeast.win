@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Empty, Form, Input, Modal, Select } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
-import { addBatchPlan, createBatch, eventDetails, eventFormData, listEvents, listPhotos,
+import { addBatchPlan, createBatch, eventDetails, eventFormData, listEvents, listPhotos, releaseEquipmentUse,
   startBatchFromRecipe, updateBatchPlan, type ActualEvent, type Batch, type Equipment, type InventoryItem,
   type LocalDb, type MeasurementKind, type PlanInput, type Recipe } from './db.ts';
 import { kindLabel } from './constants.ts';
@@ -98,6 +98,8 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
       <EventTimeline events={events} batchStartAt={batch.created_at} equipment={equipment} details={details} photos={photos}
         onEdit={event => event.actual_at != null ? void recordOrEdit(event as ActualEvent) : setEditingPlan(event as ActualEvent)}
         onRecord={event => void recordOrEdit(event)}
+        onReleaseEquipment={id => { void releaseEquipmentUse(db, id).then(changed).catch(cause =>
+          setError(cause instanceof Error ? cause.message : String(cause))); }}
         onAdd={(kind, settings) => { setEditingPlan(null); setPreset(settings); setCreatingKind(kind); }} />
     </section>}
     <Modal title="New batch" open={newBatch} onCancel={() => setNewBatch(false)} footer={null} destroyOnHidden>

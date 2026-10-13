@@ -30,6 +30,14 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
       .run(batchA, 'A', 'active', timestamp, timestamp);
     first.prepare('INSERT INTO batch_events(id, batch_id, event_type, actual_at) VALUES (?, ?, ?, ?)')
       .run(event, batchA, 'measurement', timestamp);
+    const equipmentId = nanoid();
+    const equipmentUseId = nanoid();
+    first.prepare('INSERT INTO equipment(id, name, kind, created_at) VALUES (?, ?, ?, ?)')
+      .run(equipmentId, 'Shared kettle', 'electric_kettle', timestamp);
+    first.prepare('INSERT INTO batch_events(id, batch_id, event_type, title, actual_at, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(equipmentUseId, batchA, 'equipment_use', 'Use Shared kettle', timestamp, timestamp);
+    first.prepare('INSERT INTO equipment_use_events(event_id, equipment_id) VALUES (?, ?)')
+      .run(equipmentUseId, equipmentId);
     first.prepare('INSERT INTO temperature_measurements(event_id, value, unit) VALUES (?, ?, ?)')
       .run(event, 20, 'degC');
     const discardedItem = nanoid();
@@ -63,6 +71,7 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
     const response = syncWorkspace(second, request);
     assert.equal((second.prepare('SELECT COUNT(*) AS count FROM batches').get() as { count: number }).count, 2);
     assert.equal((second.prepare('SELECT value FROM temperature_measurements WHERE event_id = ?').get(event) as { value: number }).value, 20);
+    assert.equal((second.prepare('SELECT equipment_id FROM equipment_use_events WHERE event_id = ?').get(equipmentUseId) as { equipment_id: string }).equipment_id, equipmentId);
     assert.equal((second.prepare('SELECT quantity FROM inventory_discards WHERE inventory_item_id = ?').get(discardedItem) as { quantity: number }).quantity, 5);
     assert.equal((second.prepare('SELECT parent_id FROM inventory_locations WHERE id = ?').get(shelfId) as { parent_id: string }).parent_id, roomId);
     assert.equal((second.prepare('SELECT address FROM inventory_location_addresses WHERE id = ?').get(roomId) as { address: string }).address, '123 Brew Street');
@@ -348,5 +357,33 @@ test('version 16 workspace creates a missing table without clearing locations', 
       'garage');
     upgraded.prepare('INSERT INTO inventory_location_addresses(id, address) VALUES (?, ?)').run(locationId, '123 Brew Street');
     assert.equal((upgraded.prepare('SELECT address FROM inventory_location_addresses WHERE id = ?').get(locationId) as { address: string }).address, '123 Brew Street');
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
+test('version 19 workspace adds equipment use events without clearing equipment or batches', () => {
+  const id = nanoid();
+  const batchId = nanoid();
+  const equipmentId = nanoid();
+  const db = openWorkspaceDb(id);
+  db.prepare('INSERT INTO batches(id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+    .run(batchId, 'Test batch', 'active', 1, 1);
+  db.prepare('INSERT INTO equipment(id, name, kind, created_at) VALUES (?, ?, ?, ?)')
+    .run(equipmentId, 'Test kettle', 'electric_kettle', 1);
+  db.prepare("SELECT crsql_as_table('equipment_use_events')").get();
+  db.exec('DROP TABLE equipment_use_events');
+  db.pragma('user_version = 19');
+  closeWorkspaceDb(db);
+
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.equal((upgraded.prepare('SELECT name FROM batches WHERE id = ?').get(batchId) as { name: string }).name, 'Test batch');
+    assert.equal((upgraded.prepare('SELECT name FROM equipment WHERE id = ?').get(equipmentId) as { name: string }).name, 'Test kettle');
+    const useId = nanoid();
+    upgraded.prepare('INSERT INTO batch_events(id, batch_id, event_type, actual_at, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(useId, batchId, 'equipment_use', 2, 2);
+    upgraded.prepare('INSERT INTO equipment_use_events(event_id, equipment_id) VALUES (?, ?)')
+      .run(useId, equipmentId);
+    assert.equal((upgraded.prepare('SELECT COUNT(*) AS count FROM equipment_use_events').get() as { count: number }).count, 1);
   } finally { closeWorkspaceDb(upgraded); }
 });

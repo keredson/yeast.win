@@ -54,6 +54,7 @@ export interface EquipmentSpecifications {
 export interface Equipment extends EquipmentSpecifications { id: string; name: string; kind: string;
   catalog_model_id?: string | null; catalog_model?: CatalogEquipment;
   measurement_channels?: MeasurementChannel[] }
+export interface EquipmentUse { id: string; equipment_id: string; batch_id: string; batch_name: string; assigned_at: number }
 const equipmentCalibrationColumns = ['buffer_4_observed', 'buffer_7_observed', 'reference_sg', 'observed_sg',
   'reference_brix', 'observed_brix', 'reference_g', 'observed_g', 'reference_kpa', 'observed_kpa',
   'reference_volumes', 'observed_volumes', 'reference_mg_l', 'observed_mg_l'] as const;
@@ -309,6 +310,40 @@ export async function listBatches(db: DB): Promise<Batch[]> {
   return db.execO<Batch>('SELECT id, name, description, status, created_at FROM batches ORDER BY created_at DESC, id DESC');
 }
 
+export async function listCurrentEquipmentUses(db: DB): Promise<EquipmentUse[]> {
+  return db.execO<EquipmentUse>(`SELECT e.id, u.equipment_id, e.batch_id, b.name AS batch_name, e.actual_at AS assigned_at
+    FROM batch_events e JOIN equipment_use_events u ON u.event_id = e.id
+    JOIN batches b ON b.id = e.batch_id LEFT JOIN event_ends x ON x.id = e.id
+    WHERE e.actual_at IS NOT NULL AND e.skipped_at IS NULL AND x.id IS NULL
+    ORDER BY e.actual_at DESC, e.id DESC`);
+}
+
+export async function assignEquipmentToBatch(db: DB, equipmentId: string, batchId: string, accountId: string): Promise<void> {
+  await db.tx(async tx => {
+    const equipment = await tx.execO<{ id: string; name: string }>(`SELECT id, name FROM equipment WHERE id = ?
+      AND id NOT IN (SELECT equipment_id FROM equipment_archives)`, [equipmentId]);
+    const batch = await tx.execO<{ id: string }>('SELECT id FROM batches WHERE id = ?', [batchId]);
+    if (!equipment.length || !batch.length) throw new Error('Choose available equipment and a batch');
+    const existing = await tx.execO<{ id: string }>(`SELECT e.id FROM batch_events e
+      JOIN equipment_use_events u ON u.event_id = e.id LEFT JOIN event_ends x ON x.id = e.id
+      WHERE u.equipment_id = ? AND e.batch_id = ? AND e.actual_at IS NOT NULL AND x.id IS NULL LIMIT 1`, [equipmentId, batchId]);
+    if (!existing.length) {
+      const id = nanoid();
+      const now = nowSeconds();
+      await tx.exec(`INSERT INTO batch_events(id, batch_id, event_type, title, actual_at, created_at,
+        created_by_account_id, recorded_by_account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, batchId, 'equipment_use', `Use ${equipment[0].name}`, now, now, accountId, accountId]);
+      await tx.exec('INSERT INTO equipment_use_events(event_id, equipment_id) VALUES (?, ?)', [id, equipmentId]);
+    }
+  });
+}
+
+export async function releaseEquipmentUse(db: DB, useId: string): Promise<void> {
+  await db.exec(`INSERT INTO event_ends(id, ended_at) SELECT e.id, ? FROM batch_events e
+    JOIN equipment_use_events u ON u.event_id = e.id LEFT JOIN event_ends x ON x.id = e.id
+    WHERE e.id = ? AND e.actual_at IS NOT NULL AND x.id IS NULL`, [nowSeconds(), useId]);
+}
+
 export async function createBatch(db: DB, name: string, description: string, accountId: string): Promise<string> {
   const id = nanoid();
   const now = nowSeconds();
@@ -388,7 +423,8 @@ const planPayloads = {
     pressure_control: ['pressure_control_events', ['target_value', 'target_unit', 'equipment_id']],
     measurement: ['batch_measurement_targets', ['measurement_kind', 'target_value', 'target_unit']],
     transfer: ['transfers', ['purpose', 'mash_equipment_id', 'to_vessel_id', 'to_vessel_name', 'quantity', 'unit']],
-    packaging: ['packaging', ['container_name', 'container_size', 'container_count', 'container_unit']]
+    packaging: ['packaging', ['container_name', 'container_size', 'container_count', 'container_unit']],
+    equipment_use: ['equipment_use_events', ['equipment_id']]
   }
 } as const;
 type PlanScope = keyof typeof planPayloads;
@@ -1257,6 +1293,7 @@ export async function deleteEquipment(db: DB, id: string): Promise<void> {
       || await referenced('transfers', 'from_vessel_id = ? OR to_vessel_id = ?', [id, id]);
     used ||= await referenced('recipe_transfers', 'to_vessel_id = ? OR mash_equipment_id = ?', [id, id])
       || await referenced('recipe_temperature_control_events', 'equipment_id = ?', [id]);
+    used ||= await referenced('equipment_use_events', 'equipment_id = ?', [id]);
     if (used) {
       await tx.exec('INSERT INTO equipment_archives(id, equipment_id, archived_at) VALUES (?, ?, ?)',
         [nanoid(), id, nowSeconds()]);

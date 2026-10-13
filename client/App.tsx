@@ -540,10 +540,10 @@ export function App() {
                 selectedId={route.selectedId ? locationForPath(route.selectedId, locations)?.id || route.selectedId : null}
                 onSelect={id => showItem('locations', id)} onInventorySelect={id => showItem('inventory', id)} onChanged={changed} />)}
             {section === 'equipment' && (equipmentWorkspaceId !== workspaceId ? <div className="loading-screen"><Spin description="Loading equipment" /></div>
-              : <EquipmentSection key={workspaceId} db={db} basePath={activeBase} equipment={equipment}
+              : <EquipmentSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} batches={batches} equipment={equipment}
                 catalog={catalogEquipment} preferredUnits={preferredUnits} selectedId={route.selectedId
                   ? equipmentItemForPath(route.selectedId, equipment)?.id || route.selectedId : null}
-                onSelect={id => showItem('equipment', id)} onChanged={changed} />)}
+                onSelect={id => showItem('equipment', id)} onSelectBatch={id => showItem('batches', id)} onChanged={changed} />)}
           </>}
       </main>
     </div>

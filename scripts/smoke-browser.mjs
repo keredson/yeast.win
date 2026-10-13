@@ -303,8 +303,22 @@ try {
   if (await catalogEquipmentDialog.getByRole('spinbutton', { name: 'Capacity (optional)' }).inputValue() !== '35') {
     throw new Error('Catalog capacity was not copied');
   }
+  if (await catalogEquipmentDialog.getByRole('checkbox', { name: 'Cooling' }).count()) {
+    throw new Error('A brewing kettle without built-in cooling was offered cooling controls');
+  }
   await catalogEquipmentDialog.getByRole('button', { name: 'Create equipment' }).click();
   await page.getByText('Capacity: 35 L').waitFor();
+  await page.getByRole('combobox', { name: 'Assign to batch' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: batchName }).click();
+  await page.getByRole('button', { name: 'Assign', exact: true }).click();
+  await navigateSection(page, 'Equipment');
+  const vevorRow = page.locator('.equipment-table').getByRole('row').filter({ has: page.getByRole('link', { name: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }) });
+  await vevorRow.getByRole('link', { name: batchName }).waitFor();
+  await vevorRow.getByRole('link', { name: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
+  await page.getByRole('button', { name: 'Release' }).click();
+  await navigateSection(page, 'Equipment');
+  await vevorRow.getByRole('cell', { name: '—' }).waitFor();
+  await vevorRow.getByRole('link', { name: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
   await page.waitForURL('**/equipment');
@@ -312,6 +326,9 @@ try {
   const kettleDialog = page.getByRole('dialog', { name: 'Add electric kettle' });
   await kettleDialog.getByLabel('Capacity (optional)').waitFor();
   if (await kettleDialog.getByLabel('Range minimum').count()) throw new Error('Kettle was offered a measurement range');
+  if (await kettleDialog.getByRole('checkbox', { name: 'Cooling' }).count()) {
+    throw new Error('An electric kettle was offered cooling controls');
+  }
   await kettleDialog.getByRole('textbox', { name: 'Name' }).fill('Smoke electric kettle');
   await kettleDialog.getByRole('spinbutton', { name: 'Capacity (optional)' }).fill('35');
   await kettleDialog.getByRole('spinbutton', { name: 'Rated power (W, optional)' }).fill('1800');
@@ -365,6 +382,9 @@ try {
   if (await fermentationControlDialog.getByLabel('Capacity (optional)').count()) {
     throw new Error('Fermentation temperature control was offered vessel capacity');
   }
+  if (!await fermentationControlDialog.getByRole('checkbox', { name: 'Cooling' }).count()) {
+    throw new Error('Fermentation temperature control lost its cooling option');
+  }
   await fermentationControlDialog.locator('.ant-modal-close').click();
   await chooseEquipmentType(page, 'Define equipment', 'Measurement', 'pH meter');
   const phDialog = page.getByRole('dialog', { name: 'Add pH meter' });
@@ -411,9 +431,16 @@ try {
   await page.getByRole('heading', { name: 'Smoke refractometer', exact: true }).waitFor();
   await page.getByText('Measurement range: 0–32 °Brix').waitFor();
   await navigateSection(page, 'Equipment');
-  if (await page.locator('.group-table').count() !== 2) throw new Error('Equipment kinds should have separate tables');
+  if (await page.locator('.equipment-table').count() !== 1) throw new Error('Equipment should use one table');
+  for (const heading of ['Name', 'Capabilities', 'Current batch']) {
+    if (!await page.locator('.equipment-table').getByRole('columnheader', { name: heading }).count()) {
+      throw new Error(`Equipment table is missing ${heading}`);
+    }
+  }
+  if (!await page.locator('.equipment-table').getByRole('row').filter({ has: page.getByRole('link', { name: 'Smoke pH meter' }) })
+    .getByRole('img', { name: /Measures/ }).count()) throw new Error('Measurement capability icon is missing');
   await page.setViewportSize({ width: 320, height: 720 });
-  if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw new Error('Grouped equipment tables overflow a narrow phone');
+  if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw new Error('Equipment table overflows a narrow phone');
   await page.setViewportSize({ width: 1280, height: 900 });
   await navigateSection(page, 'Batches');
   if (await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Smoke pH meter' }).count()) {
@@ -434,12 +461,12 @@ try {
   await measurementDialog.getByRole('button', { name: 'Save event' }).click();
   await page.getByText('ph 5.2 pH').waitFor();
   await navigateSection(page, 'Equipment');
-  await page.locator('.group-table').getByRole('link', { name: 'Smoke pH meter' }).click();
+  await page.locator('.equipment-table').getByRole('link', { name: 'Smoke pH meter' }).click();
   await page.getByRole('heading', { name: 'Smoke pH meter' }).waitFor();
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
   await page.waitForURL('**/equipment');
-  await page.locator('.group-table a').filter({ hasText: 'Refractometer' }).click();
+  await page.locator('.equipment-table a').filter({ hasText: 'Refractometer' }).click();
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
   await page.waitForURL('**/equipment');
@@ -447,7 +474,7 @@ try {
   await navigateSection(page, 'Batches');
   await openBatch(page, batchName);
   await page.getByText('ph 5.2 pH').waitFor();
-  console.log('Grouped equipment and hid used gear while preserving its measurement');
+  console.log('Listed equipment together and hid used gear while preserving its measurement');
 
   await page.getByRole('button', { name: 'Account settings' }).click();
   await page.getByRole('heading', { name: 'Settings' }).waitFor();

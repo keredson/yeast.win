@@ -36,10 +36,11 @@ const actionItems = [
   { key: 'photo', label: 'Photo' }, { key: 'note', label: 'Notes' }
 ];
 
-export function EventTimeline({ events, batchStartAt, equipment = [], details = {}, photos = [], onEdit, onAdd, onRecord }: {
+export function EventTimeline({ events, batchStartAt, equipment = [], details = {}, photos = [], onEdit, onAdd, onRecord, onReleaseEquipment }: {
   events: TimelineEvent[]; batchStartAt?: number; equipment?: Equipment[]; details?: Record<string, string>; photos?: TimelinePhoto[];
   onEdit: (event: TimelineEvent) => void; onAdd: (kind: string, preset: PlanPreset) => void;
   onRecord?: (event: ActualEvent) => void;
+  onReleaseEquipment?: (eventId: string) => void;
 }) {
   const isBatch = batchStartAt != null;
   const equipmentNames = new Map(equipment.map(item => [item.id, item.name]));
@@ -85,19 +86,23 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
       {group.events.map(item => {
         const happened = item.actual_at != null;
         const skipped = !happened && item.skipped_at != null;
-        const detail = happened && ['addition', 'measurement', 'temperature_control', 'note', 'photo'].includes(item.event_type)
+        const detail = item.event_type === 'equipment_use' ? equipmentNames.get(String(item.details.equipment_id || ''))
+          : happened && ['addition', 'measurement', 'temperature_control', 'note', 'photo'].includes(item.event_type)
           ? details[item.id] : planDetailsLabel(item, equipmentNames) || details[item.id];
-        const metadata = item.ended_at != null ? `Ended ${formatTime(item.ended_at)}` : '';
+        const metadata = item.ended_at != null ? `${item.event_type === 'equipment_use' ? 'Released' : 'Ended'} ${formatTime(item.ended_at)}` : '';
         const images = photos.filter(photo => photo.batch_event_id === item.id);
         return <div key={item.id} className="timeline-entry plan-card">
           <div className="timeline-card"><div><div className={`title-edit-row${isBatch ? '' : ' recipe-title-detail'}`}>
-            {isBatch && <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${item.title || kindLabel(item.event_type)}`}
+            {isBatch && item.event_type !== 'equipment_use' && <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${item.title || kindLabel(item.event_type)}`}
               onClick={() => onEdit(item)} />}
             <strong>{item.title || planKindLabel(item)}</strong>
             {!isBatch && detail && <span className="recipe-event-detail">{detail}</span>}</div>
             {metadata && <div className="plan-meta">{metadata}</div>}
-            {isBatch && <Tag color={happened ? planDuration(item) && !item.ended_at ? 'cyan' : 'green' : skipped ? 'default' : 'blue'}>
-              {happened ? planDuration(item) && !item.ended_at ? 'In progress' : 'Done' : skipped ? 'Skipped' : 'Pending'}</Tag>}</div>
+            {isBatch && <Tag color={happened ? (item.event_type === 'equipment_use' || planDuration(item)) && !item.ended_at ? 'cyan' : 'green' : skipped ? 'default' : 'blue'}>
+              {happened ? item.event_type === 'equipment_use' && !item.ended_at ? 'In use'
+                : planDuration(item) && !item.ended_at ? 'In progress' : 'Done' : skipped ? 'Skipped' : 'Pending'}</Tag>}</div>
+            {item.event_type === 'equipment_use' && item.ended_at == null && onReleaseEquipment &&
+              <Button type="text" size="small" onClick={() => onReleaseEquipment(item.id)}>Release</Button>}
             {onRecord && !happened && <Button type="text" shape="circle" icon={<CheckOutlined />} aria-label={`Record ${item.title}`}
               title="Record or skip" onClick={() => onRecord(item as ActualEvent)} />}
             {!isBatch && <Button type="text" shape="circle" size="small" icon={<EditOutlined />}

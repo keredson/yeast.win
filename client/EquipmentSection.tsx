@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react';
-import { Alert, Button, Checkbox, Dropdown, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Table } from 'antd';
-import { EditOutlined, PlusOutlined } from '@ant-design/icons';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Alert, Button, Checkbox, Dropdown, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Table, Tooltip } from 'antd';
+import { CloudOutlined, ContainerOutlined, ControlOutlined, DashboardOutlined, EditOutlined, ExperimentOutlined,
+  FireOutlined, PlusOutlined, SwapOutlined } from '@ant-design/icons';
 import { boilOffKinds, capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { createEquipment, deleteEquipment, updateEquipmentBoilHeatLoss, updateEquipmentCalibration, updateEquipmentIdentity, updateEquipmentRatedPower, updateEquipmentCapacity,
+import { assignEquipmentToBatch, createEquipment, deleteEquipment, listCurrentEquipmentUses, releaseEquipmentUse,
+  updateEquipmentBoilHeatLoss, updateEquipmentCalibration, updateEquipmentIdentity, updateEquipmentRatedPower, updateEquipmentCapacity,
   updateEquipmentTemperatureOffset, updateEquipmentThermalCapabilities, updateBrewingLosses, latestMeasuredMashEfficiency,
   updateFermenterCapabilities,
   updateEquipmentMeasurementRange,
-  type Equipment, type EquipmentSpecifications, type LocalDb } from './db.ts';
+  type Batch, type Equipment, type EquipmentSpecifications, type EquipmentUse, type LocalDb } from './db.ts';
 import { capacityInLiters, capacityLabel, capacityUnits } from '../shared/capacity.ts';
 import { changeNumberUnit } from './unitFields.ts';
 import { equipmentPathSegment, equipmentSlug } from './equipmentRoutes.ts';
@@ -62,9 +64,27 @@ function pressureLabel(kpa: number | null | undefined, unit: PreferredUnits['pre
   return `${Number(convertUnit(kpa, 'kPa', unit)!.toFixed(2))} ${unit}`;
 }
 
-export function EquipmentSection({ db, basePath, equipment, catalog, preferredUnits, selectedId, onSelect, onChanged }: {
-  db: LocalDb; basePath: string; equipment: Equipment[]; catalog: CatalogEquipment[]; preferredUnits: PreferredUnits;
-  selectedId: string | null; onSelect: (id: string | null) => void;
+function equipmentCapabilities(row: Equipment): ReactNode {
+  const capabilities: { label: string; icon: ReactNode }[] = [];
+  if (capacityKinds.has(row.kind)) capabilities.push({ label: 'Holds liquid', icon: <ContainerOutlined /> });
+  if (row.has_heating) capabilities.push({ label: 'Heating', icon: <FireOutlined /> });
+  if (row.has_cooling || ['chiller', 'glycol_chiller', 'refrigerator'].includes(row.kind)) {
+    capabilities.push({ label: 'Cooling', icon: <CloudOutlined /> });
+  }
+  if (row.has_temperature_control) capabilities.push({ label: 'Temperature control', icon: <ControlOutlined /> });
+  if (row.max_pressure_kpa != null) capabilities.push({ label: 'Pressure rated', icon: <DashboardOutlined /> });
+  if (row.kind === 'pump') capabilities.push({ label: 'Moves liquid', icon: <SwapOutlined /> });
+  const measured = [...new Set(row.measurement_channels?.map(channel => channel.measurement_kind) || [])];
+  if (measured.length || measurementRangeUnits[row.kind]) {
+    capabilities.push({ label: measured.length ? `Measures ${measured.join(', ')}` : 'Measures', icon: <ExperimentOutlined /> });
+  }
+  return capabilities.length ? <div className="equipment-capabilities">{capabilities.map(({ label, icon }) =>
+    <Tooltip key={label} title={label}><span role="img" aria-label={label} className="equipment-capability">{icon}</span></Tooltip>)}</div> : '—';
+}
+
+export function EquipmentSection({ db, basePath, accountId, batches, equipment, catalog, preferredUnits, selectedId, onSelect, onSelectBatch, onChanged }: {
+  db: LocalDb; basePath: string; accountId: string; batches: Batch[]; equipment: Equipment[]; catalog: CatalogEquipment[]; preferredUnits: PreferredUnits;
+  selectedId: string | null; onSelect: (id: string | null) => void; onSelectBatch: (id: string) => void;
   onChanged: () => Promise<void>;
 }) {
   const [creatingKind, setCreatingKind] = useState<string | null>(null);
@@ -84,6 +104,8 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
   const [editRange, setEditRange] = useState(false);
   const [editFermenter, setEditFermenter] = useState(false);
   const [error, setError] = useState('');
+  const [uses, setUses] = useState<EquipmentUse[]>([]);
+  const [assignBatchId, setAssignBatchId] = useState<string | undefined>();
   const [equipmentForm] = Form.useForm();
   const [capacityForm] = Form.useForm();
   const [powerForm] = Form.useForm();
@@ -98,6 +120,7 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
   const newPressureUnit = Form.useWatch('pressure_unit', equipmentForm) as string | undefined;
   const newHeating = Form.useWatch('has_heating', equipmentForm) as boolean | undefined;
   const newCooling = Form.useWatch('has_cooling', equipmentForm) as boolean | undefined;
+  const editCooling = Form.useWatch('has_cooling', thermalForm) as boolean | undefined;
   const newFermenterControl = Form.useWatch('built_in_temperature_control', equipmentForm) as boolean | undefined;
   const editPressureUnit = Form.useWatch('pressure_unit', fermenterForm) as string | undefined;
   const profile = item ? calibrationProfiles[item.kind] : undefined;
@@ -111,11 +134,32 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
     ? null : predictedBoilOff(specs.rated_power_watts, specs.boil_heat_loss_watts);
   const thermalKind = !!item && (boilOffKinds.has(item.kind) || item.kind === 'fermenter'
     || item.kind === 'fermentation_temperature_control');
-  const groupedKinds: { key: string; label: string; kinds: string[] }[] = equipmentGroups.map(group => ({ key: group.key, label: group.label,
-    kinds: group.kinds.filter(kind => equipment.some(row => row.kind === kind)) })).filter(group => group.kinds.length);
-  const earlierKinds = [...new Set(equipment.map(row => row.kind))].filter(kind =>
-    !equipmentGroups.some(group => (group.kinds as readonly string[]).includes(kind)));
-  if (earlierKinds.length) groupedKinds.push({ key: 'earlier', label: 'Previously added equipment', kinds: earlierKinds });
+  const coolingAvailableForNew = creatingKind === 'fermenter' || creatingKind === 'fermentation_temperature_control'
+    || !!selectedCatalogModel?.has_cooling;
+  const coolingAvailableForItem = item?.kind === 'fermenter' || item?.kind === 'fermentation_temperature_control'
+    || !!specs.has_cooling;
+  const itemUses = uses.filter(use => use.equipment_id === item?.id);
+  const availableBatches = batches.filter(batch => !itemUses.some(use => use.batch_id === batch.id));
+
+  useEffect(() => { void listCurrentEquipmentUses(db).then(setUses).catch(cause => setError(String(cause))); }, [db, equipment, batches]);
+
+  async function assignBatch() {
+    if (!item || !assignBatchId) return;
+    try {
+      await assignEquipmentToBatch(db, item.id, assignBatchId, accountId);
+      setAssignBatchId(undefined);
+      setUses(await listCurrentEquipmentUses(db));
+      await onChanged();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
+  async function releaseBatch(useId: string) {
+    try {
+      await releaseEquipmentUse(db, useId);
+      setUses(await listCurrentEquipmentUses(db));
+      await onChanged();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
 
   useEffect(() => {
     if (!item || !['all_in_one', 'mash_tun', 'kettle', 'electric_kettle'].includes(item.kind)) return;
@@ -308,28 +352,37 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
           <Button icon={<PlusOutlined />}>Define equipment</Button>
         </Dropdown>
       </div>
-      {equipment.length > 0 && <div className="group-tables">{groupedKinds.map(group => <section key={group.key} className="equipment-category">
-        <h2>{group.label}</h2>{group.kinds.map(kind => {
-        const rows = equipment.filter(row => row.kind === kind);
-        return rows.length ? <section key={kind} className="group-table"><h3>{equipmentKindLabel(kind)}</h3>
-          <Table<Equipment> dataSource={rows} rowKey="id" pagination={false} size="small"
-            columns={[{ title: 'Equipment', dataIndex: 'name', render: (_, row) =>
-              <a href={`${basePath}/equipment/${equipmentPathSegment(row, equipment)}`}
-                onClick={event => { event.preventDefault(); onSelect(row.id); }}>{row.name}</a> },
-              ...(capacityKinds.has(kind) ? [{ title: 'Capacity', key: 'capacity', width: 140, responsive: ['sm' as const], render: (_: unknown, row: Equipment) =>
-                capacityLabel(row.capacity_liters ?? undefined) }] : []),
-              ...(measurementRangeUnits[kind] ? [{ title: 'Measurement range', key: 'range', width: 180, responsive: ['sm' as const], render: (_: unknown, row: Equipment) => {
-                return row.measurement_min != null && row.measurement_max != null
-                  ? rangeLabel(row.measurement_min, row.measurement_max, row.measurement_unit ?? undefined) : '';
-              } }] : [])]} />
-        </section> : null;
-      })}</section>)}</div>}
+      {equipment.length > 0 && <Table<Equipment> className="equipment-table" dataSource={[...equipment].sort((a, b) => a.name.localeCompare(b.name))}
+        rowKey="id" pagination={false} size="small" tableLayout="fixed" columns={[
+          { title: 'Name', dataIndex: 'name', width: '42%', render: (_, row) =>
+            <a href={`${basePath}/equipment/${equipmentPathSegment(row, equipment)}`}
+              onClick={event => { event.preventDefault(); onSelect(row.id); }}>{row.name}</a> },
+          { title: 'Capabilities', key: 'capabilities', width: '30%', render: (_: unknown, row: Equipment) => equipmentCapabilities(row) },
+          { title: 'Current batch', key: 'current-batch', width: '28%', render: (_: unknown, row: Equipment) => {
+            const current = uses.filter(use => use.equipment_id === row.id);
+            return current.length ? <div className="equipment-current-batches">{current.map(use =>
+              <a key={use.id} href={`${basePath}/batch/${use.batch_id}`}
+                onClick={event => { event.preventDefault(); onSelectBatch(use.batch_id); }}>{use.batch_name}</a>)}</div> : '—';
+          } }
+        ]} />}
     </section> : !item ? <Empty description="Equipment not found" /> : <section className="record-detail">
         <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(item.kind)}</span>
           <div className="equipment-title"><h2>{item.name}</h2>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit equipment name and slug" onClick={() => setEditIdentity(true)} /></div>
           <div className="muted">Slug: {equipmentPathSegment(item, equipment)}</div></div></div>
         <div className="equipment-parameters">
+          <div className="equipment-parameter equipment-assignments"><strong>Current batches</strong>
+            {itemUses.map(use => <div key={use.id} className="equipment-assignment">
+              <a href={`${basePath}/batch/${use.batch_id}`} onClick={event => { event.preventDefault(); onSelectBatch(use.batch_id); }}>{use.batch_name}</a>
+              <Button type="text" size="small" onClick={() => void releaseBatch(use.id)}>Release</Button>
+            </div>)}
+            {availableBatches.length > 0 && <div className="equipment-assignment-form">
+              <Select aria-label="Assign to batch" placeholder="Choose a batch" showSearch optionFilterProp="label"
+                value={assignBatchId} onChange={setAssignBatchId}
+                options={availableBatches.map(batch => ({ value: batch.id, label: batch.name }))} />
+              <Button disabled={!assignBatchId} onClick={() => void assignBatch()}>Assign</Button>
+            </div>}
+          </div>
           {capacityKinds.has(item.kind) && <div className="equipment-parameter"><span>Capacity: {capacityLabel(specs.capacity_liters ?? undefined) || 'Not set'}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit capacity" onClick={() => setEditCapacity(true)} /></div>}
           {item.kind === 'fermenter' && <div className="equipment-parameter"><span>
@@ -435,10 +488,12 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
           {newHeating && <Form.Item name="rated_power_watts" label="Rated heating power (W, optional)">
             <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
         </>}
-        {['fermentation_temperature_control', 'fermenter', 'electric_kettle', 'all_in_one'].includes(creatingKind) && <>
+        {coolingAvailableForNew && <>
           <Form.Item name="has_cooling" valuePropName="checked"><Checkbox disabled={!!selectedCatalogModel?.has_cooling}>Cooling</Checkbox></Form.Item>
           {newCooling && <Form.Item name="rated_heat_removal_watts" label="Rated heat removal (W, optional)">
             <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
+        </>}
+        {['fermentation_temperature_control', 'fermenter', 'electric_kettle', 'all_in_one'].includes(creatingKind) && <>
           {(creatingKind !== 'fermenter' || newFermenterControl) && <div className="form-pair">
             <Form.Item name="min_temperature_c" label="Minimum temperature (°C)"><InputNumber className="full-width" step="any" /></Form.Item>
             <Form.Item name="max_temperature_c" label="Maximum temperature (°C)"><InputNumber className="full-width" step="any" /></Form.Item>
@@ -491,8 +546,11 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
           min_temperature_c: specs.min_temperature_c, max_temperature_c: specs.max_temperature_c }}>
         <Form.Item name="has_heating" valuePropName="checked"><Checkbox disabled={!!specs.has_heating}>Heating</Checkbox></Form.Item>
         <Form.Item name="rated_power_watts" label="Rated heating power (W)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
-        <Form.Item name="has_cooling" valuePropName="checked"><Checkbox disabled={!!specs.has_cooling}>Cooling</Checkbox></Form.Item>
-        <Form.Item name="rated_heat_removal_watts" label="Rated heat removal (W)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
+        {coolingAvailableForItem && <>
+          <Form.Item name="has_cooling" valuePropName="checked"><Checkbox disabled={!!specs.has_cooling}>Cooling</Checkbox></Form.Item>
+          {editCooling && <Form.Item name="rated_heat_removal_watts" label="Rated heat removal (W)">
+            <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
+        </>}
         {(item?.kind !== 'fermenter' || specs.has_temperature_control) && <div className="form-pair">
           <Form.Item name="min_temperature_c" label="Minimum temperature (°C)"><InputNumber className="full-width" step="any" /></Form.Item>
           <Form.Item name="max_temperature_c" label="Maximum temperature (°C)"><InputNumber className="full-width" step="any" /></Form.Item>
