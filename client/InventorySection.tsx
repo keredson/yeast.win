@@ -231,7 +231,6 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
             { title: 'Qty', key: 'on_hand', width: 140, align: 'right', render: (_, row) => onHand[row.id] === undefined ? '—'
               : onHand[row.id] === null ? 'Needs conversion'
                 : onHandQuantity(row, onHand[row.id]!) },
-            { title: 'Unit', dataIndex: 'display_unit', width: 100 },
             { title: '', key: 'actions', width: 48, align: 'right', render: (_, row) => <Dropdown trigger={['click']}
               menu={{ items: [{ key: 'purchase', label: 'Bought' }, { key: 'count', label: 'Counted' }, { key: 'discard', label: 'Discard' }, { key: 'move', label: 'Move' }],
                 onClick: ({ key }) => key === 'move' ? setMoveItemId(row.id) : void openEntry(row, key as 'purchase' | 'count' | 'discard') }}>
