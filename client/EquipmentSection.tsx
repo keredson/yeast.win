@@ -5,7 +5,9 @@ import { CloudOutlined, ContainerOutlined, ControlOutlined, DashboardOutlined, E
 import { boilOffKinds, capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
 import { assignEquipmentToBatch, createEquipment, createEquipmentUnit, deleteEquipment, listCurrentEquipmentUses, releaseEquipmentUse,
-  addEquipmentCapability, updateEquipmentBoilHeatLoss, updateEquipmentCalibration, updateEquipmentIdentity,
+  addEquipmentCapability, updateEquipmentBoilHeatLoss, clearEquipmentBoilHeatLoss,
+  updateEquipmentModelBoilHeatLoss, clearEquipmentModelBoilHeatLoss,
+  updateEquipmentCalibration, updateEquipmentIdentity,
   updateEquipmentRatedPower, updateEquipmentCapacity, updateEquipmentPressureRating,
   updateEquipmentTemperatureOffset, updateEquipmentThermalCapabilities, updateBrewingLosses, latestMeasuredMashEfficiency,
   updateEquipmentMeasurementRange,
@@ -129,6 +131,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const [selectedCatalogModel, setSelectedCatalogModel] = useState<CatalogEquipment | null>(null);
   const [editCalibration, setEditCalibration] = useState(false);
   const [newBoilCalibration, setNewBoilCalibration] = useState(false);
+  const [editModelBoilHeatLoss, setEditModelBoilHeatLoss] = useState(false);
   const [newTemperatureCalibration, setNewTemperatureCalibration] = useState(false);
   const [editIdentity, setEditIdentity] = useState(false);
   const [editCapacity, setEditCapacity] = useState(false);
@@ -172,6 +175,9 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const editingChannel = item?.measurement_channels?.find(channel => channel.measurement_kind === editRange);
   const ratedEstimate = specs.rated_power_watts == null || specs.boil_heat_loss_watts == null
     ? null : predictedBoilOff(specs.rated_power_watts, specs.boil_heat_loss_watts);
+  const boilHeatLossSource = specs.unit_boil_heat_loss_watts != null ? 'this unit'
+    : specs.workspace_model_boil_heat_loss_watts != null ? 'brewery model'
+      : specs.catalog_model_boil_heat_loss_watts != null ? 'catalog model' : null;
   const thermalKind = !!item && (!!item.has_cooling || !!item.has_temperature_control);
   const showCooling = !!item?.has_cooling;
   const createCapacity = !!creatingKind && (selectedCatalogModel
@@ -403,6 +409,25 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
+  async function clearBoilCalibration() {
+    if (!item) return;
+    try { await clearEquipmentBoilHeatLoss(db, item); setNewBoilCalibration(false); await onChanged(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
+  async function saveModelBoilHeatLoss(values: { heat_loss_watts: number }) {
+    if (!item) return;
+    try { await updateEquipmentModelBoilHeatLoss(db, item, values.heat_loss_watts);
+      setEditModelBoilHeatLoss(false); await onChanged(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
+  async function clearModelBoilHeatLoss() {
+    if (!item) return;
+    try { await clearEquipmentModelBoilHeatLoss(db, item); setEditModelBoilHeatLoss(false); await onChanged(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
   async function saveTemperatureCalibration(values: { reference_c: number; observed_c: number }) {
     if (!item) return;
     try {
@@ -551,8 +576,9 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
             ? 'Not calibrated' : `${specs.temperature_offset_c > 0 ? '+' : ''}${Number(specs.temperature_offset_c.toFixed(2))} °C`}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit temperature offset" onClick={() => setNewTemperatureCalibration(true)} /></div>}
           {boilOffKinds.has(item.kind) && <div className="equipment-parameter"><span>Heat loss at boil: {specs.boil_heat_loss_watts == null
-            ? 'Not calibrated' : `${Math.round(specs.boil_heat_loss_watts)} W`}</span>
-            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit boil heat loss" onClick={() => setNewBoilCalibration(true)} /></div>}
+            ? 'Not calibrated' : `${Math.round(specs.boil_heat_loss_watts)} W (${boilHeatLossSource})`}</span>
+            <Button type="text" size="small" onClick={() => setNewBoilCalibration(true)}>Calibrate unit</Button>
+            <Button type="text" size="small" onClick={() => setEditModelBoilHeatLoss(true)}>Edit model default</Button></div>}
           {ratedEstimate != null && <div className="equipment-parameter">Estimated boil-off at rated power: {Number(ratedEstimate.toFixed(2))} L/h</div>}
           {['all_in_one', 'mash_tun', 'kettle', 'electric_kettle'].includes(item.kind) &&
             <div className="equipment-parameter"><span>Mash efficiency: {specs.mash_efficiency_pct != null
@@ -806,15 +832,30 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <Button type="primary" htmlType="submit">Save calibration</Button>
       </Form>
     </Modal>
-    <Modal title="Calibrate boil-off" open={newBoilCalibration} onCancel={() => setNewBoilCalibration(false)} footer={null} destroyOnHidden>
+    <Modal title="Calibrate this unit's boil-off" open={newBoilCalibration} onCancel={() => setNewBoilCalibration(false)} footer={null} destroyOnHidden>
       <Form key={item?.id} layout="vertical" onFinish={saveBoilCalibration}
         initialValues={{ power_watts: specs.rated_power_watts }}>
-        <p className="muted">Measure volume loss during a steady boil. Only the derived heat loss is saved.</p>
+        <p className="muted">Measure volume loss during a steady boil. Only the derived heat loss is saved for this unit{item?.stock_id ? ` (stock ${item.stock_id})` : ''}.</p>
         <Form.Item name="power_watts" label="Power used (W)" rules={[{ required: true }]}><InputNumber className="full-width" min={1} /></Form.Item>
         <div className="form-pair"><Form.Item name="start_liters" label="Start volume (L)" rules={[{ required: true }]}><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
           <Form.Item name="end_liters" label="End volume (L)" rules={[{ required: true }]}><InputNumber className="full-width" min={0} step="any" /></Form.Item></div>
         <Form.Item name="duration_minutes" label="Boil duration (minutes)" rules={[{ required: true }]}><InputNumber className="full-width" min={0.01} step="any" /></Form.Item>
         <Button type="primary" htmlType="submit">Save calibration</Button>
+        {specs.unit_boil_heat_loss_watts != null && <Button type="text" onClick={() => void clearBoilCalibration()}>Use model default</Button>}
+      </Form>
+    </Modal>
+    <Modal title="Edit brewery model heat loss" open={editModelBoilHeatLoss}
+      onCancel={() => setEditModelBoilHeatLoss(false)} footer={null} destroyOnHidden>
+      <Form key={`${item?.model_id}:${editModelBoilHeatLoss}`} layout="vertical" onFinish={saveModelBoilHeatLoss}
+        initialValues={{ heat_loss_watts: specs.workspace_model_boil_heat_loss_watts ?? undefined }}>
+        <p className="muted">Default for every {item?.model_name || 'model'} unit without its own calibration.
+          {specs.catalog_model_boil_heat_loss_watts != null &&
+            ` Catalog default: ${Math.round(specs.catalog_model_boil_heat_loss_watts)} W.`}</p>
+        <Form.Item name="heat_loss_watts" label="Heat loss at boil (W)" rules={[{ required: true }]}>
+          <InputNumber className="full-width" min={0} step="any" /></Form.Item>
+        <Button type="primary" htmlType="submit">Save model default</Button>
+        {specs.workspace_model_boil_heat_loss_watts != null && <Button type="text" onClick={() => void clearModelBoilHeatLoss()}>
+          {item?.catalog_model_id ? 'Use catalog default' : 'Clear model default'}</Button>}
       </Form>
     </Modal>
     <Modal title="Calibrate temperature" open={newTemperatureCalibration} onCancel={() => setNewTemperatureCalibration(false)} footer={null} destroyOnHidden>

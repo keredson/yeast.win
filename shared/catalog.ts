@@ -9,13 +9,14 @@ export interface CatalogEquipment { id: string; name: string; kind: string; manu
   has_heating?: boolean; has_cooling?: boolean; has_temperature_control?: boolean;
   capacity_liters?: number | null; built_in_temperature_control?: number | boolean | null; max_pressure_kpa?: number | null;
   rated_power_watts?: number | null; rated_heat_removal_watts?: number | null;
+  boil_heat_loss_watts?: number | null;
   min_temperature_c?: number | null; max_temperature_c?: number | null;
   measurement_min?: number | null; measurement_max?: number | null;
   measurement_unit?: string | null; measurement_channels?: CatalogMeasurementChannel[] }
 export interface CatalogInventory { id: string; name: string; category: string; unit: string }
 
 export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
-export const catalogSchemaVersion = 12;
+export const catalogSchemaVersion = 13;
 export const vevorModelName = 'VEVOR Electric Brewing System 9.2 Gal/35 L';
 export const catalogModelTables = {
   equipment_models: `CREATE TABLE IF NOT EXISTS equipment_models (
@@ -26,6 +27,8 @@ export const catalogModelTables = {
     model_id TEXT PRIMARY KEY NOT NULL, max_pressure_kpa REAL)`,
   model_heating: `CREATE TABLE IF NOT EXISTS model_heating (
     model_id TEXT PRIMARY KEY NOT NULL, rated_power_watts REAL)`,
+  model_boil_characterization: `CREATE TABLE IF NOT EXISTS model_boil_characterization (
+    model_id TEXT PRIMARY KEY NOT NULL, heat_loss_watts REAL)`,
   model_cooling: `CREATE TABLE IF NOT EXISTS model_cooling (
     model_id TEXT PRIMARY KEY NOT NULL, rated_heat_removal_watts REAL)`,
   model_temperature_control: `CREATE TABLE IF NOT EXISTS model_temperature_control (

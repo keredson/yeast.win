@@ -95,6 +95,59 @@ test('version 11 catalog adds Anton Paar instruments without replacing existing 
   } finally { db.close(); }
 });
 
+test('version 12 catalog adds replicated boil defaults while preserving catalog edits', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
+  const old = new Database(join(dir, 'catalog.sqlite'));
+  old.loadExtension(join(process.cwd(), 'vendor/crsqlite.so'));
+  for (const [name, statement] of Object.entries(catalogModelTables)) {
+    if (name !== 'model_boil_characterization') old.exec(statement);
+  }
+  old.exec(catalogInventoryTable);
+  for (const table of catalogTables) {
+    if (table !== 'model_boil_characterization') old.prepare('SELECT crsql_as_crr(?)').get(table);
+  }
+  old.prepare('INSERT INTO equipment_models(id, model_name, kind) VALUES (?, ?, ?)')
+    .run('my_kettle', 'My edited kettle', 'electric_kettle');
+  old.prepare('INSERT INTO inventory(id, name, category, unit) VALUES (?, ?, ?, ?)')
+    .run('my_grain', 'My grain', 'Grain', 'g');
+  old.pragma('user_version = 12');
+  old.close();
+
+  const db = openCatalogDb(dir);
+  try {
+    assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
+    assert.equal((db.prepare('SELECT model_name FROM equipment_models WHERE id = ?')
+      .get('my_kettle') as { model_name: string }).model_name, 'My edited kettle');
+    assert.equal((db.prepare('SELECT name FROM inventory WHERE id = ?')
+      .get('my_grain') as { name: string }).name, 'My grain');
+    const cursor = BigInt(catalogChanges(db, 0n).serverCursor);
+    db.prepare('INSERT INTO model_boil_characterization(model_id, heat_loss_watts) VALUES (?, ?)')
+      .run('my_kettle', 0);
+    const delta = catalogChanges(db, cursor);
+    assert.ok(delta.changes.some(change => change.table === 'model_boil_characterization'));
+    assert.equal((db.prepare('SELECT heat_loss_watts FROM model_boil_characterization WHERE model_id = ?')
+      .get('my_kettle') as { heat_loss_watts: number }).heat_loss_watts, 0);
+  } finally { db.close(); }
+});
+
+test('partially upgraded catalog preserves boil defaults when enabling replication', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
+  const db = openCatalogDb(dir);
+  db.prepare('INSERT INTO model_boil_characterization(model_id, heat_loss_watts) VALUES (?, ?)')
+    .run('equipment_vevor_35l', 325);
+  db.prepare("SELECT crsql_as_table('model_boil_characterization')").get();
+  db.pragma('user_version = 12');
+  db.close();
+
+  const upgraded = openCatalogDb(dir);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), catalogSchemaVersion);
+    assert.equal((upgraded.prepare('SELECT heat_loss_watts FROM model_boil_characterization WHERE model_id = ?')
+      .get('equipment_vevor_35l') as { heat_loss_watts: number }).heat_loss_watts, 325);
+    assert.ok(upgraded.prepare("SELECT 1 FROM sqlite_master WHERE name = 'model_boil_characterization__crsql_clock'").get());
+  } finally { upgraded.close(); }
+});
+
 test('existing catalog models use the combined fermentation control choice', () => {
   const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
   const old = new Database(join(dir, 'catalog.sqlite'));
@@ -227,8 +280,16 @@ test('catalog sends only CR-SQLite changes after the client cursor', () => {
     assert.equal((replica.prepare('SELECT rated_power_watts FROM model_heating WHERE model_id = ?')
       .get('equipment_vevor_35l') as { rated_power_watts: number }).rated_power_watts, 2100);
 
+    db.prepare('INSERT INTO model_boil_characterization(model_id, heat_loss_watts) VALUES (?, ?)')
+      .run('equipment_vevor_35l', 320);
+    const boilDelta = catalogChanges(db, BigInt(powerDelta.serverCursor));
+    assert.ok(boilDelta.changes.some(change => change.table === 'model_boil_characterization'));
+    for (const change of boilDelta.changes) apply.run(...decodeChange(change));
+    assert.equal((replica.prepare('SELECT heat_loss_watts FROM model_boil_characterization WHERE model_id = ?')
+      .get('equipment_vevor_35l') as { heat_loss_watts: number }).heat_loss_watts, 320);
+
     db.prepare('DELETE FROM inventory WHERE id = ?').run('inventory_maris_otter');
-    const deletion = catalogChanges(db, BigInt(powerDelta.serverCursor));
+    const deletion = catalogChanges(db, BigInt(boilDelta.serverCursor));
     assert.ok(deletion.changes.length > 0);
     for (const change of deletion.changes) apply.run(...decodeChange(change));
     assert.equal(replica.prepare('SELECT id FROM inventory WHERE id = ?').get('inventory_maris_otter'), undefined);

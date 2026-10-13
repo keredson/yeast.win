@@ -54,6 +54,7 @@ const definitions: Record<string, string> = {
     measurement_kind TEXT NOT NULL, measurement_min REAL, measurement_max REAL,
     measurement_unit TEXT, measurement_scale TEXT`,
   equipment_boil_calibration: `equipment_id TEXT PRIMARY KEY NOT NULL, heat_loss_watts REAL`,
+  equipment_model_boil_characterization: `model_id TEXT PRIMARY KEY NOT NULL, heat_loss_watts REAL`,
   equipment_temperature_calibration: `equipment_id TEXT PRIMARY KEY NOT NULL, offset_c REAL`,
   equipment_measurement_calibration_points: `id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL,
     measurement_kind TEXT NOT NULL, reference_value REAL NOT NULL, observed_value REAL NOT NULL`,
@@ -256,7 +257,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 21;
+export const workspaceSchemaVersion = 22;
 export const retiredReplicatedTables = ['equipment_calibrations', 'equipment_characterization_observations'] as const;
 
 export function isValidId(value: unknown): value is string {

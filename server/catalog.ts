@@ -43,9 +43,9 @@ export function openCatalogDb(dataDir: string): Database.Database {
             channel.measurement_unit ?? null, channel.measurement_scale ?? null);
         }
       }
-      db.pragma(`user_version = ${catalogSchemaVersion}`);
+      db.pragma('user_version = 12');
     })();
-  } else if (version < catalogSchemaVersion) {
+  } else if (version < 12) {
     const hasLegacyMeta = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'catalog_meta'").get();
     const legacyVersion = hasLegacyMeta
       ? (db.prepare('SELECT version FROM catalog_meta LIMIT 1').get() as { version: number } | undefined)?.version : undefined;
@@ -109,6 +109,15 @@ export function openCatalogDb(dataDir: string): Database.Database {
       }
       for (const item of [...oldInventory, ...initialCatalogInventory]) {
         addInventory.run(item.id, item.name, item.category, item.unit);
+      }
+      db.pragma(`user_version = ${catalogSchemaVersion}`);
+    })();
+  }
+  if ((db.pragma('user_version', { simple: true }) as number) === 12) {
+    db.transaction(() => {
+      db.exec(catalogModelTables.model_boil_characterization);
+      if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'model_boil_characterization__crsql_clock'").get()) {
+        db.prepare("SELECT crsql_as_crr('model_boil_characterization')").get();
       }
       db.pragma(`user_version = ${catalogSchemaVersion}`);
     })();

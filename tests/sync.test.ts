@@ -395,6 +395,39 @@ test('version 19 workspace adds equipment use events without clearing equipment 
   } finally { closeWorkspaceDb(upgraded); }
 });
 
+test('version 21 workspace adds brewery model boil defaults and keeps unit calibrations', () => {
+  const id = nanoid();
+  const modelId = nanoid();
+  const unitId = nanoid();
+  const batchId = nanoid();
+  const db = openWorkspaceDb(id);
+  db.prepare('INSERT INTO equipment_models(id, name, kind, created_at) VALUES (?, ?, ?, ?)')
+    .run(modelId, 'Kettle model', 'electric_kettle', 1);
+  db.prepare('INSERT INTO equipment(id, name, model_id, created_at) VALUES (?, ?, ?, ?)')
+    .run(unitId, 'Kettle #1', modelId, 1);
+  db.prepare('INSERT INTO equipment_boil_calibration(equipment_id, heat_loss_watts) VALUES (?, ?)')
+    .run(unitId, 250);
+  db.prepare('INSERT INTO batches(id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+    .run(batchId, 'Existing batch', 'active', 1, 1);
+  db.prepare("SELECT crsql_as_table('equipment_model_boil_characterization')").get();
+  db.exec('DROP TABLE equipment_model_boil_characterization');
+  db.pragma('user_version = 21');
+  closeWorkspaceDb(db);
+
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.equal((upgraded.prepare('SELECT heat_loss_watts FROM equipment_boil_calibration WHERE equipment_id = ?')
+      .get(unitId) as { heat_loss_watts: number }).heat_loss_watts, 250);
+    assert.equal((upgraded.prepare('SELECT name FROM batches WHERE id = ?')
+      .get(batchId) as { name: string }).name, 'Existing batch');
+    upgraded.prepare('INSERT INTO equipment_model_boil_characterization(model_id, heat_loss_watts) VALUES (?, ?)')
+      .run(modelId, 0);
+    assert.equal((upgraded.prepare('SELECT heat_loss_watts FROM equipment_model_boil_characterization WHERE model_id = ?')
+      .get(modelId) as { heat_loss_watts: number }).heat_loss_watts, 0);
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
 test('version 20 equipment splits into models and physical units while preserving event links', () => {
   const id = nanoid();
   const unitId = nanoid();

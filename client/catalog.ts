@@ -14,8 +14,8 @@ export function openLocalCatalog(): Promise<DB> {
     const db = await sqlite.open('brewlog-catalog');
     const version = (await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version;
     if (version === 11) {
-      await db.exec(`PRAGMA user_version = ${catalogSchemaVersion}`);
-    } else if (version < catalogSchemaVersion) {
+      await db.exec('PRAGMA user_version = 12');
+    } else if (version < 12) {
       const oldClocks = await db.execO<{ name: string }>(`SELECT name FROM sqlite_master
         WHERE name LIKE '%__crsql_clock'`);
       await db.tx(async tx => {
@@ -38,18 +38,28 @@ export function openLocalCatalog(): Promise<DB> {
     } else if (version > catalogSchemaVersion) {
       throw new Error(`This app cannot open catalog schema ${version}; update Brewlog first.`);
     }
+    if ((await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version === 12) {
+      await db.tx(async tx => {
+        await tx.exec(catalogModelTables.model_boil_characterization);
+        const clock = await tx.execO<{ name: string }>(
+          "SELECT name FROM sqlite_master WHERE name = 'model_boil_characterization__crsql_clock'");
+        if (!clock.length) await tx.exec("SELECT crsql_as_crr('model_boil_characterization')");
+        await tx.exec(`PRAGMA user_version = ${catalogSchemaVersion}`);
+      });
+    }
     return db;
   })().catch(error => { opened = undefined; throw error; });
   return opened;
 }
 
 export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEquipment[]; inventory: CatalogInventory[] }> {
-  const [models, liquid, pressure, heating, cooling, control, channels, inventory] = await Promise.all([
+  const [models, liquid, pressure, heating, boil, cooling, control, channels, inventory] = await Promise.all([
     db.execO<{ id: string; name: string; kind: string; manufacturer: string | null }>(
       'SELECT id, model_name AS name, kind, manufacturer FROM equipment_models ORDER BY model_name COLLATE NOCASE'),
     db.execO<{ model_id: string; capacity_liters: number | null }>('SELECT * FROM model_liquid_containment'),
     db.execO<{ model_id: string; max_pressure_kpa: number | null }>('SELECT * FROM model_pressure_rating'),
     db.execO<{ model_id: string; rated_power_watts: number | null }>('SELECT * FROM model_heating'),
+    db.execO<{ model_id: string; heat_loss_watts: number | null }>('SELECT * FROM model_boil_characterization'),
     db.execO<{ model_id: string; rated_heat_removal_watts: number | null }>('SELECT * FROM model_cooling'),
     db.execO<{ model_id: string; min_temperature_c: number | null; max_temperature_c: number | null }>(
       'SELECT * FROM model_temperature_control'),
@@ -63,6 +73,8 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
     { has_pressure_rating: true, max_pressure_kpa: row.max_pressure_kpa });
   for (const row of heating) Object.assign(byId.get(row.model_id) || {},
     { has_heating: true, rated_power_watts: row.rated_power_watts });
+  for (const row of boil) Object.assign(byId.get(row.model_id) || {},
+    { boil_heat_loss_watts: row.heat_loss_watts });
   for (const row of cooling) Object.assign(byId.get(row.model_id) || {},
     { has_cooling: true, rated_heat_removal_watts: row.rated_heat_removal_watts });
   for (const row of control) Object.assign(byId.get(row.model_id) || {}, {

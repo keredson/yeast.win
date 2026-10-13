@@ -41,6 +41,8 @@ export interface EquipmentSpecifications {
   has_heating?: boolean; has_cooling?: boolean; has_temperature_control?: boolean;
   max_pressure_kpa?: number | null; measurement_min?: number | null; measurement_max?: number | null;
   measurement_unit?: string | null; boil_heat_loss_watts?: number | null; rated_power_watts?: number | null;
+  unit_boil_heat_loss_watts?: number | null; workspace_model_boil_heat_loss_watts?: number | null;
+  catalog_model_boil_heat_loss_watts?: number | null;
   rated_heat_removal_watts?: number | null; min_temperature_c?: number | null; max_temperature_c?: number | null;
   mash_efficiency_pct?: number | null; grain_absorption_l_per_kg?: number | null;
   mash_deadspace_liters?: number | null; kettle_retention_liters?: number | null; temperature_offset_c?: number | null;
@@ -140,7 +142,11 @@ const effectiveEquipmentView = `CREATE TEMP VIEW effective_equipment AS
     CASE WHEN cool.equipment_id IS NOT NULL OR workspace_model.has_cooling = 1 OR model_cool.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_cooling,
     CASE WHEN control.equipment_id IS NOT NULL OR workspace_model.has_temperature_control = 1 OR model_control.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_temperature_control,
     CASE WHEN control.equipment_id IS NOT NULL OR workspace_model.has_temperature_control = 1 OR model_control.model_id IS NOT NULL THEN 1 ELSE NULL END AS built_in_temperature_control,
-    boil.heat_loss_watts AS boil_heat_loss_watts, temp.offset_c AS temperature_offset_c,
+    COALESCE(boil.heat_loss_watts, workspace_boil.heat_loss_watts, model_boil.heat_loss_watts) AS boil_heat_loss_watts,
+    boil.heat_loss_watts AS unit_boil_heat_loss_watts,
+    workspace_boil.heat_loss_watts AS workspace_model_boil_heat_loss_watts,
+    model_boil.heat_loss_watts AS catalog_model_boil_heat_loss_watts,
+    temp.offset_c AS temperature_offset_c,
     COALESCE(mash.mash_efficiency_pct, workspace_model.mash_efficiency_pct) AS mash_efficiency_pct,
     COALESCE(mash.grain_absorption_l_per_kg, workspace_model.grain_absorption_l_per_kg) AS grain_absorption_l_per_kg,
     COALESCE(mash.mash_deadspace_liters, workspace_model.mash_deadspace_liters) AS mash_deadspace_liters,
@@ -163,12 +169,14 @@ const effectiveEquipmentView = `CREATE TEMP VIEW effective_equipment AS
   LEFT JOIN main.equipment_cooling cool ON cool.equipment_id = e.id
   LEFT JOIN main.equipment_temperature_control control ON control.equipment_id = e.id
   LEFT JOIN main.equipment_boil_calibration boil ON boil.equipment_id = e.id
+  LEFT JOIN main.equipment_model_boil_characterization workspace_boil ON workspace_boil.model_id = workspace_model.id
   LEFT JOIN main.equipment_temperature_calibration temp ON temp.equipment_id = e.id
   LEFT JOIN main.equipment_mash_assumptions mash ON mash.equipment_id = e.id
   LEFT JOIN catalog.equipment_models model ON model.id = workspace_model.catalog_model_id
   LEFT JOIN catalog.model_liquid_containment model_liquid ON model_liquid.model_id = model.id
   LEFT JOIN catalog.model_pressure_rating model_pressure ON model_pressure.model_id = model.id
   LEFT JOIN catalog.model_heating model_heat ON model_heat.model_id = model.id
+  LEFT JOIN catalog.model_boil_characterization model_boil ON model_boil.model_id = model.id
   LEFT JOIN catalog.model_cooling model_cool ON model_cool.model_id = model.id
   LEFT JOIN catalog.model_temperature_control model_control ON model_control.model_id = model.id`;
 
@@ -1034,7 +1042,8 @@ export async function listEquipment(db: DB): Promise<Equipment[]> {
       has_temperature_control: !!model_control_id,
       max_pressure_kpa: model_max_pressure_kpa, rated_power_watts: model_rated_power_watts,
       rated_heat_removal_watts: model_rated_heat_removal_watts,
-      min_temperature_c: model_min_temperature_c, max_temperature_c: model_max_temperature_c
+      min_temperature_c: model_min_temperature_c, max_temperature_c: model_max_temperature_c,
+      boil_heat_loss_watts: item.catalog_model_boil_heat_loss_watts
     };
     return item;
   });
@@ -1096,11 +1105,16 @@ export async function listEquipmentModels(db: DB): Promise<Equipment[]> {
     COALESCE(m.min_temperature_c, ct.min_temperature_c) AS min_temperature_c,
     COALESCE(m.max_temperature_c, ct.max_temperature_c) AS max_temperature_c,
     m.mash_efficiency_pct, m.grain_absorption_l_per_kg,
-    m.mash_deadspace_liters, m.kettle_retention_liters
+    m.mash_deadspace_liters, m.kettle_retention_liters,
+    COALESCE(wb.heat_loss_watts, cb.heat_loss_watts) AS boil_heat_loss_watts,
+    wb.heat_loss_watts AS workspace_model_boil_heat_loss_watts,
+    cb.heat_loss_watts AS catalog_model_boil_heat_loss_watts
     FROM equipment_models m
     LEFT JOIN catalog.model_liquid_containment cl ON cl.model_id = m.catalog_model_id
     LEFT JOIN catalog.model_pressure_rating cp ON cp.model_id = m.catalog_model_id
     LEFT JOIN catalog.model_heating ch ON ch.model_id = m.catalog_model_id
+    LEFT JOIN equipment_model_boil_characterization wb ON wb.model_id = m.id
+    LEFT JOIN catalog.model_boil_characterization cb ON cb.model_id = m.catalog_model_id
     LEFT JOIN catalog.model_cooling cc ON cc.model_id = m.catalog_model_id
     LEFT JOIN catalog.model_temperature_control ct ON ct.model_id = m.catalog_model_id
     ORDER BY m.name COLLATE NOCASE`);
@@ -1367,6 +1381,23 @@ export async function updateEquipmentBoilHeatLoss(db: DB, item: Equipment, watts
   if (!boilOffKinds.has(item.kind)) throw new Error('Boil calibration applies to electric kettles and all-in-one systems');
   if (!Number.isFinite(watts) || watts < 0) throw new Error('Enter a valid heat loss');
   await putEquipmentCapability(db, 'equipment_boil_calibration', item.id, { heat_loss_watts: watts });
+}
+
+export async function clearEquipmentBoilHeatLoss(db: DB, item: Equipment): Promise<void> {
+  if (!boilOffKinds.has(item.kind)) throw new Error('Boil calibration applies to electric kettles and all-in-one systems');
+  await db.exec('DELETE FROM equipment_boil_calibration WHERE equipment_id = ?', [item.id]);
+}
+
+export async function updateEquipmentModelBoilHeatLoss(db: DB, item: Equipment, watts: number): Promise<void> {
+  if (!boilOffKinds.has(item.kind) || !item.model_id) throw new Error('Choose a boiling equipment model');
+  if (!Number.isFinite(watts) || watts < 0) throw new Error('Enter a valid heat loss');
+  await db.exec(`INSERT INTO equipment_model_boil_characterization(model_id, heat_loss_watts) VALUES (?, ?)
+    ON CONFLICT(model_id) DO UPDATE SET heat_loss_watts = excluded.heat_loss_watts`, [item.model_id, watts]);
+}
+
+export async function clearEquipmentModelBoilHeatLoss(db: DB, item: Equipment): Promise<void> {
+  if (!boilOffKinds.has(item.kind) || !item.model_id) throw new Error('Choose a boiling equipment model');
+  await db.exec('DELETE FROM equipment_model_boil_characterization WHERE model_id = ?', [item.model_id]);
 }
 
 export async function updateEquipmentTemperatureOffset(db: DB, item: Equipment, offsetC: number): Promise<void> {
