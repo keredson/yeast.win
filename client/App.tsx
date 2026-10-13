@@ -9,7 +9,7 @@ import { BatchSection } from './BatchSection.tsx';
 import { RecipeSection } from './RecipeSection.tsx';
 import { RecipeTypeIcon } from './RecipeTypeIcon.tsx';
 import { InventorySection } from './InventorySection.tsx';
-import { inventoryItemForPath, inventoryPathSegment } from './inventoryRoutes.ts';
+import { inventorySupplyForPath, inventoryPathSegment } from './inventoryRoutes.ts';
 import { equipmentItemForPath, equipmentPathSegment } from './equipmentRoutes.ts';
 import { EquipmentSection } from './EquipmentSection.tsx';
 import { LocationsSection } from './LocationsSection.tsx';
@@ -337,12 +337,12 @@ export function App() {
 
   useEffect(() => {
     if (route.section !== 'inventory' || !route.selectedId || inventoryWorkspaceId !== workspaceId) return;
-    const found = inventoryItemForPath(route.selectedId, inventory);
+    const found = inventorySupplyForPath(route.selectedId, supplies, inventory);
     if (!found) return;
-    const path = routePath('inventory', inventoryPathSegment(found, inventory), workspaceBase(workspaceId, session?.workspaces || []));
+    const path = routePath('inventory', inventoryPathSegment(found, supplies), workspaceBase(workspaceId, session?.workspaces || []));
     if (location.pathname !== path) history.replaceState(null, '', path);
     if (route.selectedId !== found.id) setRoute(current => ({ ...current, selectedId: found.id }));
-  }, [route.section, route.selectedId, inventory, inventoryWorkspaceId, workspaceId, session?.workspaces]);
+  }, [route.section, route.selectedId, inventory, supplies, inventoryWorkspaceId, workspaceId, session?.workspaces]);
 
   useEffect(() => {
     if (route.section !== 'equipment' || !route.selectedId || equipmentWorkspaceId !== workspaceId) return;
@@ -372,14 +372,15 @@ export function App() {
 
   function showItem(next: Exclude<Section, 'me'>, id: string | null) {
     const base = workspaceBase(workspaceId, session?.workspaces || []);
-    const inventoryItem = next === 'inventory' && id ? inventory.find(row => row.id === id) : null;
+    const inventoryItem = next === 'inventory' && id
+      ? supplies.find(row => row.id === id) || supplies.find(row => row.id === inventory.find(stock => stock.id === id)?.supply_id) : null;
     const equipmentItem = next === 'equipment' && id ? equipment.find(row => row.id === id) : null;
     const locationItem = next === 'locations' && id ? locations.find(row => row.id === id) : null;
-    const segment = inventoryItem ? inventoryPathSegment(inventoryItem, inventory)
+    const segment = inventoryItem ? inventoryPathSegment(inventoryItem, supplies)
       : equipmentItem ? equipmentPathSegment(equipmentItem, equipment) : locationItem ? locationItem.slug : id;
     const path = routePath(next, segment, base);
     if (location.pathname !== path || location.search) history.pushState(null, '', path);
-    setRoute({ section: next, selectedId: id, slug: base.split('/')[2] || null });
+    setRoute({ section: next, selectedId: inventoryItem?.id || id, slug: base.split('/')[2] || null });
   }
 
   async function signOut() {
@@ -599,10 +600,10 @@ export function App() {
             {section === 'inventory' && (inventoryWorkspaceId !== workspaceId ? <div className="loading-screen"><Spin description="Loading inventory" /></div>
               : <InventorySection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} items={inventory}
                 supplies={supplies} catalog={catalogInventory} preferredUnits={preferredUnits} selectedId={route.selectedId
-                  ? inventoryItemForPath(route.selectedId, inventory)?.id || route.selectedId : null}
+                  ? inventorySupplyForPath(route.selectedId, supplies, inventory)?.id || route.selectedId : null}
                 onSelect={id => showItem('inventory', id)} onChanged={changed} />)}
             {section === 'locations' && (inventoryWorkspaceId !== workspaceId ? <div className="loading-screen"><Spin description="Loading locations" /></div>
-              : <LocationsSection key={workspaceId} db={db} basePath={activeBase} locations={locations} items={inventory}
+              : <LocationsSection key={workspaceId} db={db} basePath={activeBase} locations={locations} items={inventory} supplies={supplies}
                 selectedId={route.selectedId ? locationForPath(route.selectedId, locations)?.id || route.selectedId : null}
                 onSelect={id => showItem('locations', id)} onInventorySelect={id => showItem('inventory', id)} onChanged={changed} />)}
             {section === 'equipment' && (equipmentWorkspaceId !== workspaceId ? <div className="loading-screen"><Spin description="Loading equipment" /></div>

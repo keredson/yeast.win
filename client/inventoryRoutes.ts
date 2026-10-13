@@ -10,6 +10,9 @@ export function inventoryPathSegment(item: InventoryItem, items: InventoryItem[]
   return `${categoryName}-${item.id.slice(0, 8).toLowerCase()}`;
 }
 
-export function inventoryItemForPath(segment: string, items: InventoryItem[]): InventoryItem | undefined {
-  return items.find(item => item.id === segment) || items.find(item => inventoryPathSegment(item, items) === segment);
+export function inventorySupplyForPath(segment: string, supplies: InventoryItem[], stock: InventoryItem[]): InventoryItem | undefined {
+  const supply = supplies.find(item => item.id === segment || inventoryPathSegment(item, supplies) === segment);
+  if (supply) return supply;
+  const legacyStock = stock.find(item => item.id === segment || inventoryPathSegment(item, stock) === segment);
+  return supplies.find(item => item.id === legacyStock?.supply_id);
 }

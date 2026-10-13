@@ -918,7 +918,7 @@ try {
   await page.waitForURL(url => url.pathname === '/inventory');
   await page.getByRole('button', { name: 'Add grain' }).waitFor();
   const grainRow = page.locator('.group-table').getByRole('row').filter({ has: page.getByRole('link', { name: 'Smoke grain' }) });
-  await page.getByRole('columnheader', { name: 'Qty' }).waitFor();
+  await page.getByRole('columnheader', { name: 'On hand' }).waitFor();
   await grainRow.getByText('2 lb 5 oz').waitFor();
   if (!String(await grainRow.getByRole('link', { name: 'Smoke grain' }).getAttribute('href')).endsWith('/inventory/smoke-grain')) {
     throw new Error('Inventory link still uses an item ID');
@@ -934,27 +934,29 @@ try {
   if (await page.locator('.group-table').getByRole('link', { name: 'Smoke grain' }).count() !== 1) {
     throw new Error('Adding an existing inventory item created a duplicate row');
   }
-  await page.getByRole('button', { name: 'Actions for Smoke grain' }).click();
-  await page.getByRole('menuitem', { name: 'Bought' }).click();
-  const bought = page.getByRole('dialog', { name: 'Bought Smoke grain' });
+  await grainRow.getByRole('link', { name: 'Smoke grain' }).click();
+  await page.waitForURL(url => url.pathname === '/inventory/smoke-grain');
+  await page.getByRole('heading', { name: 'Lots and locations' }).waitFor();
+  await page.getByRole('button', { name: 'Actions for Unspecified lot' }).click();
+  await page.getByRole('menuitem', { name: 'Buy' }).click();
+  const bought = page.getByRole('dialog', { name: 'Buy Smoke grain' });
   await bought.getByRole('spinbutton', { name: 'Quantity · pounds' }).fill('1');
   await bought.getByRole('button', { name: 'Save' }).click();
   await bought.waitFor({ state: 'hidden' });
-  await grainRow.getByText('4 lb 5 oz').waitFor();
-  await page.locator('.group-table').getByRole('link', { name: 'Smoke grain' }).click();
-  await page.waitForURL(url => url.pathname === '/inventory/smoke-grain');
   await page.getByText('4 lb 5 oz estimated on hand').waitFor();
   await page.getByRole('heading', { name: 'Stock history' }).waitFor();
   await page.locator('.inventory-history').getByRole('columnheader', { name: 'Activity' }).waitFor();
   await page.setViewportSize({ width: 320, height: 720 });
   if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw new Error('Inventory history overflows a narrow phone');
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.getByRole('button', { name: 'Discard' }).click();
+  await page.getByRole('button', { name: 'Actions for Unspecified lot' }).click();
+  await page.getByRole('menuitem', { name: 'Discard' }).click();
   const discard = page.getByRole('dialog', { name: 'Discard Smoke grain' });
   await discard.getByRole('spinbutton', { name: 'Ounces' }).fill('5');
   await discard.getByRole('button', { name: 'Save' }).click();
   await page.getByText('4 lb estimated on hand').waitFor();
-  await page.getByRole('button', { name: 'Discard' }).click();
+  await page.getByRole('button', { name: 'Actions for Unspecified lot' }).click();
+  await page.getByRole('menuitem', { name: 'Discard' }).click();
   const discardAll = page.getByRole('dialog', { name: 'Discard Smoke grain' });
   await discardAll.getByRole('checkbox', { name: 'All available stock' }).check();
   await discardAll.getByRole('button', { name: 'Save' }).click();
@@ -1008,13 +1010,14 @@ try {
   if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw new Error('Location hierarchy overflows a narrow phone');
   await page.setViewportSize({ width: 1280, height: 900 });
   await navigateSection(page, 'Inventory');
-  await grainRow.getByRole('button', { name: 'Actions for Smoke grain' }).click();
-  await page.getByRole('menuitem', { name: 'Bought' }).click();
-  const refill = page.getByRole('dialog', { name: 'Bought Smoke grain' });
+  await grainRow.getByRole('link', { name: 'Smoke grain' }).click();
+  await page.getByRole('button', { name: 'Actions for Unspecified lot' }).click();
+  await page.getByRole('menuitem', { name: 'Buy' }).click();
+  const refill = page.getByRole('dialog', { name: 'Buy Smoke grain' });
   await refill.getByRole('spinbutton', { name: 'Quantity · pounds' }).fill('2');
   await refill.getByRole('button', { name: 'Save' }).click();
   await refill.waitFor({ state: 'hidden' });
-  await grainRow.getByRole('button', { name: 'Actions for Smoke grain' }).click();
+  await page.getByRole('button', { name: 'Actions for Unspecified lot' }).click();
   await page.getByRole('menuitem', { name: 'Move' }).click();
   const moveDialog = page.getByRole('dialog', { name: 'Move stock' });
   if (await moveDialog.getByRole('button', { name: 'Create or manage locations' }).count()) {
@@ -1034,13 +1037,12 @@ try {
   await moveDialog.getByRole('checkbox', { name: 'Move all available stock' }).check();
   await moveDialog.getByRole('button', { name: 'Move stock' }).click();
   await moveDialog.waitFor({ state: 'hidden' });
-  await page.getByRole('cell', { name: 'Back room / Shelf A' }).waitFor();
-  if (await page.locator('.group-table').getByRole('link', { name: 'Smoke grain' }).count() !== 2) {
-    throw new Error('Moving stock did not create a distinct location row');
+  await page.locator('.record-detail .ant-table').first().getByRole('cell', { name: 'Back room / Shelf A' }).waitFor();
+  if (await page.locator('.record-detail .ant-table').first().getByRole('row').filter({ hasText: 'Unspecified lot' }).count() !== 1) {
+    throw new Error('Moving stock split the lot into separate parent rows');
   }
-  const shelfRow = page.locator('.group-table').getByRole('row').filter({ has: page.getByRole('cell', { name: 'Back room / Shelf A' }) });
+  const shelfRow = page.locator('.record-detail .ant-table').first().getByRole('row').filter({ has: page.getByRole('cell', { name: 'Back room / Shelf A' }) });
   await shelfRow.getByText('2 lb').waitFor();
-  await shelfRow.getByRole('link', { name: 'Smoke grain' }).click();
   await page.getByText('Moved in', { exact: true }).waitFor();
   await navigateSection(page, 'Inventory');
   await page.getByRole('button', { name: 'Add grain' }).click();
@@ -1065,9 +1067,10 @@ try {
   await shelvedGrain.getByRole('spinbutton', { name: 'Starting quantity on hand · pounds' }).fill('1');
   await shelvedGrain.getByRole('button', { name: 'Add stock' }).click();
   await shelvedGrain.waitFor({ state: 'hidden' });
+  await page.locator('.group-table').getByRole('link', { name: 'Smoke grain' }).click();
   await shelfRow.getByText('3 lb').waitFor();
-  if (await page.locator('.group-table').getByRole('link', { name: 'Smoke grain' }).count() !== 2) {
-    throw new Error('Buying more at a location created another stock row');
+  if (await page.locator('.record-detail .ant-table').first().getByRole('row').filter({ hasText: 'Unspecified lot' }).count() !== 1) {
+    throw new Error('Buying more at a location created another lot row');
   }
   await navigateSection(page, 'Locations');
   await page.locator('.location-card-heading').filter({ hasText: 'Shelf A' }).click();
