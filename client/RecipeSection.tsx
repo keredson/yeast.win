@@ -5,7 +5,7 @@ import { addRecipePlan, createRecipe, deleteRecipe, deleteRecipePlan, hasRecipeI
   recipeImportSource, recipeTargetVolume, updateRecipeTargetVolume, latestMeasuredMashEfficiency,
   type Equipment, type InventoryItem, type LocalDb, type PlanInput, type Recipe, type RecipeType } from './db.ts';
 import { RecipeImportModal } from './RecipeImportModal.tsx';
-import { PlanForm, type PlanPreset } from './PlanForm.tsx';
+import { PlanForm, repeatPreset, type PlanPreset } from './PlanForm.tsx';
 import { kindLabel } from './constants.ts';
 import { EventTimeline } from './EventTimeline.tsx';
 import { RecipeTypeIcon } from './RecipeTypeIcon.tsx';
@@ -89,11 +89,13 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  async function addPlan(input: PlanInput) {
+  async function addPlan(input: PlanInput, _recordNow = false, addAnother = false) {
     if (!recipe) return;
     if (editingPlan) await updateRecipePlan(db, recipe.id, editingPlan.id, input);
     else await addRecipePlan(db, recipe.id, input);
-    setCreatingKind(null); setEditingPlan(null); await refreshPlans(); await onChanged();
+    if (addAnother && editingPlan) { setPreset(repeatPreset(input)); setCreatingKind(editingPlan.event_type); setEditingPlan(null); }
+    if (!addAnother) { setCreatingKind(null); setEditingPlan(null); }
+    await refreshPlans(); await onChanged();
   }
 
   async function removePlan(id: string) {
@@ -238,7 +240,8 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
       onClose={() => setImportOpen(false)} onImported={async ids => { await onChanged(); if (ids.length === 1) onSelect(ids[0]); }} />
     <Modal title={editingPlan ? editingPlan.event_type === 'measurement'
       ? `Edit ${String(editingPlan.details.measurement_kind || 'measurement').replaceAll('_', ' ')} measurement`
-      : `Edit ${editingPlan.title}` : `Add ${preset.phase || (preset.measurementKind ? `${preset.measurementKind.replaceAll('_', ' ')} measurement` : creatingKind === 'addition' ? 'ingredient' : kindLabel(creatingKind || '').toLowerCase())}`}
+      : editingPlan.event_type === 'addition' ? 'Edit ingredient' : `Edit ${editingPlan.title}`
+      : `Add ${preset.phase || (preset.measurementKind ? `${preset.measurementKind.replaceAll('_', ' ')} measurement` : creatingKind === 'addition' ? 'ingredient' : kindLabel(creatingKind || '').toLowerCase())}`}
       open={!!(editingPlan || creatingKind)} onCancel={() => { setCreatingKind(null); setEditingPlan(null); setPlanDeleteError(''); }} footer={null} destroyOnHidden>
       {planDeleteError && <Alert type="error" message={planDeleteError} className="form-alert" />}
       {(editingPlan || creatingKind) && <PlanForm key={editingPlan?.id || creatingKind || 'new'} eventType={editingPlan?.event_type || creatingKind || 'addition'}

@@ -57,6 +57,7 @@ export const antonPaarEquipment: CatalogEquipment[] = [
 ];
 
 export function unitForCategory(category: string, preferredMass: string): string {
+  if (category === 'Grain') return 'lb + oz';
   if (category === 'Yeast') return 'packet';
   if (category === 'Packaging') return 'each';
   if (category === 'Chemical') return 'mL';

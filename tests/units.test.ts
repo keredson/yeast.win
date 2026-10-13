@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { convertUnit, formatQuantity, gravityScales, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions, validPreferredUnits } from '../shared/units.ts';
+import { unitForCategory } from '../shared/catalog.ts';
 
 test('compound pounds and ounces store as ounces and render without drift', () => {
   assert.deepEqual(quantityForStorage('lb + oz', undefined, 2, 5.5), { quantity: 37.5, unit: 'oz' });
@@ -24,6 +25,8 @@ test('grain offers mass units without package counts', () => {
   assert.ok(grain.includes('lb + oz'));
   assert.ok(!grain.includes('vial'));
   assert.ok(!grain.includes('bottle'));
+  assert.equal(unitForCategory('Grain', 'oz'), 'lb + oz');
+  assert.equal(unitForCategory('Grain', 'g'), 'lb + oz');
 });
 
 test('specific gravity is a unitless gravity scale', () => {

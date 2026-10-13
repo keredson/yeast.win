@@ -158,6 +158,7 @@ button, input, textarea { font: inherit; }
 .heading-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: end; }
 .recipe-settings-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .plan-form-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.plan-form-save-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .batch-timeline { min-width: 0; }
 .timeline-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 24px; }
 .timeline-actions-recipe { justify-content: flex-start; }
