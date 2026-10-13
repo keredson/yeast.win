@@ -7,7 +7,8 @@ import { equipmentSlug } from './equipmentRoutes.ts';
 import { openLocalCatalog } from './catalog.ts';
 import { hasGeneratedLocationSuffix, locationSlug } from './locationSlug.ts';
 import type { CatalogEquipment, MeasurementChannel } from '../shared/catalog.ts';
-import { changeColumns, indexStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements, workspaceSchemaVersion, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
+import { changeColumns, indexStatements, legacyEquipmentCopyStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements,
+  workspaceSchemaVersion, workspaceTableColumns, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 import { convertUnit, formatQuantity, storageUnit } from '../shared/units.ts';
 import type { ImportedRecipe } from './recipeImport.ts';
@@ -192,7 +193,9 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
       const legacyVersion = legacyMeta.length
         ? (await db.execO<{ version: number }>('SELECT version FROM schema_meta LIMIT 1'))[0]?.version : undefined;
       const version = storedVersion || legacyVersion || 0;
-      if (version === 0) {
+      const hasWorkspaceTables = (await db.execO<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'table'")).some(row => replicatedTables.includes(row.name));
+      if (version === 0 && !hasWorkspaceTables) {
         await db.tx(async tx => {
           for (const statement of schemaStatements) await tx.exec(statement);
           for (const table of replicatedTables) await tx.exec('SELECT crsql_as_crr(?)', [table]);
@@ -201,50 +204,71 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
           if (legacyMeta.length) await tx.exec('DROP TABLE schema_meta');
           await tx.exec(`PRAGMA user_version = ${workspaceSchemaVersion}`);
         });
-      } else if (version < workspaceSchemaVersion) {
-        await db.tx(async tx => {
-          // Pre-release capability split resets the workspace and sync cursor.
-          for (const table of [...replicatedTables, ...retiredReplicatedTables]) {
-            const exists = await tx.execO<{ name: string }>(
-              "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [table]);
-            if (!exists.length) continue;
-            await tx.exec('SELECT crsql_as_table(?)', [table]);
-            await tx.exec(`DROP TABLE "${table}"`);
-          }
-          for (const statement of schemaStatements) await tx.exec(statement);
-          for (const table of replicatedTables) await tx.exec('SELECT crsql_as_crr(?)', [table]);
-          for (const statement of indexStatements) await tx.exec(statement);
-          await tx.exec('CREATE TABLE IF NOT EXISTS sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
-          await tx.exec('DELETE FROM sync_state');
-          if (legacyMeta.length) await tx.exec('DROP TABLE schema_meta');
-          await tx.exec(`PRAGMA user_version = ${workspaceSchemaVersion}`);
-        });
       } else if (version > workspaceSchemaVersion) {
         throw new Error(`This app cannot open workspace schema ${version}; update Brewlog first.`);
-      } else if (legacyMeta.length || storedVersion !== workspaceSchemaVersion) {
+      } else {
         await db.tx(async tx => {
+          const existing = new Set((await tx.execO<{ name: string }>(
+            "SELECT name FROM sqlite_master WHERE type = 'table'")).map(row => row.name));
+          let changed = version < workspaceSchemaVersion;
+          for (const [index, table] of replicatedTables.entries()) {
+            const expected = workspaceTableColumns[table];
+            if (existing.has(table)) {
+              const actual = (await tx.execO<{ name: string }>(`PRAGMA table_info("${table}")`)).map(row => row.name);
+              if (actual.join(',') === expected.join(',')) {
+                if (!existing.has(`${table}__crsql_clock`)) {
+                  await tx.exec('SELECT crsql_as_crr(?)', [table]);
+                  changed = true;
+                }
+                continue;
+              }
+              const common = expected.filter(column => actual.includes(column));
+              const snapshot = `migration_${table}`;
+              if (table === 'equipment' && actual.some(column => !expected.includes(column))
+                && !existing.has('equipment_legacy_migration')) {
+                await tx.exec('CREATE TABLE equipment_legacy_migration AS SELECT * FROM equipment');
+              }
+              if (common.length) await tx.exec(`CREATE TEMP TABLE "${snapshot}" AS SELECT ${common.join(', ')} FROM "${table}"`);
+              if (existing.has(`${table}__crsql_clock`)) await tx.exec('SELECT crsql_as_table(?)', [table]);
+              await tx.exec(`DROP TABLE "${table}"`);
+              await tx.exec(schemaStatements[index]);
+              await tx.exec('SELECT crsql_as_crr(?)', [table]);
+              if (common.length) {
+                await tx.exec(`INSERT INTO "${table}" (${common.join(', ')}) SELECT ${common.join(', ')} FROM "${snapshot}"`);
+                await tx.exec(`DROP TABLE "${snapshot}"`);
+              }
+            } else {
+              await tx.exec(schemaStatements[index]);
+              await tx.exec('SELECT crsql_as_crr(?)', [table]);
+            }
+            changed = true;
+          }
+          for (const table of retiredReplicatedTables) if (existing.has(table)) {
+            if (existing.has(`${table}__crsql_clock`)) await tx.exec('SELECT crsql_as_table(?)', [table]);
+            await tx.exec(`DROP TABLE "${table}"`);
+            changed = true;
+          }
+          for (const statement of indexStatements) await tx.exec(statement);
+          await tx.exec('CREATE TABLE IF NOT EXISTS sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
+          if (changed) await tx.exec('DELETE FROM sync_state');
           if (legacyMeta.length) await tx.exec('DROP TABLE schema_meta');
           await tx.exec(`PRAGMA user_version = ${workspaceSchemaVersion}`);
         });
       }
-      // Some development databases already report this version but lack a
-      // capability table. Repair only missing tables, leaving existing rows.
-      const present = new Set((await db.execO<{ name: string }>(
-        "SELECT name FROM sqlite_master WHERE type = 'table'")).map(row => row.name));
-      const missing = replicatedTables.filter(table => !present.has(table));
-      if (missing.length) await db.tx(async tx => {
-        for (const table of missing) {
-          await tx.exec(schemaStatements[replicatedTables.indexOf(table)]);
-          await tx.exec('SELECT crsql_as_crr(?)', [table]);
-        }
-        for (const statement of indexStatements) await tx.exec(statement);
+      const legacyEquipment = await db.execO<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'equipment_legacy_migration'");
+      if (legacyEquipment.length) await db.tx(async tx => {
+        const columns = (await tx.execO<{ name: string }>('PRAGMA table_info(equipment_legacy_migration)'))
+          .map(row => row.name);
+        for (const statement of legacyEquipmentCopyStatements(columns)) await tx.exec(statement);
+        await tx.exec('DROP TABLE equipment_legacy_migration');
       });
       await openLocalCatalog();
       await db.exec("ATTACH DATABASE 'brewlog-catalog' AS catalog");
       await db.exec(effectiveEquipmentView);
       await db.exec(effectiveMeasurementChannelsView);
       return db;
-    })();
+    })().catch(cause => { opened.delete(workspaceId); throw cause; });
     opened.set(workspaceId, pending);
   }
   return pending;

@@ -43,7 +43,7 @@ test('existing catalog gains new equipment and inventory without item capacity',
     assert.ok((pressureFermenter?.max_pressure_kpa || 0) > 0);
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_inkbird_itc_308')?.kind, 'fermentation_temperature_control');
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_vevor_35l')?.name,
-      'VEVOR Electric Brewing System 9.2 Gal/35 L Brewing Pot');
+      'VEVOR Electric Brewing System 9.2 Gal/35 L');
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_vevor_35l')?.kind, 'all_in_one');
     assert.equal((db.prepare('SELECT capacity_liters FROM model_liquid_containment WHERE model_id = ?')
       .get('equipment_vevor_35l') as { capacity_liters: number }).capacity_liters, 35);
@@ -95,6 +95,36 @@ test('version 5 catalog restores VEVOR as an all-in-one system', () => {
     assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_vevor_35l')?.kind, 'all_in_one');
   } finally { db.close(); }
+});
+
+test('existing catalog updates previous VEVOR names and preserves edits', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
+  const db = openCatalogDb(dir);
+  try {
+    db.prepare('UPDATE equipment_models SET model_name = ? WHERE id = ?')
+      .run('VEVOR 35 L', 'equipment_vevor_35l');
+  } finally { db.close(); }
+  const upgraded = openCatalogDb(dir);
+  try {
+    assert.equal((upgraded.prepare('SELECT model_name FROM equipment_models WHERE id = ?')
+      .get('equipment_vevor_35l') as { model_name: string }).model_name,
+      'VEVOR Electric Brewing System 9.2 Gal/35 L');
+    upgraded.prepare('UPDATE equipment_models SET model_name = ? WHERE id = ?')
+      .run('VEVOR Electric Brewing System 9.2 Gal/35 L Brewing Pot', 'equipment_vevor_35l');
+  } finally { upgraded.close(); }
+  const legacy = openCatalogDb(dir);
+  try {
+    assert.equal((legacy.prepare('SELECT model_name FROM equipment_models WHERE id = ?')
+      .get('equipment_vevor_35l') as { model_name: string }).model_name,
+      'VEVOR Electric Brewing System 9.2 Gal/35 L');
+    legacy.prepare('UPDATE equipment_models SET model_name = ? WHERE id = ?')
+      .run('My VEVOR', 'equipment_vevor_35l');
+  } finally { legacy.close(); }
+  const reopened = openCatalogDb(dir);
+  try {
+    assert.equal((reopened.prepare('SELECT model_name FROM equipment_models WHERE id = ?')
+      .get('equipment_vevor_35l') as { model_name: string }).model_name, 'My VEVOR');
+  } finally { reopened.close(); }
 });
 
 test('version 9 CRR catalog keeps direct server edits when removing prefixes', () => {

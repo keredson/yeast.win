@@ -116,7 +116,7 @@ test('recording an action wins over a concurrent skip', () => {
   }
 });
 
-test('pre-release workspace schemas reset without carrying old event JSON', () => {
+test('old workspace schemas preserve common event columns without carrying old JSON', () => {
   const id = nanoid();
   const file = join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`);
   const old = new Database(file);
@@ -125,14 +125,17 @@ test('pre-release workspace schemas reset without carrying old event JSON', () =
     INSERT INTO schema_meta VALUES (10);
     CREATE TABLE batch_events(id TEXT PRIMARY KEY NOT NULL, batch_id TEXT, details_json TEXT)`);
   old.prepare('SELECT crsql_as_crr(?)').get('batch_events');
+  const eventId = nanoid();
+  const batchId = nanoid();
   old.prepare('INSERT INTO batch_events(id, batch_id, details_json) VALUES (?, ?, ?)')
-    .run(nanoid(), nanoid(), '{"mode":"hold"}');
+    .run(eventId, batchId, '{"mode":"hold"}');
   old.close();
   const db = openWorkspaceDb(id);
   try {
     assert.equal(db.pragma('user_version', { simple: true }), workspaceSchemaVersion);
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'schema_meta'").get(), undefined);
-    assert.equal((db.prepare('SELECT COUNT(*) AS count FROM batch_events').get() as { count: number }).count, 0);
+    assert.equal((db.prepare('SELECT batch_id FROM batch_events WHERE id = ?').get(eventId) as { batch_id: string }).batch_id,
+      batchId);
     assert.equal((db.pragma('table_info(batch_events)') as { name: string }[])
       .some(column => column.name === 'details_json'), false);
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'recipe_temperature_control_events'").get());
@@ -153,6 +156,24 @@ test('pre-release workspace schemas reset without carrying old event JSON', () =
     assert.equal((db.pragma('table_info(temperature_measurements)') as { name: string }[])
       .some(column => column.name === 'calibration_id'), false);
   } finally { closeWorkspaceDb(db); }
+});
+
+test('unversioned workspace tables are upgraded without clearing their rows', () => {
+  const id = nanoid();
+  const batchId = nanoid();
+  const old = new Database(join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`));
+  old.loadExtension('vendor/crsqlite.so');
+  old.exec('CREATE TABLE batches(id TEXT PRIMARY KEY NOT NULL, name TEXT, status TEXT, created_at INTEGER, updated_at INTEGER)');
+  old.prepare('SELECT crsql_as_crr(?)').get('batches');
+  old.prepare('INSERT INTO batches(id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+    .run(batchId, 'Unversioned batch', 'active', 1, 1);
+  old.close();
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal((upgraded.prepare('SELECT name FROM batches WHERE id = ?').get(batchId) as { name: string }).name,
+      'Unversioned batch');
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+  } finally { closeWorkspaceDb(upgraded); }
 });
 
 test('current schema data survives the move from schema_meta to user_version', () => {
@@ -195,6 +216,44 @@ test('current workspace repairs a missing capability table without losing existi
   } finally { closeWorkspaceDb(reopened); }
 });
 
+test('version 17 equipment settings move into capability tables while batches survive', () => {
+  const id = nanoid();
+  const equipmentId = nanoid();
+  const batchId = nanoid();
+  const old = new Database(join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`));
+  old.loadExtension('vendor/crsqlite.so');
+  old.exec(`CREATE TABLE equipment(id TEXT PRIMARY KEY NOT NULL, name TEXT, kind TEXT,
+    catalog_model_id TEXT, slug TEXT, capacity_liters REAL, rated_power_watts REAL,
+    boil_heat_loss_watts REAL, temperature_offset_c REAL, created_at INTEGER);
+    CREATE TABLE batches(id TEXT PRIMARY KEY NOT NULL, name TEXT, status TEXT, created_at INTEGER, updated_at INTEGER)`);
+  for (const table of ['equipment', 'batches']) old.prepare('SELECT crsql_as_crr(?)').get(table);
+  old.prepare(`INSERT INTO equipment(id, name, kind, capacity_liters, rated_power_watts,
+    boil_heat_loss_watts, temperature_offset_c, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    equipmentId, 'Old kettle', 'electric_kettle', 35, 1800, 250, 2, 1);
+  old.prepare('INSERT INTO batches(id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+    .run(batchId, 'Old batch', 'active', 1, 1);
+  old.pragma('user_version = 17');
+  old.close();
+
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal((upgraded.prepare('SELECT name FROM batches WHERE id = ?').get(batchId) as { name: string }).name,
+      'Old batch');
+    assert.equal((upgraded.prepare('SELECT name FROM equipment WHERE id = ?').get(equipmentId) as { name: string }).name,
+      'Old kettle');
+    assert.equal((upgraded.prepare('SELECT capacity_liters FROM equipment_liquid_containment WHERE equipment_id = ?')
+      .get(equipmentId) as { capacity_liters: number }).capacity_liters, 35);
+    assert.equal((upgraded.prepare('SELECT rated_power_watts FROM equipment_heating WHERE equipment_id = ?')
+      .get(equipmentId) as { rated_power_watts: number }).rated_power_watts, 1800);
+    assert.equal((upgraded.prepare('SELECT heat_loss_watts FROM equipment_boil_calibration WHERE equipment_id = ?')
+      .get(equipmentId) as { heat_loss_watts: number }).heat_loss_watts, 250);
+    assert.equal((upgraded.prepare('SELECT offset_c FROM equipment_temperature_calibration WHERE equipment_id = ?')
+      .get(equipmentId) as { offset_c: number }).offset_c, 2);
+    assert.equal((upgraded.pragma('table_info(equipment)') as { name: string }[])
+      .some(column => column.name === 'capacity_liters'), false);
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
 test('version 12 ingredient JSON is replaced by typed columns', () => {
   const id = nanoid();
   const file = join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`);
@@ -204,8 +263,9 @@ test('version 12 ingredient JSON is replaced by typed columns', () => {
     INSERT INTO schema_meta VALUES (12);
     CREATE TABLE inventory_ingredient_properties(id TEXT PRIMARY KEY NOT NULL, properties_json TEXT)`);
   old.prepare('SELECT crsql_as_crr(?)').get('inventory_ingredient_properties');
+  const propertyId = nanoid();
   old.prepare('INSERT INTO inventory_ingredient_properties(id, properties_json) VALUES (?, ?)')
-    .run(nanoid(), '{"yield_pct":80}');
+    .run(propertyId, '{"yield_pct":80}');
   old.close();
   const db = openWorkspaceDb(id);
   try {
@@ -214,11 +274,12 @@ test('version 12 ingredient JSON is replaced by typed columns', () => {
     const columns = db.pragma('table_info(inventory_ingredient_properties)') as { name: string }[];
     assert.deepEqual(columns.map(column => column.name),
       ['id', 'yield_pct', 'color_lovibond', 'alpha_acid_pct', 'hop_form', 'attenuation_pct']);
-    assert.equal((db.prepare('SELECT COUNT(*) AS count FROM inventory_ingredient_properties').get() as { count: number }).count, 0);
+    assert.equal((db.prepare('SELECT yield_pct FROM inventory_ingredient_properties WHERE id = ?')
+      .get(propertyId) as { yield_pct: number | null }).yield_pct, null);
   } finally { closeWorkspaceDb(db); }
 });
 
-test('version 14 calibration JSON table is removed on reset', () => {
+test('version 14 calibration JSON table is retired during upgrade', () => {
   const id = nanoid();
   const file = join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`);
   const old = new Database(file);
@@ -236,7 +297,7 @@ test('version 14 calibration JSON table is removed on reset', () => {
   } finally { closeWorkspaceDb(db); }
 });
 
-test('version 15 workspace resets for the capability schema', () => {
+test('version 15 workspace gains new tables while retaining inventory and locations', () => {
   const id = nanoid();
   const file = join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`);
   const old = new Database(file);
@@ -258,13 +319,15 @@ test('version 15 workspace resets for the capability schema', () => {
   try {
     assert.equal(db.pragma('user_version', { simple: true }), workspaceSchemaVersion);
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'schema_meta'").get(), undefined);
-    assert.equal(db.prepare('SELECT name FROM inventory_locations WHERE id = ?').get(locationId), undefined);
-    assert.equal(db.prepare('SELECT location_id FROM inventory_item_locations WHERE id = ?').get(itemId), undefined);
+    assert.equal((db.prepare('SELECT name FROM inventory_locations WHERE id = ?').get(locationId) as { name: string }).name,
+      'Cellar');
+    assert.equal((db.prepare('SELECT location_id FROM inventory_item_locations WHERE id = ?').get(itemId) as { location_id: string }).location_id,
+      locationId);
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'inventory_location_slugs'").get());
   } finally { closeWorkspaceDb(db); }
 });
 
-test('version 16 workspace resets for the capability schema', () => {
+test('version 16 workspace creates a missing table without clearing locations', () => {
   const id = nanoid();
   const locationId = nanoid();
   const db = openWorkspaceDb(id);
@@ -279,8 +342,10 @@ test('version 16 workspace resets for the capability schema', () => {
   const upgraded = openWorkspaceDb(id);
   try {
     assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
-    assert.equal(upgraded.prepare('SELECT name FROM inventory_locations WHERE id = ?').get(locationId), undefined);
-    assert.equal(upgraded.prepare('SELECT slug FROM inventory_location_slugs WHERE id = ?').get(locationId), undefined);
+    assert.equal((upgraded.prepare('SELECT name FROM inventory_locations WHERE id = ?').get(locationId) as { name: string }).name,
+      'Garage');
+    assert.equal((upgraded.prepare('SELECT slug FROM inventory_location_slugs WHERE id = ?').get(locationId) as { slug: string }).slug,
+      'garage');
     upgraded.prepare('INSERT INTO inventory_location_addresses(id, address) VALUES (?, ?)').run(locationId, '123 Brew Street');
     assert.equal((upgraded.prepare('SELECT address FROM inventory_location_addresses WHERE id = ?').get(locationId) as { address: string }).address, '123 Brew Street');
   } finally { closeWorkspaceDb(upgraded); }

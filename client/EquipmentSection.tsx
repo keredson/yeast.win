@@ -286,7 +286,8 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
   const catalogKinds = [...new Set(catalog.map(model => model.kind))].sort((left, right) =>
     equipmentKindLabel(left).localeCompare(equipmentKindLabel(right)));
   const query = catalogQuery.trim().toLocaleLowerCase();
-  const matchingModels = catalog.filter(model => (!catalogKind || model.kind === catalogKind)
+  const matchingModels = catalog.filter(model => model.id !== 'equipment_inkbird_itc_308_wifi'
+    && (!catalogKind || model.kind === catalogKind)
     && (!query || `${model.name} ${equipmentKindLabel(model.kind)}`.toLocaleLowerCase().includes(query)));
   function chooseCatalogModel(model: CatalogEquipment) {
     setCatalogPickerOpen(false);

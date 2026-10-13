@@ -280,11 +280,16 @@ try {
   }
   await page.getByRole('button', { name: 'Add from catalog' }).click();
   const catalogDialog = page.getByRole('dialog', { name: 'Add from catalog' });
+  await catalogDialog.getByRole('searchbox', { name: 'Search equipment models' }).fill('Inkbird');
+  if (!await catalogDialog.getByRole('button', { name: /Inkbird ITC-308\b/ }).count()
+    || await catalogDialog.getByRole('button', { name: /Inkbird ITC-308-WIFI/ }).count()) {
+    throw new Error('Catalog should offer one Inkbird ITC-308 model');
+  }
   await catalogDialog.getByRole('searchbox', { name: 'Search equipment models' }).fill('VEVOR');
-  await catalogDialog.getByRole('button', { name: /VEVOR Electric Brewing System/ }).click();
+  await catalogDialog.getByRole('button', { name: /VEVOR Electric Brewing System 9.2 Gal\/35 L/ }).click();
   const catalogEquipmentDialog = page.getByRole('dialog', { name: 'Add all-in-one brewing system' });
   if (await catalogEquipmentDialog.getByRole('textbox', { name: 'Name' }).inputValue()
-    !== 'VEVOR Electric Brewing System 9.2 Gal/35 L Brewing Pot') throw new Error('Catalog model name was not copied');
+    !== 'VEVOR Electric Brewing System 9.2 Gal/35 L') throw new Error('Catalog model name was not copied');
   if (await catalogEquipmentDialog.getByRole('spinbutton', { name: 'Capacity (optional)' }).inputValue() !== '35') {
     throw new Error('Catalog capacity was not copied');
   }
