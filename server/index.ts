@@ -5,8 +5,9 @@ import type Database from 'better-sqlite3';
 import { accountForToken, changePassword, clearSessionCookie, getAvatar, getPreferredUnits, login, logout,
   readSessionCookie, register, saveAvatar, savePreferredUnits, sessionCookie, sessionCookieName } from './auth.ts';
 import { assertCrSqliteAvailable, closeWorkspaceDb, createWorkspace, dataDir, deleteWorkspace, openAuthDb, openWorkspaceDb, projectRoot, updateWorkspace } from './db.ts';
-import { catalogChanges, openCatalogDb } from './catalog.ts';
-import { syncWorkspace, validateSyncRequest } from './sync.ts';
+import { openCatalogDb } from './catalog.ts';
+import { receiveCborChanges, streamCborChanges } from './sync.ts';
+import { syncContentType } from '../shared/cborSync.ts';
 import { isValidId } from '../shared/schema.ts';
 import { validPreferredUnits } from '../shared/units.ts';
 
@@ -39,6 +40,18 @@ async function readJson(req: IncomingMessage, maxBytes = 32 * 1024 * 1024): Prom
     chunks.push(chunk);
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+}
+
+async function readCbor(req: IncomingMessage, maxBytes = 32 * 1024 * 1024): Promise<Buffer> {
+  if (!req.headers['content-type']?.startsWith(syncContentType)) throw new Error('Expected CBOR sync request');
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > maxBytes) throw new Error('Sync request is too large');
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 function sessionToken(req: IncomingMessage) {
@@ -152,17 +165,11 @@ const server = createServer(async (req, res) => {
     if (pathname === '/api/me' && req.method === 'GET') {
       return json(res, 200, { account, workspaces: ownerWorkspaces(account.id), preferred_units: getPreferredUnits(authDb, account.id) });
     }
-    if (pathname === '/api/catalog' && req.method === 'GET') {
-      const cursor = url.searchParams.get('cursor') || '0';
-      if (!/^\d+$/.test(cursor)) return json(res, 400, { error: 'Invalid catalog cursor' });
-      try {
-        return json(res, 200, catalogChanges(catalogDb, BigInt(cursor)));
-      } catch (cause) {
-        if (cause instanceof Error && cause.message === 'Catalog cursor is ahead of the server') {
-          return json(res, 409, { error: cause.message });
-        }
-        throw cause;
-      }
+    if (pathname === '/api/catalog/sync' && req.method === 'GET') {
+      const version = url.searchParams.get('version') || '0';
+      const seq = url.searchParams.get('seq') || '0';
+      if (!/^\d+$/.test(version) || !/^\d+$/.test(seq)) return json(res, 400, { error: 'Invalid catalog cursor' });
+      return await streamCborChanges(catalogDb, res, version, seq);
     }
     if (pathname === '/api/me/preferences' && req.method === 'PATCH') {
       const units = await readJson(req, 4 * 1024);
@@ -254,13 +261,27 @@ const server = createServer(async (req, res) => {
       });
       return json(res, 200, { ok: true });
     }
-    const syncMatch = /^\/api\/workspaces\/([^/]+)\/sync$/.exec(pathname);
-    if (syncMatch && req.method === 'POST') {
-      const workspaceId = syncMatch[1];
+    const binarySyncMatch = /^\/api\/workspaces\/([^/]+)\/sync\/(upload|download)$/.exec(pathname);
+    if (binarySyncMatch && (req.method === 'POST' || req.method === 'GET')) {
+      const [, workspaceId, action] = binarySyncMatch;
       if (!isValidId(workspaceId) || !ownsWorkspace(account.id, workspaceId)) return json(res, 404, { error: 'Brewery not found' });
-      const body = await readJson(req);
-      if (!validateSyncRequest(body)) return json(res, 400, { error: 'Invalid sync request' });
-      return json(res, 200, syncWorkspace(getWorkspaceDb(workspaceId), body));
+      if (action === 'upload' && req.method === 'POST') {
+        let result: Uint8Array;
+        try { result = receiveCborChanges(getWorkspaceDb(workspaceId), await readCbor(req)); }
+        catch (cause) {
+          if (cause instanceof Error && /Invalid CBOR|Expected CBOR|too large/i.test(cause.message))
+            return json(res, 400, { error: cause.message });
+          throw cause;
+        }
+        res.writeHead(200, { 'Content-Type': syncContentType, 'Cache-Control': 'no-store' });
+        return res.end(result);
+      }
+      if (action === 'download' && req.method === 'GET') {
+        const version = url.searchParams.get('version') || '0';
+        const seq = url.searchParams.get('seq') || '0';
+        if (!/^\d+$/.test(version) || !/^\d+$/.test(seq)) return json(res, 400, { error: 'Invalid sync cursor' });
+        return await streamCborChanges(getWorkspaceDb(workspaceId), res, version, seq);
+      }
     }
     return json(res, 404, { error: 'Not found' });
   } catch (error) {

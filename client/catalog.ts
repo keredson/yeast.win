@@ -1,9 +1,9 @@
 import initWasm, { type DB } from '@vlcn.io/crsqlite-wasm';
 import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { catalogModelTables, catalogSupplyTables, catalogSchemaVersion, catalogTables,
-  type CatalogChanges, type CatalogEquipment, type CatalogInventory, type CatalogMeasurementChannel } from '../shared/catalog.ts';
+  type CatalogEquipment, type CatalogInventory, type CatalogMeasurementChannel } from '../shared/catalog.ts';
 import { changeColumns } from '../shared/schema.ts';
-import { decodeChange } from '../shared/wire.ts';
+import { maxSequence, readSequence, syncProtocolVersion, validChangeTuple, type ChangeTuple } from '../shared/cborSync.ts';
 import { fetchApi } from './api.ts';
 
 let opened: Promise<DB> | undefined;
@@ -117,30 +117,63 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
   return { equipment, inventory };
 }
 
-export function syncLocalCatalog(db: DB): Promise<boolean> {
+export function syncLocalCatalog(db: DB, onProgress?: (applied: number, total: number) => void): Promise<boolean> {
   if (syncing) return syncing;
   syncing = (async () => {
     const rows = await db.execO<{ key: string; value: string }>(
-      "SELECT key, value FROM sync_state WHERE key IN ('serverCursor', 'lastRefreshAt')");
+      "SELECT key, value FROM sync_state WHERE key IN ('serverCursor', 'serverSeq', 'lastRefreshAt')");
     const cursor = rows.find(row => row.key === 'serverCursor')?.value || '0';
     const lastRefreshAt = Number(rows.find(row => row.key === 'lastRefreshAt')?.value);
     const now = Date.now();
     if (lastRefreshAt > 0 && now >= lastRefreshAt && now - lastRefreshAt < catalogRefreshIntervalMs) return false;
-    const response = await fetchApi(`/api/catalog?cursor=${cursor}`, { credentials: 'same-origin' });
+    let seq = rows.find(row => row.key === 'serverSeq')?.value || '0';
+    if (seq === '0' && cursor !== '0') seq = maxSequence;
+    const response = await fetchApi(`/api/catalog/sync?version=${cursor}&seq=${seq}`, { credentials: 'same-origin' });
     if (!response.ok) throw new Error('Catalog sync failed');
-    const result = await response.json() as CatalogChanges;
-    if (!/^\d+$/.test(result.serverCursor) || !Array.isArray(result.changes)
-      || result.changes.some(change => !catalogTables.includes(change.table as typeof catalogTables[number]))) {
-      throw new Error('Invalid catalog response');
-    }
+    if (!response.body) throw new Error('Catalog sync response cannot be streamed');
+    const stream = readSequence(response.body);
+    const first = await stream.next();
+    const header = first.value;
+    if (first.done || !Array.isArray(header) || header.length !== 3 || header[0] !== syncProtocolVersion
+      || !Number.isSafeInteger(header[1]) || header[1] < 0 || !/^\d+$/.test(header[2]))
+      throw new Error('Invalid catalog sync header');
+    const total = header[1] as number;
+    const targetVersion = header[2] as string;
+    let applied = 0;
+    onProgress?.(0, total);
     const insert = `INSERT INTO crsql_changes (${changeColumns.map(column => `"${column}"`).join(', ')})
       VALUES (${changeColumns.map(() => '?').join(', ')})`;
+    let batch: ChangeTuple[] = [];
+    const apply = async () => {
+      if (!batch.length) return;
+      const changes = batch;
+      batch = [];
+      const last = changes.at(-1)!;
+      await db.tx(async tx => {
+        for (const change of changes) await tx.exec(insert, change);
+        await tx.exec(`INSERT INTO sync_state(key,value) VALUES ('serverCursor',?)
+          ON CONFLICT(key) DO UPDATE SET value=excluded.value`, [String(last[5])]);
+        await tx.exec(`INSERT INTO sync_state(key,value) VALUES ('serverSeq',?)
+          ON CONFLICT(key) DO UPDATE SET value=excluded.value`, [String(last[8])]);
+      });
+      applied += changes.length;
+      onProgress?.(applied, total);
+    };
+    for await (const item of stream) {
+      if (!validChangeTuple(item) || !catalogTables.includes(item[0] as typeof catalogTables[number]))
+        throw new Error('Invalid catalog change');
+      batch.push(item);
+      if (batch.length >= 64) await apply();
+    }
+    await apply();
+    if (applied !== total) throw new Error('Incomplete catalog sync');
     await db.tx(async tx => {
-      for (const change of result.changes) await tx.exec(insert, decodeChange(change));
-      await tx.exec(`INSERT INTO sync_state(key, value) VALUES ('serverCursor', ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [result.serverCursor]);
-      await tx.exec(`INSERT INTO sync_state(key, value) VALUES ('lastRefreshAt', ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [String(Date.now())]);
+      await tx.exec(`INSERT INTO sync_state(key,value) VALUES ('serverCursor',?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value`, [targetVersion]);
+      await tx.exec(`INSERT INTO sync_state(key,value) VALUES ('serverSeq',?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value`, [maxSequence]);
+      await tx.exec(`INSERT INTO sync_state(key,value) VALUES ('lastRefreshAt',?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value`, [String(Date.now())]);
     });
     return true;
   })().finally(() => { syncing = undefined; });

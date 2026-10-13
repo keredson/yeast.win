@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppstoreOutlined, BookOutlined, DisconnectOutlined, EnvironmentOutlined, InboxOutlined, MenuOutlined, ToolOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Button, Card, Drawer, Empty, Form, Input, Layout, Menu, Popover, Select, Spin, Tooltip, Typography } from 'antd';
+import { Alert, Avatar, Button, Card, Drawer, Empty, Form, Input, Layout, Menu, Popover, Progress, Select, Spin, Tooltip, Typography } from 'antd';
 import { api, ApiError, ApiUnavailableError, type PreferredUnits, type Session, type Workspace } from './api.ts';
 import { defaultPreferredUnits } from '../shared/units.ts';
-import { forgetLocalDb, openLocalDb, syncNow, type Batch, type Equipment, type InventoryItem, type InventoryLocation, type LocalDb, type Recipe, type RecipeType,
+import { forgetLocalDb, openLocalDb, syncNow, type SyncProgress, type Batch, type Equipment, type InventoryItem, type InventoryLocation, type LocalDb, type Recipe, type RecipeType,
   listBatches, listEquipment, listEquipmentModels, listInventory, listSupplies, listInventoryLocations, listRecipes } from './db.ts';
 import { BatchSection } from './BatchSection.tsx';
 import { RecipeSection } from './RecipeSection.tsx';
@@ -212,6 +212,8 @@ export function App() {
   const [error, setError] = useState('');
   const [serverDisconnected, setServerDisconnected] = useState(false);
   const [syncPhase, setSyncPhase] = useState<'idle' | 'syncing' | 'synced' | 'failed'>('idle');
+  const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
+  const [catalogSyncProgress, setCatalogSyncProgress] = useState<{ applied: number; total: number } | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
   const [menuOpen, setMenuOpen] = useState(false);
@@ -258,7 +260,10 @@ export function App() {
       const cached = await readLocalCatalog(catalogDb);
       if (!cancelled) { setCatalogEquipment(cached.equipment); setCatalogInventory(cached.inventory); }
       try {
-        const refreshed = await syncLocalCatalog(catalogDb);
+        const refreshed = await syncLocalCatalog(catalogDb, (applied, total) => {
+          if (!cancelled) setCatalogSyncProgress({ applied, total });
+        });
+        if (!cancelled) setCatalogSyncProgress(null);
         if (!refreshed || cancelled) return;
         setServerDisconnected(false);
         const updated = await readLocalCatalog(catalogDb);
@@ -267,6 +272,7 @@ export function App() {
         setCatalogInventory(updated.inventory);
         setCatalogRevision(revision => revision + 1);
       } catch (cause) {
+        if (!cancelled) setCatalogSyncProgress(null);
         if (!cancelled && cause instanceof ApiUnavailableError) setServerDisconnected(true);
         // Cached catalog remains searchable offline.
       }
@@ -406,8 +412,11 @@ export function App() {
   const runSync = useCallback(async (activeDb: LocalDb, targetWorkspaceId: string) => {
     if (activeWorkspaceId.current !== targetWorkspaceId) return;
     setSyncPhase('syncing');
+    setSyncProgress(null);
     try {
-      await syncNow(activeDb, targetWorkspaceId);
+      await syncNow(activeDb, targetWorkspaceId, progress => {
+        if (activeWorkspaceId.current === targetWorkspaceId) setSyncProgress(progress);
+      });
       if (activeWorkspaceId.current !== targetWorkspaceId) return;
       await refresh(activeDb, targetWorkspaceId);
       const syncedAt = Date.now();
@@ -415,11 +424,13 @@ export function App() {
       setLastSyncedAt(syncedAt);
       setNow(syncedAt);
       setSyncPhase('synced');
+      setSyncProgress(null);
       setServerDisconnected(false);
       setError('');
     } catch (cause) {
       if (activeWorkspaceId.current !== targetWorkspaceId) return;
       setSyncPhase('failed');
+      setSyncProgress(null);
       if (cause instanceof ApiUnavailableError) setServerDisconnected(true);
       else if (navigator.onLine) setError(cause instanceof Error ? cause.message : 'Sync failed');
     }
@@ -514,6 +525,10 @@ export function App() {
   const avatarSrc = session.account.has_avatar ? `/api/me/avatar?v=${avatarVersion}` : undefined;
   const preferredUnits = session.preferred_units || defaultPreferredUnits;
   const activeBase = workspaceBase(workspaceId, session.workspaces);
+  const headerProgress = syncPhase === 'syncing' && syncProgress
+    ? { label: syncProgress.phase === 'uploading' ? 'Sending' : 'Applying', ...syncProgress }
+    : catalogSyncProgress && syncPhase !== 'syncing'
+      ? { label: 'Updating catalog', ...catalogSyncProgress } : null;
 
   return <div className="app-shell">
     <header className="app-header">
@@ -523,12 +538,20 @@ export function App() {
         <div className="brand"><img className="brand-mark" src="/icon.svg" alt="" /><div><strong>Brewlog</strong><small>Batch-first brewing</small></div></div>
       </div>
       <div className="header-controls">
-        <Select className="workspace-select" value={workspaceId} placeholder="No breweries" disabled={!session.workspaces.length}
+        {headerProgress && <Tooltip title={`${headerProgress.label}: ${headerProgress.applied} of ${headerProgress.total} changes`}>
+          <div className="header-sync-progress" role="status" aria-live="polite"
+            aria-label={`${headerProgress.label}: ${headerProgress.applied} of ${headerProgress.total} changes`}>
+            <Progress type="circle" percent={headerProgress.total
+              ? Math.round(headerProgress.applied / headerProgress.total * 100) : 100}
+              showInfo={false} size={28} strokeWidth={11} strokeColor="#e7b464" trailColor="#56736f" />
+          </div>
+        </Tooltip>}
+        {session.workspaces.length > 1 && <Select className="workspace-select" value={workspaceId}
           aria-label="Brewery"
           options={session.workspaces.map(item => ({ label: item.name, value: item.id }))}
           onChange={value => {
             setWorkspaceId(value); localStorage.setItem(activeBreweryKey, value); setOpenedDb(null); showSection('batches', value);
-          }} />
+          }} />}
         {serverDisconnected && <Popover trigger="click" title="Server disconnected" content={<div className="connection-popover">
           <p>Your brewing entries are saved on this device.</p>
           <p>{autoSync ? 'They will sync when the server is available again.' : 'Sync them from Settings when the server is available again.'}</p>
