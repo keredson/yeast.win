@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select } from 'antd';
-import { DeleteOutlined, DownloadOutlined, PlusOutlined, SettingOutlined, UploadOutlined } from '@ant-design/icons';
+import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Tooltip } from 'antd';
+import { DeleteOutlined, DownloadOutlined, QuestionCircleOutlined, PlusOutlined, SettingOutlined, UploadOutlined } from '@ant-design/icons';
 import { addRecipePlan, createRecipe, deleteRecipe, deleteRecipePlan, hasRecipeImport, listRecipePlans, startBatchFromRecipe, updateRecipe, updateRecipePlan,
   recipeImportSource, recipeTargetVolume, updateRecipeTargetVolume, recipeWortLoss, updateRecipeWortLoss,
   breweryWortLoss, updateBatchWortLoss, latestMeasuredMashEfficiency,
@@ -22,12 +22,20 @@ const recipeTypeOptions = [
   { value: 'mead', label: 'Mead' }, { value: 'cider', label: 'Cider' }
 ];
 
+function EstimateTile({ label, value, help }: { label: string; value: string | null; help: string[] }) {
+  return <div><span className="recipe-estimate-label">{label}
+    {value == null && <Tooltip title={help.join(' ')} trigger={['hover', 'focus', 'click']}>
+      <button type="button" className="recipe-estimate-help" aria-label={`Why ${label} is unavailable`}>
+        <QuestionCircleOutlined /></button>
+    </Tooltip>}</span><strong>{value ?? '—'}</strong></div>;
+}
+
 export function RecipeSection({ db, basePath, accountId, recipes, equipment, equipmentModels, inventory, supplies, catalogInventory, preferredUnits, selectedId, onSelect, onChanged, onBatchStarted }: {
   db: LocalDb; basePath: string; accountId: string; recipes: Recipe[]; selectedId: string | null; onSelect: (id: string | null) => void;
   equipment: Equipment[]; equipmentModels: Equipment[]; inventory: InventoryItem[]; supplies: InventoryItem[]; catalogInventory: CatalogInventory[]; preferredUnits: PreferredUnits;
   onChanged: () => Promise<void>; onBatchStarted: (id: string) => void;
 }) {
-  const [settingsForm] = Form.useForm<{ name: string; description?: string; recipe_type: RecipeType;
+  const [settingsForm] = Form.useForm<{ name: string; slug: string; description?: string; recipe_type: RecipeType;
     target_volume?: number; target_volume_unit: string; wort_loss?: number }>();
   const targetVolumeUnit = useRef<string>(preferredUnits.volume);
   const [plans, setPlans] = useState<(PlanInput & { id: string })[]>([]);
@@ -126,12 +134,12 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
     finally { setDeletingRecipe(false); }
   }
 
-  async function saveSettings(values: { name: string; description?: string; recipe_type: RecipeType;
+  async function saveSettings(values: { name: string; slug: string; description?: string; recipe_type: RecipeType;
     target_volume?: number; target_volume_unit: string; wort_loss?: number }) {
     if (!recipe) return;
     setSettingsBusy(true); setSettingsError('');
     try {
-      await updateRecipe(db, recipe.id, values.name, values.description || '', values.recipe_type);
+      await updateRecipe(db, recipe.id, values.name, values.description || '', values.recipe_type, values.slug);
       await updateRecipeTargetVolume(db, recipe.id, values.target_volume == null ? null
         : convertUnit(values.target_volume, values.target_volume_unit, 'L'));
       await updateRecipeWortLoss(db, recipe.id, values.wort_loss == null ? null
@@ -149,7 +157,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
       recipeTargetVolume(db, recipe.id), recipeWortLoss(db, recipe.id), breweryWortLoss(db)]);
     setBreweryDefaultWortLoss(defaultLoss);
     targetVolumeUnit.current = preferredUnits.volume;
-    settingsForm.setFieldsValue({ name: recipe.name, description: recipe.description || '', recipe_type: recipe.recipe_type || 'beer',
+    settingsForm.setFieldsValue({ name: recipe.name, slug: recipe.slug, description: recipe.description || '', recipe_type: recipe.recipe_type || 'beer',
       target_volume: liters == null ? undefined : convertUnit(liters, 'L', preferredUnits.volume) ?? undefined,
       target_volume_unit: preferredUnits.volume,
       wort_loss: recipeLoss == null ? undefined : convertUnit(recipeLoss, 'L', preferredUnits.volume) ?? undefined });
@@ -185,7 +193,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
       <div className="section-heading"><div><span className="eyebrow">Planning</span><h1>Recipes</h1></div></div>
       <p className="muted">Reusable event plans for your batches.</p>
       {recipes.length > 0 && <div className="record-list">{recipes.map(item =>
-        <a key={item.id} className="record-link recipe-link" href={`${basePath}/recipe/${item.id}`}
+        <a key={item.id} className="record-link recipe-link" href={`${basePath}/recipe/${item.slug}`}
           onClick={event => { event.preventDefault(); onSelect(item.id); }}>
           <RecipeTypeIcon type={item.recipe_type} />
           <span className="recipe-link-copy"><strong>{item.name}</strong><small>{item.description || 'No description'}</small></span>
@@ -205,15 +213,20 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
         {estimate && <section className="recipe-estimates" aria-label="Recipe details">
           <h3>Details</h3>
           <div className="recipe-estimate-grid">
-            <div><span>Into fermenter</span><strong>{estimate.targetLiters == null ? '—'
-              : `${Number((convertUnit(estimate.targetLiters, 'L', preferredUnits.volume) || 0).toFixed(2))} ${preferredUnits.volume}`}</strong></div>
-            <div><span>Expected OG</span><strong>{estimate.originalGravity?.toFixed(3) || '—'}</strong></div>
-            <div><span>Expected FG</span><strong>{estimate.finalGravity?.toFixed(3) || '—'}</strong></div>
-            <div><span>Expected ABV</span><strong>{estimate.abvPct == null ? '—' : `${estimate.abvPct.toFixed(1)}%`}</strong></div>
-            {recipe.recipe_type === 'beer' && <div><span>Estimated color</span><strong>{estimate.colorSrm == null ? '—' : `${estimate.colorSrm.toFixed(1)} SRM`}</strong></div>}
+            <EstimateTile label="Into fermenter" value={estimate.targetLiters == null ? null
+              : `${Number((convertUnit(estimate.targetLiters, 'L', preferredUnits.volume) || 0).toFixed(2))} ${preferredUnits.volume}`}
+              help={estimate.unavailable.targetLiters} />
+            <EstimateTile label="Expected OG" value={estimate.originalGravity?.toFixed(3) ?? null}
+              help={estimate.unavailable.originalGravity} />
+            <EstimateTile label="Expected FG" value={estimate.finalGravity?.toFixed(3) ?? null}
+              help={estimate.unavailable.finalGravity} />
+            <EstimateTile label="Expected ABV" value={estimate.abvPct == null ? null : `${estimate.abvPct.toFixed(1)}%`}
+              help={estimate.unavailable.abvPct} />
+            {recipe.recipe_type === 'beer' && <EstimateTile label="Estimated color"
+              value={estimate.colorSrm == null ? null : `${estimate.colorSrm.toFixed(1)} SRM`}
+              help={estimate.unavailable.colorSrm} />}
           </div>
           {estimate.efficiencyLabel && <p className="muted">Using {estimate.efficiencyLabel}.</p>}
-          {estimate.missing.length > 0 && <p className="muted recipe-estimate-missing">{estimate.missing.join(' ')}</p>}
         </section>}
         <EventTimeline events={plans} equipment={equipmentModels} onEdit={plan => { setPlanDeleteError(''); setEditingPlan(plan); }}
           onAdd={(kind, settings) => { setEditingPlan(null); setPreset(settings); setCreatingKind(kind); }} />
@@ -230,6 +243,9 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
       <Form form={settingsForm} layout="vertical" onFinish={saveSettings}>
         <Form.Item name="name" label="Recipe name" rules={[{ required: true, whitespace: true }, { max: 100 }]}>
           <Input maxLength={100} /></Form.Item>
+        <Form.Item name="slug" label="URL slug" rules={[{ required: true },
+          { pattern: /^[a-z0-9]+(?:-[a-z0-9]+)*$/, message: 'Use lowercase letters, numbers, and hyphens' }, { max: 80 }]}>
+          <Input maxLength={80} /></Form.Item>
         <Form.Item name="recipe_type" label="Type" rules={[{ required: true }]}>
           <Select options={recipeTypeOptions} /></Form.Item>
         <Form.Item name="description" label="Description"><Input.TextArea rows={3} /></Form.Item>

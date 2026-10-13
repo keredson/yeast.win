@@ -6,6 +6,7 @@ import { boilOffKinds, capacityKinds, equipmentKinds, measurementRangeUnits, tem
 import { equipmentSlug } from './equipmentRoutes.ts';
 import { openLocalCatalog } from './catalog.ts';
 import { hasGeneratedLocationSuffix, locationSlug } from './locationSlug.ts';
+import { recordSlug } from './recordSlug.ts';
 import type { CatalogEquipment, MeasurementChannel } from '../shared/catalog.ts';
 import { changeColumns, indexStatements, legacyEquipmentCopyStatements, legacyEquipmentModelStatements, supplyMigrationStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements,
   workspaceSchemaVersion, workspaceTableColumns } from '../shared/schema.ts';
@@ -21,7 +22,7 @@ export type LocalDb = DB;
 export interface Batch { id: string; name: string; description: string | null; status: string; created_at: number;
   source_batch_id?: string | null; source_batch_name?: string | null }
 export type RecipeType = 'beer' | 'wine' | 'mead' | 'cider';
-export interface Recipe { id: string; name: string; description: string | null; recipe_type: RecipeType | null }
+export interface Recipe { id: string; name: string; slug: string; description: string | null; recipe_type: RecipeType | null }
 export interface BatchEvent {
   id: string; batch_id: string; event_type: string; title: string; planned_at: number | null;
   anchor_event_id: string | null; offset_seconds: number | null; details: PlanDetails;
@@ -440,8 +441,27 @@ export async function startBatchFromTemplate(db: DB, recipeType: RecipeType, nam
 }
 
 export async function listRecipes(db: DB): Promise<Recipe[]> {
-  return db.execO<Recipe>(`SELECT r.id, r.name, r.description, t.recipe_type FROM recipes r
-    LEFT JOIN recipe_types t ON t.id = r.id ORDER BY r.name COLLATE NOCASE`);
+  const rows = await db.execO<Recipe & { slug: string | null }>(`SELECT r.id, r.name, s.slug, r.description, t.recipe_type FROM recipes r
+    LEFT JOIN recipe_slugs s ON s.id = r.id LEFT JOIN recipe_types t ON t.id = r.id ORDER BY r.created_at, r.id`);
+  const used = new Set(rows.flatMap(row => [row.id, ...(row.slug ? [row.slug] : [])]));
+  for (const row of rows) if (!row.slug) {
+    const base = recordSlug(row.name).slice(0, 70);
+    let slug = base;
+    for (let number = 2; used.has(slug); number++) slug = `${base}-${number}`;
+    used.add(slug);
+    await db.exec('INSERT OR IGNORE INTO recipe_slugs(id, slug) VALUES (?, ?)', [row.id, slug]);
+  }
+  return db.execO<Recipe>(`SELECT r.id, r.name, s.slug, r.description, t.recipe_type FROM recipes r
+    JOIN recipe_slugs s ON s.id = r.id LEFT JOIN recipe_types t ON t.id = r.id ORDER BY r.name COLLATE NOCASE`);
+}
+
+async function nextRecipeSlug(db: Pick<DB, 'execO'>, name: string): Promise<string> {
+  const rows = await db.execO<{ slug: string }>(`SELECT slug FROM recipe_slugs UNION SELECT id AS slug FROM recipes`);
+  const used = new Set(rows.map(row => row.slug));
+  const base = recordSlug(name).slice(0, 70);
+  let slug = base;
+  for (let number = 2; used.has(slug); number++) slug = `${base}-${number}`;
+  return slug;
 }
 
 export async function recipeTargetVolume(db: DB, recipeId: string): Promise<number | null> {
@@ -496,14 +516,21 @@ export async function updateRecipeTargetVolume(db: DB, recipeId: string, liters:
     ON CONFLICT(id) DO UPDATE SET target_fermenter_volume_liters = excluded.target_fermenter_volume_liters`, [recipeId, liters]);
 }
 
-export async function updateRecipe(db: DB, recipeId: string, name: string, description: string, recipeType: RecipeType): Promise<void> {
+export async function updateRecipe(db: DB, recipeId: string, name: string, description: string, recipeType: RecipeType,
+  slug: string): Promise<void> {
   if (!name.trim() || name.trim().length > 100) throw new Error('Recipe name must be 1–100 characters');
   if (!['beer', 'wine', 'mead', 'cider'].includes(recipeType)) throw new Error('Choose a recipe type');
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) || slug.length > 80) throw new Error('Enter a valid recipe slug');
   await db.tx(async tx => {
     const recipes = await tx.execO<{ id: string }>('SELECT id FROM recipes WHERE id = ?', [recipeId]);
     if (!recipes.length) throw new Error('Recipe not found');
+    const matches = await tx.execO<{ id: string }>(`SELECT id FROM recipe_slugs WHERE slug = ? AND id <> ?
+      UNION SELECT id FROM recipes WHERE id = ? AND id <> ?`, [slug, recipeId, slug, recipeId]);
+    if (matches.length) throw new Error('That recipe slug is already in use');
     await tx.exec('UPDATE recipes SET name = ?, description = ?, updated_at = ? WHERE id = ?',
       [name.trim(), description.trim() || null, nowSeconds(), recipeId]);
+    await tx.exec('INSERT INTO recipe_slugs(id, slug) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET slug = excluded.slug',
+      [recipeId, slug]);
     const types = await tx.execO<{ id: string }>('SELECT id FROM recipe_types WHERE id = ?', [recipeId]);
     if (types.length) await tx.exec('UPDATE recipe_types SET recipe_type = ? WHERE id = ?', [recipeType, recipeId]);
     else await tx.exec('INSERT INTO recipe_types(id, recipe_type) VALUES (?, ?)', [recipeId, recipeType]);
@@ -528,6 +555,7 @@ export async function deleteRecipe(db: DB, recipeId: string): Promise<void> {
       if (!others.length) await tx.exec('DELETE FROM recipe_import_sources WHERE id = ?', [link.source_id]);
     }
     await tx.exec('DELETE FROM recipe_types WHERE id = ?', [recipeId]);
+    await tx.exec('DELETE FROM recipe_slugs WHERE id = ?', [recipeId]);
     await tx.exec('DELETE FROM recipes WHERE id = ?', [recipeId]);
   });
 }
@@ -671,8 +699,10 @@ export async function importRecipes(db: DB, source: {
     for (const recipe of selected) {
       const recipeId = nanoid();
       ids.push(recipeId);
+      const slug = await nextRecipeSlug(tx, recipe.name);
       await tx.exec('INSERT INTO recipes(id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
         [recipeId, recipe.name.slice(0, 100), recipe.description || null, now, now]);
+      await tx.exec('INSERT INTO recipe_slugs(id, slug) VALUES (?, ?)', [recipeId, slug]);
       await tx.exec('INSERT INTO recipe_types(id, recipe_type) VALUES (?, ?)', [recipeId, recipe.type]);
       await tx.exec('INSERT INTO recipe_import_links(id, source_id, source_index, external_id) VALUES (?, ?, ?, ?)',
         [recipeId, sourceId, recipe.sourceIndex, recipe.externalId || null]);
@@ -766,8 +796,10 @@ export async function createRecipe(db: DB, name: string, description: string, re
   const now = nowSeconds();
   const plans = recipeTemplatePlans(recipeType, temperatureUnit);
   await db.tx(async tx => {
+    const slug = await nextRecipeSlug(tx, name);
     await tx.exec('INSERT INTO recipes(id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
       [id, name, description || null, now, now]);
+    await tx.exec('INSERT INTO recipe_slugs(id, slug) VALUES (?, ?)', [id, slug]);
     await tx.exec('INSERT INTO recipe_types(id, recipe_type) VALUES (?, ?)', [id, recipeType]);
     for (const plan of plans) {
       await tx.exec(`INSERT INTO recipe_events
