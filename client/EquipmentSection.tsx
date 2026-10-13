@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, AutoComplete, Button, Checkbox, Dropdown, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Table } from 'antd';
+import { Alert, Button, Checkbox, Dropdown, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Table } from 'antd';
 import { EditOutlined, PlusOutlined } from '@ant-design/icons';
 import { boilOffKinds, capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
@@ -68,6 +68,10 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
   onChanged: () => Promise<void>;
 }) {
   const [creatingKind, setCreatingKind] = useState<string | null>(null);
+  const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
+  const [catalogQuery, setCatalogQuery] = useState('');
+  const [catalogKind, setCatalogKind] = useState<string | undefined>();
+  const [selectedCatalogModel, setSelectedCatalogModel] = useState<CatalogEquipment | null>(null);
   const [editCalibration, setEditCalibration] = useState(false);
   const [newBoilCalibration, setNewBoilCalibration] = useState(false);
   const [newTemperatureCalibration, setNewTemperatureCalibration] = useState(false);
@@ -142,7 +146,7 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
     return { min, max, unit };
   }
 
-  async function create(values: { name: string; catalog_id?: string; capacity?: number; capacity_unit?: string;
+  async function create(values: { name: string; capacity?: number; capacity_unit?: string;
     measurement_min?: number; measurement_max?: number; measurement_unit?: string; rated_power_watts?: number;
     built_in_temperature_control?: boolean; max_pressure?: number; pressure_unit?: string }) {
     if (!creatingKind) return;
@@ -164,8 +168,8 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
         overrides.built_in_temperature_control = !!values.built_in_temperature_control;
         overrides.max_pressure_kpa = pressureInKpa(values.max_pressure, values.pressure_unit);
       }
-      const id = await createEquipment(db, values.name.trim(), creatingKind, catalog.find(row => row.id === values.catalog_id), overrides);
-      setCreatingKind(null); equipmentForm.resetFields(); onSelect(id); await onChanged();
+      const id = await createEquipment(db, values.name.trim(), creatingKind, selectedCatalogModel || undefined, overrides);
+      setCreatingKind(null); setSelectedCatalogModel(null); onSelect(id); await onChanged();
     }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -255,15 +259,32 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
   }
 
   const addMenu = { items: equipmentMenuItems, triggerSubMenuAction: 'click' as const,
-    onClick: ({ key }: { key: string }) => setCreatingKind(key) };
+    onClick: ({ key }: { key: string }) => { setSelectedCatalogModel(null); setCreatingKind(key); } };
+  const catalogKinds = [...new Set(catalog.map(model => model.kind))].sort((left, right) =>
+    equipmentKindLabel(left).localeCompare(equipmentKindLabel(right)));
+  const query = catalogQuery.trim().toLocaleLowerCase();
+  const matchingModels = catalog.filter(model => (!catalogKind || model.kind === catalogKind)
+    && (!query || `${model.name} ${equipmentKindLabel(model.kind)}`.toLocaleLowerCase().includes(query)));
+  function chooseCatalogModel(model: CatalogEquipment) {
+    setCatalogPickerOpen(false);
+    setSelectedCatalogModel(model);
+    setCreatingKind(model.kind);
+  }
+  function closeCreation() {
+    setCreatingKind(null);
+    setSelectedCatalogModel(null);
+  }
 
   return <div className="section-page">
     {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
     {!selectedId ? <section className="record-index equipment-index"><div className="section-heading"><div><span className="eyebrow">Your gear</span><h1>Equipment</h1></div></div>
       <p className="muted">Measurements, control settings, and transfers can reference your equipment.</p>
-      <Dropdown trigger={['click']} menu={addMenu} placement="bottomLeft">
-        <Button icon={<PlusOutlined />}>Add equipment</Button>
-      </Dropdown>
+      <div className="equipment-add-actions">
+        <Button icon={<PlusOutlined />} onClick={() => { setCatalogQuery(''); setCatalogKind(undefined); setCatalogPickerOpen(true); }}>Add from catalog</Button>
+        <Dropdown trigger={['click']} menu={addMenu} placement="bottomLeft">
+          <Button icon={<PlusOutlined />}>Define equipment</Button>
+        </Dropdown>
+      </div>
       {equipment.length > 0 && <div className="group-tables">{groupedKinds.map(group => <section key={group.key} className="equipment-category">
         <h2>{group.label}</h2>{group.kinds.map(kind => {
         const rows = equipment.filter(row => row.kind === kind);
@@ -321,25 +342,37 @@ export function EquipmentSection({ db, basePath, equipment, catalog, preferredUn
           <Button type="text" danger>Delete</Button>
         </Popconfirm></div>
       </section>}
+    <Modal title="Add from catalog" open={catalogPickerOpen} onCancel={() => setCatalogPickerOpen(false)} footer={null} destroyOnHidden>
+      <div className="equipment-catalog-filters">
+        <Input.Search aria-label="Search equipment models" placeholder="Search equipment models" allowClear value={catalogQuery}
+          onChange={event => setCatalogQuery(event.target.value)} />
+        <Select aria-label="Filter equipment type" placeholder="All equipment types" allowClear showSearch optionFilterProp="label"
+          value={catalogKind} onChange={setCatalogKind}
+          options={catalogKinds.map(kind => ({ value: kind, label: equipmentKindLabel(kind) }))} />
+      </div>
+      {matchingModels.length ? <div className="equipment-catalog-list" role="list">
+        {matchingModels.map(model => <div key={model.id} role="listitem">
+          <button type="button" className="equipment-catalog-option" onClick={() => chooseCatalogModel(model)}>
+            <strong>{model.name}</strong><span>{equipmentKindLabel(model.kind)}</span>
+          </button>
+        </div>)}
+      </div> : <Empty description={catalog.length ? 'No matching equipment' : 'No catalog equipment available'} />}
+    </Modal>
     <Modal title={creatingKind ? addEquipmentTitle(creatingKind) : 'Add equipment'} open={!!creatingKind}
-      onCancel={() => setCreatingKind(null)} footer={null} destroyOnHidden>
-      {creatingKind && <Form key={creatingKind} form={equipmentForm} layout="vertical" onFinish={create} preserve={false}
-        initialValues={{ capacity_unit: 'L', measurement_unit: measurementRangeUnits[creatingKind]?.[0],
+      onCancel={closeCreation} footer={null} destroyOnHidden>
+      {creatingKind && <Form key={`${creatingKind}:${selectedCatalogModel?.id || 'custom'}`} form={equipmentForm} layout="vertical" onFinish={create} preserve={false}
+        initialValues={{ name: selectedCatalogModel?.name, capacity: selectedCatalogModel?.capacity_liters,
+          capacity_unit: 'L', measurement_min: selectedCatalogModel?.measurement_min,
+          measurement_max: selectedCatalogModel?.measurement_max,
+          measurement_unit: selectedCatalogModel?.measurement_unit || measurementRangeUnits[creatingKind]?.[0],
+          rated_power_watts: selectedCatalogModel?.rated_power_watts,
+          built_in_temperature_control: selectedCatalogModel?.built_in_temperature_control || false,
+          max_pressure: selectedCatalogModel?.max_pressure_kpa == null ? undefined
+            : convertUnit(selectedCatalogModel.max_pressure_kpa, 'kPa', preferredUnits.pressure),
           pressure_unit: preferredUnits.pressure }}>
-        <Form.Item name="catalog_id" hidden><Input /></Form.Item>
+        {selectedCatalogModel && <p className="muted">Based on {selectedCatalogModel.name}. Review the settings before adding it.</p>}
         <Form.Item name="name" label="Name" rules={[{ required: true, whitespace: true }]}>
-          <AutoComplete placeholder="Search shared catalog or enter a name" maxLength={120}
-            options={catalog.filter(row => row.kind === creatingKind).map(row => ({ value: row.name }))}
-            filterOption={(input, option) => String(option?.value || '').toLowerCase().includes(input.toLowerCase())}
-            onSelect={value => { const entry = catalog.find(row => row.kind === creatingKind && row.name === value);
-              if (entry) { const specs = entry;
-                equipmentForm.setFieldsValue({ catalog_id: entry.id, capacity: specs.capacity_liters, capacity_unit: 'L',
-                  rated_power_watts: specs.rated_power_watts,
-                  built_in_temperature_control: specs.built_in_temperature_control || false,
-                  max_pressure: specs.max_pressure_kpa == null ? undefined : convertUnit(specs.max_pressure_kpa, 'kPa', preferredUnits.pressure),
-                  pressure_unit: preferredUnits.pressure,
-                  measurement_min: specs.measurement_min, measurement_max: specs.measurement_max,
-                  measurement_unit: specs.measurement_unit || measurementRangeUnits[entry.kind]?.[0] }); } }} />
+          <Input placeholder="Equipment name" maxLength={120} />
         </Form.Item>
         {capacityKinds.has(creatingKind) && <div className="capacity-fields"><Form.Item name="capacity" label="Capacity (optional)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
           <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]}

@@ -278,11 +278,26 @@ try {
   if (!await page.locator('.app-nav').evaluate(element => element.classList.contains('ant-layout-sider'))) {
     throw new Error('Desktop navigation is not an Ant Design Sider');
   }
-  await chooseEquipmentType(page, 'Add equipment', 'Control', 'Electric kettle');
+  await page.getByRole('button', { name: 'Add from catalog' }).click();
+  const catalogDialog = page.getByRole('dialog', { name: 'Add from catalog' });
+  await catalogDialog.getByRole('searchbox', { name: 'Search equipment models' }).fill('VEVOR');
+  await catalogDialog.getByRole('button', { name: /VEVOR Electric Brewing System/ }).click();
+  const catalogEquipmentDialog = page.getByRole('dialog', { name: 'Add all-in-one brewing system' });
+  if (await catalogEquipmentDialog.getByRole('textbox', { name: 'Name' }).inputValue()
+    !== 'VEVOR Electric Brewing System 9.2 Gal/35 L Brewing Pot') throw new Error('Catalog model name was not copied');
+  if (await catalogEquipmentDialog.getByRole('spinbutton', { name: 'Capacity (optional)' }).inputValue() !== '35') {
+    throw new Error('Catalog capacity was not copied');
+  }
+  await catalogEquipmentDialog.getByRole('button', { name: 'Create equipment' }).click();
+  await page.getByText('Capacity: 35 L').waitFor();
+  await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
+  await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
+  await page.waitForURL('**/equipment');
+  await chooseEquipmentType(page, 'Define equipment', 'Control', 'Electric kettle');
   const kettleDialog = page.getByRole('dialog', { name: 'Add electric kettle' });
   await kettleDialog.getByLabel('Capacity (optional)').waitFor();
   if (await kettleDialog.getByLabel('Range minimum').count()) throw new Error('Kettle was offered a measurement range');
-  await kettleDialog.getByRole('combobox', { name: 'Name' }).fill('Smoke electric kettle');
+  await kettleDialog.getByRole('textbox', { name: 'Name' }).fill('Smoke electric kettle');
   await kettleDialog.getByRole('spinbutton', { name: 'Capacity (optional)' }).fill('35');
   await kettleDialog.getByRole('spinbutton', { name: 'Rated power (W, optional)' }).fill('1800');
   await kettleDialog.getByRole('button', { name: 'Create equipment' }).click();
@@ -326,24 +341,22 @@ try {
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
   await page.waitForURL('**/equipment');
-  await chooseEquipmentType(page, 'Add equipment', 'Passive vessels', 'Mash tun');
+  await chooseEquipmentType(page, 'Define equipment', 'Passive vessels', 'Mash tun');
   const mashTunDialog = page.getByRole('dialog', { name: 'Add mash tun' });
   await mashTunDialog.getByLabel('Capacity (optional)').waitFor();
   await mashTunDialog.locator('.ant-modal-close').click();
-  await chooseEquipmentType(page, 'Add equipment', 'Control', 'Fermentation temperature control');
+  await chooseEquipmentType(page, 'Define equipment', 'Control', 'Fermentation temperature control');
   const fermentationControlDialog = page.getByRole('dialog', { name: 'Add fermentation temperature control' });
   if (await fermentationControlDialog.getByLabel('Capacity (optional)').count()) {
     throw new Error('Fermentation temperature control was offered vessel capacity');
   }
   await fermentationControlDialog.locator('.ant-modal-close').click();
-  await chooseEquipmentType(page, 'Add equipment', 'Measurement', 'pH meter');
+  await chooseEquipmentType(page, 'Define equipment', 'Measurement', 'pH meter');
   const phDialog = page.getByRole('dialog', { name: 'Add pH meter' });
   if (await phDialog.getByLabel('Capacity (optional)').count()) {
     throw new Error('Measurement equipment was offered vessel capacity');
   }
-  const phName = phDialog.getByRole('combobox', { name: 'Name' });
-  await phName.fill('pH meter');
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'pH meter' }).last().click();
+  const phName = phDialog.getByRole('textbox', { name: 'Name' });
   await phName.fill('Smoke pH meter');
   await phDialog.getByRole('spinbutton', { name: 'Range minimum' }).fill('0');
   await phDialog.getByRole('spinbutton', { name: 'Range maximum' }).fill('14');
@@ -365,18 +378,17 @@ try {
   if (!String(await page.getByRole('link', { name: 'Smoke pH meter' }).getAttribute('href')).endsWith('/equipment/smoke-ph-meter')) {
     throw new Error('Equipment list link should use its name slug');
   }
-  const addEquipmentButton = page.getByRole('button', { name: 'Add equipment' });
-  await addEquipmentButton.waitFor();
-  const buttonBelowIntro = await addEquipmentButton.evaluate(button => {
-    const intro = button.previousElementSibling;
+  const addEquipmentActions = page.locator('.equipment-add-actions');
+  await addEquipmentActions.getByRole('button', { name: 'Add from catalog' }).waitFor();
+  await addEquipmentActions.getByRole('button', { name: 'Define equipment' }).waitFor();
+  const buttonBelowIntro = await addEquipmentActions.evaluate(actions => {
+    const intro = actions.previousElementSibling;
     return intro?.textContent?.includes('Measurements, control settings, and transfers') || false;
   });
-  if (!buttonBelowIntro) throw new Error('Add equipment moved away from the intro when equipment exists');
-  await chooseEquipmentType(page, 'Add equipment', 'Measurement', 'Refractometer');
+  if (!buttonBelowIntro) throw new Error('Equipment actions moved away from the intro when equipment exists');
+  await chooseEquipmentType(page, 'Define equipment', 'Measurement', 'Refractometer');
   const refractometerDialog = page.getByRole('dialog', { name: 'Add refractometer' });
-  const refractometerName = refractometerDialog.getByRole('combobox', { name: 'Name' });
-  await refractometerName.fill('Refractometer');
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Refractometer' }).last().click();
+  const refractometerName = refractometerDialog.getByRole('textbox', { name: 'Name' });
   await refractometerName.fill('Smoke refractometer');
   await refractometerDialog.getByRole('spinbutton', { name: 'Range minimum' }).fill('0');
   await refractometerDialog.getByRole('spinbutton', { name: 'Range maximum' }).fill('32');
@@ -416,7 +428,7 @@ try {
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
   await page.waitForURL('**/equipment');
-  await page.getByRole('button', { name: 'Add equipment' }).waitFor();
+  await page.getByRole('button', { name: 'Define equipment' }).waitFor();
   await navigateSection(page, 'Batches');
   await openBatch(page, batchName);
   await page.getByText('ph 5.2 pH').waitFor();
@@ -433,9 +445,9 @@ try {
   await navigateSection(page, 'Equipment');
   for (const [group, kind, name] of [['Passive vessels', 'Kettle', 'Smoke kettle'],
     ['Passive vessels', 'Fermenter', 'Smoke fermenter'], ['Control', 'Wort chiller', 'Smoke chiller']]) {
-    await chooseEquipmentType(page, 'Add equipment', group, kind);
+    await chooseEquipmentType(page, 'Define equipment', group, kind);
     const vesselDialog = page.getByRole('dialog', { name: `Add ${kind.toLowerCase()}` });
-    await vesselDialog.getByRole('combobox', { name: 'Name' }).fill(name);
+    await vesselDialog.getByRole('textbox', { name: 'Name' }).fill(name);
     await vesselDialog.getByRole('button', { name: 'Create equipment' }).click();
     await page.getByRole('heading', { name, exact: true }).waitFor();
     await navigateSection(page, 'Equipment');
