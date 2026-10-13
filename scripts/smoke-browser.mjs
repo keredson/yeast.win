@@ -859,7 +859,7 @@ try {
     throw new Error('Move stock still has a separate location management link');
   }
   await moveDialog.getByRole('combobox', { name: 'To location (optional)' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'New location…' }).click();
+  await page.locator('.ant-select-tree:visible').getByText('New location…').click();
   const moveLocationDialog = page.getByRole('dialog', { name: 'New location' });
   await moveLocationDialog.getByRole('textbox', { name: 'Name' }).fill('Spare shelf');
   await moveLocationDialog.getByRole('button', { name: 'Add location' }).click();
@@ -868,7 +868,7 @@ try {
     throw new Error('New location was not selected for the stock move');
   }
   await moveDialog.getByRole('combobox', { name: 'To location' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Back room / Shelf A' }).click();
+  await page.locator('.ant-select-tree:visible').getByText('Shelf A', { exact: true }).click();
   await moveDialog.getByRole('checkbox', { name: 'Move all available stock' }).check();
   await moveDialog.getByRole('button', { name: 'Move stock' }).click();
   await moveDialog.waitFor({ state: 'hidden' });
@@ -889,7 +889,7 @@ try {
     throw new Error('New inventory item still has a separate location management link');
   }
   await shelvedGrain.locator('input#location_id').click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'New location…' }).click();
+  await page.locator('.ant-select-tree:visible').getByText('New location…').click();
   const itemLocationDialog = page.getByRole('dialog', { name: 'New location' });
   await itemLocationDialog.getByRole('textbox', { name: 'Name' }).fill('Stock cabinet');
   await itemLocationDialog.getByRole('button', { name: 'Add location' }).click();
@@ -898,7 +898,7 @@ try {
     throw new Error('New location was not selected for the inventory item');
   }
   await shelvedGrain.locator('input#location_id').click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Back room / Shelf A' }).click();
+  await page.locator('.ant-select-tree:visible').getByText('Shelf A', { exact: true }).click();
   await shelvedGrain.getByText('This item is already at this location').waitFor();
   await shelvedGrain.getByRole('spinbutton', { name: 'Starting quantity on hand · pounds' }).fill('1');
   await shelvedGrain.getByRole('button', { name: 'Add stock' }).click();

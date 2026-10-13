@@ -12,13 +12,13 @@ import { QuantityFields } from './QuantityFields.tsx';
 import { changeQuantityUnit } from './unitFields.ts';
 import { inventoryPathSegment } from './inventoryRoutes.ts';
 import { LocationFields } from './LocationFields.tsx';
+import { LocationTreeSelect, newLocationOption } from './LocationTreeSelect.tsx';
 
 function onHandQuantity(item: InventoryItem, balance: number): string {
   if (item.display_unit === compoundMassUnit) return formatQuantity(balance, item.default_unit, compoundMassUnit);
   const amount = convertInventoryUnit(balance, item.default_unit, item.display_unit);
   return amount == null ? 'Needs conversion' : String(Number(amount.toFixed(6)));
 }
-const newLocationOption = '__new_location__';
 
 export function InventorySection({ db, basePath, accountId, items, catalog, preferredUnits, selectedId, onSelect, onChanged }: {
   db: LocalDb; basePath: string; accountId: string; items: InventoryItem[]; catalog: CatalogInventory[]; preferredUnits: PreferredUnits;
@@ -61,9 +61,6 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
   const existingItem = items.find(row => row.category === newItemCategory && row.name.trim().toLocaleLowerCase() === newItemName?.trim().toLocaleLowerCase());
   const existingAtLocation = existingItem
     ? stockAtLocation(items, existingItem.name, existingItem.category, newLocationId || null) : undefined;
-  const locationOptions = locations.map(location =>
-    ({ value: location.id, label: inventoryLocationPath(location.id, locations) }));
-  const locationChoices = [...locationOptions, { value: newLocationOption, label: 'New location…' }];
   const entryDisplayUnit = entryItem?.display_unit === compoundMassUnit || entryItem?.default_unit === 'oz' && preferredUnits.mass === compoundMassUnit
     ? compoundMassUnit : entryItem?.display_unit || entryItem?.default_unit;
 
@@ -266,7 +263,7 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
           if (value === newLocationOption) { openLocationCreate('item'); return previousValue; }
           return value;
         }}>
-          <Select allowClear placeholder="Choose a location" options={locationChoices} />
+          <LocationTreeSelect locations={locations} includeCreate allowClear placeholder="Choose a location" />
         </Form.Item>
         <Form.Item name="default_unit" label="Unit" rules={[{ required: true }]}>
           <Select showSearch options={unitOptions(quantityUnitsForCategory(newItemCategory || 'Other'))}
@@ -286,8 +283,8 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
           if (value === newLocationOption) { openLocationCreate('move'); return previousValue; }
           return value;
         }}>
-          <Select allowClear placeholder="Leave empty to clear location"
-            options={locationChoices.filter(option => option.value !== moveItem?.location_id)} />
+          <LocationTreeSelect locations={locations} excludedIds={new Set(moveItem?.location_id ? [moveItem.location_id] : [])}
+            includeCreate allowClear placeholder="Leave empty to clear location" />
         </Form.Item>
         <Form.Item name="all" valuePropName="checked"><Checkbox>Move all available stock</Checkbox></Form.Item>
         {!moveAll && <><Form.Item name="unit" label="Unit" rules={[{ required: true }]}>
