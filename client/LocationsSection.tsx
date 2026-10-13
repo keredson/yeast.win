@@ -102,11 +102,11 @@ export function LocationsSection({ db, basePath, locations, items, selectedId, o
     {error && !creating && !editing && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
     {!selectedId ? <section className="record-index location-index">
       <div className="section-heading"><div><span className="eyebrow">Storage map</span><h1>Locations</h1></div></div>
-      <p className="muted">Rooms, shelves, and other places where stock is kept.</p>
+      <p className="muted">Buildings, rooms, shelves, and other places where stock is kept.</p>
       {locations.length > 0 && <div className="location-map"><LocationBranch parentId={null} locations={locations} items={items}
         basePath={basePath} onSelect={id => onSelect(id)} /></div>}
       {unassigned.length > 0 && <section className="location-stock-section"><h2>Unassigned stock</h2>{stockRows(unassigned)}</section>}
-      <Button className="location-add" type="text" icon={<PlusOutlined />} onClick={() => openCreate(null)}>Add location</Button>
+      <Button className="location-add" icon={<PlusOutlined />} onClick={() => openCreate(null)}>Add location</Button>
     </section> : !selected ? <p className="muted">Location not found.</p> : <section className="record-detail location-detail">
       <nav className="location-breadcrumb" aria-label="Location path">
         <a href={`${basePath}/locations`} onClick={event => { event.preventDefault(); onSelect(null); }}>Locations</a>
