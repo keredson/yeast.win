@@ -32,8 +32,18 @@ const definitions: Record<string, string> = {
   pressure_control_events: `event_id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, target_value REAL NOT NULL, target_unit TEXT NOT NULL`,
   transfers: `event_id TEXT PRIMARY KEY NOT NULL, purpose TEXT, mash_equipment_id TEXT, from_vessel_id TEXT, to_vessel_id TEXT, to_vessel_name TEXT, quantity REAL, unit TEXT`,
   packaging: `event_id TEXT PRIMARY KEY NOT NULL, container_name TEXT NOT NULL, container_size REAL NOT NULL, container_unit TEXT NOT NULL, container_count INTEGER NOT NULL, inventory_item_id TEXT`,
-  equipment: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL,
-    catalog_model_id TEXT, slug TEXT, created_at INTEGER NOT NULL`,
+  equipment_models: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL,
+    catalog_model_id TEXT, has_liquid_containment INTEGER, capacity_liters REAL,
+    has_pressure_rating INTEGER, max_pressure_kpa REAL, has_heating INTEGER, rated_power_watts REAL,
+    has_cooling INTEGER, rated_heat_removal_watts REAL, has_temperature_control INTEGER,
+    min_temperature_c REAL, max_temperature_c REAL,
+    mash_efficiency_pct REAL, grain_absorption_l_per_kg REAL,
+    mash_deadspace_liters REAL, kettle_retention_liters REAL, created_at INTEGER NOT NULL`,
+  equipment: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, model_id TEXT NOT NULL,
+    slug TEXT, stock_id TEXT, added_at INTEGER, removed_at INTEGER, created_at INTEGER NOT NULL`,
+  equipment_model_measurement_channels: `id TEXT PRIMARY KEY NOT NULL, model_id TEXT NOT NULL,
+    measurement_kind TEXT NOT NULL, measurement_min REAL, measurement_max REAL,
+    measurement_unit TEXT, measurement_scale TEXT`,
   equipment_liquid_containment: `equipment_id TEXT PRIMARY KEY NOT NULL, capacity_liters REAL`,
   equipment_pressure_rating: `equipment_id TEXT PRIMARY KEY NOT NULL, max_pressure_kpa REAL`,
   equipment_heating: `equipment_id TEXT PRIMARY KEY NOT NULL, rated_power_watts REAL`,
@@ -143,6 +153,58 @@ export function legacyEquipmentCopyStatements(columns: string[]): string[] {
   }
   return statements;
 }
+
+export function legacyEquipmentModelStatements(columns: string[]): string[] {
+  const old = 'equipment_legacy_migration';
+  const catalog = columns.includes('catalog_model_id') ? 'e.catalog_model_id' : 'NULL';
+  const kind = columns.includes('kind') ? 'e.kind' : "'other'";
+  const name = columns.includes('name') ? 'e.name' : 'e.id';
+  const created = columns.includes('created_at') ? 'e.created_at' : '0';
+  const modelId = `COALESCE(${catalog}, e.id)`;
+  return [
+    `INSERT OR IGNORE INTO equipment_models(id, name, kind, catalog_model_id,
+      has_liquid_containment, capacity_liters, has_pressure_rating, max_pressure_kpa,
+      has_heating, rated_power_watts, has_cooling, rated_heat_removal_watts,
+      has_temperature_control, min_temperature_c, max_temperature_c,
+      mash_efficiency_pct, grain_absorption_l_per_kg, mash_deadspace_liters, kettle_retention_liters, created_at)
+      SELECT ${modelId}, ${name}, ${kind}, ${catalog},
+      CASE WHEN liquid.equipment_id IS NOT NULL THEN 1 END, liquid.capacity_liters,
+      CASE WHEN pressure.equipment_id IS NOT NULL THEN 1 END, pressure.max_pressure_kpa,
+      CASE WHEN heat.equipment_id IS NOT NULL THEN 1 END, heat.rated_power_watts,
+      CASE WHEN cool.equipment_id IS NOT NULL THEN 1 END, cool.rated_heat_removal_watts,
+      CASE WHEN control.equipment_id IS NOT NULL THEN 1 END, control.min_temperature_c, control.max_temperature_c,
+      assumptions.mash_efficiency_pct, assumptions.grain_absorption_l_per_kg,
+      assumptions.mash_deadspace_liters, assumptions.kettle_retention_liters,
+      ${created} FROM ${old} e
+      LEFT JOIN equipment_liquid_containment liquid ON liquid.equipment_id = e.id
+      LEFT JOIN equipment_pressure_rating pressure ON pressure.equipment_id = e.id
+      LEFT JOIN equipment_heating heat ON heat.equipment_id = e.id
+      LEFT JOIN equipment_cooling cool ON cool.equipment_id = e.id
+      LEFT JOIN equipment_temperature_control control ON control.equipment_id = e.id
+      LEFT JOIN equipment_mash_assumptions assumptions ON assumptions.equipment_id = e.id`,
+    `UPDATE equipment SET model_id = (SELECT ${modelId} FROM ${old} e WHERE e.id = equipment.id),
+      added_at = COALESCE(added_at, created_at)
+      WHERE id IN (SELECT id FROM ${old})`,
+    `INSERT OR IGNORE INTO equipment_model_measurement_channels
+      (id, model_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
+      SELECT equipment.model_id || ':' || c.measurement_kind, equipment.model_id, c.measurement_kind,
+        c.measurement_min, c.measurement_max, c.measurement_unit, c.measurement_scale
+      FROM equipment_measurement_channels c JOIN equipment ON equipment.id = c.equipment_id
+      JOIN equipment_models m ON m.id = equipment.model_id WHERE m.catalog_model_id IS NULL`,
+    `UPDATE recipe_temperature_control_events SET equipment_id =
+      (SELECT model_id FROM equipment WHERE equipment.id = recipe_temperature_control_events.equipment_id)
+      WHERE equipment_id IN (SELECT id FROM equipment)`,
+    `UPDATE recipe_pressure_control_events SET equipment_id =
+      (SELECT model_id FROM equipment WHERE equipment.id = recipe_pressure_control_events.equipment_id)
+      WHERE equipment_id IN (SELECT id FROM equipment)`,
+    `UPDATE recipe_transfers SET mash_equipment_id =
+      (SELECT model_id FROM equipment WHERE equipment.id = recipe_transfers.mash_equipment_id)
+      WHERE mash_equipment_id IN (SELECT id FROM equipment)`,
+    `UPDATE recipe_transfers SET to_vessel_id =
+      (SELECT model_id FROM equipment WHERE equipment.id = recipe_transfers.to_vessel_id)
+      WHERE to_vessel_id IN (SELECT id FROM equipment)`
+  ];
+}
 export const schemaStatements = Object.entries(definitions).map(
   // CR-SQLite permits NOT NULL on the primary key, but requires a DEFAULT for
   // other NOT NULL columns so older peers can accept newly added fields.
@@ -156,7 +218,9 @@ export const indexStatements = [
   `CREATE INDEX IF NOT EXISTS recipe_events_by_recipe ON recipe_events(recipe_id, sort_order, id)`,
   `CREATE INDEX IF NOT EXISTS recipe_import_links_by_source ON recipe_import_links(source_id, source_index)`,
   `CREATE INDEX IF NOT EXISTS pill_bindings_by_pill ON pill_bindings(pill_id, valid_from)`,
-  `CREATE INDEX IF NOT EXISTS equipment_use_events_by_equipment ON equipment_use_events(equipment_id, event_id)`
+  `CREATE INDEX IF NOT EXISTS equipment_use_events_by_equipment ON equipment_use_events(equipment_id, event_id)`,
+  `CREATE INDEX IF NOT EXISTS equipment_by_model ON equipment(model_id, removed_at, id)`,
+  `CREATE INDEX IF NOT EXISTS equipment_by_stock_id ON equipment(stock_id)`
 ];
 
 export const changeColumns = [
@@ -192,7 +256,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 20;
+export const workspaceSchemaVersion = 21;
 export const retiredReplicatedTables = ['equipment_calibrations', 'equipment_characterization_observations'] as const;
 
 export function isValidId(value: unknown): value is string {

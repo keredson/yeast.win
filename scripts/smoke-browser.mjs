@@ -434,10 +434,10 @@ try {
   await temperatureDialog.getByRole('button', { name: 'Save temperature calibration' }).click();
   await page.getByText('Temperature offset: +2 °C').waitFor();
   await page.getByRole('button', { name: 'Edit equipment name and slug' }).click();
-  const identityDialog = page.getByRole('dialog', { name: 'Edit equipment name and slug' });
+  const identityDialog = page.getByRole('dialog', { name: 'Edit equipment unit' });
   await identityDialog.getByRole('textbox', { name: 'Name' }).fill('Smoke kettle renamed');
   await identityDialog.getByRole('textbox', { name: 'Slug' }).fill('my-smoke-kettle');
-  await identityDialog.getByRole('button', { name: 'Save name and slug' }).click();
+  await identityDialog.getByRole('button', { name: 'Save unit' }).click();
   await page.getByRole('heading', { name: 'Smoke kettle renamed' }).waitFor();
   await page.waitForURL('**/equipment/my-smoke-kettle');
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
@@ -648,7 +648,7 @@ try {
   if (await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke chiller' }).count()) {
     throw new Error('Transfer plan offered a chiller as a vessel');
   }
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke fermenter' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="Smoke fermenter"]').click();
   await transferPlan.getByRole('button', { name: 'Save event' }).click();
   await page.locator('.plan-card').filter({ hasText: 'Transfer to fermenter' }).getByText('To Smoke fermenter').waitFor();
   await page.getByRole('button', { name: 'Edit planned event Measure original specific gravity' }).click();

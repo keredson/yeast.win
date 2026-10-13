@@ -4,7 +4,7 @@ import { CloudOutlined, ContainerOutlined, ControlOutlined, DashboardOutlined, E
   FireOutlined, PlusOutlined, SwapOutlined } from '@ant-design/icons';
 import { boilOffKinds, capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { assignEquipmentToBatch, createEquipment, deleteEquipment, listCurrentEquipmentUses, releaseEquipmentUse,
+import { assignEquipmentToBatch, createEquipment, createEquipmentUnit, deleteEquipment, listCurrentEquipmentUses, releaseEquipmentUse,
   addEquipmentCapability, updateEquipmentBoilHeatLoss, updateEquipmentCalibration, updateEquipmentIdentity,
   updateEquipmentRatedPower, updateEquipmentCapacity, updateEquipmentPressureRating,
   updateEquipmentTemperatureOffset, updateEquipmentThermalCapabilities, updateBrewingLosses, latestMeasuredMashEfficiency,
@@ -116,12 +116,13 @@ function equipmentCapabilities(row: Equipment): ReactNode {
     <Tooltip key={label} title={label}><span role="img" aria-label={label} className="equipment-capability">{icon}</span></Tooltip>)}</div> : '—';
 }
 
-export function EquipmentSection({ db, basePath, accountId, batches, equipment, catalog, preferredUnits, selectedId, onSelect, onSelectBatch, onChanged }: {
-  db: LocalDb; basePath: string; accountId: string; batches: Batch[]; equipment: Equipment[]; catalog: CatalogEquipment[]; preferredUnits: PreferredUnits;
+export function EquipmentSection({ db, basePath, accountId, batches, equipment, models, catalog, preferredUnits, selectedId, onSelect, onSelectBatch, onChanged }: {
+  db: LocalDb; basePath: string; accountId: string; batches: Batch[]; equipment: Equipment[]; models: Equipment[]; catalog: CatalogEquipment[]; preferredUnits: PreferredUnits;
   selectedId: string | null; onSelect: (id: string | null) => void; onSelectBatch: (id: string) => void;
   onChanged: () => Promise<void>;
 }) {
   const [creatingKind, setCreatingKind] = useState<string | null>(null);
+  const [addingUnit, setAddingUnit] = useState(false);
   const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogKind, setCatalogKind] = useState<string | undefined>();
@@ -279,7 +280,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     return { min, max, unit };
   }
 
-  async function create(values: { name: string; capacity?: number; capacity_unit?: string;
+  async function create(values: { name: string; stock_id?: string; capacity?: number; capacity_unit?: string;
     measurement_min?: number; measurement_max?: number; measurement_unit?: string; rated_power_watts?: number;
     channel_ranges?: Record<string, { min?: number; max?: number; unit?: string }>;
     built_in_temperature_control?: boolean; max_pressure?: number; pressure_unit?: string;
@@ -333,7 +334,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         if (range) channelRanges[channel.measurement_kind] = range;
       }
       const id = await createEquipment(db, values.name.trim(), creatingKind,
-        selectedCatalogModel || undefined, overrides, channelRanges);
+        selectedCatalogModel || undefined, overrides, channelRanges, values.stock_id);
       setCreatingKind(null); setSelectedCatalogModel(null); onSelect(id); await onChanged();
     }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
@@ -384,10 +385,10 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  async function saveIdentity(values: { name: string; slug: string }) {
+  async function saveIdentity(values: { name: string; slug: string; stock_id?: string }) {
     if (!item) return;
     try {
-      await updateEquipmentIdentity(db, item, values.name, values.slug, equipment);
+      await updateEquipmentIdentity(db, item, values.name, values.slug, values.stock_id, equipment);
       setEditIdentity(false); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -492,6 +493,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     {!selectedId ? <section className="record-index equipment-index"><div className="section-heading"><div><span className="eyebrow">Your gear</span><h1>Equipment</h1></div></div>
       <p className="muted">Measurements, control settings, and transfers can reference your equipment.</p>
       <div className="equipment-add-actions">
+        {models.length > 0 && <Button icon={<PlusOutlined />} onClick={() => setAddingUnit(true)}>Add unit</Button>}
         <Button icon={<PlusOutlined />} onClick={() => { setCatalogQuery(''); setCatalogKind(undefined); setCatalogPickerOpen(true); }}>Add from catalog</Button>
         <Dropdown trigger={['click']} menu={addMenu} placement="bottomLeft">
           <Button icon={<PlusOutlined />}>Define equipment</Button>
@@ -514,6 +516,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(item.kind)}</span>
           <div className="equipment-title"><h2>{item.name}</h2>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit equipment name and slug" onClick={() => setEditIdentity(true)} /></div>
+          <div className="muted">Model: {item.model_name || item.name}{item.stock_id ? ` · Stock ID: ${item.stock_id}` : ''}</div>
           <div className="muted">Slug: {equipmentPathSegment(item, equipment)}</div></div></div>
         <div className="equipment-parameters">
           <div className="equipment-parameter equipment-assignments"><strong>Current batches</strong>
@@ -576,7 +579,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           <Button icon={<PlusOutlined />}>Add capability</Button>
         </Dropdown>}
         <div className="equipment-delete"><Popconfirm title={`Delete ${item.name}?`}
-          description="Used equipment stays in batch history. Unused equipment and calibrations are removed."
+          description="The unit is removed from your equipment list. Its batch history and calibrations remain."
           okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => void remove()}>
           <Button type="text" danger>Delete</Button>
         </Popconfirm></div>
@@ -598,6 +601,20 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching equipment' : 'No catalog equipment available'} />}
     </Modal>
+    <Modal title="Add equipment unit" open={addingUnit} onCancel={() => setAddingUnit(false)} footer={null} destroyOnHidden>
+      <Form layout="vertical" onFinish={async (values: { model_id: string; name: string; stock_id?: string }) => {
+        try {
+          const id = await createEquipmentUnit(db, values.model_id, values.name, values.stock_id);
+          setAddingUnit(false); await onChanged(); onSelect(id);
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+      }}>
+        <Form.Item name="model_id" label="Model" rules={[{ required: true }]}><Select showSearch optionFilterProp="label"
+          options={models.map(model => ({ value: model.id, label: model.name }))} /></Form.Item>
+        <Form.Item name="name" label="Unit name" rules={[{ required: true, whitespace: true }]}><Input maxLength={120} /></Form.Item>
+        <Form.Item name="stock_id" label="Stock ID (optional)"><Input maxLength={80} /></Form.Item>
+        <Button type="primary" htmlType="submit">Add unit</Button>
+      </Form>
+    </Modal>
     <Modal title={creatingKind ? addEquipmentTitle(creatingKind) : 'Add equipment'} open={!!creatingKind}
       onCancel={closeCreation} footer={null} destroyOnHidden>
       {creatingKind && <Form key={`${creatingKind}:${selectedCatalogModel?.id || 'custom'}`} form={equipmentForm} layout="vertical" onFinish={create} preserve={false}
@@ -606,6 +623,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <Form.Item name="name" label="Name" rules={[{ required: true, whitespace: true }]}>
           <Input placeholder="Equipment name" maxLength={120} />
         </Form.Item>
+        <Form.Item name="stock_id" label="Stock ID (optional)"><Input maxLength={80} /></Form.Item>
         {selectedCatalogModel && (selectedCatalogModel.measurement_channels?.length || 0) > 1 &&
           <p className="muted">Measures {channelSummary(selectedCatalogModel.measurement_channels)}.</p>}
         {createCapacity && <div className="capacity-fields"><Form.Item name="capacity" label="Capacity (optional)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
@@ -759,12 +777,13 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <Button type="primary" htmlType="submit">Save</Button>
       </Form>
     </Modal>
-    <Modal title="Edit equipment name and slug" open={editIdentity} onCancel={() => setEditIdentity(false)} footer={null} destroyOnHidden>
-      <Form key={item?.id} layout="vertical" onFinish={saveIdentity} initialValues={{ name: item?.name, slug: item ? equipmentSlug(item) : '' }}>
+    <Modal title="Edit equipment unit" open={editIdentity} onCancel={() => setEditIdentity(false)} footer={null} destroyOnHidden>
+      <Form key={item?.id} layout="vertical" onFinish={saveIdentity} initialValues={{ name: item?.name, slug: item ? equipmentSlug(item) : '', stock_id: item?.stock_id }}>
         <Form.Item name="name" label="Name" rules={[{ required: true, whitespace: true }]}><Input maxLength={120} /></Form.Item>
+        <Form.Item name="stock_id" label="Stock ID (optional)"><Input maxLength={80} /></Form.Item>
         <Form.Item name="slug" label="Slug" rules={[{ required: true }, { pattern: /^[a-z0-9]+(?:-[a-z0-9]+)*$/, message: 'Use lowercase letters, numbers, and hyphens' }]}>
           <Input maxLength={80} /></Form.Item>
-        <Button type="primary" htmlType="submit">Save name and slug</Button>
+        <Button type="primary" htmlType="submit">Save unit</Button>
       </Form>
     </Modal>
     <Modal title={editRange ? `Edit ${measurementSentenceLabel(editRange)} range` : 'Edit measurement range'}

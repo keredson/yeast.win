@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nanoid } from 'nanoid';
 import { indexStatements, legacyEquipmentCopyStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements,
-  workspaceSchemaVersion, workspaceTableColumns } from '../shared/schema.ts';
+  workspaceSchemaVersion, workspaceTableColumns, legacyEquipmentModelStatements } from '../shared/schema.ts';
 
 export const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const envPath = resolve(projectRoot, '.env');
@@ -221,9 +221,14 @@ export function openWorkspaceDb(id: string): Database.Database {
       const columns = (db.pragma('table_info(equipment_legacy_migration)') as { name: string }[])
         .map(row => row.name);
       for (const statement of legacyEquipmentCopyStatements(columns)) db.exec(statement);
+      for (const statement of legacyEquipmentModelStatements(columns)) db.exec(statement);
       db.exec('DROP TABLE equipment_legacy_migration');
     })();
   }
+  db.exec(`UPDATE equipment SET added_at = COALESCE(added_at, created_at) WHERE added_at IS NULL;
+    UPDATE equipment SET removed_at =
+      (SELECT archived_at FROM equipment_archives WHERE equipment_id = equipment.id ORDER BY archived_at LIMIT 1)
+      WHERE removed_at IS NULL AND id IN (SELECT equipment_id FROM equipment_archives)`);
   const catalogPath = join(dataDir, 'catalog.sqlite');
   if (existsSync(catalogPath)) db.prepare('ATTACH DATABASE ? AS catalog').run(catalogPath);
   return db;

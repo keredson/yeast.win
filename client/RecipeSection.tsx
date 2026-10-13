@@ -14,15 +14,16 @@ import type { PreferredUnits } from './api.ts';
 import { convertUnit, unitGroups, unitOptions } from '../shared/units.ts';
 import { changeNumberUnit } from './unitFields.ts';
 import { calculateRecipe, type RecipeEstimate } from './recipeCalculations.ts';
+import { RecipeEquipmentFields } from './RecipeEquipmentFields.tsx';
 
 const recipeTypeOptions = [
   { value: 'beer', label: 'Beer' }, { value: 'wine', label: 'Wine' },
   { value: 'mead', label: 'Mead' }, { value: 'cider', label: 'Cider' }
 ];
 
-export function RecipeSection({ db, basePath, accountId, recipes, equipment, inventory, catalogInventory, preferredUnits, selectedId, onSelect, onChanged, onBatchStarted }: {
+export function RecipeSection({ db, basePath, accountId, recipes, equipment, equipmentModels, inventory, catalogInventory, preferredUnits, selectedId, onSelect, onChanged, onBatchStarted }: {
   db: LocalDb; basePath: string; accountId: string; recipes: Recipe[]; selectedId: string | null; onSelect: (id: string | null) => void;
-  equipment: Equipment[]; inventory: InventoryItem[]; catalogInventory: CatalogInventory[]; preferredUnits: PreferredUnits;
+  equipment: Equipment[]; equipmentModels: Equipment[]; inventory: InventoryItem[]; catalogInventory: CatalogInventory[]; preferredUnits: PreferredUnits;
   onChanged: () => Promise<void>; onBatchStarted: (id: string) => void;
 }) {
   const [settingsForm] = Form.useForm<{ name: string; description?: string; recipe_type: RecipeType;
@@ -70,17 +71,18 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
           || plans.find(item => item.id === plan.anchor_event_id)?.details.equipment_id || '')));
       for (const id of equipmentIds) {
         if (id) {
-          const value = await latestMeasuredMashEfficiency(db, id);
+          const unit = equipment.find(item => item.model_id === id);
+          const value = unit ? await latestMeasuredMashEfficiency(db, unit.id) : null;
           if (value != null) recent[id] = value;
         }
       }
       const recipeInputs = recipeRows[0] || {};
       const eventInputs = Object.fromEntries(eventRows.map(row => [row.id, row]));
-      if (!cancelled) setEstimate(calculateRecipe(plans, inventory, equipment, recipeInputs, eventInputs, recent,
+      if (!cancelled) setEstimate(calculateRecipe(plans, inventory, equipmentModels, recipeInputs, eventInputs, recent,
         recipe?.recipe_type || 'beer'));
     })();
     return () => { cancelled = true; };
-  }, [db, selectedId, plans, inventory, equipment, settingsOpen, recipe?.recipe_type]);
+  }, [db, selectedId, plans, inventory, equipment, equipmentModels, settingsOpen, recipe?.recipe_type]);
 
   async function addRecipe(values: { name: string; description?: string; recipe_type: RecipeType }) {
     try {
@@ -157,10 +159,10 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
     } catch (cause) { setSettingsError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  async function start(values: { name: string }) {
+  async function start(values: { name: string; unit_ids?: Record<string, string> }) {
     if (!recipe) return;
     try {
-      const id = await startBatchFromRecipe(db, recipe, values.name.trim(), accountId);
+      const id = await startBatchFromRecipe(db, recipe, values.name.trim(), accountId, recipe.description || '', values.unit_ids);
       setNewBatch(false); await onChanged(); onBatchStarted(id);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -201,7 +203,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
           {estimate.efficiencyLabel && <p className="muted">Using {estimate.efficiencyLabel}.</p>}
           {estimate.missing.length > 0 && <p className="muted recipe-estimate-missing">{estimate.missing.join(' ')}</p>}
         </section>}
-        <EventTimeline events={plans} equipment={equipment} onEdit={plan => { setPlanDeleteError(''); setEditingPlan(plan); }}
+        <EventTimeline events={plans} equipment={equipmentModels} onEdit={plan => { setPlanDeleteError(''); setEditingPlan(plan); }}
           onAdd={(kind, settings) => { setEditingPlan(null); setPreset(settings); setCreatingKind(kind); }} />
       </section>}
     <Modal title="New recipe" open={newRecipe} onCancel={() => setNewRecipe(false)} footer={null} destroyOnHidden>
@@ -246,7 +248,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
       {planDeleteError && <Alert type="error" message={planDeleteError} className="form-alert" />}
       {(editingPlan || creatingKind) && <PlanForm key={editingPlan?.id || creatingKind || 'new'} eventType={editingPlan?.event_type || creatingKind || 'addition'}
         anchors={plans.filter(item => item.id !== editingPlan?.id)} initialPlan={editingPlan || undefined}
-        equipment={equipment} inventory={inventory} catalog={catalogInventory} preferredUnits={preferredUnits} preset={editingPlan ? undefined : preset} submit={addPlan}
+        equipment={equipmentModels} inventory={inventory} catalog={catalogInventory} preferredUnits={preferredUnits} preset={editingPlan ? undefined : preset} submit={addPlan}
         extraAction={editingPlan && <Popconfirm title={`Delete ${editingPlan.title}?`}
           description="Actions timed from this one will become relative to batch start. Existing batches keep their copies."
           okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => void removePlan(editingPlan.id)}>
@@ -257,6 +259,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
     <Modal title="Start a batch" open={newBatch} onCancel={() => setNewBatch(false)} footer={null} destroyOnHidden>
       <Form layout="vertical" onFinish={start} initialValues={{ name: recipe ? `${recipe.name} batch` : '' }}>
         <Form.Item name="name" label="Batch name" rules={[{ required: true }]}><Input maxLength={100} /></Form.Item>
+        <RecipeEquipmentFields db={db} recipeId={recipe?.id} equipment={equipment} models={equipmentModels} />
         <Button type="primary" htmlType="submit">Create batch</Button>
       </Form>
     </Modal>

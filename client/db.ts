@@ -7,7 +7,7 @@ import { equipmentSlug } from './equipmentRoutes.ts';
 import { openLocalCatalog } from './catalog.ts';
 import { hasGeneratedLocationSuffix, locationSlug } from './locationSlug.ts';
 import type { CatalogEquipment, MeasurementChannel } from '../shared/catalog.ts';
-import { changeColumns, indexStatements, legacyEquipmentCopyStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements,
+import { changeColumns, indexStatements, legacyEquipmentCopyStatements, legacyEquipmentModelStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements,
   workspaceSchemaVersion, workspaceTableColumns, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 import { convertUnit, formatQuantity, storageUnit } from '../shared/units.ts';
@@ -53,6 +53,7 @@ export interface EquipmentSpecifications {
   reference_mg_l?: number | null; observed_mg_l?: number | null;
 }
 export interface Equipment extends EquipmentSpecifications { id: string; name: string; kind: string;
+  model_id?: string; model_name?: string; stock_id?: string | null; added_at?: number | null; removed_at?: number | null;
   catalog_model_id?: string | null; catalog_model?: CatalogEquipment;
   measurement_channels?: MeasurementChannel[] }
 export interface EquipmentUse { id: string; equipment_id: string; batch_id: string; batch_name: string; assigned_at: number }
@@ -126,33 +127,36 @@ const opened = new Map<string, Promise<DB>>();
 // TEMP views can refer to the attached catalog without becoming replicated
 // workspace schema. SQLite reevaluates inherited values after catalog sync.
 const effectiveEquipmentView = `CREATE TEMP VIEW effective_equipment AS
-  SELECT e.*,
-    COALESCE(liquid.capacity_liters, model_liquid.capacity_liters) AS capacity_liters,
-    COALESCE(pressure.max_pressure_kpa, model_pressure.max_pressure_kpa) AS max_pressure_kpa,
-    COALESCE(heat.rated_power_watts, model_heat.rated_power_watts) AS rated_power_watts,
-    COALESCE(cool.rated_heat_removal_watts, model_cool.rated_heat_removal_watts) AS rated_heat_removal_watts,
-    COALESCE(control.min_temperature_c, model_control.min_temperature_c) AS min_temperature_c,
-    COALESCE(control.max_temperature_c, model_control.max_temperature_c) AS max_temperature_c,
-    CASE WHEN liquid.equipment_id IS NOT NULL OR model_liquid.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_liquid_containment,
-    CASE WHEN pressure.equipment_id IS NOT NULL OR model_pressure.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_pressure_rating,
-    CASE WHEN heat.equipment_id IS NOT NULL OR model_heat.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_heating,
-    CASE WHEN cool.equipment_id IS NOT NULL OR model_cool.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_cooling,
-    CASE WHEN control.equipment_id IS NOT NULL OR model_control.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_temperature_control,
-    CASE WHEN control.equipment_id IS NOT NULL OR model_control.model_id IS NOT NULL THEN 1 ELSE NULL END AS built_in_temperature_control,
+  SELECT e.*, workspace_model.kind, workspace_model.catalog_model_id, workspace_model.name AS model_name,
+    COALESCE(liquid.capacity_liters, workspace_model.capacity_liters, model_liquid.capacity_liters) AS capacity_liters,
+    COALESCE(pressure.max_pressure_kpa, workspace_model.max_pressure_kpa, model_pressure.max_pressure_kpa) AS max_pressure_kpa,
+    COALESCE(heat.rated_power_watts, workspace_model.rated_power_watts, model_heat.rated_power_watts) AS rated_power_watts,
+    COALESCE(cool.rated_heat_removal_watts, workspace_model.rated_heat_removal_watts, model_cool.rated_heat_removal_watts) AS rated_heat_removal_watts,
+    COALESCE(control.min_temperature_c, workspace_model.min_temperature_c, model_control.min_temperature_c) AS min_temperature_c,
+    COALESCE(control.max_temperature_c, workspace_model.max_temperature_c, model_control.max_temperature_c) AS max_temperature_c,
+    CASE WHEN liquid.equipment_id IS NOT NULL OR workspace_model.has_liquid_containment = 1 OR model_liquid.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_liquid_containment,
+    CASE WHEN pressure.equipment_id IS NOT NULL OR workspace_model.has_pressure_rating = 1 OR model_pressure.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_pressure_rating,
+    CASE WHEN heat.equipment_id IS NOT NULL OR workspace_model.has_heating = 1 OR model_heat.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_heating,
+    CASE WHEN cool.equipment_id IS NOT NULL OR workspace_model.has_cooling = 1 OR model_cool.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_cooling,
+    CASE WHEN control.equipment_id IS NOT NULL OR workspace_model.has_temperature_control = 1 OR model_control.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_temperature_control,
+    CASE WHEN control.equipment_id IS NOT NULL OR workspace_model.has_temperature_control = 1 OR model_control.model_id IS NOT NULL THEN 1 ELSE NULL END AS built_in_temperature_control,
     boil.heat_loss_watts AS boil_heat_loss_watts, temp.offset_c AS temperature_offset_c,
-    mash.mash_efficiency_pct, mash.grain_absorption_l_per_kg,
-    mash.mash_deadspace_liters, mash.kettle_retention_liters,
+    COALESCE(mash.mash_efficiency_pct, workspace_model.mash_efficiency_pct) AS mash_efficiency_pct,
+    COALESCE(mash.grain_absorption_l_per_kg, workspace_model.grain_absorption_l_per_kg) AS grain_absorption_l_per_kg,
+    COALESCE(mash.mash_deadspace_liters, workspace_model.mash_deadspace_liters) AS mash_deadspace_liters,
+    COALESCE(mash.kettle_retention_liters, workspace_model.kettle_retention_liters) AS kettle_retention_liters,
     model.model_name AS catalog_model_name, model.manufacturer AS catalog_manufacturer,
-    model_liquid.capacity_liters AS model_capacity_liters,
-    model_pressure.max_pressure_kpa AS model_max_pressure_kpa,
-    model_heat.rated_power_watts AS model_rated_power_watts,
-    model_cool.rated_heat_removal_watts AS model_rated_heat_removal_watts,
+    COALESCE(workspace_model.capacity_liters, model_liquid.capacity_liters) AS model_capacity_liters,
+    COALESCE(workspace_model.max_pressure_kpa, model_pressure.max_pressure_kpa) AS model_max_pressure_kpa,
+    COALESCE(workspace_model.rated_power_watts, model_heat.rated_power_watts) AS model_rated_power_watts,
+    COALESCE(workspace_model.rated_heat_removal_watts, model_cool.rated_heat_removal_watts) AS model_rated_heat_removal_watts,
     model_liquid.model_id AS model_liquid_id, model_pressure.model_id AS model_pressure_id,
     model_heat.model_id AS model_heat_id, model_cool.model_id AS model_cool_id,
     model_control.model_id AS model_control_id,
-    model_control.min_temperature_c AS model_min_temperature_c,
-    model_control.max_temperature_c AS model_max_temperature_c
+    COALESCE(workspace_model.min_temperature_c, model_control.min_temperature_c) AS model_min_temperature_c,
+    COALESCE(workspace_model.max_temperature_c, model_control.max_temperature_c) AS model_max_temperature_c
   FROM main.equipment e
+  JOIN main.equipment_models workspace_model ON workspace_model.id = e.model_id
   LEFT JOIN main.equipment_liquid_containment liquid ON liquid.equipment_id = e.id
   LEFT JOIN main.equipment_pressure_rating pressure ON pressure.equipment_id = e.id
   LEFT JOIN main.equipment_heating heat ON heat.equipment_id = e.id
@@ -161,7 +165,7 @@ const effectiveEquipmentView = `CREATE TEMP VIEW effective_equipment AS
   LEFT JOIN main.equipment_boil_calibration boil ON boil.equipment_id = e.id
   LEFT JOIN main.equipment_temperature_calibration temp ON temp.equipment_id = e.id
   LEFT JOIN main.equipment_mash_assumptions mash ON mash.equipment_id = e.id
-  LEFT JOIN catalog.equipment_models model ON model.id = e.catalog_model_id
+  LEFT JOIN catalog.equipment_models model ON model.id = workspace_model.catalog_model_id
   LEFT JOIN catalog.model_liquid_containment model_liquid ON model_liquid.model_id = model.id
   LEFT JOIN catalog.model_pressure_rating model_pressure ON model_pressure.model_id = model.id
   LEFT JOIN catalog.model_heating model_heat ON model_heat.model_id = model.id
@@ -169,24 +173,29 @@ const effectiveEquipmentView = `CREATE TEMP VIEW effective_equipment AS
   LEFT JOIN catalog.model_temperature_control model_control ON model_control.model_id = model.id`;
 
 const effectiveMeasurementChannelsView = `CREATE TEMP VIEW effective_measurement_channels AS
-  SELECT e.id AS equipment_id, COALESCE(workspace.id, model.id) AS id,
-    model.measurement_kind,
-    COALESCE(workspace.measurement_min, model.measurement_min) AS measurement_min,
-    COALESCE(workspace.measurement_max, model.measurement_max) AS measurement_max,
-    COALESCE(workspace.measurement_unit, model.measurement_unit) AS measurement_unit,
-    COALESCE(workspace.measurement_scale, model.measurement_scale) AS measurement_scale
-  FROM main.equipment e
-  JOIN catalog.model_measurement_channels model ON model.model_id = e.catalog_model_id
-  LEFT JOIN main.equipment_measurement_channels workspace
-    ON workspace.equipment_id = e.id AND workspace.measurement_kind = model.measurement_kind
-  UNION ALL
-  SELECT workspace.equipment_id, workspace.id, workspace.measurement_kind,
-    workspace.measurement_min, workspace.measurement_max,
-    workspace.measurement_unit, workspace.measurement_scale
-  FROM main.equipment_measurement_channels workspace
-  JOIN main.equipment e ON e.id = workspace.equipment_id
-  WHERE NOT EXISTS (SELECT 1 FROM catalog.model_measurement_channels model
-    WHERE model.model_id = e.catalog_model_id AND model.measurement_kind = workspace.measurement_kind)`;
+  WITH channel_kinds AS (
+    SELECT e.id AS equipment_id, c.measurement_kind FROM main.equipment e
+      JOIN main.equipment_measurement_channels c ON c.equipment_id = e.id
+    UNION SELECT e.id, c.measurement_kind FROM main.equipment e
+      JOIN main.equipment_model_measurement_channels c ON c.model_id = e.model_id
+    UNION SELECT e.id, c.measurement_kind FROM main.equipment e
+      JOIN main.equipment_models m ON m.id = e.model_id
+      JOIN catalog.model_measurement_channels c ON c.model_id = m.catalog_model_id
+  )
+  SELECT k.equipment_id, COALESCE(unit.id, workspace_model.id, catalog_model.id) AS id,
+    k.measurement_kind,
+    COALESCE(unit.measurement_min, workspace_model.measurement_min, catalog_model.measurement_min) AS measurement_min,
+    COALESCE(unit.measurement_max, workspace_model.measurement_max, catalog_model.measurement_max) AS measurement_max,
+    COALESCE(unit.measurement_unit, workspace_model.measurement_unit, catalog_model.measurement_unit) AS measurement_unit,
+    COALESCE(unit.measurement_scale, workspace_model.measurement_scale, catalog_model.measurement_scale) AS measurement_scale
+  FROM channel_kinds k JOIN main.equipment e ON e.id = k.equipment_id
+  JOIN main.equipment_models m ON m.id = e.model_id
+  LEFT JOIN main.equipment_measurement_channels unit
+    ON unit.equipment_id = e.id AND unit.measurement_kind = k.measurement_kind
+  LEFT JOIN main.equipment_model_measurement_channels workspace_model
+    ON workspace_model.model_id = m.id AND workspace_model.measurement_kind = k.measurement_kind
+  LEFT JOIN catalog.model_measurement_channels catalog_model
+    ON catalog_model.model_id = m.catalog_model_id AND catalog_model.measurement_kind = k.measurement_kind`;
 
 export async function openLocalDb(workspaceId: string): Promise<DB> {
   let pending = opened.get(workspaceId);
@@ -268,8 +277,13 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
         const columns = (await tx.execO<{ name: string }>('PRAGMA table_info(equipment_legacy_migration)'))
           .map(row => row.name);
         for (const statement of legacyEquipmentCopyStatements(columns)) await tx.exec(statement);
+        for (const statement of legacyEquipmentModelStatements(columns)) await tx.exec(statement);
         await tx.exec('DROP TABLE equipment_legacy_migration');
       });
+      await db.exec('UPDATE equipment SET added_at = COALESCE(added_at, created_at) WHERE added_at IS NULL');
+      await db.exec(`UPDATE equipment SET removed_at =
+        (SELECT archived_at FROM equipment_archives WHERE equipment_id = equipment.id ORDER BY archived_at LIMIT 1)
+        WHERE removed_at IS NULL AND id IN (SELECT equipment_id FROM equipment_archives)`);
       await openLocalCatalog();
       await db.exec("ATTACH DATABASE 'brewlog-catalog' AS catalog");
       await db.exec(effectiveEquipmentView);
@@ -327,7 +341,7 @@ export async function listCurrentEquipmentUses(db: DB): Promise<EquipmentUse[]> 
 export async function assignEquipmentToBatch(db: DB, equipmentId: string, batchId: string, accountId: string): Promise<void> {
   await db.tx(async tx => {
     const equipment = await tx.execO<{ id: string; name: string }>(`SELECT id, name FROM equipment WHERE id = ?
-      AND id NOT IN (SELECT equipment_id FROM equipment_archives)`, [equipmentId]);
+      AND removed_at IS NULL`, [equipmentId]);
     const batch = await tx.execO<{ id: string }>('SELECT id FROM batches WHERE id = ?', [batchId]);
     if (!equipment.length || !batch.length) throw new Error('Choose available equipment and a batch');
     const existing = await tx.execO<{ id: string }>(`SELECT e.id FROM batch_events e
@@ -736,11 +750,30 @@ export async function updateBatchPlan(db: DB, batchId: string, planId: string, i
 }
 
 export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string, accountId: string,
-  description = recipe.description || ''): Promise<string> {
+  description = recipe.description || '', unitIds: Record<string, string> = {}): Promise<string> {
   const plans = await listRecipePlans(db, recipe.id);
+  const referencedModels = new Set(plans.flatMap(plan =>
+    [plan.details.equipment_id, plan.details.mash_equipment_id, plan.details.to_vessel_id]
+      .filter((id): id is string => typeof id === 'string' && !!id)));
+  const units = await db.execO<{ id: string; model_id: string; name: string }>(
+    'SELECT id, model_id, name FROM equipment WHERE removed_at IS NULL');
+  const modelToUnit = new Map<string, string>();
+  for (const modelId of referencedModels) {
+    const matches = units.filter(unit => unit.model_id === modelId);
+    const choice = unitIds[modelId] || (matches.length === 1 ? matches[0].id : null);
+    if (!choice || !matches.some(unit => unit.id === choice)) {
+      throw new Error(matches.length ? 'Choose a specific equipment unit for this recipe model'
+        : 'Add a physical unit for each equipment model used by the recipe');
+    }
+    modelToUnit.set(modelId, choice);
+  }
+  const physicalDetails = (details: PlanDetails): PlanDetails => ({ ...details,
+    equipment_id: details.equipment_id ? modelToUnit.get(details.equipment_id) : undefined,
+    mash_equipment_id: details.mash_equipment_id ? modelToUnit.get(details.mash_equipment_id) : undefined,
+    to_vessel_id: details.to_vessel_id ? modelToUnit.get(details.to_vessel_id) : undefined });
   const latestEfficiencies = new Map<string, number | null>();
   for (const plan of plans) {
-    const details = plan.details;
+    const details = physicalDetails(plan.details);
     const mashEquipmentId = details.purpose === 'drain_grain' ? details.mash_equipment_id : null;
     if (typeof mashEquipmentId === 'string' && !latestEfficiencies.has(mashEquipmentId)) {
       latestEfficiencies.set(mashEquipmentId, await latestMeasuredMashEfficiency(db, mashEquipmentId));
@@ -764,15 +797,20 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
           plan.anchor_event_id ? ids.get(plan.anchor_event_id) ?? null : null,
           plan.offset_seconds ?? null, plan.details.anchor_point ?? null, plan.details.duration_seconds ?? null,
           plan.details.note ?? null, now, accountId]);
-      await writePlanPayload(tx, 'batch', ids.get(plan.id)!, plan.event_type, plan.details);
+      await writePlanPayload(tx, 'batch', ids.get(plan.id)!, plan.event_type, physicalDetails(plan.details));
       const eventInputs = await tx.execO<IngredientProperties>('SELECT * FROM recipe_event_inputs WHERE id = ?', [plan.id]);
       const snapshot: Record<string, string | number | null> = {};
       if (eventInputs.length) for (const column of ingredientPropertyColumns) snapshot[column] = eventInputs[0][column] ?? null;
-      const details = plan.details;
+      const details = physicalDetails(plan.details);
       const assumptionEquipmentId = details.purpose === 'drain_grain' ? details.mash_equipment_id : details.equipment_id;
       if (typeof assumptionEquipmentId === 'string') {
         const rows = await tx.execO<EquipmentSpecifications>(
-          'SELECT * FROM equipment_mash_assumptions WHERE equipment_id = ?', [assumptionEquipmentId]);
+          `SELECT COALESCE(a.mash_efficiency_pct, m.mash_efficiency_pct) AS mash_efficiency_pct,
+            COALESCE(a.grain_absorption_l_per_kg, m.grain_absorption_l_per_kg) AS grain_absorption_l_per_kg,
+            COALESCE(a.mash_deadspace_liters, m.mash_deadspace_liters) AS mash_deadspace_liters,
+            COALESCE(a.kettle_retention_liters, m.kettle_retention_liters) AS kettle_retention_liters
+            FROM equipment e JOIN equipment_models m ON m.id = e.model_id
+            LEFT JOIN equipment_mash_assumptions a ON a.equipment_id = e.id WHERE e.id = ?`, [assumptionEquipmentId]);
         if (rows.length) {
           const specs = rows[0];
           for (const column of equipmentAssumptionColumns) snapshot[column] = specs[column] ?? null;
@@ -971,14 +1009,15 @@ export async function listEquipment(db: DB): Promise<Equipment[]> {
   };
   const [rows, channels, modelChannels, points] = await Promise.all([
     db.execO<EffectiveEquipmentRow>(`SELECT * FROM effective_equipment
-      WHERE id NOT IN (SELECT equipment_id FROM equipment_archives)
+      WHERE removed_at IS NULL
       ORDER BY name COLLATE NOCASE`),
     db.execO<MeasurementChannel & { equipment_id: string }>('SELECT * FROM effective_measurement_channels'),
     db.execO<MeasurementChannel & { equipment_id: string }>(`SELECT e.id AS equipment_id,
       channel.id, channel.measurement_kind, channel.measurement_min, channel.measurement_max,
       channel.measurement_unit, channel.measurement_scale
-      FROM equipment e JOIN catalog.model_measurement_channels channel
-        ON channel.model_id = e.catalog_model_id`),
+      FROM equipment e JOIN equipment_models workspace_model ON workspace_model.id = e.model_id
+      JOIN catalog.model_measurement_channels channel
+        ON channel.model_id = workspace_model.catalog_model_id`),
     db.execO<{ id: string; equipment_id: string; measurement_kind: string; reference_value: number; observed_value: number }>(
       'SELECT * FROM equipment_measurement_calibration_points')
   ]);
@@ -1043,6 +1082,45 @@ export async function listEquipment(db: DB): Promise<Equipment[]> {
   return equipment;
 }
 
+export async function listEquipmentModels(db: DB): Promise<Equipment[]> {
+  return db.execO<Equipment>(`SELECT m.id, m.name, m.kind, m.catalog_model_id,
+    COALESCE(m.has_liquid_containment, CASE WHEN cl.model_id IS NOT NULL THEN 1 END) AS has_liquid_containment,
+    COALESCE(m.capacity_liters, cl.capacity_liters) AS capacity_liters,
+    COALESCE(m.has_pressure_rating, CASE WHEN cp.model_id IS NOT NULL THEN 1 END) AS has_pressure_rating,
+    COALESCE(m.max_pressure_kpa, cp.max_pressure_kpa) AS max_pressure_kpa,
+    COALESCE(m.has_heating, CASE WHEN ch.model_id IS NOT NULL THEN 1 END) AS has_heating,
+    COALESCE(m.rated_power_watts, ch.rated_power_watts) AS rated_power_watts,
+    COALESCE(m.has_cooling, CASE WHEN cc.model_id IS NOT NULL THEN 1 END) AS has_cooling,
+    COALESCE(m.rated_heat_removal_watts, cc.rated_heat_removal_watts) AS rated_heat_removal_watts,
+    COALESCE(m.has_temperature_control, CASE WHEN ct.model_id IS NOT NULL THEN 1 END) AS has_temperature_control,
+    COALESCE(m.min_temperature_c, ct.min_temperature_c) AS min_temperature_c,
+    COALESCE(m.max_temperature_c, ct.max_temperature_c) AS max_temperature_c,
+    m.mash_efficiency_pct, m.grain_absorption_l_per_kg,
+    m.mash_deadspace_liters, m.kettle_retention_liters
+    FROM equipment_models m
+    LEFT JOIN catalog.model_liquid_containment cl ON cl.model_id = m.catalog_model_id
+    LEFT JOIN catalog.model_pressure_rating cp ON cp.model_id = m.catalog_model_id
+    LEFT JOIN catalog.model_heating ch ON ch.model_id = m.catalog_model_id
+    LEFT JOIN catalog.model_cooling cc ON cc.model_id = m.catalog_model_id
+    LEFT JOIN catalog.model_temperature_control ct ON ct.model_id = m.catalog_model_id
+    ORDER BY m.name COLLATE NOCASE`);
+}
+
+export async function createEquipmentUnit(db: DB, modelId: string, name: string, stockId?: string): Promise<string> {
+  const models = await db.execO<{ id: string }>('SELECT id FROM equipment_models WHERE id = ?', [modelId]);
+  if (!models.length) throw new Error('Choose an equipment model');
+  if (!name.trim()) throw new Error('Enter an equipment name');
+  if (stockId?.trim()) {
+    const used = await db.execO<{ id: string }>('SELECT id FROM equipment WHERE stock_id = ? AND removed_at IS NULL', [stockId.trim()]);
+    if (used.length) throw new Error('Stock ID is already in use');
+  }
+  const id = nanoid();
+  const now = nowSeconds();
+  await db.exec('INSERT INTO equipment(id, name, model_id, stock_id, added_at, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    [id, name.trim(), modelId, stockId?.trim() || null, now, now]);
+  return id;
+}
+
 export async function updateBrewingLosses(db: DB, item: Equipment, values: Pick<EquipmentSpecifications,
   'mash_efficiency_pct' | 'grain_absorption_l_per_kg' | 'mash_deadspace_liters' | 'kettle_retention_liters'>): Promise<void> {
   if (!['all_in_one', 'mash_tun', 'kettle', 'electric_kettle'].includes(item.kind)) throw new Error('Choose brewing equipment');
@@ -1051,10 +1129,14 @@ export async function updateBrewingLosses(db: DB, item: Equipment, values: Pick<
       throw new Error(`Enter a valid ${key.replaceAll('_', ' ')}`);
     }
   }
-  await db.exec(`INSERT INTO equipment_mash_assumptions(equipment_id, ${equipmentAssumptionColumns.join(', ')})
-    VALUES (?, ${equipmentAssumptionColumns.map(() => '?').join(', ')})
-    ON CONFLICT(equipment_id) DO UPDATE SET ${equipmentAssumptionColumns.map(column => `${column} = excluded.${column}`).join(', ')}`,
-  [item.id, ...equipmentAssumptionColumns.map(column => values[column] ?? null)]);
+  await db.tx(async tx => {
+    await tx.exec(`INSERT INTO equipment_mash_assumptions(equipment_id, ${equipmentAssumptionColumns.join(', ')})
+      VALUES (?, ${equipmentAssumptionColumns.map(() => '?').join(', ')})
+      ON CONFLICT(equipment_id) DO UPDATE SET ${equipmentAssumptionColumns.map(column => `${column} = excluded.${column}`).join(', ')}`,
+    [item.id, ...equipmentAssumptionColumns.map(column => values[column] ?? null)]);
+    if (item.model_id) await tx.exec(`UPDATE equipment_models SET ${equipmentAssumptionColumns.map(column => `${column} = ?`).join(', ')}
+      WHERE id = ?`, [...equipmentAssumptionColumns.map(column => values[column] ?? null), item.model_id]);
+  });
 }
 
 export async function latestMeasuredMashEfficiency(db: DB, equipmentId: string): Promise<number | null> {
@@ -1093,7 +1175,7 @@ export async function latestMeasuredMashEfficiency(db: DB, equipmentId: string):
   return null;
 }
 
-export async function updateEquipmentIdentity(db: DB, item: Equipment, name: string, slug: string,
+export async function updateEquipmentIdentity(db: DB, item: Equipment, name: string, slug: string, stockId: string | undefined,
   equipment: Equipment[]): Promise<void> {
   const trimmed = name.trim();
   if (!trimmed || trimmed.length > 120) throw new Error('Enter an equipment name');
@@ -1101,7 +1183,11 @@ export async function updateEquipmentIdentity(db: DB, item: Equipment, name: str
   if (equipment.some(row => row.id !== item.id && (equipmentSlug(row) === slug || row.id === slug))) {
     throw new Error('That slug is already used by another equipment item');
   }
-  await db.exec('UPDATE equipment SET name = ?, slug = ? WHERE id = ?', [trimmed, slug, item.id]);
+  if (stockId?.trim() && equipment.some(row => row.id !== item.id && row.stock_id === stockId.trim())) {
+    throw new Error('Stock ID is already in use');
+  }
+  await db.exec('UPDATE equipment SET name = ?, slug = ?, stock_id = ? WHERE id = ?',
+    [trimmed, slug, stockId?.trim() || null, item.id]);
 }
 
 async function putEquipmentCapability(db: Pick<DB, 'exec'>, table: string, id: string,
@@ -1114,16 +1200,39 @@ async function putEquipmentCapability(db: Pick<DB, 'exec'>, table: string, id: s
 
 export async function createEquipment(db: DB, name: string, kind: string, catalogModel?: CatalogEquipment,
   overrides: EquipmentSpecifications = {},
-  channelRanges: Record<string, { min: number; max: number; unit: string }> = {}): Promise<string> {
+  channelRanges: Record<string, { min: number; max: number; unit: string }> = {}, stockId?: string): Promise<string> {
   if (!equipmentKinds.some(item => item.value === kind)) throw new Error('Choose a valid equipment kind');
   if (catalogModel && catalogModel.kind !== kind) throw new Error('Catalog kind does not match equipment kind');
   const id = nanoid();
   if (!name.trim()) throw new Error('Enter an equipment name');
+  if (stockId?.trim() && (await db.execO<{ id: string }>(
+    'SELECT id FROM equipment WHERE stock_id = ? AND removed_at IS NULL', [stockId.trim()])).length) {
+    throw new Error('Stock ID is already in use');
+  }
   const changed = (column: keyof EquipmentSpecifications) => overrides[column] != null
     && (!catalogModel || overrides[column] !== catalogModel[column as keyof CatalogEquipment]);
   await db.tx(async tx => {
-    await tx.exec('INSERT INTO equipment(id, name, kind, catalog_model_id, created_at) VALUES (?, ?, ?, ?, ?)',
-      [id, name.trim(), kind, catalogModel?.id || null, nowSeconds()]);
+    const modelId = catalogModel?.id || nanoid();
+    const now = nowSeconds();
+    await tx.exec(`INSERT OR IGNORE INTO equipment_models(id, name, kind, catalog_model_id,
+      has_liquid_containment, capacity_liters, has_pressure_rating, max_pressure_kpa,
+      has_heating, rated_power_watts, has_cooling, rated_heat_removal_watts,
+      has_temperature_control, min_temperature_c, max_temperature_c, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [modelId, catalogModel?.name || name.trim(), kind, catalogModel?.id || null,
+      catalogModel ? null : Number(capacityKinds.has(kind)), catalogModel ? null : overrides.capacity_liters ?? null,
+      catalogModel ? null : Number(kind === 'fermenter' || overrides.max_pressure_kpa != null),
+      catalogModel ? null : overrides.max_pressure_kpa ?? null,
+      catalogModel ? null : Number(boilOffKinds.has(kind) || !!overrides.has_heating),
+      catalogModel ? null : overrides.rated_power_watts ?? null,
+      catalogModel ? null : Number(!!overrides.has_cooling),
+      catalogModel ? null : overrides.rated_heat_removal_watts ?? null,
+      catalogModel ? null : Number(boilOffKinds.has(kind) || kind === 'fermentation_temperature_control'
+        || !!overrides.has_temperature_control || !!overrides.built_in_temperature_control),
+      catalogModel ? null : overrides.min_temperature_c ?? null,
+      catalogModel ? null : overrides.max_temperature_c ?? null, now]);
+    await tx.exec(`INSERT INTO equipment(id, name, model_id, stock_id, added_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`, [id, name.trim(), modelId, stockId?.trim() || null, now, now]);
     if ((!catalogModel && capacityKinds.has(kind)) || changed('capacity_liters')) {
       await putEquipmentCapability(tx, 'equipment_liquid_containment', id,
         { capacity_liters: changed('capacity_liters') ? overrides.capacity_liters : null });
@@ -1173,6 +1282,11 @@ export async function createEquipment(db: DB, name: string, kind: string, catalo
         range.unit === (modelChannel.measurement_scale || modelChannel.measurement_unit) ? null : scale ? null : range.unit,
         range.unit === (modelChannel.measurement_scale || modelChannel.measurement_unit) ? null : scale]);
     }
+    if (!catalogModel) await tx.exec(`INSERT INTO equipment_model_measurement_channels
+      (id, model_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
+      SELECT ? || ':' || measurement_kind, ?, measurement_kind, measurement_min, measurement_max,
+        measurement_unit, measurement_scale FROM equipment_measurement_channels WHERE equipment_id = ?`,
+    [modelId, modelId, id]);
   });
   return id;
 }
@@ -1357,35 +1471,7 @@ export async function updateEquipmentMeasurementRange(db: DB, item: Equipment,
 }
 
 export async function deleteEquipment(db: DB, id: string): Promise<void> {
-  await db.tx(async tx => {
-    const referenced = async (table: string, where: string, binds: string[]) =>
-      (await tx.execO<{ used: number }>(`SELECT 1 AS used FROM ${table} WHERE ${where} LIMIT 1`, binds)).length > 0;
-    let used = false;
-    for (const table of Object.values(measurementTables)) {
-      if (await referenced(table, 'equipment_id = ?', [id])) {
-        used = true;
-        break;
-      }
-    }
-    used ||= await referenced('temperature_control_events', 'equipment_id = ?', [id])
-      || await referenced('pressure_control_events', 'equipment_id = ?', [id])
-      || await referenced('transfers', 'from_vessel_id = ? OR to_vessel_id = ?', [id, id]);
-    used ||= await referenced('recipe_transfers', 'to_vessel_id = ? OR mash_equipment_id = ?', [id, id])
-      || await referenced('recipe_temperature_control_events', 'equipment_id = ?', [id]);
-    used ||= await referenced('equipment_use_events', 'equipment_id = ?', [id]);
-    if (used) {
-      await tx.exec('INSERT INTO equipment_archives(id, equipment_id, archived_at) VALUES (?, ?, ?)',
-        [nanoid(), id, nowSeconds()]);
-      return;
-    }
-    for (const table of ['equipment_liquid_containment', 'equipment_pressure_rating', 'equipment_heating',
-      'equipment_cooling', 'equipment_temperature_control', 'equipment_measurement_channels',
-      'equipment_boil_calibration', 'equipment_temperature_calibration',
-      'equipment_measurement_calibration_points', 'equipment_mash_assumptions']) {
-      await tx.exec(`DELETE FROM ${table} WHERE equipment_id = ?`, [id]);
-    }
-    await tx.exec('DELETE FROM equipment WHERE id = ?', [id]);
-  });
+  await db.exec('UPDATE equipment SET removed_at = ? WHERE id = ? AND removed_at IS NULL', [nowSeconds(), id]);
 }
 
 export async function listInventory(db: DB): Promise<InventoryItem[]> {

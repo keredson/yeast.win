@@ -9,11 +9,12 @@ import { formatTime } from './time.ts';
 import { PlanForm, repeatPreset, type PlanPreset } from './PlanForm.tsx';
 import { EventForm } from './EventForm.tsx';
 import { EventTimeline } from './EventTimeline.tsx';
+import { RecipeEquipmentFields } from './RecipeEquipmentFields.tsx';
 import type { PreferredUnits } from './api.ts';
 import type { CatalogInventory } from '../shared/catalog.ts';
 
-export function BatchSection({ db, basePath, accountId, batches, recipes, equipment, inventory, catalogInventory, preferredUnits, selectedId, onSelect, onChanged }: {
-  db: LocalDb; basePath: string; accountId: string; batches: Batch[]; recipes: Recipe[]; equipment: Equipment[]; inventory: InventoryItem[];
+export function BatchSection({ db, basePath, accountId, batches, recipes, equipment, equipmentModels, inventory, catalogInventory, preferredUnits, selectedId, onSelect, onChanged }: {
+  db: LocalDb; basePath: string; accountId: string; batches: Batch[]; recipes: Recipe[]; equipment: Equipment[]; equipmentModels: Equipment[]; inventory: InventoryItem[];
   catalogInventory: CatalogInventory[]; preferredUnits: PreferredUnits; selectedId: string | null;
   onSelect: (id: string | null) => void; onChanged: () => Promise<void>;
 }) {
@@ -21,6 +22,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   const [details, setDetails] = useState<Record<string, string>>({});
   const [photos, setPhotos] = useState<{ id: string; url: string; batch_event_id: string | null; created_at: number }[]>([]);
   const [newBatch, setNewBatch] = useState(false);
+  const [selectedRecipeId, setSelectedRecipeId] = useState<string | undefined>();
   const [creatingKind, setCreatingKind] = useState<string | null>(null);
   const [preset, setPreset] = useState<PlanPreset>({});
   const [editingPlan, setEditingPlan] = useState<ActualEvent | null>(null);
@@ -49,11 +51,11 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
 
   async function changed() { await refreshDetail(); await onChanged(); }
 
-  async function create(values: { name: string; description?: string; recipe_id?: string }) {
+  async function create(values: { name: string; description?: string; recipe_id?: string; unit_ids?: Record<string, string> }) {
     try {
       const recipe = recipes.find(item => item.id === values.recipe_id);
       if (values.recipe_id && !recipe) throw new Error('Choose an available recipe');
-      const id = recipe ? await startBatchFromRecipe(db, recipe, values.name.trim(), accountId, values.description || '')
+      const id = recipe ? await startBatchFromRecipe(db, recipe, values.name.trim(), accountId, values.description || '', values.unit_ids)
         : await createBatch(db, values.name.trim(), values.description || '', accountId);
       onSelect(id); setNewBatch(false); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
@@ -106,7 +108,9 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
       <Form layout="vertical" onFinish={create}>
         <Form.Item name="name" label="Batch name" rules={[{ required: true }]}><Input maxLength={100} /></Form.Item>
         <Form.Item name="recipe_id" label="Recipe (optional)"><Select allowClear showSearch optionFilterProp="label"
-          placeholder="Choose a recipe" options={recipes.map(recipe => ({ value: recipe.id, label: recipe.name }))} /></Form.Item>
+          placeholder="Choose a recipe" options={recipes.map(recipe => ({ value: recipe.id, label: recipe.name }))}
+          onChange={setSelectedRecipeId} /></Form.Item>
+        <RecipeEquipmentFields db={db} recipeId={selectedRecipeId} equipment={equipment} models={equipmentModels} />
         <Form.Item name="description" label="Description"><Input.TextArea rows={2} /></Form.Item>
         <Button type="primary" htmlType="submit">Create batch</Button>
       </Form>

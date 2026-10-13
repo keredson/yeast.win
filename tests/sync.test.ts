@@ -31,9 +31,12 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
     first.prepare('INSERT INTO batch_events(id, batch_id, event_type, actual_at) VALUES (?, ?, ?, ?)')
       .run(event, batchA, 'measurement', timestamp);
     const equipmentId = nanoid();
+    const modelId = nanoid();
     const equipmentUseId = nanoid();
-    first.prepare('INSERT INTO equipment(id, name, kind, created_at) VALUES (?, ?, ?, ?)')
-      .run(equipmentId, 'Shared kettle', 'electric_kettle', timestamp);
+    first.prepare('INSERT INTO equipment_models(id, name, kind, created_at) VALUES (?, ?, ?, ?)')
+      .run(modelId, 'Shared kettle model', 'electric_kettle', timestamp);
+    first.prepare('INSERT INTO equipment(id, name, model_id, added_at, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(equipmentId, 'Shared kettle', modelId, timestamp, timestamp);
     first.prepare('INSERT INTO batch_events(id, batch_id, event_type, title, actual_at, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run(equipmentUseId, batchA, 'equipment_use', 'Use Shared kettle', timestamp, timestamp);
     first.prepare('INSERT INTO equipment_use_events(event_id, equipment_id) VALUES (?, ?)')
@@ -72,6 +75,7 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
     assert.equal((second.prepare('SELECT COUNT(*) AS count FROM batches').get() as { count: number }).count, 2);
     assert.equal((second.prepare('SELECT value FROM temperature_measurements WHERE event_id = ?').get(event) as { value: number }).value, 20);
     assert.equal((second.prepare('SELECT equipment_id FROM equipment_use_events WHERE event_id = ?').get(equipmentUseId) as { equipment_id: string }).equipment_id, equipmentId);
+    assert.equal((second.prepare('SELECT model_id FROM equipment WHERE id = ?').get(equipmentId) as { model_id: string }).model_id, modelId);
     assert.equal((second.prepare('SELECT quantity FROM inventory_discards WHERE inventory_item_id = ?').get(discardedItem) as { quantity: number }).quantity, 5);
     assert.equal((second.prepare('SELECT parent_id FROM inventory_locations WHERE id = ?').get(shelfId) as { parent_id: string }).parent_id, roomId);
     assert.equal((second.prepare('SELECT address FROM inventory_location_addresses WHERE id = ?').get(roomId) as { address: string }).address, '123 Brew Street');
@@ -364,11 +368,14 @@ test('version 19 workspace adds equipment use events without clearing equipment 
   const id = nanoid();
   const batchId = nanoid();
   const equipmentId = nanoid();
+  const modelId = nanoid();
   const db = openWorkspaceDb(id);
   db.prepare('INSERT INTO batches(id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
     .run(batchId, 'Test batch', 'active', 1, 1);
-  db.prepare('INSERT INTO equipment(id, name, kind, created_at) VALUES (?, ?, ?, ?)')
-    .run(equipmentId, 'Test kettle', 'electric_kettle', 1);
+  db.prepare('INSERT INTO equipment_models(id, name, kind, created_at) VALUES (?, ?, ?, ?)')
+    .run(modelId, 'Test kettle model', 'electric_kettle', 1);
+  db.prepare('INSERT INTO equipment(id, name, model_id, added_at, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(equipmentId, 'Test kettle', modelId, 1, 1);
   db.prepare("SELECT crsql_as_table('equipment_use_events')").get();
   db.exec('DROP TABLE equipment_use_events');
   db.pragma('user_version = 19');
@@ -385,5 +392,56 @@ test('version 19 workspace adds equipment use events without clearing equipment 
     upgraded.prepare('INSERT INTO equipment_use_events(event_id, equipment_id) VALUES (?, ?)')
       .run(useId, equipmentId);
     assert.equal((upgraded.prepare('SELECT COUNT(*) AS count FROM equipment_use_events').get() as { count: number }).count, 1);
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
+test('version 20 equipment splits into models and physical units while preserving event links', () => {
+  const id = nanoid();
+  const unitId = nanoid();
+  const catalogUnitId = nanoid();
+  const catalogModelId = nanoid();
+  const recipeEventId = nanoid();
+  const catalogRecipeEventId = nanoid();
+  const batchEventId = nanoid();
+  const old = new Database(join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`));
+  old.loadExtension('vendor/crsqlite.so');
+  old.exec(`CREATE TABLE equipment(id TEXT PRIMARY KEY NOT NULL, name TEXT, kind TEXT, catalog_model_id TEXT,
+      slug TEXT, created_at INTEGER);
+    CREATE TABLE equipment_heating(equipment_id TEXT PRIMARY KEY NOT NULL, rated_power_watts REAL);
+    CREATE TABLE recipe_temperature_control_events(event_id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT);
+    CREATE TABLE temperature_control_events(event_id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT)`);
+  for (const table of ['equipment', 'equipment_heating', 'recipe_temperature_control_events', 'temperature_control_events']) {
+    old.prepare('SELECT crsql_as_crr(?)').get(table);
+  }
+  old.prepare('INSERT INTO equipment(id, name, kind, created_at) VALUES (?, ?, ?, ?)')
+    .run(unitId, 'Custom kettle #1', 'electric_kettle', 123);
+  old.prepare('INSERT INTO equipment(id, name, kind, catalog_model_id, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(catalogUnitId, 'Catalog kettle #1', 'electric_kettle', catalogModelId, 124);
+  old.prepare('INSERT INTO equipment_heating(equipment_id, rated_power_watts) VALUES (?, ?)').run(unitId, 1800);
+  old.prepare('INSERT INTO recipe_temperature_control_events(event_id, equipment_id) VALUES (?, ?)')
+    .run(recipeEventId, unitId);
+  old.prepare('INSERT INTO recipe_temperature_control_events(event_id, equipment_id) VALUES (?, ?)')
+    .run(catalogRecipeEventId, catalogUnitId);
+  old.prepare('INSERT INTO temperature_control_events(event_id, equipment_id) VALUES (?, ?)')
+    .run(batchEventId, unitId);
+  old.pragma('user_version = 20');
+  old.close();
+
+  const upgraded = openWorkspaceDb(id);
+  try {
+    const unit = upgraded.prepare('SELECT model_id, added_at FROM equipment WHERE id = ?').get(unitId) as
+      { model_id: string; added_at: number };
+    assert.equal(unit.model_id, unitId);
+    assert.equal(unit.added_at, 123);
+    assert.deepEqual(upgraded.prepare('SELECT name, kind, rated_power_watts FROM equipment_models WHERE id = ?')
+      .get(unitId), { name: 'Custom kettle #1', kind: 'electric_kettle', rated_power_watts: 1800 });
+    assert.equal((upgraded.prepare('SELECT equipment_id FROM recipe_temperature_control_events WHERE event_id = ?')
+      .get(recipeEventId) as { equipment_id: string }).equipment_id, unitId);
+    assert.equal((upgraded.prepare('SELECT equipment_id FROM recipe_temperature_control_events WHERE event_id = ?')
+      .get(catalogRecipeEventId) as { equipment_id: string }).equipment_id, catalogModelId);
+    assert.equal((upgraded.prepare('SELECT model_id FROM equipment WHERE id = ?')
+      .get(catalogUnitId) as { model_id: string }).model_id, catalogModelId);
+    assert.equal((upgraded.prepare('SELECT equipment_id FROM temperature_control_events WHERE event_id = ?')
+      .get(batchEventId) as { equipment_id: string }).equipment_id, unitId);
   } finally { closeWorkspaceDb(upgraded); }
 });
