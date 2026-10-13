@@ -7,15 +7,15 @@ export interface CatalogEquipment { id: string; name: string; kind: string;
 export interface CatalogInventory { id: string; name: string; category: string; unit: string }
 
 export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
-export const catalogSchemaVersion = 9;
-export const catalogTables = ['catalog_equipment', 'catalog_inventory'] as const;
+export const catalogSchemaVersion = 10;
+export const catalogTables = ['equipment', 'inventory'] as const;
 export const catalogEquipmentColumns = ['capacity_liters', 'built_in_temperature_control', 'max_pressure_kpa',
   'rated_power_watts', 'measurement_min', 'measurement_max', 'measurement_unit'] as const;
-export const catalogEquipmentTable = `CREATE TABLE IF NOT EXISTS catalog_equipment (
+export const catalogEquipmentTable = `CREATE TABLE IF NOT EXISTS equipment (
   id TEXT PRIMARY KEY NOT NULL, name TEXT, kind TEXT,
   capacity_liters REAL, built_in_temperature_control INTEGER, max_pressure_kpa REAL,
   rated_power_watts REAL, measurement_min REAL, measurement_max REAL, measurement_unit TEXT)`;
-export const catalogInventoryTable = `CREATE TABLE IF NOT EXISTS catalog_inventory (
+export const catalogInventoryTable = `CREATE TABLE IF NOT EXISTS inventory (
   id TEXT PRIMARY KEY NOT NULL, name TEXT, category TEXT, unit TEXT)`;
 
 export const inventoryCategories = ['Grain', 'Hops', 'Yeast', 'Nutrient', 'Adjunct', 'Chemical', 'Packaging', 'Other'] as const;

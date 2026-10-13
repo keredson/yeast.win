@@ -153,7 +153,7 @@ Inventory is a ledger, not a mutable `quantity_on_hand` field. Additions and pac
 
 Initially, sync all CRR changes between an account's device and each private workspace DB it opens. `crsql_changes.db_version` is the replication cursor; `received_at` is for provenance and ingest ordering, not for completeness of sync. Retain source site IDs and use idempotent application/retry. Transport 64-bit SQLite cursor values as BigInt or decimal strings rather than assuming every value fits a JavaScript `number`. HTTPS request/response is sufficient for correctness; WebSockets can reduce latency. Authentication is required, but there is no per-batch permission filtering in the initial implementation.
 
-The shared catalog uses CRR tables and the same change encoding. Devices request changes after their stored server cursor and apply them locally; they never upload catalog changes. Normal updates transfer changed rows only. A new device receives the full history once. Schema upgrades may reset a pre-release local catalog and its cursor.
+The shared catalog uses unprefixed `equipment` and `inventory` CRR tables and the same change encoding. Devices request changes after their stored server cursor and apply them locally; they never upload catalog changes. The browser stores this checkpoint in `sync_state`, while SQLite `user_version` records the catalog schema version. Normal updates transfer changed rows only. A new device receives the full history once. Schema upgrades may reset a pre-release local catalog and its checkpoint.
 
 ### Later: sharing and filtered sync
 
