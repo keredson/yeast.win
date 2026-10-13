@@ -15,10 +15,52 @@ import { LocationFields } from './LocationFields.tsx';
 import { LocationTreeSelect, newLocationOption } from './LocationTreeSelect.tsx';
 import { locationDescendantIds } from './locationRoutes.ts';
 
-function onHandQuantity(item: InventoryItem, balance: number): string {
-  if (item.display_unit === compoundMassUnit) return formatQuantity(balance, item.default_unit, compoundMassUnit);
-  const amount = convertInventoryUnit(balance, item.default_unit, item.display_unit);
-  return amount == null ? 'Needs conversion' : String(Number(amount.toFixed(6)));
+function stockTotal(rows: InventoryItem[], balances: Record<string, number | null>, unit: string): number | null | undefined {
+  let total = 0;
+  for (const row of rows) {
+    const balance = balances[row.id];
+    if (balance === undefined) return undefined;
+    if (balance === null) return null;
+    const converted = convertInventoryUnit(balance, row.default_unit, unit);
+    if (converted === null) return null;
+    total += converted;
+  }
+  return total;
+}
+
+function stockQuantity(rows: InventoryItem[], balances: Record<string, number | null>, unit: string,
+  displayUnit: string): string {
+  const total = stockTotal(rows, balances, unit);
+  return total === undefined ? '—' : total === null ? 'Needs conversion' : formatStockQuantity(total, unit, displayUnit);
+}
+
+function formatStockQuantity(quantity: number, unit: string, displayUnit: string): string {
+  const converted = convertInventoryUnit(quantity, unit, displayUnit === compoundMassUnit ? 'oz' : displayUnit);
+  return converted === null ? formatQuantity(quantity, unit) : formatQuantity(converted,
+    displayUnit === compoundMassUnit ? 'oz' : displayUnit, displayUnit);
+}
+
+type StockMovement = InventoryMovement & { stock_id: string; lot_code: string | null; location_id: string | null };
+type StockTreeRow = { key: string; lotLabel: string; locationLabel: string; rows: InventoryItem[];
+  lotItem?: InventoryItem; stockItem?: InventoryItem; children?: StockTreeRow[] };
+
+function stockTree(rows: InventoryItem[]): StockTreeRow[] {
+  const lots = new Map<string, InventoryItem[]>();
+  for (const row of rows) {
+    const key = row.lot_id || 'no-lot';
+    const existing = lots.get(key) || [];
+    existing.push(row);
+    lots.set(key, existing);
+  }
+  return [...lots.entries()].map(([lotId, stockRows]) => {
+    const lotLabel = stockRows[0].lot_code ? `Lot ${stockRows[0].lot_code}` : 'Unspecified lot';
+    if (stockRows.length === 1) return { key: `stock:${stockRows[0].id}`, lotLabel,
+      locationLabel: stockRows[0].location_name || 'No location', rows: stockRows,
+      lotItem: stockRows[0], stockItem: stockRows[0] };
+    return { key: `lot:${lotId}`, lotLabel, locationLabel: '', rows: stockRows, lotItem: stockRows[0],
+      children: stockRows.map(row => ({ key: `stock:${row.id}`, lotLabel: '',
+        locationLabel: row.location_name || 'No location', rows: [row], stockItem: row })) };
+  }).sort((a, b) => a.lotLabel.localeCompare(b.lotLabel));
 }
 
 function PropertyFields({ category }: { category: string }) {
@@ -40,7 +82,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   db: LocalDb; basePath: string; accountId: string; items: InventoryItem[]; supplies: InventoryItem[]; catalog: CatalogInventory[]; preferredUnits: PreferredUnits;
   selectedId: string | null; onSelect: (id: string | null) => void; onChanged: () => Promise<void>;
 }) {
-  const [movements, setMovements] = useState<InventoryMovement[]>([]);
+  const [movements, setMovements] = useState<StockMovement[]>([]);
   const [onHand, setOnHand] = useState<Record<string, number | null>>({});
   const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [locationFilterId, setLocationFilterId] = useState<string | null>(null);
@@ -48,9 +90,12 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const [moveItemId, setMoveItemId] = useState<string | null>(null);
   const [locationReturn, setLocationReturn] = useState<'item' | 'move' | null>(null);
   const [newItemCategory, setNewItemCategory] = useState<string | null>(null);
+  const [newStockProduct, setNewStockProduct] = useState<InventoryItem | null>(null);
+  const [newStockLotCode, setNewStockLotCode] = useState<string | null | undefined>(undefined);
   const [ingredientSettingsOpen, setIngredientSettingsOpen] = useState(false);
   const [supplyProperties, setSupplyProperties] = useState<IngredientProperties>({});
   const [lotSettingsOpen, setLotSettingsOpen] = useState(false);
+  const [lotTarget, setLotTarget] = useState<InventoryItem | null>(null);
   const [lotProperties, setLotProperties] = useState<IngredientProperties>({});
   const [entryKind, setEntryKind] = useState<'purchase' | 'count' | 'discard' | null>(null);
   const [entryItemId, setEntryItemId] = useState<string | null>(null);
@@ -62,9 +107,11 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const [moveForm] = Form.useForm();
   const previousItemUnit = useRef<string | undefined>(undefined);
   const previousEntryUnit = useRef<string | undefined>(undefined);
-  const item = items.find(row => row.id === selectedId) || null;
+  const item = supplies.find(row => row.id === selectedId) || null;
+  const productRows = items.filter(row => row.supply_id === item?.id);
+  const stockTreeRows = stockTree(productRows);
   const currentIngredientProperties = ingredientProperties(item);
-  const entryItem = items.find(row => row.id === entryItemId) || item;
+  const entryItem = items.find(row => row.id === entryItemId) || null;
   const newItemUnit = Form.useWatch('default_unit', itemForm) as string | undefined;
   const newItemName = Form.useWatch('name', itemForm) as string | undefined;
   const newLotCode = Form.useWatch('lot_code', itemForm) as string | undefined;
@@ -74,27 +121,31 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const moveAll = Form.useWatch('all', moveForm) as boolean | undefined;
   const moveUnit = Form.useWatch('unit', moveForm) as string | undefined;
   const moveItem = items.find(row => row.id === moveItemId) || null;
-  const itemDisplayUnit = item?.display_unit === compoundMassUnit || item?.default_unit === 'oz' && preferredUnits.mass === compoundMassUnit
-    ? compoundMassUnit : item?.display_unit || item?.default_unit;
-  const categories = [...inventoryCategories, ...items.map(row => row.category).filter(category =>
+  const itemDisplayUnit = item?.default_unit === 'oz' && preferredUnits.mass === compoundMassUnit
+    ? compoundMassUnit : productRows[0]?.display_unit || item?.display_unit || item?.default_unit;
+  const categories = [...inventoryCategories, ...supplies.map(row => row.category).filter(category =>
     !inventoryCategories.some(known => known === category))].filter((category, index, all) => all.indexOf(category) === index);
   const activeLocationId = locations.some(location => location.id === locationFilterId) ? locationFilterId : null;
   const locationFilterLabel = inventoryLocationPath(activeLocationId, locations) || 'All locations';
   const locationFilterWidth = Math.max(18, Math.min(42, locationFilterLabel.length + 5));
   const visibleLocationIds = activeLocationId ? locationDescendantIds(activeLocationId, locations) : null;
   const visibleItems = visibleLocationIds ? items.filter(row => row.location_id && visibleLocationIds.has(row.location_id)) : items;
-  const missingCategories = categories.filter(category => !visibleItems.some(row => row.category === category));
+  const visibleSupplies = supplies.filter(row => visibleItems.some(stock => stock.supply_id === row.id));
+  const missingCategories = categories.filter(category => !visibleSupplies.some(row => row.category === category));
   const existingItem = items.find(row => row.category === newItemCategory && row.name.trim().toLocaleLowerCase() === newItemName?.trim().toLocaleLowerCase());
   const existingAtLocation = existingItem
     ? stockAtLocation(items, existingItem.name, existingItem.category, newLocationId || null, newLotCode?.trim() || null) : undefined;
   const entryDisplayUnit = entryItem?.display_unit === compoundMassUnit || entryItem?.default_unit === 'oz' && preferredUnits.mass === compoundMassUnit
     ? compoundMassUnit : entryItem?.display_unit || entryItem?.default_unit;
 
-  function openCreate(category: string) {
+  function openCreate(category: string, product?: InventoryItem, lotCode?: string | null, lockLot = false) {
     itemForm.resetFields();
-    const unit = unitForCategory(category, preferredUnits.mass);
+    const unit = product?.default_unit || unitForCategory(category, preferredUnits.mass);
     previousItemUnit.current = unit;
-    itemForm.setFieldsValue({ category, default_unit: unit, location_id: activeLocationId || undefined });
+    itemForm.setFieldsValue({ category, name: product?.name, lot_code: lotCode || undefined,
+      default_unit: unit, location_id: activeLocationId || undefined });
+    setNewStockProduct(product || null);
+    setNewStockLotCode(lockLot ? lotCode || null : undefined);
     setNewItemCategory(category);
   }
 
@@ -105,8 +156,8 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   }
 
   async function saveLotProperties(values: IngredientProperties) {
-    if (!item) return;
-    try { await updateLotIngredientProperties(db, item, values); setLotSettingsOpen(false); await onChanged(); }
+    if (!lotTarget) return;
+    try { await updateLotIngredientProperties(db, lotTarget, values); setLotSettingsOpen(false); setLotTarget(null); await onChanged(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
@@ -132,7 +183,11 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
 
   async function refreshMovements() {
     if (!selectedId) return;
-    setMovements(await listInventoryMovements(db, selectedId));
+    const rows = items.filter(row => row.supply_id === selectedId);
+    const histories = await Promise.all(rows.map(async row => (await listInventoryMovements(db, row.id))
+      .map(movement => ({ ...movement, stock_id: row.id, lot_code: row.lot_code || null,
+        location_id: row.location_id }))));
+    setMovements(histories.flat().sort((a, b) => b.at - a.at || a.id.localeCompare(b.id)));
   }
   useEffect(() => { void refreshMovements(); }, [db, selectedId, items]);
   useEffect(() => {
@@ -143,11 +198,16 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   }, [db, items]);
   useEffect(() => { void listInventoryLocations(db).then(setLocations).catch(cause => setError(String(cause))); }, [db, items]);
 
-  const balance = item ? inventoryBalance(movements, item.default_unit) : null;
+  const balance = item ? stockTotal(productRows, onHand, item.default_unit) : undefined;
 
   async function create(values: { name: string; category: string; default_unit: string;
     starting_quantity?: number; pounds?: number; ounces?: number; location_id?: string; lot_code?: string }) {
     try {
+      if (newStockProduct) {
+        values.name = newStockProduct.name;
+        values.category = newStockProduct.category;
+      }
+      if (newStockLotCode !== undefined) values.lot_code = newStockLotCode || undefined;
       const starting = quantityForStorage(values.default_unit, values.starting_quantity, values.pounds, values.ounces);
       const locationId = values.location_id || null;
       const match = stockAtLocation(items, values.name, values.category, locationId, values.lot_code?.trim() || null);
@@ -163,7 +223,8 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
           catalog.find(row => row.category === values.category && row.name === values.name)?.id || null,
           values.lot_code || null);
       }
-      setNewItemCategory(null); itemForm.resetFields(); await onChanged();
+      setNewItemCategory(null); setNewStockProduct(null); setNewStockLotCode(undefined);
+      itemForm.resetFields(); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
@@ -218,49 +279,35 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
           style={{ width: `min(100%, ${locationFilterWidth}ch)` }}
           onChange={value => setLocationFilterId(typeof value === 'string' ? value : null)} allowClear placeholder="All locations" />
       </div>}
-      {visibleItems.length > 0 && <div className="group-tables">{categories.map(category => {
-        const rows = visibleItems.filter(row => row.category === category);
+      {visibleSupplies.length > 0 && <div className="group-tables">{categories.map(category => {
+        const rows = visibleSupplies.filter(row => row.category === category);
         return rows.length ? <section key={category} className="group-table"><div className="group-table-heading"><h2>{category}</h2>
           <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label={`Add ${category.toLowerCase()}`} title={`Add ${category.toLowerCase()}`}
             onClick={() => openCreate(category)} /></div>
-          <Table<InventoryItem> dataSource={rows} rowKey="id" pagination={false} size="small" scroll={{ x: 740 }}
+          <Table<InventoryItem> dataSource={rows} rowKey="id" pagination={false} size="small" scroll={{ x: 520 }}
             columns={[{ title: 'Item', dataIndex: 'name', render: (_, row) =>
-              <a href={`${basePath}/inventory/${inventoryPathSegment(row, items)}`} onClick={event => { event.preventDefault(); onSelect(row.id); }}>{row.name}</a> },
-            { title: 'Lot', key: 'lot', width: 130, render: (_, row) => row.lot_code || '—' },
-            { title: 'Location', key: 'location', width: 190, render: (_, row) => inventoryLocationPath(row.location_id, locations) || '—' },
-            { title: 'Qty', key: 'on_hand', width: 140, align: 'right', render: (_, row) => onHand[row.id] === undefined ? '—'
-              : onHand[row.id] === null ? 'Needs conversion'
-                : onHandQuantity(row, onHand[row.id]!) },
-            { title: 'Unit', dataIndex: 'display_unit', width: 100 },
-            { title: '', key: 'actions', width: 48, align: 'right', render: (_, row) => <Dropdown trigger={['click']}
-              menu={{ items: [{ key: 'purchase', label: 'Bought' }, { key: 'count', label: 'Counted' }, { key: 'discard', label: 'Discard' }, { key: 'move', label: 'Move' }],
-                onClick: ({ key }) => key === 'move' ? setMoveItemId(row.id) : void openEntry(row, key as 'purchase' | 'count' | 'discard') }}>
-              <Button type="text" shape="circle" icon={<MoreOutlined />} aria-label={`Actions for ${row.name}`} />
-            </Dropdown> }]} /></section> : null;
+              <a href={`${basePath}/inventory/${inventoryPathSegment(row, supplies)}`} onClick={event => { event.preventDefault(); onSelect(row.id); }}>{row.name}</a> },
+            { title: 'Lots', key: 'lots', width: 90, render: (_, row) => new Set(visibleItems.filter(stock => stock.supply_id === row.id)
+              .map(stock => stock.lot_id || stock.id)).size },
+            { title: 'On hand', key: 'on_hand', width: 170, align: 'right', render: (_, row) => stockQuantity(
+              visibleItems.filter(stock => stock.supply_id === row.id), onHand, row.default_unit,
+              row.default_unit === 'oz' && preferredUnits.mass === compoundMassUnit ? compoundMassUnit
+                : visibleItems.find(stock => stock.supply_id === row.id)?.display_unit || row.default_unit) }]} /></section> : null;
       })}</div>}
       {missingCategories.length > 0 && <p className="inventory-add-types">Add {missingCategories.map((category, index) =>
         <span key={category}>{index > 0 && (index === missingCategories.length - 1 ? missingCategories.length === 2 ? ' or ' : ', or ' : ', ')}
           <a href={`${basePath}/inventory`} onClick={event => { event.preventDefault(); openCreate(category); }}>{category.toLowerCase()}</a></span>)}.</p>}
     </section> : !item ? <Empty description="Inventory item not found" /> : <section className="record-detail">
         <div className="content-heading"><div><span className="eyebrow">{item.category}</span><h2>{item.name}</h2>
-          <p className="muted">{item.lot_code ? `Lot ${item.lot_code} · ` : ''}{item.location_id ? `${inventoryLocationPath(item.location_id, locations)} · ` : ''}{balance == null ? 'Balance needs unit conversion'
-            : `${formatQuantity(balance ?? 0, item.default_unit, itemDisplayUnit)} estimated on hand`}</p></div>
+          <p className="muted">{balance === undefined ? 'Calculating stock' : balance === null ? 'Balance needs unit conversion'
+            : `${formatStockQuantity(balance, item.default_unit, itemDisplayUnit || item.default_unit)} estimated on hand`}</p></div>
           <div className="heading-actions">{['Grain', 'Adjunct', 'Hops', 'Yeast'].includes(item.category) &&
-            <Button type="text" shape="circle" icon={<SettingOutlined />} aria-label="Ingredient properties"
-              title="Supply properties" onClick={() => {
+            <Button icon={<SettingOutlined />} onClick={() => {
                 setError(''); void supplyIngredientProperties(db, item).then(values => {
                   setSupplyProperties(values); setIngredientSettingsOpen(true);
                 }).catch(cause => setError(String(cause)));
-              }} />}
-            {['Grain', 'Adjunct', 'Hops', 'Yeast'].includes(item.category) &&
-              <Button type="text" aria-label="Lot properties" onClick={() => {
-                void lotIngredientProperties(db, item).then(values => { setLotProperties(values); setLotSettingsOpen(true); })
-                  .catch(cause => setError(String(cause)));
-              }}>Lot properties</Button>}
-            <Button onClick={() => void openEntry(item, 'purchase')}>Bought some</Button>
-            <Button onClick={() => void openEntry(item, 'discard')}>Discard</Button>
-            <Button onClick={() => setMoveItemId(item.id)}>Move stock</Button>
-            <Button type="primary" onClick={() => void openEntry(item, 'count')}>Count stock</Button></div></div>
+              }}>Supply properties</Button>}
+            <Button type="primary" onClick={() => openCreate(item.category, item)}>Add stock</Button></div></div>
         {Object.keys(currentIngredientProperties).length > 0 && <p className="muted">{[
           currentIngredientProperties.yield_pct != null && `Yield ${currentIngredientProperties.yield_pct}%`,
           currentIngredientProperties.color_lovibond != null && `Color ${currentIngredientProperties.color_lovibond} °L`,
@@ -268,13 +315,44 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
           currentIngredientProperties.hop_form && `${currentIngredientProperties.hop_form} hops`,
           currentIngredientProperties.attenuation_pct != null && `Attenuation ${currentIngredientProperties.attenuation_pct}%`
         ].filter(Boolean).join(' · ')}</p>}
+        <h3>Lots and locations</h3>
+        <Table<StockTreeRow> key={`${item.id}:${stockTreeRows.filter(row => row.children).map(row => row.key).join(',')}`}
+          dataSource={stockTreeRows} rowKey="key" pagination={false} size="small"
+          defaultExpandAllRows scroll={{ x: 620 }}
+          columns={[{ title: 'Lot', dataIndex: 'lotLabel' },
+          { title: 'Location', key: 'location', render: (_, row) => row.stockItem
+            ? inventoryLocationPath(row.stockItem.location_id, locations) || 'No location' : '' },
+          { title: 'On hand', key: 'on_hand', width: 170, align: 'right', render: (_, row) =>
+            stockQuantity(row.rows, onHand, item.default_unit, itemDisplayUnit || item.default_unit) },
+          { title: '', key: 'actions', width: 60, align: 'right', render: (_, row) => <Dropdown trigger={['click']}
+            menu={{ items: [
+              ...(row.lotItem && ['Grain', 'Adjunct', 'Hops', 'Yeast'].includes(item.category)
+                ? [{ key: 'lot', label: 'Edit lot properties' }] : []),
+              ...(row.lotItem ? [{ key: 'add', label: 'Add stock' }] : []),
+              ...(row.stockItem ? [{ key: 'purchase', label: 'Bought' }, { key: 'count', label: 'Counted' },
+                { key: 'discard', label: 'Discard' }, { key: 'move', label: 'Move' }] : [])],
+            onClick: ({ key }) => {
+              if (key === 'lot' && row.lotItem) {
+                setLotTarget(row.lotItem);
+                void lotIngredientProperties(db, row.lotItem).then(values => {
+                  setLotProperties(values); setLotSettingsOpen(true);
+                }).catch(cause => setError(String(cause)));
+              } else if (key === 'add' && row.lotItem) openCreate(item.category, item, row.lotItem.lot_code, true);
+              else if (key === 'move' && row.stockItem) setMoveItemId(row.stockItem.id);
+              else if (row.stockItem) void openEntry(row.stockItem, key as 'purchase' | 'count' | 'discard');
+            } }}>
+            <Button type="text" shape="circle" icon={<MoreOutlined />}
+              aria-label={`Actions for ${row.lotLabel || row.locationLabel}`} />
+          </Dropdown> }]} />
         {movements.length > 0 && <><h3>Stock history</h3>
-        <Table<InventoryMovement> className="inventory-history" dataSource={movements} rowKey={row => `${row.kind}-${row.id}`}
-          pagination={false} size="small" scroll={{ x: 480 }}
+        <Table<StockMovement> className="inventory-history" dataSource={movements} rowKey={row => `${row.stock_id}-${row.kind}-${row.id}`}
+          pagination={false} size="small" scroll={{ x: 650 }}
           columns={[{ title: 'When', dataIndex: 'at', width: 190, render: at => formatTime(at) },
             { title: 'Activity', dataIndex: 'kind', width: 120 },
+            { title: 'Lot', key: 'lot', render: (_, row) => row.lot_code || 'Unspecified' },
+            { title: 'Location', key: 'location', render: (_, row) => inventoryLocationPath(row.location_id, locations) || 'No location' },
             { title: 'Quantity', key: 'quantity', align: 'right', render: (_, row) =>
-              `${row.kind === 'Purchased' || row.kind === 'Moved in' ? '+' : row.kind === 'Used' || row.kind === 'Discarded' || row.kind === 'Moved out' ? '−' : 'Set to '}${formatQuantity(row.quantity, row.unit, itemDisplayUnit)}` }]} /></>}
+              `${row.kind === 'Purchased' || row.kind === 'Moved in' ? '+' : row.kind === 'Used' || row.kind === 'Discarded' || row.kind === 'Moved out' ? '−' : 'Set to '}${formatStockQuantity(row.quantity, row.unit, itemDisplayUnit || row.unit)}` }]} /></>}
       </section>}
     <Modal title={item ? `${item.name} supply defaults` : 'Supply defaults'} open={ingredientSettingsOpen}
       onCancel={() => setIngredientSettingsOpen(false)} footer={null} destroyOnHidden>
@@ -284,21 +362,22 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
         <Button type="primary" htmlType="submit">Save properties</Button>
       </Form>
     </Modal>
-    <Modal title={item ? `${item.name} lot properties` : 'Lot properties'} open={lotSettingsOpen}
-      onCancel={() => setLotSettingsOpen(false)} footer={null} destroyOnHidden>
+    <Modal title={lotTarget ? `${lotTarget.lot_code ? `Lot ${lotTarget.lot_code}` : 'Unspecified lot'} properties` : 'Lot properties'} open={lotSettingsOpen}
+      onCancel={() => { setLotSettingsOpen(false); setLotTarget(null); }} footer={null} destroyOnHidden>
       <p className="muted">Set values specific to this lot. Leave a value empty to use the supply or catalog default.</p>
-      <Form key={`${item?.lot_id}:lot:${lotSettingsOpen}`} layout="vertical" initialValues={lotProperties} onFinish={saveLotProperties}>
-        <PropertyFields category={item?.category || ''} />
+      <Form key={`${lotTarget?.lot_id}:lot:${lotSettingsOpen}`} layout="vertical" initialValues={lotProperties} onFinish={saveLotProperties}>
+        <PropertyFields category={lotTarget?.category || ''} />
         <Button type="primary" htmlType="submit">Save lot properties</Button>
       </Form>
     </Modal>
-    <Modal title={newItemCategory ? `New ${newItemCategory.toLowerCase()} item` : 'New inventory item'} open={!!newItemCategory}
-      onCancel={() => setNewItemCategory(null)} footer={null} destroyOnHidden>
+    <Modal title={newStockProduct ? `Add ${newStockProduct.name} stock` : newItemCategory
+      ? `New ${newItemCategory.toLowerCase()} item` : 'New inventory item'} open={!!newItemCategory}
+      onCancel={() => { setNewItemCategory(null); setNewStockProduct(null); setNewStockLotCode(undefined); }} footer={null} destroyOnHidden>
       {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
       <Form form={itemForm} layout="vertical" onFinish={create}>
         <Form.Item name="category" hidden><Input /></Form.Item>
         <Form.Item name="name" label="Item" rules={[{ required: true, whitespace: true }]}>
-          <AutoComplete placeholder="Search supplies or enter an item" maxLength={120}
+          <AutoComplete placeholder="Search supplies or enter an item" maxLength={120} disabled={!!newStockProduct}
             options={[
               ...supplies.filter(row => row.category === newItemCategory).map(row => ({ value: row.name, label: `${row.name} · Your supplies` })),
               ...catalog.filter(row => row.category === newItemCategory && !supplies.some(owned =>
@@ -321,7 +400,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
         }}>
           <LocationTreeSelect locations={locations} includeCreate allowClear placeholder="Choose a location" />
         </Form.Item>
-        <Form.Item name="lot_code" label="Lot code (optional)"><Input maxLength={80} /></Form.Item>
+        <Form.Item name="lot_code" label="Lot code (optional)"><Input maxLength={80} disabled={newStockLotCode !== undefined} /></Form.Item>
         <Form.Item name="default_unit" label="Unit" rules={[{ required: true }]}>
           <Select showSearch options={unitOptions(quantityUnitsForCategory(newItemCategory || 'Other'))}
             onChange={unit => { changeQuantityUnit(itemForm, previousItemUnit.current, unit, 'starting_quantity'); previousItemUnit.current = unit; }} /></Form.Item>

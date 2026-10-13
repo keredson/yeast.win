@@ -32,8 +32,8 @@ function LocationCards({ parentId, locations, items, basePath, onSelect, visited
   })}</div>;
 }
 
-export function LocationsSection({ db, basePath, locations, items, selectedId, onSelect, onInventorySelect, onChanged }: {
-  db: LocalDb; basePath: string; locations: InventoryLocation[]; items: InventoryItem[];
+export function LocationsSection({ db, basePath, locations, items, supplies, selectedId, onSelect, onInventorySelect, onChanged }: {
+  db: LocalDb; basePath: string; locations: InventoryLocation[]; items: InventoryItem[]; supplies: InventoryItem[];
   selectedId: string | null; onSelect: (id: string | null) => void; onInventorySelect: (id: string) => void;
   onChanged: () => Promise<void>;
 }) {
@@ -87,14 +87,15 @@ export function LocationsSection({ db, basePath, locations, items, selectedId, o
   }
 
   const stockRows = (rows: InventoryItem[]) => <div className="location-stock-list">{rows.map(item => {
+    const supply = supplies.find(row => row.id === item.supply_id);
     const balance = balances[item.id];
     const converted = balance == null || item.display_unit === compoundMassUnit ? balance
       : convertInventoryUnit(balance, item.default_unit, item.display_unit);
     const displayed = converted == null ? converted === null ? 'Needs conversion' : '—'
       : formatQuantity(converted, item.display_unit === compoundMassUnit ? item.default_unit : item.display_unit,
         item.display_unit === compoundMassUnit ? compoundMassUnit : undefined);
-    return <a key={item.id} href={`${basePath}/inventory/${inventoryPathSegment(item, items)}`}
-      onClick={event => { event.preventDefault(); onInventorySelect(item.id); }}>
+    return <a key={item.id} href={`${basePath}/inventory/${supply ? inventoryPathSegment(supply, supplies) : item.id}`}
+      onClick={event => { event.preventDefault(); onInventorySelect(supply?.id || item.id); }}>
       <span>{item.name}</span><small>{displayed}</small>
     </a>;
   })}</div>;
