@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { join, resolve } from 'node:path';
 import { catalogModelTables, catalogInventoryTable, catalogSchemaVersion,
   catalogTables, initialCatalogEquipment, initialCatalogInventory,
-  vevorModelName,
+  antonPaarEquipment, vevorModelName,
   type CatalogChanges, type CatalogEquipment, type CatalogInventory } from '../shared/catalog.ts';
 import { boilOffKinds, vesselKinds } from '../shared/equipment.ts';
 import { encodeChange, type SqlChangeRow } from '../shared/wire.ts';
@@ -21,7 +21,31 @@ export function openCatalogDb(dataDir: string): Database.Database {
     db.close();
     throw new Error(`This server cannot open catalog version ${version}; update Brewlog first.`);
   }
-  if (version < catalogSchemaVersion) {
+  if (version === 11) {
+    db.transaction(() => {
+      const addModel = db.prepare(`INSERT INTO equipment_models(id, manufacturer, model_name, kind)
+        VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`);
+      const addChannel = db.prepare(`INSERT INTO model_measurement_channels
+        (id, model_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`);
+      const channelKinds: Record<string, string> = { hydrometer: 'gravity', refractometer: 'gravity',
+        carbonation_meter: 'carbonation', dissolved_oxygen_meter: 'dissolved_oxygen' };
+      for (const item of antonPaarEquipment) {
+        if (!addModel.run(item.id, item.manufacturer ?? null, item.name, item.kind).changes) continue;
+        const scale = ['SG', '°Plato', '°Brix'].includes(item.measurement_unit || '')
+          ? item.measurement_unit : null;
+        addChannel.run(`${item.id}:${channelKinds[item.kind]}`, item.id, channelKinds[item.kind],
+          item.measurement_min ?? null, item.measurement_max ?? null,
+          scale ? null : item.measurement_unit ?? null, scale);
+        for (const channel of item.measurement_channels || []) {
+          addChannel.run(channel.id, item.id, channel.measurement_kind,
+            channel.measurement_min ?? null, channel.measurement_max ?? null,
+            channel.measurement_unit ?? null, channel.measurement_scale ?? null);
+        }
+      }
+      db.pragma(`user_version = ${catalogSchemaVersion}`);
+    })();
+  } else if (version < catalogSchemaVersion) {
     const hasLegacyMeta = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'catalog_meta'").get();
     const legacyVersion = hasLegacyMeta
       ? (db.prepare('SELECT version FROM catalog_meta LIMIT 1').get() as { version: number } | undefined)?.version : undefined;
@@ -73,6 +97,11 @@ export function openCatalogDb(dataDir: string): Database.Database {
             ? item.measurement_unit : null;
           addChannel.run(`${item.id}:${kind}`, item.id, kind, item.measurement_min ?? null,
             item.measurement_max ?? null, scale ? null : item.measurement_unit ?? null, scale);
+        }
+        for (const channel of item.measurement_channels || []) {
+          addChannel.run(channel.id, item.id, channel.measurement_kind,
+            channel.measurement_min ?? null, channel.measurement_max ?? null,
+            channel.measurement_unit ?? null, channel.measurement_scale ?? null);
         }
         if (['equipment_tilt', 'equipment_rapt_pill'].includes(item.id)) {
           addChannel.run(`${item.id}:temperature`, item.id, 'temperature', null, null, '°C', null);
