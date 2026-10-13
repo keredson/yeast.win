@@ -72,6 +72,76 @@ function measurementColumns(extra = ''): string {
 }
 
 export const replicatedTables = Object.keys(definitions);
+export const workspaceTableColumns: Record<string, string[]> = Object.fromEntries(
+  Object.entries(definitions).map(([table, columns]) => [table,
+    columns.split(',').map(column => column.trim().split(/\s+/)[0])])
+);
+
+export function legacyEquipmentCopyStatements(columns: string[]): string[] {
+  const has = (...names: string[]) => names.every(name => columns.includes(name));
+  const statements: string[] = [];
+  const copy = (needed: string[], statement: string) => { if (has(...needed)) statements.push(statement); };
+  copy(['capacity_liters'], `INSERT OR IGNORE INTO equipment_liquid_containment(equipment_id, capacity_liters)
+    SELECT id, capacity_liters FROM equipment_legacy_migration WHERE capacity_liters IS NOT NULL`);
+  copy(['max_pressure_kpa'], `INSERT OR IGNORE INTO equipment_pressure_rating(equipment_id, max_pressure_kpa)
+    SELECT id, max_pressure_kpa FROM equipment_legacy_migration WHERE max_pressure_kpa IS NOT NULL`);
+  copy(['rated_power_watts'], `INSERT OR IGNORE INTO equipment_heating(equipment_id, rated_power_watts)
+    SELECT id, rated_power_watts FROM equipment_legacy_migration
+    WHERE rated_power_watts IS NOT NULL OR kind IN ('electric_kettle', 'all_in_one')`);
+  if (has('built_in_temperature_control')) statements.push(`INSERT OR IGNORE INTO equipment_temperature_control(equipment_id)
+    SELECT id FROM equipment_legacy_migration
+    WHERE built_in_temperature_control = 1 OR kind IN ('electric_kettle', 'all_in_one', 'fermentation_temperature_control')`);
+  copy(['measurement_min', 'measurement_max', 'measurement_unit'], `INSERT OR IGNORE INTO equipment_measurement_channels
+    (id, equipment_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
+    SELECT id || ':' || CASE
+      WHEN kind IN ('hydrometer', 'refractometer') THEN 'gravity'
+      WHEN kind = 'thermometer' THEN 'temperature'
+      WHEN kind = 'ph_meter' THEN 'ph'
+      WHEN kind = 'pressure_gauge' THEN 'pressure'
+      WHEN kind = 'carbonation_meter' THEN 'carbonation'
+      WHEN kind = 'dissolved_oxygen_meter' THEN 'dissolved_oxygen'
+      WHEN kind = 'scale' THEN 'mass' END,
+      id, CASE
+      WHEN kind IN ('hydrometer', 'refractometer') THEN 'gravity'
+      WHEN kind = 'thermometer' THEN 'temperature'
+      WHEN kind = 'ph_meter' THEN 'ph'
+      WHEN kind = 'pressure_gauge' THEN 'pressure'
+      WHEN kind = 'carbonation_meter' THEN 'carbonation'
+      WHEN kind = 'dissolved_oxygen_meter' THEN 'dissolved_oxygen'
+      WHEN kind = 'scale' THEN 'mass' END,
+      measurement_min, measurement_max,
+      CASE WHEN measurement_unit IN ('SG', '°Plato', '°Brix', 'pH') THEN NULL ELSE measurement_unit END,
+      CASE WHEN measurement_unit IN ('SG', '°Plato', '°Brix', 'pH') THEN measurement_unit ELSE NULL END
+    FROM equipment_legacy_migration WHERE kind IN ('hydrometer', 'refractometer', 'thermometer', 'ph_meter',
+      'pressure_gauge', 'carbonation_meter', 'dissolved_oxygen_meter', 'scale')`);
+  copy(['boil_heat_loss_watts'], `INSERT OR IGNORE INTO equipment_boil_calibration(equipment_id, heat_loss_watts)
+    SELECT id, boil_heat_loss_watts FROM equipment_legacy_migration WHERE boil_heat_loss_watts IS NOT NULL`);
+  copy(['temperature_offset_c'], `INSERT OR IGNORE INTO equipment_temperature_calibration(equipment_id, offset_c)
+    SELECT id, temperature_offset_c FROM equipment_legacy_migration WHERE temperature_offset_c IS NOT NULL`);
+  const assumptions = ['mash_efficiency_pct', 'grain_absorption_l_per_kg', 'mash_deadspace_liters', 'kettle_retention_liters'];
+  if (has(...assumptions)) statements.push(`INSERT OR IGNORE INTO equipment_mash_assumptions
+    (equipment_id, ${assumptions.join(', ')}) SELECT id, ${assumptions.join(', ')} FROM equipment_legacy_migration
+    WHERE ${assumptions.map(column => `${column} IS NOT NULL`).join(' OR ')}`);
+  const readings: [string, string, string, string][] = [
+    ['ph_meter', 'ph', '4', 'buffer_4_observed'], ['ph_meter', 'ph', '7', 'buffer_7_observed'],
+    ['hydrometer', 'gravity', 'reference_sg', 'observed_sg'],
+    ['refractometer', 'gravity', 'reference_brix', 'observed_brix'],
+    ['scale', 'mass', 'reference_g', 'observed_g'],
+    ['pressure_gauge', 'pressure', 'reference_kpa', 'observed_kpa'],
+    ['carbonation_meter', 'carbonation', 'reference_volumes', 'observed_volumes'],
+    ['dissolved_oxygen_meter', 'dissolved_oxygen', 'reference_mg_l', 'observed_mg_l']
+  ];
+  for (const [kind, measurement, reference, observed] of readings) {
+    const referenceIsColumn = !['4', '7'].includes(reference);
+    if (!has(observed) || referenceIsColumn && !has(reference)) continue;
+    statements.push(`INSERT OR IGNORE INTO equipment_measurement_calibration_points
+      (id, equipment_id, measurement_kind, reference_value, observed_value)
+      SELECT id || ':${measurement}:${referenceIsColumn ? 'reference' : reference}', id, '${measurement}',
+        ${reference}, ${observed} FROM equipment_legacy_migration
+      WHERE kind = '${kind}' AND ${observed} IS NOT NULL${referenceIsColumn ? ` AND ${reference} IS NOT NULL` : ''}`);
+  }
+  return statements;
+}
 export const schemaStatements = Object.entries(definitions).map(
   // CR-SQLite permits NOT NULL on the primary key, but requires a DEFAULT for
   // other NOT NULL columns so older peers can accept newly added fields.
@@ -120,7 +190,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 18;
+export const workspaceSchemaVersion = 19;
 export const retiredReplicatedTables = ['equipment_calibrations', 'equipment_characterization_observations'] as const;
 
 export function isValidId(value: unknown): value is string {

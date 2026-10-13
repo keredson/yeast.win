@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nanoid } from 'nanoid';
-import { indexStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements, workspaceSchemaVersion } from '../shared/schema.ts';
+import { indexStatements, legacyEquipmentCopyStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements,
+  workspaceSchemaVersion, workspaceTableColumns } from '../shared/schema.ts';
 
 export const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const envPath = resolve(projectRoot, '.env');
@@ -149,30 +150,11 @@ export function openWorkspaceDb(id: string): Database.Database {
   const legacyVersion = hasLegacyMeta
     ? (db.prepare('SELECT version FROM schema_meta LIMIT 1').get() as { version: number } | undefined)?.version : undefined;
   const version = storedVersion || legacyVersion || 0;
-  if (version === 0) {
+  const hasWorkspaceTables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+    .all() as { name: string }[]).some(row => replicatedTables.includes(row.name));
+  if (version === 0 && !hasWorkspaceTables) {
     db.exec('BEGIN');
     try {
-      for (const statement of schemaStatements) db.exec(statement);
-      for (const table of replicatedTables) db.prepare('SELECT crsql_as_crr(?)').get(table);
-      for (const statement of indexStatements) db.exec(statement);
-      if (hasLegacyMeta) db.exec('DROP TABLE schema_meta');
-      db.pragma(`user_version = ${workspaceSchemaVersion}`);
-      db.exec('COMMIT');
-    } catch (error) {
-      if (db.inTransaction) db.exec('ROLLBACK');
-      db.close();
-      throw error;
-    }
-  } else if (version < workspaceSchemaVersion) {
-    db.exec('BEGIN');
-    try {
-      // Pre-release capability split resets workspace data and CR-SQLite history.
-      for (const table of [...replicatedTables, ...retiredReplicatedTables]) {
-        const exists = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
-        if (!exists) continue;
-        db.prepare('SELECT crsql_as_table(?)').get(table);
-        db.exec(`DROP TABLE "${table}"`);
-      }
       for (const statement of schemaStatements) db.exec(statement);
       for (const table of replicatedTables) db.prepare('SELECT crsql_as_crr(?)').get(table);
       for (const statement of indexStatements) db.exec(statement);
@@ -187,22 +169,61 @@ export function openWorkspaceDb(id: string): Database.Database {
   } else if (version > workspaceSchemaVersion) {
     db.close();
     throw new Error(`This server cannot open workspace schema ${version}; update Brewlog first.`);
-  } else if (hasLegacyMeta || storedVersion !== workspaceSchemaVersion) {
-    db.transaction(() => {
+  } else {
+    db.exec('BEGIN');
+    try {
+      const existing = new Set((db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .all() as { name: string }[]).map(row => row.name));
+      for (const [index, table] of replicatedTables.entries()) {
+        const expected = workspaceTableColumns[table];
+        if (existing.has(table)) {
+          const actual = (db.pragma(`table_info("${table}")`) as { name: string }[]).map(row => row.name);
+          if (actual.join(',') === expected.join(',')) {
+            if (!existing.has(`${table}__crsql_clock`)) db.prepare('SELECT crsql_as_crr(?)').get(table);
+            continue;
+          }
+          const common = expected.filter(column => actual.includes(column));
+          const snapshot = `migration_${table}`;
+          if (table === 'equipment' && actual.some(column => !expected.includes(column))
+            && !existing.has('equipment_legacy_migration')) {
+            db.exec('CREATE TABLE equipment_legacy_migration AS SELECT * FROM equipment');
+          }
+          if (common.length) db.exec(`CREATE TEMP TABLE "${snapshot}" AS SELECT ${common.join(', ')} FROM "${table}"`);
+          if (existing.has(`${table}__crsql_clock`)) db.prepare('SELECT crsql_as_table(?)').get(table);
+          db.exec(`DROP TABLE "${table}"`);
+          db.exec(schemaStatements[index]);
+          db.prepare('SELECT crsql_as_crr(?)').get(table);
+          if (common.length) {
+            db.exec(`INSERT INTO "${table}" (${common.join(', ')}) SELECT ${common.join(', ')} FROM "${snapshot}"`);
+            db.exec(`DROP TABLE "${snapshot}"`);
+          }
+        } else {
+          db.exec(schemaStatements[index]);
+          db.prepare('SELECT crsql_as_crr(?)').get(table);
+        }
+      }
+      for (const table of retiredReplicatedTables) if (existing.has(table)) {
+        if (existing.has(`${table}__crsql_clock`)) db.prepare('SELECT crsql_as_table(?)').get(table);
+        db.exec(`DROP TABLE "${table}"`);
+      }
+      for (const statement of indexStatements) db.exec(statement);
       if (hasLegacyMeta) db.exec('DROP TABLE schema_meta');
       db.pragma(`user_version = ${workspaceSchemaVersion}`);
+      db.exec('COMMIT');
+    } catch (error) {
+      if (db.inTransaction) db.exec('ROLLBACK');
+      db.close();
+      throw error;
+    }
+  }
+  if (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'equipment_legacy_migration'").get()) {
+    db.transaction(() => {
+      const columns = (db.pragma('table_info(equipment_legacy_migration)') as { name: string }[])
+        .map(row => row.name);
+      for (const statement of legacyEquipmentCopyStatements(columns)) db.exec(statement);
+      db.exec('DROP TABLE equipment_legacy_migration');
     })();
   }
-  const present = new Set((db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
-    .all() as { name: string }[]).map(row => row.name));
-  const missing = replicatedTables.filter(table => !present.has(table));
-  if (missing.length) db.transaction(() => {
-    for (const table of missing) {
-      db.exec(schemaStatements[replicatedTables.indexOf(table)]);
-      db.prepare('SELECT crsql_as_crr(?)').get(table);
-    }
-    for (const statement of indexStatements) db.exec(statement);
-  })();
   const catalogPath = join(dataDir, 'catalog.sqlite');
   if (existsSync(catalogPath)) db.prepare('ATTACH DATABASE ? AS catalog').run(catalogPath);
   return db;
