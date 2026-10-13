@@ -82,6 +82,9 @@ export function openLocalCatalog(): Promise<DB> {
         const clock = await tx.execO<{ name: string }>(
           "SELECT name FROM sqlite_master WHERE name = 'manufacturers__crsql_clock'");
         if (!clock.length) await tx.exec("SELECT crsql_as_crr('manufacturers')");
+        const syncState = await tx.execO<{ name: string }>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sync_state'");
+        if (syncState.length) await tx.exec("DELETE FROM sync_state WHERE key = 'lastRefreshAt'");
         await tx.exec(`PRAGMA user_version = ${catalogSchemaVersion}`);
       });
     }
