@@ -60,6 +60,8 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
   const categories = [...inventoryCategories, ...items.map(row => row.category).filter(category =>
     !inventoryCategories.some(known => known === category))].filter((category, index, all) => all.indexOf(category) === index);
   const activeLocationId = locations.some(location => location.id === locationFilterId) ? locationFilterId : null;
+  const locationFilterLabel = inventoryLocationPath(activeLocationId, locations) || 'All locations';
+  const locationFilterWidth = Math.max(18, Math.min(42, locationFilterLabel.length + 5));
   const visibleLocationIds = activeLocationId ? locationDescendantIds(activeLocationId, locations) : null;
   const visibleItems = visibleLocationIds ? items.filter(row => row.location_id && visibleLocationIds.has(row.location_id)) : items;
   const missingCategories = categories.filter(category => !visibleItems.some(row => row.category === category));
@@ -186,6 +188,7 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
       <p className="muted">Purchases, uses from batches, and physical counts.</p>
       {locations.length > 0 && <div className="inventory-filter"><label htmlFor="inventory-location-filter">Location</label>
         <LocationTreeSelect id="inventory-location-filter" locations={locations} value={activeLocationId}
+          style={{ width: `min(100%, ${locationFilterWidth}ch)` }}
           onChange={value => setLocationFilterId(typeof value === 'string' ? value : null)} allowClear placeholder="All locations" />
       </div>}
       {visibleItems.length > 0 && <div className="group-tables">{categories.map(category => {
