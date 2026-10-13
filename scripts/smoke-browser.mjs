@@ -303,8 +303,44 @@ try {
   if (await catalogEquipmentDialog.getByRole('spinbutton', { name: 'Capacity (optional)' }).inputValue() !== '35') {
     throw new Error('Catalog capacity was not copied');
   }
+  if (await catalogEquipmentDialog.getByRole('checkbox', { name: 'Cooling' }).count()
+    || await catalogEquipmentDialog.getByRole('spinbutton', { name: 'Rated heat removal (W, optional)' }).count()) {
+    throw new Error('VEVOR import offered cooling without a model cooling capability');
+  }
   await catalogEquipmentDialog.getByRole('button', { name: 'Create equipment' }).click();
   await page.getByText('Capacity: 35 L').waitFor();
+  if (await page.getByText(/^Cooling:/).count()) throw new Error('VEVOR detail invented a cooling capability');
+  await page.getByRole('button', { name: 'Edit thermal capabilities' }).click();
+  const vevorThermalDialog = page.getByRole('dialog', { name: 'Thermal capabilities' });
+  if (await vevorThermalDialog.getByRole('checkbox', { name: 'Cooling' }).count()
+    || await vevorThermalDialog.getByRole('spinbutton', { name: 'Rated heat removal (W)' }).count()) {
+    throw new Error('VEVOR edit offered cooling without a model cooling capability');
+  }
+  await vevorThermalDialog.locator('.ant-modal-close').click();
+  await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
+  await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
+  await page.waitForURL('**/equipment');
+  await chooseEquipmentType(page, 'Define equipment', 'Passive vessels', 'Fermenter');
+  const basicFermenterDialog = page.getByRole('dialog', { name: 'Add fermenter' });
+  await basicFermenterDialog.getByRole('textbox', { name: 'Name' }).fill('Basic smoke fermenter');
+  await basicFermenterDialog.getByRole('button', { name: 'Create equipment' }).click();
+  await page.getByRole('heading', { name: 'Basic smoke fermenter' }).waitFor();
+  if (await page.getByText(/^Temperature range:/).count()) throw new Error('Basic fermenter started with temperature control');
+  await page.getByRole('button', { name: 'Add capability' }).click();
+  await page.getByRole('menuitem', { name: 'Temperature control' }).click();
+  const addedControlDialog = page.getByRole('dialog', { name: 'Add Temperature control' });
+  await addedControlDialog.getByRole('spinbutton', { name: 'Minimum temperature (°C)' }).fill('0');
+  await addedControlDialog.getByRole('spinbutton', { name: 'Maximum temperature (°C)' }).fill('30');
+  await addedControlDialog.getByRole('button', { name: 'Add capability' }).click();
+  await page.getByText('Temperature range: 0–30 °C').waitFor();
+  await page.getByRole('button', { name: 'Edit thermal capabilities' }).click();
+  const addedControlEditDialog = page.getByRole('dialog', { name: 'Thermal capabilities' });
+  if (await addedControlEditDialog.getByRole('checkbox', { name: 'Cooling' }).count()) {
+    throw new Error('Temperature control invented a cooling capability');
+  }
+  await addedControlEditDialog.getByRole('spinbutton', { name: 'Maximum temperature (°C)' }).fill('32');
+  await addedControlEditDialog.getByRole('button', { name: 'Save capabilities' }).click();
+  await page.getByText('Temperature range: 0–32 °C').waitFor();
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
   await page.waitForURL('**/equipment');

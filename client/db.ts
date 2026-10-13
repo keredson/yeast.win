@@ -1092,8 +1092,10 @@ export async function createEquipment(db: DB, name: string, kind: string, catalo
       await putEquipmentCapability(tx, 'equipment_liquid_containment', id,
         { capacity_liters: changed('capacity_liters') ? overrides.capacity_liters : null });
     }
-    if (changed('max_pressure_kpa')) await putEquipmentCapability(tx, 'equipment_pressure_rating', id,
-      { max_pressure_kpa: overrides.max_pressure_kpa });
+    if (changed('max_pressure_kpa') || !catalogModel && kind === 'fermenter') {
+      await putEquipmentCapability(tx, 'equipment_pressure_rating', id,
+        { max_pressure_kpa: overrides.max_pressure_kpa });
+    }
     if ((!catalogModel && boilOffKinds.has(kind)) || overrides.has_heating && !catalogModel?.has_heating
       || changed('rated_power_watts')) {
       await putEquipmentCapability(tx, 'equipment_heating', id,
@@ -1125,7 +1127,7 @@ export async function createEquipment(db: DB, name: string, kind: string, catalo
     }
     for (const [channelKind, range] of Object.entries(channelRanges)) {
       const modelChannel = catalogModel?.measurement_channels?.find(channel => channel.measurement_kind === channelKind);
-      if (!modelChannel || channelKind === measurementKind) throw new Error('Unknown equipment measurement channel');
+      if (!modelChannel) throw new Error('Unknown equipment measurement channel');
       const scale = ['SG', '°Plato', '°Brix', 'pH'].includes(range.unit) ? range.unit : null;
       await tx.exec(`INSERT INTO equipment_measurement_channels
         (id, equipment_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
@@ -1139,24 +1141,6 @@ export async function createEquipment(db: DB, name: string, kind: string, catalo
   return id;
 }
 
-export async function updateFermenterCapabilities(db: DB, item: Equipment,
-  builtInTemperatureControl: boolean, maxPressureKpa: number | null): Promise<void> {
-  if (item.kind !== 'fermenter') throw new Error('These settings apply only to fermenters');
-  if (maxPressureKpa != null && (!Number.isFinite(maxPressureKpa) || maxPressureKpa <= 0)) {
-    throw new Error('Enter a positive pressure rating');
-  }
-  await db.tx(async tx => {
-    if (builtInTemperatureControl) await putEquipmentCapability(tx, 'equipment_temperature_control', item.id,
-      { min_temperature_c: item.min_temperature_c === item.catalog_model?.min_temperature_c
-        ? null : item.min_temperature_c,
-      max_temperature_c: item.max_temperature_c === item.catalog_model?.max_temperature_c
-        ? null : item.max_temperature_c });
-    else if (!item.catalog_model_id) await tx.exec('DELETE FROM equipment_temperature_control WHERE equipment_id = ?', [item.id]);
-    await putEquipmentCapability(tx, 'equipment_pressure_rating', item.id,
-      { max_pressure_kpa: maxPressureKpa === item.catalog_model?.max_pressure_kpa ? null : maxPressureKpa });
-  });
-}
-
 export async function updateEquipmentCapacity(db: DB, item: Equipment, capacityLiters: number | null): Promise<void> {
   await putEquipmentCapability(db, 'equipment_liquid_containment', item.id,
     { capacity_liters: capacityLiters === item.catalog_model?.capacity_liters ? null : capacityLiters });
@@ -1168,6 +1152,65 @@ export async function updateEquipmentPressureRating(db: DB, item: Equipment, max
   }
   await putEquipmentCapability(db, 'equipment_pressure_rating', item.id,
     { max_pressure_kpa: maxPressureKpa === item.catalog_model?.max_pressure_kpa ? null : maxPressureKpa });
+}
+
+export async function addEquipmentCapability(db: DB, item: Equipment, capability: string, values: {
+  capacity_liters?: number | null; max_pressure_kpa?: number | null;
+  rated_power_watts?: number | null; rated_heat_removal_watts?: number | null;
+  min_temperature_c?: number | null; max_temperature_c?: number | null;
+  measurement_min?: number | null; measurement_max?: number | null; measurement_unit?: string | null;
+} = {}): Promise<void> {
+  const positive = (value: number | null | undefined) => value == null || Number.isFinite(value) && value > 0;
+  if (capability === 'liquid_containment') {
+    if (item.has_liquid_containment) throw new Error('Liquid capacity is already available');
+    if (!positive(values.capacity_liters)) throw new Error('Enter a positive capacity');
+    await putEquipmentCapability(db, 'equipment_liquid_containment', item.id,
+      { capacity_liters: values.capacity_liters });
+  } else if (capability === 'pressure_rating') {
+    if (item.has_pressure_rating) throw new Error('Pressure rating is already available');
+    if (!positive(values.max_pressure_kpa)) throw new Error('Enter a positive pressure rating');
+    await putEquipmentCapability(db, 'equipment_pressure_rating', item.id,
+      { max_pressure_kpa: values.max_pressure_kpa });
+  } else if (capability === 'heating') {
+    if (item.has_heating) throw new Error('Heating is already available');
+    if (!positive(values.rated_power_watts)) throw new Error('Enter a positive power');
+    await putEquipmentCapability(db, 'equipment_heating', item.id,
+      { rated_power_watts: values.rated_power_watts });
+  } else if (capability === 'cooling') {
+    if (item.has_cooling) throw new Error('Cooling is already available');
+    if (!positive(values.rated_heat_removal_watts)) throw new Error('Enter a positive heat removal rate');
+    await putEquipmentCapability(db, 'equipment_cooling', item.id,
+      { rated_heat_removal_watts: values.rated_heat_removal_watts });
+  } else if (capability === 'temperature_control') {
+    if (item.has_temperature_control) throw new Error('Temperature control is already available');
+    if (values.min_temperature_c != null && !Number.isFinite(values.min_temperature_c)
+      || values.max_temperature_c != null && !Number.isFinite(values.max_temperature_c)
+      || values.min_temperature_c != null && values.max_temperature_c != null
+        && values.min_temperature_c >= values.max_temperature_c) throw new Error('Enter a valid temperature range');
+    await putEquipmentCapability(db, 'equipment_temperature_control', item.id,
+      { min_temperature_c: values.min_temperature_c, max_temperature_c: values.max_temperature_c });
+  } else if (capability.startsWith('measurement:')) {
+    const kind = capability.slice('measurement:'.length);
+    if (!['temperature', 'ph', 'gravity', 'volume', 'pressure', 'carbonation', 'dissolved_oxygen', 'mass']
+      .includes(kind)) throw new Error('Unknown measurement channel');
+    if (item.measurement_channels?.some(channel => channel.measurement_kind === kind)) {
+      throw new Error('Measurement channel is already available');
+    }
+    if (!values.measurement_unit) throw new Error('Choose a measurement unit');
+    if (values.measurement_min != null || values.measurement_max != null) {
+      if (values.measurement_min == null || values.measurement_max == null
+        || !Number.isFinite(values.measurement_min) || !Number.isFinite(values.measurement_max)
+        || values.measurement_min >= values.measurement_max) throw new Error('Enter a valid measurement range');
+    }
+    const scale = ['SG', '°Plato', '°Brix', 'pH'].includes(values.measurement_unit) ? values.measurement_unit : null;
+    await db.exec(`INSERT INTO equipment_measurement_channels
+      (id, equipment_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`, [`${item.id}:${kind}`, item.id, kind,
+      values.measurement_min ?? null, values.measurement_max ?? null,
+      scale ? null : values.measurement_unit, scale]);
+  } else {
+    throw new Error('Unknown equipment capability');
+  }
 }
 
 export async function updateEquipmentBoilHeatLoss(db: DB, item: Equipment, watts: number): Promise<void> {
@@ -1220,7 +1263,7 @@ export async function updateEquipmentCalibration(db: DB, item: Equipment, values
 }
 
 export async function updateEquipmentRatedPower(db: DB, item: Equipment, watts: number | null): Promise<void> {
-  if (!boilOffKinds.has(item.kind)) throw new Error('Rated power applies to electric kettles and all-in-one systems');
+  if (!item.has_heating) throw new Error('This equipment has no heating capability');
   if (watts != null && (!Number.isFinite(watts) || watts <= 0)) throw new Error('Enter a positive power');
   await putEquipmentCapability(db, 'equipment_heating', item.id,
     { rated_power_watts: watts === item.catalog_model?.rated_power_watts ? null : watts });
