@@ -1,10 +1,10 @@
 import initWasm, { type DB } from '@vlcn.io/crsqlite-wasm';
 import { fetchApi } from './api.ts';
 import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
-import { customAlphabet, nanoid } from 'nanoid';
+import { nanoid } from 'nanoid';
 import { boilOffKinds, capacityKinds, equipmentKinds, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import { equipmentSlug } from './equipmentRoutes.ts';
-import { recordSlug } from './recordSlug.ts';
+import { hasGeneratedLocationSuffix, locationSlug } from './locationSlug.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
 import { changeColumns, indexStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements, workspaceSchemaVersion, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
@@ -95,7 +95,6 @@ async function writeIngredientProperties(db: Pick<DB, 'exec'>, id: string, value
   [id, ...columns.map(column => values[column] ?? null)]);
 }
 export interface InventoryLocation { id: string; name: string; parent_id: string | null; slug: string }
-const locationSlugSuffix = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 8);
 export interface InventoryMovement { id: string; kind: 'Purchased' | 'Counted' | 'Used' | 'Discarded' | 'Moved in' | 'Moved out'; quantity: number; unit: string; at: number }
 
 const inventoryMassInGrams: Record<string, number> = { g: 1, kg: 1000, oz: 28.349523125, lb: 453.59237, 'lb + oz': 28.349523125 };
@@ -1011,12 +1010,16 @@ export async function updateIngredientProperties(db: DB, item: InventoryItem, pr
 }
 
 export async function listInventoryLocations(db: DB): Promise<InventoryLocation[]> {
-  const missing = await db.execO<{ id: string; name: string }>(`SELECT l.id, l.name FROM inventory_locations l
-    LEFT JOIN inventory_location_slugs s ON s.id = l.id WHERE s.id IS NULL`);
-  for (const row of missing) {
-    const idHex = [...row.id].map(char => char.charCodeAt(0).toString(16).padStart(2, '0')).join('');
-    const slug = `${recordSlug(row.name).slice(0, 14)}-${idHex}`;
-    await db.exec('INSERT OR IGNORE INTO inventory_location_slugs(id, slug) VALUES (?, ?)', [row.id, slug]);
+  const rows = await db.execO<{ id: string; name: string; slug: string | null }>(`SELECT l.id, l.name, s.slug
+    FROM inventory_locations l LEFT JOIN inventory_location_slugs s ON s.id = l.id ORDER BY l.id`);
+  const used = new Set(rows.map(row => row.id));
+  for (const row of rows) if (row.slug && !hasGeneratedLocationSuffix(row.name, row.id, row.slug)) used.add(row.slug);
+  for (const row of rows) {
+    if (row.slug && !hasGeneratedLocationSuffix(row.name, row.id, row.slug)) continue;
+    const slug = locationSlug(row.name, used);
+    used.add(slug);
+    if (row.slug) await db.exec('UPDATE inventory_location_slugs SET slug = ? WHERE id = ?', [slug, row.id]);
+    else await db.exec('INSERT OR IGNORE INTO inventory_location_slugs(id, slug) VALUES (?, ?)', [row.id, slug]);
   }
   return db.execO<InventoryLocation>(`SELECT l.id, l.name, l.parent_id, s.slug FROM inventory_locations l
     JOIN inventory_location_slugs s ON s.id = l.id ORDER BY l.name COLLATE NOCASE, l.id`);
@@ -1043,7 +1046,7 @@ export async function saveInventoryLocation(db: DB, name: string, parentId: stri
   if (!clean) throw new Error('Enter a location name');
   const locations = await listInventoryLocations(db);
   const chosenSlug = slug?.trim() || (id ? locations.find(location => location.id === id)?.slug
-    : `${recordSlug(clean).slice(0, 40)}-${locationSlugSuffix()}`);
+    : locationSlug(clean, new Set(locations.flatMap(location => [location.id, location.slug]))));
   if (!chosenSlug || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(chosenSlug) || chosenSlug.length > 80)
     throw new Error('Use lowercase letters, numbers, and hyphens for the slug');
   if (locations.some(location => location.id !== id && (location.slug === chosenSlug || location.id === chosenSlug)))
