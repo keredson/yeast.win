@@ -565,7 +565,7 @@ export function App() {
           autoSync={autoSync} onAutoSyncChange={enabled => { localStorage.setItem(autoSyncKey, enabled ? '1' : '0'); setAutoSync(enabled); }}
           onSignOut={signOut} /> : !workspaceId ? <Empty description="Add a brewery in Settings to begin">
             <Button type="primary" onClick={() => showSection('me')}>Open Settings</Button></Empty> :
-          !db ? <div className="loading-screen"><Spin tip="Opening local database" /></div> : <>
+          !db ? <div className="loading-screen"><Spin description="Opening data on this device" /></div> : <>
             {section === 'batches' && <BatchSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} batches={batches} recipes={recipes}
               equipment={equipment} equipmentModels={equipmentModels} inventory={inventory} catalogInventory={catalogInventory} preferredUnits={preferredUnits}
               selectedId={route.selectedId} onSelect={id => showItem('batches', id)} onChanged={changed} />}
