@@ -244,6 +244,7 @@ export function openWorkspaceDb(id: string): Database.Database {
       db.exec('DROP TABLE equipment_legacy_migration');
     })();
   }
+  db.transaction(() => { for (const statement of supplyMigrationStatements) db.exec(statement); })();
   const uniqueLegacyLosses = [...new Set(legacyLossValues)];
   if (uniqueLegacyLosses.length === 1 || legacyBatchLosses.length) db.transaction(() => {
     if (uniqueLegacyLosses.length === 1) db.prepare(`INSERT INTO brewery_process_defaults(id, wort_loss_liters)
@@ -254,7 +255,6 @@ export function openWorkspaceDb(id: string): Database.Database {
       ON CONFLICT(id) DO UPDATE SET wort_loss_liters = COALESCE(batch_recipe_inputs.wort_loss_liters, excluded.wort_loss_liters)`);
     for (const row of legacyBatchLosses) copyBatch.run(row.batch_id, row.wort_loss_liters);
   })();
-  db.transaction(() => { for (const statement of supplyMigrationStatements) db.exec(statement); })();
   db.exec(`UPDATE equipment SET added_at = COALESCE(added_at, created_at) WHERE added_at IS NULL;
     UPDATE equipment SET removed_at =
       (SELECT archived_at FROM equipment_archives WHERE equipment_id = equipment.id ORDER BY archived_at LIMIT 1)

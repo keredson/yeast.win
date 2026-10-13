@@ -301,6 +301,7 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
         for (const statement of legacyEquipmentModelStatements(columns)) await tx.exec(statement);
         await tx.exec('DROP TABLE equipment_legacy_migration');
       });
+      await db.tx(async tx => { for (const statement of supplyMigrationStatements) await tx.exec(statement); });
       const uniqueLegacyLosses = [...new Set(legacyLossValues)];
       if (uniqueLegacyLosses.length === 1 || legacyBatchLosses.length) await db.tx(async tx => {
         if (uniqueLegacyLosses.length === 1) await tx.exec(`INSERT INTO brewery_process_defaults(id, wort_loss_liters)
@@ -312,7 +313,6 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
             wort_loss_liters = COALESCE(batch_recipe_inputs.wort_loss_liters, excluded.wort_loss_liters)`,
         [row.batch_id, row.wort_loss_liters]);
       });
-      await db.tx(async tx => { for (const statement of supplyMigrationStatements) await tx.exec(statement); });
       await db.exec('UPDATE equipment SET added_at = COALESCE(added_at, created_at) WHERE added_at IS NULL');
       await db.exec(`UPDATE equipment SET removed_at =
         (SELECT archived_at FROM equipment_archives WHERE equipment_id = equipment.id ORDER BY archived_at LIMIT 1)

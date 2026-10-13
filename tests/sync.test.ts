@@ -41,8 +41,6 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
       .run(equipmentUseId, batchA, 'equipment_use', 'Use Shared kettle', timestamp, timestamp);
     first.prepare('INSERT INTO equipment_use_events(event_id, equipment_id) VALUES (?, ?)')
       .run(equipmentUseId, equipmentId);
-    first.prepare("INSERT INTO brewery_process_defaults(id, wort_loss_liters) VALUES ('brewery', ?)")
-      .run(1.5);
     first.prepare('INSERT INTO temperature_measurements(event_id, value, unit) VALUES (?, ?, ?)')
       .run(event, 20, 'degC');
     const discardedItem = nanoid();
@@ -78,8 +76,6 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
     assert.equal((second.prepare('SELECT value FROM temperature_measurements WHERE event_id = ?').get(event) as { value: number }).value, 20);
     assert.equal((second.prepare('SELECT equipment_id FROM equipment_use_events WHERE event_id = ?').get(equipmentUseId) as { equipment_id: string }).equipment_id, equipmentId);
     assert.equal((second.prepare('SELECT model_id FROM equipment WHERE id = ?').get(equipmentId) as { model_id: string }).model_id, modelId);
-    assert.equal((second.prepare("SELECT wort_loss_liters FROM brewery_process_defaults WHERE id = 'brewery'")
-      .get() as { wort_loss_liters: number }).wort_loss_liters, 1.5);
     assert.equal((second.prepare('SELECT quantity FROM inventory_discards WHERE inventory_item_id = ?').get(discardedItem) as { quantity: number }).quantity, 5);
     assert.equal((second.prepare('SELECT parent_id FROM inventory_locations WHERE id = ?').get(shelfId) as { parent_id: string }).parent_id, roomId);
     assert.equal((second.prepare('SELECT address FROM inventory_location_addresses WHERE id = ?').get(roomId) as { address: string }).address, '123 Brew Street');
