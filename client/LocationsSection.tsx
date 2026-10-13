@@ -8,7 +8,7 @@ import { locationAncestors, locationDescendantIds } from './locationRoutes.ts';
 import { inventoryPathSegment } from './inventoryRoutes.ts';
 import { compoundMassUnit, formatQuantity } from '../shared/units.ts';
 
-function LocationBranch({ parentId, locations, items, basePath, onSelect, visited = new Set<string>() }: {
+function LocationCards({ parentId, locations, items, basePath, onSelect, visited = new Set<string>() }: {
   parentId: string | null; locations: InventoryLocation[]; items: InventoryItem[]; basePath: string;
   onSelect: (id: string) => void; visited?: Set<string>;
 }) {
@@ -16,20 +16,20 @@ function LocationBranch({ parentId, locations, items, basePath, onSelect, visite
     && (location.parent_id === parentId || parentId === null && location.parent_id
       && !locations.some(parent => parent.id === location.parent_id)));
   if (!children.length) return null;
-  return <ul className="location-tree">{children.map(location => {
+  return <div className="location-cards">{children.map(location => {
     const descendantIds = locationDescendantIds(location.id, locations);
     const directCount = items.filter(item => item.location_id === location.id).length;
     const totalCount = items.filter(item => item.location_id && descendantIds.has(item.location_id)).length;
-    return <li key={location.id}>
-      <a className="location-node" href={`${basePath}/location/${location.slug}`}
+    return <article className="location-card" key={location.id}>
+      <a className="location-card-heading" href={`${basePath}/location/${location.slug}`}
         onClick={event => { event.preventDefault(); onSelect(location.id); }}>
-        <EnvironmentOutlined aria-hidden />
-        <span className="location-node-text"><strong>{location.name}</strong><small>{directCount} here · {totalCount} including sublocations</small></span>
+        <span className="location-card-text"><strong>{location.name}</strong><small>{directCount} here · {totalCount} including sublocations</small></span>
       </a>
-      <LocationBranch parentId={location.id} locations={locations} items={items} basePath={basePath}
+      {location.address && <p className="location-card-address">{location.address}</p>}
+      <LocationCards parentId={location.id} locations={locations} items={items} basePath={basePath}
         onSelect={onSelect} visited={new Set([...visited, location.id])} />
-    </li>;
-  })}</ul>;
+    </article>;
+  })}</div>;
 }
 
 export function LocationsSection({ db, basePath, locations, items, selectedId, onSelect, onInventorySelect, onChanged }: {
@@ -37,7 +37,7 @@ export function LocationsSection({ db, basePath, locations, items, selectedId, o
   selectedId: string | null; onSelect: (id: string | null) => void; onInventorySelect: (id: string) => void;
   onChanged: () => Promise<void>;
 }) {
-  const [form] = Form.useForm<{ name: string; parent_id?: string; slug?: string }>();
+  const [form] = Form.useForm<{ name: string; parent_id?: string; slug?: string; address?: string }>();
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState('');
@@ -63,14 +63,15 @@ export function LocationsSection({ db, basePath, locations, items, selectedId, o
 
   function openSettings() {
     if (!selected) return;
-    form.setFieldsValue({ name: selected.name, parent_id: selected.parent_id || undefined, slug: selected.slug });
+    form.setFieldsValue({ name: selected.name, parent_id: selected.parent_id || undefined,
+      slug: selected.slug, address: selected.address || undefined });
     setError(''); setEditing(true);
   }
 
-  async function save(values: { name: string; parent_id?: string; slug?: string }) {
+  async function save(values: { name: string; parent_id?: string; slug?: string; address?: string }) {
     try {
       const id = await saveInventoryLocation(db, values.name, values.parent_id || null,
-        editing ? selected?.id : undefined, editing ? values.slug : undefined);
+        editing ? selected?.id : undefined, editing ? values.slug : undefined, values.address);
       setCreating(false); setEditing(false); form.resetFields();
       await onChanged();
       if (editing) onSelect(id);
@@ -102,11 +103,11 @@ export function LocationsSection({ db, basePath, locations, items, selectedId, o
     {error && !creating && !editing && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
     {!selectedId ? <section className="record-index location-index">
       <div className="section-heading"><div><span className="eyebrow">Storage map</span><h1>Locations</h1></div></div>
-      <p className="muted">Rooms, shelves, and other places where stock is kept.</p>
-      {locations.length > 0 && <div className="location-map"><LocationBranch parentId={null} locations={locations} items={items}
+      <p className="muted">Buildings, rooms, shelves, and other places where stock is kept.</p>
+      {locations.length > 0 && <div className="location-map"><LocationCards parentId={null} locations={locations} items={items}
         basePath={basePath} onSelect={id => onSelect(id)} /></div>}
       {unassigned.length > 0 && <section className="location-stock-section"><h2>Unassigned stock</h2>{stockRows(unassigned)}</section>}
-      <Button className="location-add" type="text" icon={<PlusOutlined />} onClick={() => openCreate(null)}>Add location</Button>
+      <Button className="location-add" icon={<PlusOutlined />} onClick={() => openCreate(null)}>Add location</Button>
     </section> : !selected ? <p className="muted">Location not found.</p> : <section className="record-detail location-detail">
       <nav className="location-breadcrumb" aria-label="Location path">
         <a href={`${basePath}/locations`} onClick={event => { event.preventDefault(); onSelect(null); }}>Locations</a>
@@ -117,8 +118,9 @@ export function LocationsSection({ db, basePath, locations, items, selectedId, o
         <h2>{selected.name}</h2></div><div className="heading-actions">
         <Button type="text" shape="circle" icon={<SettingOutlined />} aria-label="Location settings" title="Location settings"
           onClick={openSettings} /></div></div>
+      {selected.address && <p className="location-detail-address"><EnvironmentOutlined aria-hidden /> {selected.address}</p>}
       {locations.some(location => location.parent_id === selected.id) && <section className="location-stock-section">
-        <h3>Inside {selected.name}</h3><div className="location-map"><LocationBranch parentId={selected.id} locations={locations}
+        <h3>Inside {selected.name}</h3><div className="location-map"><LocationCards parentId={selected.id} locations={locations}
           items={items} basePath={basePath} onSelect={id => onSelect(id)} /></div></section>}
       <section className="location-stock-section"><h3>Stock here</h3>
         {directItems.length ? categories.map(category => <div key={category} className="location-stock-category">

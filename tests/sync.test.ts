@@ -41,6 +41,8 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
     const targetId = nanoid();
     first.prepare('INSERT INTO inventory_locations(id, name, parent_id, created_at) VALUES (?, ?, ?, ?)')
       .run(roomId, 'Back room', null, timestamp);
+    first.prepare('INSERT INTO inventory_location_addresses(id, address) VALUES (?, ?)')
+      .run(roomId, '123 Brew Street');
     first.prepare('INSERT INTO inventory_locations(id, name, parent_id, created_at) VALUES (?, ?, ?, ?)')
       .run(shelfId, 'Shelf A', roomId, timestamp);
     for (const itemId of [sourceId, targetId]) first.prepare(
@@ -63,6 +65,7 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
     assert.equal((second.prepare('SELECT value FROM temperature_measurements WHERE event_id = ?').get(event) as { value: number }).value, 20);
     assert.equal((second.prepare('SELECT quantity FROM inventory_discards WHERE inventory_item_id = ?').get(discardedItem) as { quantity: number }).quantity, 5);
     assert.equal((second.prepare('SELECT parent_id FROM inventory_locations WHERE id = ?').get(shelfId) as { parent_id: string }).parent_id, roomId);
+    assert.equal((second.prepare('SELECT address FROM inventory_location_addresses WHERE id = ?').get(roomId) as { address: string }).address, '123 Brew Street');
     assert.equal((second.prepare('SELECT location_id FROM inventory_item_locations WHERE id = ?').get(targetId) as { location_id: string }).location_id, shelfId);
     assert.equal((second.prepare('SELECT quantity FROM inventory_moves WHERE to_item_id = ?').get(targetId) as { quantity: number }).quantity, 25);
     assert.deepEqual((second.prepare('SELECT image FROM photos WHERE id = ?').get(photoId) as { image: Buffer }).image, pixels);
@@ -235,4 +238,26 @@ test('version 15 adds location slugs without deleting existing locations or stoc
     assert.equal((db.prepare('SELECT location_id FROM inventory_item_locations WHERE id = ?').get(itemId) as { location_id: string }).location_id, locationId);
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'inventory_location_slugs'").get());
   } finally { closeWorkspaceDb(db); }
+});
+
+test('version 16 adds optional location addresses without losing locations', () => {
+  const id = nanoid();
+  const locationId = nanoid();
+  const db = openWorkspaceDb(id);
+  db.prepare('INSERT INTO inventory_locations(id, name, created_at) VALUES (?, ?, ?)')
+    .run(locationId, 'Garage', nowSeconds());
+  db.prepare('INSERT INTO inventory_location_slugs(id, slug) VALUES (?, ?)').run(locationId, 'garage');
+  db.prepare("SELECT crsql_as_table('inventory_location_addresses')").get();
+  db.exec('DROP TABLE inventory_location_addresses');
+  db.pragma('user_version = 16');
+  closeWorkspaceDb(db);
+
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.equal((upgraded.prepare('SELECT name FROM inventory_locations WHERE id = ?').get(locationId) as { name: string }).name, 'Garage');
+    assert.equal((upgraded.prepare('SELECT slug FROM inventory_location_slugs WHERE id = ?').get(locationId) as { slug: string }).slug, 'garage');
+    upgraded.prepare('INSERT INTO inventory_location_addresses(id, address) VALUES (?, ?)').run(locationId, '123 Brew Street');
+    assert.equal((upgraded.prepare('SELECT address FROM inventory_location_addresses WHERE id = ?').get(locationId) as { address: string }).address, '123 Brew Street');
+  } finally { closeWorkspaceDb(upgraded); }
 });

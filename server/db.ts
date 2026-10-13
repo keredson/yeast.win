@@ -166,9 +166,13 @@ export function openWorkspaceDb(id: string): Database.Database {
   } else if (version < workspaceSchemaVersion) {
     db.exec('BEGIN');
     try {
-      if (version === 15) {
-        db.exec(schemaStatements[replicatedTables.indexOf('inventory_location_slugs')]);
-        db.prepare('SELECT crsql_as_crr(?)').get('inventory_location_slugs');
+      if (version >= 15) {
+        for (const table of version === 15
+          ? ['inventory_location_slugs', 'inventory_location_addresses']
+          : ['inventory_location_addresses']) {
+          db.exec(schemaStatements[replicatedTables.indexOf(table)]);
+          db.prepare('SELECT crsql_as_crr(?)').get(table);
+        }
       } else {
         for (const table of [...replicatedTables, ...retiredReplicatedTables]) {
           const exists = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);

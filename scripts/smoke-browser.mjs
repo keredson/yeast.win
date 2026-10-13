@@ -824,17 +824,24 @@ try {
     throw new Error('Empty location list should not show the parent selector or optional-parent note');
   }
   await locationsDialog.getByRole('textbox', { name: 'Name' }).fill('Back room');
+  await locationsDialog.getByRole('textbox', { name: 'Address (optional)' }).fill('123 Brew Street');
   await locationsDialog.getByRole('button', { name: 'Add location' }).click();
   await locationsDialog.waitFor({ state: 'hidden' });
+  await page.locator('.location-card').filter({ hasText: 'Back room' }).getByText('123 Brew Street').waitFor();
   await page.getByRole('link', { name: /Back room.*0 here/ }).waitFor();
   await page.getByRole('link', { name: /Back room.*0 here/ }).click();
-  await page.waitForURL(/\/location\/back-room-/);
+  await page.waitForURL(/\/location\/back-room$/);
+  await page.locator('.location-detail-address').getByText('123 Brew Street').waitFor();
   await page.getByRole('button', { name: 'New sublocation' }).click();
   const childDialog = page.getByRole('dialog', { name: 'New location' });
   await childDialog.getByRole('textbox', { name: 'Name' }).fill('Shelf A');
   await childDialog.getByRole('button', { name: 'Add location' }).click();
   await childDialog.waitFor({ state: 'hidden' });
   await page.getByRole('link', { name: /Shelf A.*0 here/ }).waitFor();
+  await navigateSection(page, 'Locations');
+  if (!await page.locator('.location-card .location-card').filter({ hasText: 'Shelf A' }).count()) {
+    throw new Error('Child location is not shown as a card inside its parent');
+  }
   await page.setViewportSize({ width: 320, height: 720 });
   if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw new Error('Location hierarchy overflows a narrow phone');
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -901,7 +908,7 @@ try {
     throw new Error('Buying more at a location created another stock row');
   }
   await navigateSection(page, 'Locations');
-  await page.locator('.location-node').filter({ hasText: 'Shelf A' }).click();
+  await page.locator('.location-card-heading').filter({ hasText: 'Shelf A' }).click();
   await page.getByRole('heading', { name: 'Shelf A' }).waitFor();
   await page.getByRole('heading', { name: 'Stock here' }).waitFor();
   await page.getByRole('link', { name: /Smoke grain.*3 lb/ }).waitFor();
