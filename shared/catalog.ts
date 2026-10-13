@@ -15,7 +15,7 @@ export interface CatalogInventory { id: string; name: string; category: string; 
 
 export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
 export const catalogSchemaVersion = 11;
-export const vevorModelName = 'VEVOR 35 L';
+export const vevorModelName = 'VEVOR Electric Brewing System 9.2 Gal/35 L';
 export const catalogModelTables = {
   equipment_models: `CREATE TABLE IF NOT EXISTS equipment_models (
     id TEXT PRIMARY KEY NOT NULL, manufacturer TEXT, model_name TEXT, kind TEXT)`,
@@ -60,6 +60,7 @@ export const initialCatalogEquipment: CatalogEquipment[] = [
   { id: 'equipment_fermzilla_all_rounder_30l', name: 'KegLand FermZilla All Rounder 30 L', kind: 'fermenter', capacity_liters: 30, max_pressure_kpa: 241.316505 },
   { id: 'equipment_rapt_chamber', name: 'KegLand RAPT Fermentation Chamber', kind: 'fermentation_temperature_control' },
   { id: 'equipment_inkbird_itc_308', name: 'Inkbird ITC-308', kind: 'fermentation_temperature_control' },
+  // Retain this legacy model for equipment already linked to it, but do not offer it for new imports.
   { id: 'equipment_inkbird_itc_308_wifi', name: 'Inkbird ITC-308-WIFI', kind: 'fermentation_temperature_control' },
   { id: 'equipment_rapt_controller', name: 'KegLand RAPT Temperature Controller', kind: 'fermentation_temperature_control' },
   { id: 'equipment_grainfather_gc4', name: 'Grainfather GC4 Glycol Chiller', kind: 'fermentation_temperature_control' },
