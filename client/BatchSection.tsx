@@ -6,7 +6,7 @@ import { addBatchPlan, createBatch, eventDetails, eventFormData, listEvents, lis
   type LocalDb, type MeasurementKind, type PlanInput, type Recipe } from './db.ts';
 import { kindLabel } from './constants.ts';
 import { formatTime } from './time.ts';
-import { PlanForm, type PlanPreset } from './PlanForm.tsx';
+import { PlanForm, repeatPreset, type PlanPreset } from './PlanForm.tsx';
 import { EventForm } from './EventForm.tsx';
 import { EventTimeline } from './EventTimeline.tsx';
 import type { PreferredUnits } from './api.ts';
@@ -59,19 +59,18 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  async function saveAction(input: PlanInput, recordNow = false) {
+  async function saveAction(input: PlanInput, recordNow = false, addAnother = false) {
     if (!batch) return;
-    try {
-      const id = editingPlan ? (await updateBatchPlan(db, batch.id, editingPlan.id, input), editingPlan.id)
-        : await addBatchPlan(db, batch.id, input, accountId);
-      setCreatingKind(null); setEditingPlan(null);
-      await changed();
-      if (recordNow) {
-        const next = await listEvents(db, batch.id);
-        setRecordingEvent(next.find(item => item.id === id) || null);
-        setEditingData(null);
-      }
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    const id = editingPlan ? (await updateBatchPlan(db, batch.id, editingPlan.id, input), editingPlan.id)
+      : await addBatchPlan(db, batch.id, input, accountId);
+    if (addAnother && editingPlan) { setPreset(repeatPreset(input)); setCreatingKind(editingPlan.event_type); setEditingPlan(null); }
+    if (!addAnother) { setCreatingKind(null); setEditingPlan(null); }
+    await changed();
+    if (recordNow) {
+      const next = await listEvents(db, batch.id);
+      setRecordingEvent(next.find(item => item.id === id) || null);
+      setEditingData(null);
+    }
   }
 
   async function recordOrEdit(event: ActualEvent) {
@@ -110,7 +109,9 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
         <Button type="primary" htmlType="submit">Create batch</Button>
       </Form>
     </Modal>
-    <Modal title={editingPlan ? `Edit ${kindLabel(editingPlan.event_type).toLowerCase()}` : `Add ${kindLabel(creatingKind || '').toLowerCase()}`}
+    <Modal title={editingPlan ? editingPlan.event_type === 'addition' ? 'Edit ingredient'
+      : `Edit ${kindLabel(editingPlan.event_type).toLowerCase()}` : creatingKind === 'addition' ? 'Add ingredient'
+        : `Add ${kindLabel(creatingKind || '').toLowerCase()}`}
       open={!!(editingPlan || creatingKind)} onCancel={() => { setCreatingKind(null); setEditingPlan(null); }} footer={null} destroyOnHidden>
       {(editingPlan || creatingKind) && <PlanForm key={editingPlan?.id || creatingKind || 'new'}
         eventType={editingPlan?.event_type || creatingKind || 'addition'} anchors={events.filter(item => item.id !== editingPlan?.id)}

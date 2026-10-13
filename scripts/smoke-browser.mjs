@@ -155,17 +155,19 @@ try {
   }
 
   await choosePlanKind(page, 'Add action', 'Ingredient');
-  const firstAction = page.getByRole('dialog', { name: 'Add addition' });
+  const firstAction = page.getByRole('dialog', { name: 'Add ingredient' });
   await choosePlanCategory(page, firstAction, 'Nutrient');
   await firstAction.getByLabel('What will be added?').fill('Add nutrient');
   await firstAction.getByRole('spinbutton', { name: 'Quantity' }).fill('1');
-  await firstAction.getByRole('button', { name: 'Add addition' }).click();
-  await firstAction.waitFor({ state: 'hidden' });
-  await choosePlanKind(page, 'Add action', 'Ingredient');
-  const yeastAction = page.getByRole('dialog', { name: 'Add addition' });
+  await firstAction.getByRole('button', { name: 'Save and add another' }).click();
+  await page.waitForFunction(() => document.querySelector('input#title')?.value === '');
+  if (await firstAction.getByLabel('What will be added?').inputValue()) {
+    throw new Error('Save and add another did not clear the ingredient name');
+  }
+  const yeastAction = firstAction;
   await choosePlanCategory(page, yeastAction, 'Yeast');
   await yeastAction.getByLabel('What will be added?').fill('Add yeast');
-  await yeastAction.getByRole('button', { name: 'Add addition' }).click();
+  await yeastAction.getByRole('button', { name: 'Add ingredient' }).click();
   await yeastAction.waitFor({ state: 'hidden' });
   if (await page.locator('.timeline-group').count() !== 1 || await page.locator('.timeline-group .plan-card').count() !== 2) {
     throw new Error('Actions at batch start were not grouped together');
@@ -190,9 +192,17 @@ try {
     throw new Error('Batch edit button moved away from the event title');
   }
   await page.getByRole('button', { name: 'Edit Add nutrient' }).click();
-  const editAction = page.getByRole('dialog', { name: 'Edit addition' });
+  const editAction = page.getByRole('dialog', { name: 'Edit ingredient' });
   await editAction.getByLabel('What will be added?').fill('Add nutrient dose');
-  await editAction.getByRole('button', { name: 'Save event' }).click();
+  await editAction.getByRole('button', { name: 'Save and add another' }).click();
+  const nextIngredient = page.getByRole('dialog', { name: 'Add ingredient' });
+  await nextIngredient.waitFor();
+  if (await nextIngredient.getByLabel('What will be added?').inputValue()) {
+    throw new Error('Editing with Save and add another did not open a blank ingredient');
+  }
+  await nextIngredient.getByLabel('What will be added?').fill('Extra nutrient');
+  await nextIngredient.getByRole('button', { name: 'Add ingredient' }).click();
+  await page.locator('.plan-card').filter({ hasText: 'Extra nutrient' }).waitFor();
   await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).getByRole('button', { name: 'Record Add nutrient dose' }).click();
   const recordAction = page.getByRole('dialog', { name: 'Record: Add nutrient dose' });
   await recordAction.getByRole('spinbutton', { name: 'Quantity' }).fill('2');
@@ -483,7 +493,7 @@ try {
     throw new Error('Fermentable placeholder should appear at the start of Mash');
   }
   await page.getByRole('button', { name: 'Edit planned event Add fermentable' }).click();
-  const fermentablePlan = page.getByRole('dialog', { name: 'Edit Add fermentable' });
+  const fermentablePlan = page.getByRole('dialog', { name: 'Edit ingredient' });
   await fermentablePlan.waitFor();
   if (await fermentablePlan.getByLabel('What will be added?').inputValue()
     || !await fermentablePlan.getByRole('combobox', { name: 'Type' }).locator('..').getByText('Grain').count()
@@ -569,7 +579,7 @@ try {
     throw new Error('Consecutive beer template actions should occupy separate timeline groups');
   }
   await page.getByRole('button', { name: 'Edit planned event Pitch yeast' }).click();
-  const pitchPlan = page.getByRole('dialog', { name: 'Edit Pitch yeast' });
+  const pitchPlan = page.getByRole('dialog', { name: 'Edit ingredient' });
   await pitchPlan.waitFor();
   if (!await pitchPlan.getByRole('combobox', { name: 'Timing' }).locator('..').getByText('After Chill').count()) {
     throw new Error('Beer template should pitch yeast at the end of Chill');
@@ -628,15 +638,20 @@ try {
   if (!await recipePlan.getByText('At or after start of Boil').count()) throw new Error('Ingredient did not default to boil start');
   await recipePlan.getByLabel('What will be added?').fill('2-row');
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: '2-row pale malt' }).click();
-  await recipePlan.getByRole('spinbutton', { name: 'Quantity' }).fill('5');
-  if (!await recipePlan.getByRole('combobox', { name: 'Unit' }).locator('..').getByText('oz', { exact: true }).count()) {
-    throw new Error('Shared grain suggestion replaced preferred ounces');
+  if (!await recipePlan.getByRole('combobox', { name: 'Unit' }).locator('..').getByText('lb + oz', { exact: true }).count()) {
+    throw new Error('Shared grain suggestion did not keep the grain default unit');
   }
-  await recipePlan.getByRole('button', { name: 'Add addition' }).click();
+  await recipePlan.getByRole('spinbutton', { name: 'Quantity · pounds' }).fill('5');
+  await recipePlan.getByRole('button', { name: 'Save and add another' }).click();
+  await page.waitForFunction(() => document.querySelector('input#title')?.value === '');
+  if (await recipePlan.getByLabel('What will be added?').inputValue()) {
+    throw new Error('Recipe Save and add another did not clear the ingredient name');
+  }
+  await recipePlan.locator('.ant-modal-close').click();
   await recipePlan.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Edit planned event 2-row pale malt' }).waitFor();
   const ingredientCard = page.locator('.plan-card').filter({ has: page.getByRole('button', { name: 'Edit planned event 2-row pale malt' }) });
-  if (!await ingredientCard.locator('.title-edit-row').getByText('5 oz', { exact: true }).count()
+  if (!await ingredientCard.locator('.title-edit-row').getByText('5 lb', { exact: true }).count()
     || await ingredientCard.locator('p.event-detail').count()) {
     throw new Error('Recipe ingredient quantity should share the title line');
   }
@@ -646,9 +661,9 @@ try {
     || !boilGroupTitles.includes('2-row pale malt')) {
     throw new Error('An ingredient at boil start should appear before the boil action');
   }
-  await page.getByText('5 oz', { exact: true }).waitFor();
+  await page.getByText('5 lb', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Edit planned event 2-row pale malt' }).click();
-  const editRecipePlan = page.getByRole('dialog', { name: 'Edit 2-row pale malt' });
+  const editRecipePlan = page.getByRole('dialog', { name: 'Edit ingredient' });
   await editRecipePlan.getByLabel('What will be added?').fill('2-row pale malt extra');
   await editRecipePlan.getByRole('button', { name: 'Save event' }).click();
   await page.getByText('2-row pale malt extra').waitFor();
@@ -692,7 +707,7 @@ try {
   await recipeReminder.getByRole('button', { name: 'Add notes' }).click();
   await recipeReminder.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Edit planned event 2-row pale malt extra' }).click();
-  const deleteRecipeEvent = page.getByRole('dialog', { name: 'Edit 2-row pale malt extra' });
+  const deleteRecipeEvent = page.getByRole('dialog', { name: 'Edit ingredient' });
   const recipeEventActions = deleteRecipeEvent.locator('.plan-form-actions');
   await recipeEventActions.getByRole('button', { name: 'Save event' }).waitFor();
   await recipeEventActions.getByRole('button', { name: 'Delete event' }).click();

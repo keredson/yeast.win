@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Alert, AutoComplete, Button, Checkbox, Form, Input, InputNumber, Select } from 'antd';
 import { kindLabel, measurementKinds } from './constants.ts';
@@ -13,7 +13,16 @@ import { changeNumberUnit, changeQuantityUnit } from './unitFields.ts';
 
 interface Anchor { id: string; title: string; event_type: string; details?: PlanDetails }
 export interface PlanPreset { phase?: 'mash' | 'boil' | 'chill'; measurementKind?: string; itemCategory?: string; title?: string;
-  timingKey?: string; purpose?: 'drain_grain' }
+  timingKey?: string; offsetSeconds?: number; purpose?: 'drain_grain' }
+export function repeatPreset(input: PlanInput): PlanPreset {
+  const anchorPoint = input.details?.anchor_point === 'end' ? 'end' : 'start';
+  return {
+    itemCategory: String(input.details?.item_category || ''),
+    measurementKind: String(input.details?.measurement_kind || ''),
+    timingKey: input.anchor_event_id ? `${(input.offset_seconds || 0) < 0 ? 'before' : 'after'}:${anchorPoint}:${input.anchor_event_id}` : 'start',
+    offsetSeconds: input.offset_seconds || 0
+  };
+}
 const timeUnits = [
   { value: 'seconds', label: 'Seconds', multiplier: 1 },
   { value: 'minutes', label: 'Minutes', multiplier: 60 },
@@ -48,12 +57,13 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
   preset?: PlanPreset;
   allowRecordNow?: boolean;
   extraAction?: ReactNode;
-  submit: (input: PlanInput, recordNow?: boolean) => Promise<void>;
+  submit: (input: PlanInput, recordNow?: boolean, addAnother?: boolean) => Promise<void>;
 }) {
   const [form] = Form.useForm<Values>();
+  const addAnotherRef = useRef(false);
   const initialDetails = initialPlan?.details || {};
   const kind = initialPlan?.event_type || eventType;
-  const offset = initialPlan?.offset_seconds ?? 0;
+  const offset = initialPlan?.offset_seconds ?? preset?.offsetSeconds ?? 0;
   const offsetUnit = offset === 0 ? timeUnits[1] : [...timeUnits].reverse().find(item => Math.abs(offset) % item.multiplier === 0) || timeUnits[0];
   const genericPitch = kind === 'addition' && initialPlan?.title === 'Pitch yeast'
     && initialDetails.item_category === 'Yeast' && !initialDetails.inventory_item_id && !initialDetails.catalog_item_id
@@ -77,6 +87,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
   const [itemCategory, setItemCategory] = useState(initialCategory);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const recordNow = Form.useWatch('record_now', form) as boolean | undefined;
   const selectedUnit = Form.useWatch('unit', form) as string | undefined;
   const selectedTargetUnit = Form.useWatch('target_unit', form) as string | undefined;
   const selectedOffsetUnit = Form.useWatch('offset_unit', form) as string | undefined;
@@ -104,6 +115,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
   async function save(values: Values) {
     try {
       setBusy(true); setError('');
+      const addAnother = addAnotherRef.current;
       const itemName = values.title?.trim() || '';
       const title = itemName || (kind === 'photo' ? 'Photo' : kind === 'addition' ? initialPlan?.title
         || (values.item_category === 'Yeast' ? 'Pitch yeast' : `Add ${String(values.item_category || 'ingredient').toLowerCase()}`) : '');
@@ -165,12 +177,14 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
         planned_at: null, anchor_event_id: anchorId,
         offset_seconds: hasOffset ? Math.round(values.offset_value! * unit!.multiplier) * (direction === 'before' ? -1 : 1) : 0,
         details
-      }, values.record_now);
+      }, addAnother ? false : values.record_now, addAnother);
+      if (addAnother) form.setFieldsValue({ title: undefined, quantity: undefined, pounds: undefined,
+        ounces: undefined, target_value: undefined, details: undefined });
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setBusy(false); }
+    finally { addAnotherRef.current = false; setBusy(false); }
   }
 
-  return <Form form={form} layout="vertical" onFinish={save} initialValues={{
+  return <Form form={form} layout="vertical" onFinish={save} onFinishFailed={() => { addAnotherRef.current = false; }} initialValues={{
     title: kind === 'addition' ? initialItem : initialPlan?.title || preset?.title,
     timing_key: initialPlan?.anchor_event_id ? `${offset < 0 ? 'before' : 'after'}:${initialDetails.anchor_point === 'end' ? 'end' : 'start'}:${initialPlan.anchor_event_id}` : preset?.timingKey || 'start',
     offset_value: gravityMeasurement && offset === 0 ? undefined : Math.abs(offset) / offsetUnit.multiplier,
@@ -211,7 +225,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
             const owned = inventory.find(item => item.category === itemCategory && item.name === value);
             const known = catalog.find(item => item.category === itemCategory && item.name === value);
             const knownUnit = known?.unit && unitGroups.mass.includes(known.unit as typeof unitGroups.mass[number])
-              ? preferredUnits.mass : known?.unit;
+              ? unitForCategory(itemCategory, preferredUnits.mass) : known?.unit;
             const nextUnit = owned?.display_unit || knownUnit || unitForCategory(itemCategory, preferredUnits.mass);
             changeQuantityUnit(form, selectedUnit || initialUnit, nextUnit);
             form.setFieldValue('unit', nextUnit);
@@ -302,7 +316,13 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
       <Checkbox>Record this now</Checkbox>
     </Form.Item>}
     <div className="plan-form-actions">
-      <Button type="primary" htmlType="submit" loading={busy}>{initialPlan ? 'Save event' : `Add ${kindLabel(kind).toLowerCase()}`}</Button>
+      <div className="plan-form-save-actions">
+        <Button type="primary" htmlType="submit" loading={busy} onClick={() => { addAnotherRef.current = false; }}>
+          {initialPlan ? 'Save event' : kind === 'addition' ? 'Add ingredient' : `Add ${kindLabel(kind).toLowerCase()}`}
+        </Button>
+        {['addition', 'measurement'].includes(kind) && !recordNow &&
+          <Button htmlType="submit" loading={busy} onClick={() => { addAnotherRef.current = true; }}>Save and add another</Button>}
+      </div>
       {extraAction}
     </div>
   </Form>;

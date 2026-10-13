@@ -40,6 +40,7 @@ export const catalogInventoryTable = `CREATE TABLE IF NOT EXISTS inventory (
 export const inventoryCategories = ['Grain', 'Hops', 'Yeast', 'Nutrient', 'Adjunct', 'Chemical', 'Packaging', 'Other'] as const;
 
 export function unitForCategory(category: string, preferredMass: string): string {
+  if (category === 'Grain') return 'lb + oz';
   if (category === 'Yeast') return 'packet';
   if (category === 'Packaging') return 'each';
   if (category === 'Chemical') return 'mL';

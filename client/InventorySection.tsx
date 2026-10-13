@@ -266,7 +266,8 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
             options={catalog.filter(row => row.category === newItemCategory).map(row => ({ value: row.name }))}
             filterOption={(input, option) => String(option?.value || '').toLowerCase().includes(input.toLowerCase())}
             onSelect={value => { const entry = catalog.find(row => row.category === newItemCategory && row.name === value);
-              if (entry) { const nextUnit = ['Grain', 'Hops', 'Nutrient'].includes(entry.category) ? preferredUnits.mass : entry.unit === 'ml' ? 'mL' : entry.unit;
+              if (entry) { const nextUnit = ['Grain', 'Hops', 'Nutrient'].includes(entry.category)
+                ? unitForCategory(entry.category, preferredUnits.mass) : entry.unit === 'ml' ? 'mL' : entry.unit;
                 changeQuantityUnit(itemForm, previousItemUnit.current, nextUnit, 'starting_quantity');
                 previousItemUnit.current = nextUnit;
                 itemForm.setFieldValue('default_unit', nextUnit); } }} />
