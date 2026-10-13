@@ -127,7 +127,7 @@ test('pre-release workspace schemas reset without carrying old event JSON', () =
   old.close();
   const db = openWorkspaceDb(id);
   try {
-    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 13);
+    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 14);
     assert.equal((db.prepare('SELECT COUNT(*) AS count FROM batch_events').get() as { count: number }).count, 0);
     assert.equal((db.pragma('table_info(batch_events)') as { name: string }[])
       .some(column => column.name === 'details_json'), false);
@@ -136,6 +136,9 @@ test('pre-release workspace schemas reset without carrying old event JSON', () =
     const columns = db.pragma('table_info(inventory_ingredient_properties)') as { name: string }[];
     assert.ok(columns.some(column => column.name === 'yield_pct'));
     assert.equal(columns.some(column => column.name === 'properties_json'), false);
+    for (const table of ['recipe_inputs', 'recipe_event_inputs', 'batch_recipe_inputs', 'batch_event_inputs']) {
+      assert.equal((db.pragma(`table_info(${table})`) as { name: string }[]).some(column => column.name === 'inputs_json'), false);
+    }
   } finally { closeWorkspaceDb(db); }
 });
 
@@ -153,7 +156,7 @@ test('version 12 ingredient JSON is replaced by typed columns', () => {
   old.close();
   const db = openWorkspaceDb(id);
   try {
-    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 13);
+    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, 14);
     const columns = db.pragma('table_info(inventory_ingredient_properties)') as { name: string }[];
     assert.deepEqual(columns.map(column => column.name),
       ['id', 'yield_pct', 'color_lovibond', 'alpha_acid_pct', 'hop_form', 'attenuation_pct']);

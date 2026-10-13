@@ -37,11 +37,11 @@ try {
       details: { ...grain.details, item_name: 'Test malt', inventory_item_id: itemId, quantity: 4.5, unit: 'kg' } });
     const recipe = { id: recipeId, name: 'Mash test beer', description: null, recipe_type: 'beer' };
     const batchId = await api.startBatchFromRecipe(db, recipe, 'First mash', session.account.id);
-    const inputs = await db.execO('SELECT inputs_json FROM batch_recipe_inputs WHERE id = ?', [batchId]);
+    const inputs = await db.execO('SELECT target_fermenter_volume_liters FROM batch_recipe_inputs WHERE id = ?', [batchId]);
     const drainBatch = (await db.execO('SELECT id FROM batch_events WHERE batch_id = ? AND title = ?', [batchId, 'Drain grain']))[0];
-    const drainInputs = await db.execO('SELECT inputs_json FROM batch_event_inputs WHERE id = ?', [drainBatch.id]);
+    const drainInputs = await db.execO('SELECT mash_efficiency_pct, grain_absorption_l_per_kg FROM batch_event_inputs WHERE id = ?', [drainBatch.id]);
     const grainBatch = (await db.execO('SELECT id FROM batch_events WHERE batch_id = ? AND title = ?', [batchId, 'Test malt']))[0];
-    const grainInputs = await db.execO('SELECT inputs_json FROM batch_event_inputs WHERE id = ?', [grainBatch.id]);
+    const grainInputs = await db.execO('SELECT yield_pct, color_lovibond FROM batch_event_inputs WHERE id = ?', [grainBatch.id]);
     const gravityBatch = (await db.execO('SELECT id FROM batch_events WHERE batch_id = ? AND title = ?', [batchId, 'Measure pre-boil gravity']))[0];
     const at = Math.floor(Date.now() / 1000);
     for (const id of [grainBatch.id, drainBatch.id, gravityBatch.id])
@@ -57,22 +57,21 @@ try {
     await api.updateBrewingLosses(db, current, { mash_efficiency_pct: null });
     const nextBatchId = await api.startBatchFromRecipe(db, recipe, 'Second mash', session.account.id);
     const nextDrain = (await db.execO('SELECT id FROM batch_events WHERE batch_id = ? AND title = ?', [nextBatchId, 'Drain grain']))[0];
-    const nextInputs = await db.execO('SELECT inputs_json FROM batch_event_inputs WHERE id = ?', [nextDrain.id]);
+    const nextInputs = await db.execO('SELECT mash_efficiency_pct FROM batch_event_inputs WHERE id = ?', [nextDrain.id]);
     const nextGrain = (await db.execO('SELECT id FROM batch_events WHERE batch_id = ? AND title = ?', [nextBatchId, 'Test malt']))[0];
-    const nextGrainInputs = await db.execO('SELECT inputs_json FROM batch_event_inputs WHERE id = ?', [nextGrain.id]);
+    const nextGrainInputs = await db.execO('SELECT yield_pct, color_lovibond FROM batch_event_inputs WHERE id = ?', [nextGrain.id]);
     await api.syncNow(db, session.workspaces[0].id);
     return { recipeId, target: await api.recipeTargetVolume(db, recipeId),
-      recipeInputs: JSON.parse(inputs[0].inputs_json), drainInputs: JSON.parse(drainInputs[0].inputs_json),
-      grainInputs: JSON.parse(grainInputs[0].inputs_json), measured,
-      nextInputs: JSON.parse(nextInputs[0].inputs_json), nextGrainInputs: JSON.parse(nextGrainInputs[0].inputs_json) };
+      recipeInputs: inputs[0], drainInputs: drainInputs[0], grainInputs: grainInputs[0], measured,
+      nextInputs: nextInputs[0], nextGrainInputs: nextGrainInputs[0] };
   });
   if (result.target !== 19 || result.recipeInputs.target_fermenter_volume_liters !== 19
-    || result.drainInputs.equipment_assumptions.mash_efficiency_pct !== 75
-    || result.drainInputs.equipment_assumptions.grain_absorption_l_per_kg !== 0.8
-    || result.grainInputs.ingredient_properties.yield_pct !== 80
+    || result.drainInputs.mash_efficiency_pct !== 75
+    || result.drainInputs.grain_absorption_l_per_kg !== 0.8
+    || result.grainInputs.yield_pct !== 80 || result.grainInputs.color_lovibond !== 2
     || Math.abs(result.measured - 72.02) > 1
-    || result.nextInputs.equipment_assumptions.mash_efficiency_pct !== result.measured
-    || result.nextGrainInputs.ingredient_properties.yield_pct !== 75) {
+    || result.nextInputs.mash_efficiency_pct !== result.measured
+    || result.nextGrainInputs.yield_pct !== 75 || result.nextGrainInputs.color_lovibond !== 3) {
     throw new Error(`Incorrect mash data: ${JSON.stringify(result)}`);
   }
   await page.goto(`${process.env.BREWLOG_TEST_URL || 'http://127.0.0.1:5173'}/recipe/${result.recipeId}`);

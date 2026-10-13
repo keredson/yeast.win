@@ -13,11 +13,11 @@ const definitions: Record<string, string> = {
   recipe_packaging: `event_id TEXT PRIMARY KEY NOT NULL, container_name TEXT, container_size REAL, container_count INTEGER, container_unit TEXT`,
   recipe_import_sources: `id TEXT PRIMARY KEY NOT NULL, filename TEXT NOT NULL, format TEXT NOT NULL, sha256 TEXT NOT NULL, byte_count INTEGER NOT NULL, content BLOB NOT NULL, imported_at INTEGER NOT NULL`,
   recipe_import_links: `id TEXT PRIMARY KEY NOT NULL, source_id TEXT NOT NULL, source_index INTEGER NOT NULL, external_id TEXT`,
-  recipe_inputs: `id TEXT PRIMARY KEY NOT NULL, inputs_json TEXT NOT NULL`,
-  recipe_event_inputs: `id TEXT PRIMARY KEY NOT NULL, inputs_json TEXT NOT NULL`,
+  recipe_inputs: `id TEXT PRIMARY KEY NOT NULL, target_fermenter_volume_liters REAL, brewhouse_efficiency_pct REAL`,
+  recipe_event_inputs: `id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL, alpha_acid_pct REAL, hop_form TEXT, attenuation_pct REAL`,
   batch_events: `id TEXT PRIMARY KEY NOT NULL, batch_id TEXT NOT NULL, recipe_event_id TEXT, event_type TEXT NOT NULL, title TEXT, planned_at INTEGER, anchor_event_id TEXT, offset_seconds INTEGER, anchor_point TEXT, duration_seconds INTEGER, instructions TEXT, actual_at INTEGER, skipped_at INTEGER, note TEXT, created_at INTEGER NOT NULL, created_by_account_id TEXT, recorded_by_account_id TEXT, source_id TEXT, external_id TEXT, received_at INTEGER`,
-  batch_recipe_inputs: `id TEXT PRIMARY KEY NOT NULL, inputs_json TEXT NOT NULL`,
-  batch_event_inputs: `id TEXT PRIMARY KEY NOT NULL, inputs_json TEXT NOT NULL`,
+  batch_recipe_inputs: `id TEXT PRIMARY KEY NOT NULL, target_fermenter_volume_liters REAL, brewhouse_efficiency_pct REAL`,
+  batch_event_inputs: `id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL, alpha_acid_pct REAL, hop_form TEXT, attenuation_pct REAL, mash_efficiency_pct REAL, grain_absorption_l_per_kg REAL, mash_deadspace_liters REAL, kettle_retention_liters REAL`,
   event_ends: `id TEXT PRIMARY KEY NOT NULL, ended_at INTEGER NOT NULL`,
   additions: `event_id TEXT PRIMARY KEY NOT NULL, item_category TEXT, catalog_item_id TEXT, inventory_item_id TEXT, item_name TEXT, quantity REAL, unit TEXT, display_unit TEXT, lot TEXT`,
   batch_measurement_targets: `event_id TEXT PRIMARY KEY NOT NULL, measurement_kind TEXT, target_value REAL, target_unit TEXT`,
@@ -103,7 +103,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 13;
+export const workspaceSchemaVersion = 14;
 
 export function isValidId(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{10,32}$/.test(value);

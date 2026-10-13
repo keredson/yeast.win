@@ -58,8 +58,9 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
     setEstimate(null);
     void (async () => {
       const [recipeRows, eventRows] = await Promise.all([
-        db.execO<{ inputs_json: string }>('SELECT inputs_json FROM recipe_inputs WHERE id = ?', [selectedId]),
-        db.execO<{ id: string; inputs_json: string }>(`SELECT i.id, i.inputs_json FROM recipe_event_inputs i
+        db.execO<{ target_fermenter_volume_liters: number | null; brewhouse_efficiency_pct: number | null }>(
+          'SELECT target_fermenter_volume_liters, brewhouse_efficiency_pct FROM recipe_inputs WHERE id = ?', [selectedId]),
+        db.execO<{ id: string; yield_pct: number | null; color_lovibond: number | null; attenuation_pct: number | null }>(`SELECT i.id, i.yield_pct, i.color_lovibond, i.attenuation_pct FROM recipe_event_inputs i
           JOIN recipe_events e ON e.id = i.id WHERE e.recipe_id = ?`, [selectedId])
       ]);
       const recent: Record<string, number> = {};
@@ -73,8 +74,8 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, inv
           if (value != null) recent[id] = value;
         }
       }
-      const recipeInputs = recipeRows.length ? JSON.parse(recipeRows[0].inputs_json) as Record<string, unknown> : {};
-      const eventInputs = Object.fromEntries(eventRows.map(row => [row.id, JSON.parse(row.inputs_json) as Record<string, unknown>]));
+      const recipeInputs = recipeRows[0] || {};
+      const eventInputs = Object.fromEntries(eventRows.map(row => [row.id, row]));
       if (!cancelled) setEstimate(calculateRecipe(plans, inventory, equipment, recipeInputs, eventInputs, recent,
         recipe?.recipe_type || 'beer'));
     })();

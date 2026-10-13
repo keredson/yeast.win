@@ -40,6 +40,24 @@ export interface InventoryItem { id: string; name: string; category: string; def
 export interface IngredientProperties { yield_pct?: number; color_lovibond?: number; alpha_acid_pct?: number;
   hop_form?: 'pellet' | 'whole' | 'plug'; attenuation_pct?: number }
 const ingredientPropertyColumns = ['yield_pct', 'color_lovibond', 'alpha_acid_pct', 'hop_form', 'attenuation_pct'] as const;
+const equipmentAssumptionColumns = ['mash_efficiency_pct', 'grain_absorption_l_per_kg', 'mash_deadspace_liters', 'kettle_retention_liters'] as const;
+
+function sourceNumber(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function sourceIngredientProperties(inputs: Record<string, unknown>): IngredientProperties {
+  const form = String(inputs.form || '').toLowerCase();
+  return {
+    ...(sourceNumber(inputs.yield) != null ? { yield_pct: sourceNumber(inputs.yield)! } : {}),
+    ...(sourceNumber(inputs.color) != null ? { color_lovibond: sourceNumber(inputs.color)! } : {}),
+    ...(sourceNumber(inputs.alpha) != null ? { alpha_acid_pct: sourceNumber(inputs.alpha)! } : {}),
+    ...(['pellet', 'whole', 'plug'].includes(form) ? { hop_form: form as IngredientProperties['hop_form'] } : {}),
+    ...(sourceNumber(inputs.attenuation) != null ? { attenuation_pct: sourceNumber(inputs.attenuation)! } : {})
+  };
+}
 
 export function ingredientProperties(item: InventoryItem | null | undefined): IngredientProperties {
   if (!item) return {};
@@ -163,24 +181,15 @@ export async function listRecipes(db: DB): Promise<Recipe[]> {
 }
 
 export async function recipeTargetVolume(db: DB, recipeId: string): Promise<number | null> {
-  const rows = await db.execO<{ inputs_json: string }>('SELECT inputs_json FROM recipe_inputs WHERE id = ?', [recipeId]);
-  if (!rows.length) return null;
-  const inputs = JSON.parse(rows[0].inputs_json) as Record<string, unknown>;
-  const value = Object.hasOwn(inputs, 'target_fermenter_volume_liters')
-    ? inputs.target_fermenter_volume_liters : inputs.batch_size ?? inputs.batchSize;
-  const liters = Number(value);
-  return value != null && value !== '' && Number.isFinite(liters) && liters > 0 ? liters : null;
+  const rows = await db.execO<{ target_fermenter_volume_liters: number | null }>(
+    'SELECT target_fermenter_volume_liters FROM recipe_inputs WHERE id = ?', [recipeId]);
+  return rows[0]?.target_fermenter_volume_liters ?? null;
 }
 
 export async function updateRecipeTargetVolume(db: DB, recipeId: string, liters: number | null): Promise<void> {
   if (liters != null && (!Number.isFinite(liters) || liters <= 0)) throw new Error('Enter a positive target volume');
-  await db.tx(async tx => {
-    const rows = await tx.execO<{ inputs_json: string }>('SELECT inputs_json FROM recipe_inputs WHERE id = ?', [recipeId]);
-    const inputs = rows.length ? JSON.parse(rows[0].inputs_json) as Record<string, unknown> : {};
-    inputs.target_fermenter_volume_liters = liters;
-    if (rows.length) await tx.exec('UPDATE recipe_inputs SET inputs_json = ? WHERE id = ?', [JSON.stringify(inputs), recipeId]);
-    else await tx.exec('INSERT INTO recipe_inputs(id, inputs_json) VALUES (?, ?)', [recipeId, JSON.stringify(inputs)]);
-  });
+  await db.exec(`INSERT INTO recipe_inputs(id, target_fermenter_volume_liters) VALUES (?, ?)
+    ON CONFLICT(id) DO UPDATE SET target_fermenter_volume_liters = excluded.target_fermenter_volume_liters`, [recipeId, liters]);
 }
 
 export async function updateRecipe(db: DB, recipeId: string, name: string, description: string, recipeType: RecipeType): Promise<void> {
@@ -342,7 +351,10 @@ export async function importRecipes(db: DB, source: {
       await tx.exec('INSERT INTO recipe_types(id, recipe_type) VALUES (?, ?)', [recipeId, recipe.type]);
       await tx.exec('INSERT INTO recipe_import_links(id, source_id, source_index, external_id) VALUES (?, ?, ?, ?)',
         [recipeId, sourceId, recipe.sourceIndex, recipe.externalId || null]);
-      await tx.exec('INSERT INTO recipe_inputs(id, inputs_json) VALUES (?, ?)', [recipeId, JSON.stringify(recipe.inputs)]);
+      const targetLiters = sourceNumber(recipe.inputs.batch_size ?? recipe.inputs.batchSize);
+      const brewhouseEfficiency = sourceNumber(recipe.inputs.efficiency);
+      await tx.exec(`INSERT INTO recipe_inputs(id, target_fermenter_volume_liters, brewhouse_efficiency_pct)
+        VALUES (?, ?, ?)`, [recipeId, targetLiters, brewhouseEfficiency]);
       const eventIds = new Map(recipe.actions.map(action => [action.key, nanoid()]));
       for (const [order, action] of recipe.actions.entries()) {
         const eventId = eventIds.get(action.key)!;
@@ -354,8 +366,10 @@ export async function importRecipes(db: DB, source: {
         [eventId, recipeId, action.eventType, action.title, action.anchorKey ? eventIds.get(action.anchorKey) || null : null,
           action.offsetSeconds, details.anchor_point ?? null, details.duration_seconds ?? null, details.note ?? null, order + 1]);
         await writePlanPayload(tx, 'recipe', eventId, action.eventType, details as PlanDetails);
-        if (Object.keys(action.inputs).length) await tx.exec('INSERT INTO recipe_event_inputs(id, inputs_json) VALUES (?, ?)',
-          [eventId, JSON.stringify(action.inputs)]);
+        const sourceProperties = sourceIngredientProperties(action.inputs);
+        if (Object.keys(sourceProperties).length) await tx.exec(`INSERT INTO recipe_event_inputs(id, ${ingredientPropertyColumns.join(', ')})
+          VALUES (?, ${ingredientPropertyColumns.map(() => '?').join(', ')})`,
+        [eventId, ...ingredientPropertyColumns.map(column => sourceProperties[column] ?? null)]);
       }
     }
   });
@@ -554,9 +568,10 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
   await db.tx(async tx => {
     await tx.exec('INSERT INTO batches(id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
       [batchId, name, description, 'active', now, now]);
-    const recipeInputs = await tx.execO<{ inputs_json: string }>('SELECT inputs_json FROM recipe_inputs WHERE id = ?', [recipe.id]);
-    if (recipeInputs.length) await tx.exec('INSERT INTO batch_recipe_inputs(id, inputs_json) VALUES (?, ?)',
-      [batchId, recipeInputs[0].inputs_json]);
+    const recipeInputs = await tx.execO<{ target_fermenter_volume_liters: number | null; brewhouse_efficiency_pct: number | null }>(
+      'SELECT target_fermenter_volume_liters, brewhouse_efficiency_pct FROM recipe_inputs WHERE id = ?', [recipe.id]);
+    if (recipeInputs.length) await tx.exec(`INSERT INTO batch_recipe_inputs(id, target_fermenter_volume_liters, brewhouse_efficiency_pct)
+      VALUES (?, ?, ?)`, [batchId, recipeInputs[0].target_fermenter_volume_liters, recipeInputs[0].brewhouse_efficiency_pct]);
     for (const plan of plans) {
       await tx.exec(`INSERT INTO batch_events(id, batch_id, recipe_event_id, event_type, title, planned_at,
         anchor_event_id, offset_seconds, anchor_point, duration_seconds, instructions, created_at, created_by_account_id)
@@ -566,30 +581,35 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
           plan.offset_seconds ?? null, plan.details.anchor_point ?? null, plan.details.duration_seconds ?? null,
           plan.details.note ?? null, now, accountId]);
       await writePlanPayload(tx, 'batch', ids.get(plan.id)!, plan.event_type, plan.details);
-      const eventInputs = await tx.execO<{ inputs_json: string }>('SELECT inputs_json FROM recipe_event_inputs WHERE id = ?', [plan.id]);
-      const snapshot = eventInputs.length ? JSON.parse(eventInputs[0].inputs_json) as Record<string, unknown> : {};
+      const eventInputs = await tx.execO<IngredientProperties>('SELECT * FROM recipe_event_inputs WHERE id = ?', [plan.id]);
+      const snapshot: Record<string, string | number | null> = {};
+      if (eventInputs.length) for (const column of ingredientPropertyColumns) snapshot[column] = eventInputs[0][column] ?? null;
       const details = plan.details;
       const assumptionEquipmentId = details.purpose === 'drain_grain' ? details.mash_equipment_id : details.equipment_id;
       if (typeof assumptionEquipmentId === 'string') {
         const rows = await tx.execO<{ specification_json: string | null }>('SELECT specification_json FROM equipment WHERE id = ?', [assumptionEquipmentId]);
         if (rows.length) {
           const specs = JSON.parse(rows[0].specification_json || '{}') as EquipmentSpecifications;
-          snapshot.equipment_assumptions = Object.fromEntries([
-            'mash_efficiency_pct', 'grain_absorption_l_per_kg', 'mash_deadspace_liters', 'kettle_retention_liters'
-          ].filter(key => (specs as Record<string, unknown>)[key] != null).map(key => [key, (specs as Record<string, unknown>)[key]]));
+          for (const column of equipmentAssumptionColumns) snapshot[column] = specs[column] ?? null;
           if (details.purpose === 'drain_grain' && specs.mash_efficiency_pct == null) {
             const recent = latestEfficiencies.get(assumptionEquipmentId);
-            if (recent != null) (snapshot.equipment_assumptions as Record<string, unknown>).mash_efficiency_pct = recent;
+            if (recent != null) snapshot.mash_efficiency_pct = recent;
           }
         }
       }
       if (typeof details.inventory_item_id === 'string') {
+        // A linked inventory item supplies the calculation defaults. Imported values
+        // remain in the original file, even when the item has no property set.
+        for (const column of ingredientPropertyColumns) snapshot[column] = null;
         const rows = await tx.execO<InventoryItem>(
           'SELECT * FROM inventory_ingredient_properties WHERE id = ?', [details.inventory_item_id]);
-        if (rows.length) snapshot.ingredient_properties = ingredientProperties(rows[0]);
+        if (rows.length) for (const [column, value] of Object.entries(ingredientProperties(rows[0]))) snapshot[column] = value;
       }
-      if (Object.keys(snapshot).length) await tx.exec('INSERT INTO batch_event_inputs(id, inputs_json) VALUES (?, ?)',
-        [ids.get(plan.id)!, JSON.stringify(snapshot)]);
+      if (Object.values(snapshot).some(value => value != null)) {
+        const columns = [...ingredientPropertyColumns, ...equipmentAssumptionColumns];
+        await tx.exec(`INSERT INTO batch_event_inputs(id, ${columns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')})`,
+          [ids.get(plan.id)!, ...columns.map(column => snapshot[column] ?? null)]);
+      }
     }
   });
   return batchId;
@@ -815,18 +835,14 @@ export async function latestMeasuredMashEfficiency(db: DB, equipmentId: string):
     const volume = collected[0]?.quantity != null && collected[0].unit
       ? { value: collected[0].quantity, unit: collected[0].unit } : volumes[0];
     if (!volume || !gravities.length) continue;
-    const additions = await db.execO<{ quantity: number; unit: string; inputs_json: string | null }>(`SELECT a.quantity, a.unit,
-      i.inputs_json FROM additions a JOIN batch_events e ON e.id = a.event_id
+    const additions = await db.execO<{ quantity: number; unit: string; yield_pct: number | null }>(`SELECT a.quantity, a.unit,
+      i.yield_pct FROM additions a JOIN batch_events e ON e.id = a.event_id
       LEFT JOIN inventory_items item ON item.id = a.inventory_item_id
       LEFT JOIN batch_event_inputs i ON i.id = e.id
       WHERE e.batch_id = ? AND e.actual_at IS NOT NULL AND e.actual_at <= ?
         AND (item.category = 'Grain' OR a.item_category = 'Grain')`, [drain.batch_id, drain.actual_at]);
-    const grains: MashGrain[] = additions.map(row => {
-      const inputs = JSON.parse(row.inputs_json || '{}') as Record<string, unknown>;
-      const saved = inputs.ingredient_properties as IngredientProperties | undefined;
-      return { quantity: row.quantity, unit: row.unit,
-        yieldPct: Number(saved?.yield_pct ?? inputs.yield) };
-    });
+    const grains: MashGrain[] = additions.map(row => ({ quantity: row.quantity, unit: row.unit,
+      yieldPct: Number(row.yield_pct) }));
     if (!grains.length) continue;
     const result = mashEfficiencyPct(grains, volume.value, volume.unit, gravities[0].value, gravities[0].unit);
     if (result != null) return result;

@@ -32,10 +32,9 @@ test('estimates OG, FG and ABV using mash efficiency and the retained kettle vol
   assert.match(result.efficiencyLabel!, /kettle retention/);
 });
 
-test('imported brewhouse efficiency works without selected equipment and never uses imported OG', () => {
-  const imported = calculateRecipe(events, [grain, yeast], [], { batch_size: '20', efficiency: '70', og: '1.099' }, {});
+test('imported brewhouse efficiency works without selected equipment', () => {
+  const imported = calculateRecipe(events, [grain, yeast], [], { target_fermenter_volume_liters: 20, brewhouse_efficiency_pct: 70 }, {});
   assert.ok(imported.originalGravity! > 1.053 && imported.originalGravity! < 1.055);
-  assert.notEqual(imported.originalGravity!.toFixed(3), '1.099');
   assert.match(imported.efficiencyLabel!, /brewhouse/);
 });
 
@@ -45,7 +44,7 @@ test('incomplete equipment or ingredient inputs do not produce misleading gravit
   assert.equal(missingRetention.originalGravity, null);
   assert.ok(missingRetention.missing.some(message => message.includes('kettle retention')));
   const missingYield = calculateRecipe(events, [{ ...grain, yield_pct: null, color_lovibond: null }, yeast], equipment,
-    { target_fermenter_volume_liters: 20 }, { 'grain-add': { yield: 80 } });
+    { target_fermenter_volume_liters: 20 }, { 'grain-add': { yield_pct: 80 } });
   assert.equal(missingYield.originalGravity, null);
   assert.ok(missingYield.missing.some(message => message.includes('extract yield')));
   assert.equal(missingYield.colorSrm, null);

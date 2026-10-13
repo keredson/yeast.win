@@ -45,30 +45,30 @@ try {
     const session = await fetch('/api/me').then(response => response.json());
     const db = await openLocalDb(session.workspaces[0].id);
     const recipes = await db.execO("SELECT id FROM recipes WHERE name = 'Import Pale Ale'");
-    const inputs = await db.execO('SELECT inputs_json FROM recipe_inputs WHERE id = ?', [recipes[0].id]);
+    const inputs = await db.execO('SELECT target_fermenter_volume_liters, brewhouse_efficiency_pct FROM recipe_inputs WHERE id = ?', [recipes[0].id]);
     const hops = await db.execO(`SELECT e.id, e.anchor_event_id, e.offset_seconds, a.item_category, a.quantity, a.unit
       FROM recipe_events e JOIN recipe_additions a ON a.event_id = e.id
       WHERE e.recipe_id = ? AND e.title = 'Cascade'`, [recipes[0].id]);
-    const hopInputs = await db.execO('SELECT inputs_json FROM recipe_event_inputs WHERE id = ?', [hops[0].id]);
+    const hopInputs = await db.execO('SELECT alpha_acid_pct FROM recipe_event_inputs WHERE id = ?', [hops[0].id]);
     const items = await db.execO("SELECT name FROM inventory_items WHERE name = '2-row pale malt' OR name = 'Cascade'");
     const counts = await db.execO('SELECT id FROM inventory_counts');
     const sources = await db.execO('SELECT id FROM recipe_import_sources');
     const links = await db.execO('SELECT id FROM recipe_import_links');
     const recipe = (await db.execO('SELECT id, name, description FROM recipes WHERE id = ?', [recipes[0].id]))[0];
     const batchId = await startBatchFromRecipe(db, recipe, 'Imported recipe batch', session.account.id);
-    const batchInputs = await db.execO('SELECT inputs_json FROM batch_recipe_inputs WHERE id = ?', [batchId]);
-    const batchHopInputs = await db.execO(`SELECT i.inputs_json FROM batch_event_inputs i
+    const batchInputs = await db.execO('SELECT target_fermenter_volume_liters, brewhouse_efficiency_pct FROM batch_recipe_inputs WHERE id = ?', [batchId]);
+    const batchHopInputs = await db.execO(`SELECT i.alpha_acid_pct FROM batch_event_inputs i
       JOIN batch_events e ON e.id = i.id WHERE e.batch_id = ? AND e.title = 'Cascade'`, [batchId]);
     await syncNow(db, session.workspaces[0].id);
-    return { inputs: JSON.parse(inputs[0].inputs_json), hop: hops[0], hopInputs: JSON.parse(hopInputs[0].inputs_json),
+    return { inputs: inputs[0], hop: hops[0], hopInputs: hopInputs[0],
       items: items.map(item => item.name), counts: counts.length, sources: sources.length, links: links.length,
-      batchInputs: JSON.parse(batchInputs[0].inputs_json), batchHopInputs: JSON.parse(batchHopInputs[0].inputs_json) };
+      batchInputs: batchInputs[0], batchHopInputs: batchHopInputs[0] };
   });
-  if (imported.inputs.efficiency !== '72' || imported.inputs.est_og || imported.hop.offset_seconds !== -900
+  if (imported.inputs.brewhouse_efficiency_pct !== 72 || imported.inputs.target_fermenter_volume_liters !== 20 || imported.hop.offset_seconds !== -900
     || imported.hop.item_category !== 'Hops' || imported.hop.quantity !== 30 || imported.hop.unit !== 'g'
-    || imported.hopInputs.alpha !== '6' || imported.items.join(',') !== '2-row pale malt'
+    || imported.hopInputs.alpha_acid_pct !== 6 || imported.items.join(',') !== '2-row pale malt'
     || imported.counts !== 0 || imported.sources !== 1 || imported.links !== 1
-    || imported.batchInputs.efficiency !== '72' || imported.batchHopInputs.alpha !== '6') {
+    || imported.batchInputs.brewhouse_efficiency_pct !== 72 || imported.batchHopInputs.alpha_acid_pct !== 6) {
     throw new Error(`Incorrect imported data: ${JSON.stringify(imported)}`);
   }
   await page.getByRole('button', { name: 'Recipe settings' }).click();
