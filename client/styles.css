@@ -11,8 +11,7 @@ button, input, textarea { font: inherit; }
 .brand strong { display: block; font-size: 23px; letter-spacing: -.03em; line-height: 1.05; }
 .brand small { display: block; margin-top: 4px; opacity: .72; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; }
 .brand-mark { display: block; width: 40px; height: 40px; border-radius: 13px; }
-.header-sync-progress { flex: 1; min-width: 150px; max-width: 360px; color: white; font-size: 12px; line-height: 1.2; }
-.header-sync-progress .ant-progress { display: block; line-height: 1; margin-top: 5px; }
+.header-sync-progress { display: flex; align-items: center; justify-content: center; flex: none; width: 32px; height: 32px; }
 .header-controls { display: flex; align-items: center; gap: 10px; }
 .workspace-select { width: 200px; }
 .app-header .ant-btn { color: white; border-color: #56736f; background: transparent; }
@@ -238,7 +237,6 @@ button, input, textarea { font: inherit; }
   .brand small { font-size: 9px; }
   .brand-mark { width: 36px; height: 36px; }
   .header-brand-row { width: 100%; justify-content: flex-start; }
-  .header-sync-progress { order: 3; flex: 1 1 100%; max-width: none; }
   .mobile-menu-button { display: inline-flex !important; color: white !important; }
   .header-controls { width: 100%; gap: 8px; }
   .workspace-select { flex: 1; width: auto; min-width: 90px; }
@@ -253,8 +251,8 @@ button, input, textarea { font: inherit; }
 }
 @media (max-width: 360px) {
   .header-controls { flex-wrap: wrap; }
-  .workspace-select { flex: 1 1 100%; }
-  .header-controls { justify-content: flex-end; }
+  .workspace-select { order: -1; flex: 1 1 100%; }
+  .header-controls .avatar-button { margin-left: auto; }
 }
 .import-recipe-choices, .import-inventory-toggle { margin: 20px 0; }
 .import-recipe-list { display: grid; gap: 10px; margin-top: 10px; }

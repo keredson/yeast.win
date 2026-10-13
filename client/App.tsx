@@ -536,12 +536,15 @@ export function App() {
           icon={<MenuOutlined />} onClick={() => setMenuOpen(true)} />
         <div className="brand"><img className="brand-mark" src="/icon.svg" alt="" /><div><strong>Brewlog</strong><small>Batch-first brewing</small></div></div>
       </div>
-      {headerProgress && <div className="header-sync-progress" role="status" aria-live="polite">
-        <span>{headerProgress.label}: {headerProgress.applied} of {headerProgress.total} changes</span>
-        <Progress percent={headerProgress.total ? Math.round(headerProgress.applied / headerProgress.total * 100) : 100}
-          showInfo={false} size="small" strokeColor="#e7b464" trailColor="#56736f" />
-      </div>}
       <div className="header-controls">
+        {headerProgress && <Tooltip title={`${headerProgress.label}: ${headerProgress.applied} of ${headerProgress.total} changes`}>
+          <div className="header-sync-progress" role="status" aria-live="polite"
+            aria-label={`${headerProgress.label}: ${headerProgress.applied} of ${headerProgress.total} changes`}>
+            <Progress type="circle" percent={headerProgress.total
+              ? Math.round(headerProgress.applied / headerProgress.total * 100) : 100}
+              showInfo={false} size={28} strokeWidth={11} strokeColor="#e7b464" trailColor="#56736f" />
+          </div>
+        </Tooltip>}
         <Select className="workspace-select" value={workspaceId} placeholder="No breweries" disabled={!session.workspaces.length}
           aria-label="Brewery"
           options={session.workspaces.map(item => ({ label: item.name, value: item.id }))}
