@@ -84,14 +84,13 @@ button, input, textarea { font: inherit; }
 .location-card .location-cards { grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 14px; }
 .location-card .location-card { padding: 13px; background: #f8faf7; }
 .location-card .location-card .location-card { background: #fff; }
-.location-card-heading { display: flex; align-items: flex-start; gap: 11px; color: #263c36; text-decoration: none; }
+.location-card-heading { display: block; color: #263c36; text-decoration: none; }
 .location-card-heading:hover { color: #1d604f; }
-.location-card-heading > svg { flex: none; margin-top: 2px; color: #518065; font-size: 19px; }
 .location-card-text { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
 .location-card-text strong { overflow-wrap: anywhere; }
 .location-card-text small { color: #728079; font-size: 12px; }
 .location-card-address, .location-detail-address { white-space: pre-line; overflow-wrap: anywhere; color: #61766a; }
-.location-card-address { margin: 10px 0 0 30px; font-size: 13px; }
+.location-card-address { margin: 10px 0 0; font-size: 13px; }
 .location-detail-address { margin: 0 0 22px; }
 .location-detail-address svg { margin-right: 5px; color: #518065; }
 .location-breadcrumb { margin: 0 0 14px; color: #728079; font-size: 13px; }

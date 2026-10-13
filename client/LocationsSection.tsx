@@ -23,7 +23,6 @@ function LocationCards({ parentId, locations, items, basePath, onSelect, visited
     return <article className="location-card" key={location.id}>
       <a className="location-card-heading" href={`${basePath}/location/${location.slug}`}
         onClick={event => { event.preventDefault(); onSelect(location.id); }}>
-        <EnvironmentOutlined aria-hidden />
         <span className="location-card-text"><strong>{location.name}</strong><small>{directCount} here · {totalCount} including sublocations</small></span>
       </a>
       {location.address && <p className="location-card-address">{location.address}</p>}
