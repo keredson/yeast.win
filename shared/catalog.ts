@@ -1,20 +1,38 @@
 import type { WireChange } from './schema.ts';
 
-export interface CatalogEquipment { id: string; name: string; kind: string;
+export interface MeasurementChannel { id: string; measurement_kind: string;
+  measurement_min?: number | null; measurement_max?: number | null;
+  measurement_unit?: string | null; measurement_scale?: string | null }
+export interface CatalogMeasurementChannel extends MeasurementChannel { model_id: string }
+export interface CatalogEquipment { id: string; name: string; kind: string; manufacturer?: string | null;
+  has_heating?: boolean; has_cooling?: boolean; has_temperature_control?: boolean;
   capacity_liters?: number | null; built_in_temperature_control?: number | boolean | null; max_pressure_kpa?: number | null;
-  rated_power_watts?: number | null; measurement_min?: number | null; measurement_max?: number | null;
-  measurement_unit?: string | null }
+  rated_power_watts?: number | null; rated_heat_removal_watts?: number | null;
+  min_temperature_c?: number | null; max_temperature_c?: number | null;
+  measurement_min?: number | null; measurement_max?: number | null;
+  measurement_unit?: string | null; measurement_channels?: CatalogMeasurementChannel[] }
 export interface CatalogInventory { id: string; name: string; category: string; unit: string }
 
 export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
-export const catalogSchemaVersion = 10;
-export const catalogTables = ['equipment', 'inventory'] as const;
-export const catalogEquipmentColumns = ['capacity_liters', 'built_in_temperature_control', 'max_pressure_kpa',
-  'rated_power_watts', 'measurement_min', 'measurement_max', 'measurement_unit'] as const;
-export const catalogEquipmentTable = `CREATE TABLE IF NOT EXISTS equipment (
-  id TEXT PRIMARY KEY NOT NULL, name TEXT, kind TEXT,
-  capacity_liters REAL, built_in_temperature_control INTEGER, max_pressure_kpa REAL,
-  rated_power_watts REAL, measurement_min REAL, measurement_max REAL, measurement_unit TEXT)`;
+export const catalogSchemaVersion = 11;
+export const catalogModelTables = {
+  equipment_models: `CREATE TABLE IF NOT EXISTS equipment_models (
+    id TEXT PRIMARY KEY NOT NULL, manufacturer TEXT, model_name TEXT, kind TEXT)`,
+  model_liquid_containment: `CREATE TABLE IF NOT EXISTS model_liquid_containment (
+    model_id TEXT PRIMARY KEY NOT NULL, capacity_liters REAL)`,
+  model_pressure_rating: `CREATE TABLE IF NOT EXISTS model_pressure_rating (
+    model_id TEXT PRIMARY KEY NOT NULL, max_pressure_kpa REAL)`,
+  model_heating: `CREATE TABLE IF NOT EXISTS model_heating (
+    model_id TEXT PRIMARY KEY NOT NULL, rated_power_watts REAL)`,
+  model_cooling: `CREATE TABLE IF NOT EXISTS model_cooling (
+    model_id TEXT PRIMARY KEY NOT NULL, rated_heat_removal_watts REAL)`,
+  model_temperature_control: `CREATE TABLE IF NOT EXISTS model_temperature_control (
+    model_id TEXT PRIMARY KEY NOT NULL, min_temperature_c REAL, max_temperature_c REAL)`,
+  model_measurement_channels: `CREATE TABLE IF NOT EXISTS model_measurement_channels (
+    id TEXT PRIMARY KEY NOT NULL, model_id TEXT, measurement_kind TEXT,
+    measurement_min REAL, measurement_max REAL, measurement_unit TEXT, measurement_scale TEXT)`
+} as const;
+export const catalogTables = [...Object.keys(catalogModelTables), 'inventory'] as const;
 export const catalogInventoryTable = `CREATE TABLE IF NOT EXISTS inventory (
   id TEXT PRIMARY KEY NOT NULL, name TEXT, category TEXT, unit TEXT)`;
 
