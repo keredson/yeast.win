@@ -18,18 +18,19 @@ const events: (PlanInput & { id: string })[] = [
 ];
 const equipment: Equipment[] = [
   { id: 'tun', kind: 'mash_tun', name: 'Tun', mash_efficiency_pct: 75 },
-  { id: 'kettle', kind: 'kettle', name: 'Kettle', kettle_retention_liters: 2 }
+  { id: 'kettle', kind: 'kettle', name: 'Kettle' }
 ];
 
-test('estimates OG, FG and ABV using mash efficiency and the retained kettle volume', () => {
-  const result = calculateRecipe(events, [grain, yeast], equipment, { target_fermenter_volume_liters: 20 }, {});
+test('estimates OG, FG and ABV using mash efficiency and expected wort loss', () => {
+  const result = calculateRecipe(events, [grain, yeast], equipment,
+    { target_fermenter_volume_liters: 20, wort_loss_liters: 2 }, {});
   const expectedOg = 1 + (5 / 0.45359237 * 46 * .8 * .75) / (22 / 3.785411784) / 1000;
   assert.ok(Math.abs(result.originalGravity! - expectedOg) < .000001);
   assert.ok(Math.abs(result.finalGravity! - (1 + (expectedOg - 1) * .25)) < .000001);
   assert.ok(Math.abs(result.abvPct! - (expectedOg - result.finalGravity!) * 131.25) < .000001);
   const mcu = 5 / 0.45359237 * 2 / (20 / 3.785411784);
   assert.ok(Math.abs(result.colorSrm! - 1.4922 * mcu ** .6859) < .000001);
-  assert.match(result.efficiencyLabel!, /kettle retention/);
+  assert.match(result.efficiencyLabel!, /wort loss/);
 });
 
 test('imported brewhouse efficiency works without selected equipment', () => {
@@ -39,15 +40,22 @@ test('imported brewhouse efficiency works without selected equipment', () => {
 });
 
 test('incomplete equipment or ingredient inputs do not produce misleading gravity', () => {
-  const missingRetention = calculateRecipe(events, [grain, yeast], equipment.slice(0, 1),
+  const missingRetention = calculateRecipe(events, [grain, yeast], equipment,
     { target_fermenter_volume_liters: 20 }, {});
   assert.equal(missingRetention.originalGravity, null);
-  assert.ok(missingRetention.missing.some(message => message.includes('kettle retention')));
+  assert.ok(missingRetention.missing.some(message => message.includes('wort loss')));
   const missingYield = calculateRecipe(events, [{ ...grain, yield_pct: null, color_lovibond: null }, yeast], equipment,
-    { target_fermenter_volume_liters: 20 }, { 'grain-add': { yield_pct: 80 } });
+    { target_fermenter_volume_liters: 20, wort_loss_liters: 2 }, { 'grain-add': { yield_pct: 80 } });
   assert.equal(missingYield.originalGravity, null);
   assert.ok(missingYield.missing.some(message => message.includes('extract yield')));
   assert.equal(missingYield.colorSrm, null);
+});
+
+test('zero wort loss is an explicit recipe input', () => {
+  const result = calculateRecipe(events, [grain, yeast], equipment,
+    { target_fermenter_volume_liters: 20, wort_loss_liters: 0 }, {});
+  assert.ok(result.originalGravity != null);
+  assert.match(result.efficiencyLabel!, /0 L wort loss/);
 });
 
 test('cider recipe asks for sugar inputs rather than grain mash equipment', () => {

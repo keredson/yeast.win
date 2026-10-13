@@ -13,11 +13,11 @@ const definitions: Record<string, string> = {
   recipe_packaging: `event_id TEXT PRIMARY KEY NOT NULL, container_name TEXT, container_size REAL, container_count INTEGER, container_unit TEXT`,
   recipe_import_sources: `id TEXT PRIMARY KEY NOT NULL, filename TEXT NOT NULL, format TEXT NOT NULL, sha256 TEXT NOT NULL, byte_count INTEGER NOT NULL, content BLOB NOT NULL, imported_at INTEGER NOT NULL`,
   recipe_import_links: `id TEXT PRIMARY KEY NOT NULL, source_id TEXT NOT NULL, source_index INTEGER NOT NULL, external_id TEXT`,
-  recipe_inputs: `id TEXT PRIMARY KEY NOT NULL, target_fermenter_volume_liters REAL, brewhouse_efficiency_pct REAL`,
+  recipe_inputs: `id TEXT PRIMARY KEY NOT NULL, target_fermenter_volume_liters REAL, brewhouse_efficiency_pct REAL, wort_loss_liters REAL`,
   recipe_event_inputs: `id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL, alpha_acid_pct REAL, hop_form TEXT, attenuation_pct REAL`,
   batch_events: `id TEXT PRIMARY KEY NOT NULL, batch_id TEXT NOT NULL, recipe_event_id TEXT, event_type TEXT NOT NULL, title TEXT, planned_at INTEGER, anchor_event_id TEXT, offset_seconds INTEGER, anchor_point TEXT, duration_seconds INTEGER, instructions TEXT, actual_at INTEGER, skipped_at INTEGER, note TEXT, created_at INTEGER NOT NULL, created_by_account_id TEXT, recorded_by_account_id TEXT, source_id TEXT, external_id TEXT, received_at INTEGER`,
-  batch_recipe_inputs: `id TEXT PRIMARY KEY NOT NULL, target_fermenter_volume_liters REAL, brewhouse_efficiency_pct REAL`,
-  batch_event_inputs: `id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL, alpha_acid_pct REAL, hop_form TEXT, attenuation_pct REAL, mash_efficiency_pct REAL, grain_absorption_l_per_kg REAL, mash_deadspace_liters REAL, kettle_retention_liters REAL`,
+  batch_recipe_inputs: `id TEXT PRIMARY KEY NOT NULL, target_fermenter_volume_liters REAL, brewhouse_efficiency_pct REAL, wort_loss_liters REAL`,
+  batch_event_inputs: `id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL, alpha_acid_pct REAL, hop_form TEXT, attenuation_pct REAL, mash_efficiency_pct REAL, grain_absorption_l_per_kg REAL`,
   event_ends: `id TEXT PRIMARY KEY NOT NULL, ended_at INTEGER NOT NULL`,
   additions: `event_id TEXT PRIMARY KEY NOT NULL, item_category TEXT, catalog_item_id TEXT, inventory_item_id TEXT, item_name TEXT, quantity REAL, unit TEXT, display_unit TEXT, lot TEXT`,
   batch_measurement_targets: `event_id TEXT PRIMARY KEY NOT NULL, measurement_kind TEXT, target_value REAL, target_unit TEXT`,
@@ -37,8 +37,8 @@ const definitions: Record<string, string> = {
     has_pressure_rating INTEGER, max_pressure_kpa REAL, has_heating INTEGER, rated_power_watts REAL,
     has_cooling INTEGER, rated_heat_removal_watts REAL, has_temperature_control INTEGER,
     min_temperature_c REAL, max_temperature_c REAL,
-    mash_efficiency_pct REAL, grain_absorption_l_per_kg REAL,
-    mash_deadspace_liters REAL, kettle_retention_liters REAL, created_at INTEGER NOT NULL`,
+    mash_efficiency_pct REAL, grain_absorption_l_per_kg REAL, created_at INTEGER NOT NULL`,
+  brewery_process_defaults: `id TEXT PRIMARY KEY NOT NULL, wort_loss_liters REAL`,
   equipment: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, model_id TEXT NOT NULL,
     slug TEXT, stock_id TEXT, added_at INTEGER, removed_at INTEGER, created_at INTEGER NOT NULL`,
   equipment_model_measurement_channels: `id TEXT PRIMARY KEY NOT NULL, model_id TEXT NOT NULL,
@@ -59,8 +59,7 @@ const definitions: Record<string, string> = {
   equipment_measurement_calibration_points: `id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL,
     measurement_kind TEXT NOT NULL, reference_value REAL NOT NULL, observed_value REAL NOT NULL`,
   equipment_mash_assumptions: `equipment_id TEXT PRIMARY KEY NOT NULL,
-    mash_efficiency_pct REAL, grain_absorption_l_per_kg REAL,
-    mash_deadspace_liters REAL, kettle_retention_liters REAL`,
+    mash_efficiency_pct REAL, grain_absorption_l_per_kg REAL`,
   equipment_archives: `id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, archived_at INTEGER NOT NULL`,
   equipment_use_events: `event_id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL`,
   inventory_items: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL, default_unit TEXT NOT NULL, created_at INTEGER NOT NULL`,
@@ -130,7 +129,7 @@ export function legacyEquipmentCopyStatements(columns: string[]): string[] {
     SELECT id, boil_heat_loss_watts FROM equipment_legacy_migration WHERE boil_heat_loss_watts IS NOT NULL`);
   copy(['temperature_offset_c'], `INSERT OR IGNORE INTO equipment_temperature_calibration(equipment_id, offset_c)
     SELECT id, temperature_offset_c FROM equipment_legacy_migration WHERE temperature_offset_c IS NOT NULL`);
-  const assumptions = ['mash_efficiency_pct', 'grain_absorption_l_per_kg', 'mash_deadspace_liters', 'kettle_retention_liters'];
+  const assumptions = ['mash_efficiency_pct', 'grain_absorption_l_per_kg'];
   if (has(...assumptions)) statements.push(`INSERT OR IGNORE INTO equipment_mash_assumptions
     (equipment_id, ${assumptions.join(', ')}) SELECT id, ${assumptions.join(', ')} FROM equipment_legacy_migration
     WHERE ${assumptions.map(column => `${column} IS NOT NULL`).join(' OR ')}`);
@@ -167,7 +166,7 @@ export function legacyEquipmentModelStatements(columns: string[]): string[] {
       has_liquid_containment, capacity_liters, has_pressure_rating, max_pressure_kpa,
       has_heating, rated_power_watts, has_cooling, rated_heat_removal_watts,
       has_temperature_control, min_temperature_c, max_temperature_c,
-      mash_efficiency_pct, grain_absorption_l_per_kg, mash_deadspace_liters, kettle_retention_liters, created_at)
+      mash_efficiency_pct, grain_absorption_l_per_kg, created_at)
       SELECT ${modelId}, ${name}, ${kind}, ${catalog},
       CASE WHEN liquid.equipment_id IS NOT NULL THEN 1 END, liquid.capacity_liters,
       CASE WHEN pressure.equipment_id IS NOT NULL THEN 1 END, pressure.max_pressure_kpa,
@@ -175,7 +174,6 @@ export function legacyEquipmentModelStatements(columns: string[]): string[] {
       CASE WHEN cool.equipment_id IS NOT NULL THEN 1 END, cool.rated_heat_removal_watts,
       CASE WHEN control.equipment_id IS NOT NULL THEN 1 END, control.min_temperature_c, control.max_temperature_c,
       assumptions.mash_efficiency_pct, assumptions.grain_absorption_l_per_kg,
-      assumptions.mash_deadspace_liters, assumptions.kettle_retention_liters,
       ${created} FROM ${old} e
       LEFT JOIN equipment_liquid_containment liquid ON liquid.equipment_id = e.id
       LEFT JOIN equipment_pressure_rating pressure ON pressure.equipment_id = e.id
@@ -257,7 +255,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 22;
+export const workspaceSchemaVersion = 23;
 export const retiredReplicatedTables = ['equipment_calibrations', 'equipment_characterization_observations'] as const;
 
 export function isValidId(value: unknown): value is string {

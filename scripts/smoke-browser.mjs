@@ -562,6 +562,9 @@ try {
 
   await page.getByRole('button', { name: 'Account settings' }).click();
   await page.getByRole('heading', { name: 'Settings' }).waitFor();
+  await page.getByRole('spinbutton', { name: 'Brewery default (L)' }).fill('2');
+  await page.getByRole('button', { name: 'Save default' }).click();
+  await page.getByText('Wort loss to fermenter: 2 L').waitFor();
   await page.getByRole('combobox', { name: 'Preferred mass unit' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="oz"]').click();
   await page.waitForFunction(async () => (await (await fetch('/api/me')).json()).preferred_units.mass === 'oz');
@@ -785,6 +788,12 @@ try {
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke recipe' }).click();
   await page.getByRole('button', { name: 'Create batch' }).click();
   await page.getByRole('heading', { name: 'Batch from recipe' }).waitFor();
+  await page.getByText('Expected wort loss to fermenter: 2 L').waitFor();
+  await page.getByRole('button', { name: 'Edit batch wort loss' }).click();
+  const batchWortLossDialog = page.getByRole('dialog', { name: 'Batch wort loss' });
+  await batchWortLossDialog.getByRole('spinbutton', { name: 'Wort loss to fermenter (L)' }).fill('1.5');
+  await batchWortLossDialog.getByRole('button', { name: 'Save batch value' }).click();
+  await page.getByText('Expected wort loss to fermenter: 1.5 L').waitFor();
   await page.locator('.plan-card').getByText('2-row pale malt extra').waitFor();
   await page.getByRole('button', { name: 'Record Transfer to fermenter' }).click();
   const recordTransfer = page.getByRole('dialog', { name: 'Record: Transfer to fermenter' });
@@ -835,14 +844,29 @@ try {
   const recipeSettings = page.getByRole('dialog', { name: 'Recipe settings' });
   await recipeSettings.getByRole('textbox', { name: 'Recipe name' }).fill('Smoke recipe revised');
   await recipeSettings.getByRole('textbox', { name: 'Description' }).fill('Edited recipe description');
+  await recipeSettings.getByRole('spinbutton', { name: 'Wort loss to fermenter (L, optional)' }).fill('3');
   await recipeSettings.getByRole('combobox', { name: 'Type' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Wine' }).click();
   await recipeSettings.getByRole('button', { name: 'Save changes' }).click();
   await recipeSettings.waitFor({ state: 'hidden' });
   await page.getByRole('heading', { name: 'Smoke recipe revised' }).waitFor();
   await page.getByText('Edited recipe description').waitFor();
+  await page.getByRole('button', { name: 'Recipe settings' }).click();
+  await page.getByRole('dialog', { name: 'Recipe settings' })
+    .getByRole('spinbutton', { name: 'Wort loss to fermenter (L, optional)' }).inputValue()
+    .then(value => { if (value !== '3') throw new Error(`Recipe wort loss override was ${value}`); });
+  await page.getByRole('dialog', { name: 'Recipe settings' }).locator('.ant-modal-close').click();
+  await recipeSettings.waitFor({ state: 'hidden' });
   if (await page.getByText('Recipe plan · wine').count()) throw new Error('Recipe header still repeats its type');
   await page.locator('.recipe-detail-heading .recipe-type-icon[data-recipe-type="wine"]').waitFor();
+  await page.getByRole('button', { name: 'Start batch' }).click();
+  await page.getByRole('dialog', { name: 'Start a batch' }).getByRole('textbox', { name: 'Batch name' })
+    .fill('Batch with recipe wort loss');
+  await page.getByRole('dialog', { name: 'Start a batch' }).getByRole('button', { name: 'Create batch' }).click();
+  await page.getByRole('heading', { name: 'Batch with recipe wort loss' }).waitFor();
+  await page.getByText('Expected wort loss to fermenter: 3 L').waitFor();
+  await navigateSection(page, 'Recipes');
+  await page.locator('.record-link').filter({ hasText: 'Smoke recipe revised' }).click();
   await page.getByRole('button', { name: 'Recipe settings' }).click();
   await recipeSettings.getByRole('button', { name: 'Delete recipe' }).click();
   await page.getByText('Batches already started from it keep their actions.').waitFor();

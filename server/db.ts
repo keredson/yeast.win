@@ -150,8 +150,27 @@ export function openWorkspaceDb(id: string): Database.Database {
   const legacyVersion = hasLegacyMeta
     ? (db.prepare('SELECT version FROM schema_meta LIMIT 1').get() as { version: number } | undefined)?.version : undefined;
   const version = storedVersion || legacyVersion || 0;
-  const hasWorkspaceTables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
-    .all() as { name: string }[]).some(row => replicatedTables.includes(row.name));
+  const existingTables = new Set((db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+    .all() as { name: string }[]).map(row => row.name));
+  const hasWorkspaceTables = [...existingTables].some(name => replicatedTables.includes(name));
+  const legacyLossValues: number[] = [];
+  const legacyBatchLosses: { batch_id: string; wort_loss_liters: number }[] = [];
+  if (version < 23 && hasWorkspaceTables) {
+    for (const table of ['equipment_models', 'equipment_mash_assumptions', 'equipment']) {
+      if (!existingTables.has(table) || !(db.pragma(`table_info("${table}")`) as { name: string }[])
+        .some(column => column.name === 'kettle_retention_liters')) continue;
+      legacyLossValues.push(...(db.prepare(`SELECT DISTINCT kettle_retention_liters AS value FROM "${table}"
+        WHERE kettle_retention_liters IS NOT NULL`).all() as { value: number }[]).map(row => row.value));
+    }
+    if (existingTables.has('batch_event_inputs') && existingTables.has('batch_events')
+      && (db.pragma('table_info(batch_event_inputs)') as { name: string }[])
+        .some(column => column.name === 'kettle_retention_liters')) {
+      legacyBatchLosses.push(...db.prepare(`SELECT e.batch_id, MIN(i.kettle_retention_liters) AS wort_loss_liters
+        FROM batch_event_inputs i JOIN batch_events e ON e.id = i.id
+        WHERE i.kettle_retention_liters IS NOT NULL GROUP BY e.batch_id
+        HAVING MIN(i.kettle_retention_liters) = MAX(i.kettle_retention_liters)`).all() as typeof legacyBatchLosses);
+    }
+  }
   if (version === 0 && !hasWorkspaceTables) {
     db.exec('BEGIN');
     try {
@@ -225,6 +244,16 @@ export function openWorkspaceDb(id: string): Database.Database {
       db.exec('DROP TABLE equipment_legacy_migration');
     })();
   }
+  const uniqueLegacyLosses = [...new Set(legacyLossValues)];
+  if (uniqueLegacyLosses.length === 1 || legacyBatchLosses.length) db.transaction(() => {
+    if (uniqueLegacyLosses.length === 1) db.prepare(`INSERT INTO brewery_process_defaults(id, wort_loss_liters)
+      VALUES ('brewery', ?) ON CONFLICT(id) DO UPDATE SET
+        wort_loss_liters = COALESCE(brewery_process_defaults.wort_loss_liters, excluded.wort_loss_liters)`)
+      .run(uniqueLegacyLosses[0]);
+    const copyBatch = db.prepare(`INSERT INTO batch_recipe_inputs(id, wort_loss_liters) VALUES (?, ?)
+      ON CONFLICT(id) DO UPDATE SET wort_loss_liters = COALESCE(batch_recipe_inputs.wort_loss_liters, excluded.wort_loss_liters)`);
+    for (const row of legacyBatchLosses) copyBatch.run(row.batch_id, row.wort_loss_liters);
+  })();
   db.exec(`UPDATE equipment SET added_at = COALESCE(added_at, created_at) WHERE added_at IS NULL;
     UPDATE equipment SET removed_at =
       (SELECT archived_at FROM equipment_archives WHERE equipment_id = equipment.id ORDER BY archived_at LIMIT 1)

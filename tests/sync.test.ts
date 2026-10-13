@@ -41,6 +41,8 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
       .run(equipmentUseId, batchA, 'equipment_use', 'Use Shared kettle', timestamp, timestamp);
     first.prepare('INSERT INTO equipment_use_events(event_id, equipment_id) VALUES (?, ?)')
       .run(equipmentUseId, equipmentId);
+    first.prepare("INSERT INTO brewery_process_defaults(id, wort_loss_liters) VALUES ('brewery', ?)")
+      .run(1.5);
     first.prepare('INSERT INTO temperature_measurements(event_id, value, unit) VALUES (?, ?, ?)')
       .run(event, 20, 'degC');
     const discardedItem = nanoid();
@@ -76,6 +78,8 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
     assert.equal((second.prepare('SELECT value FROM temperature_measurements WHERE event_id = ?').get(event) as { value: number }).value, 20);
     assert.equal((second.prepare('SELECT equipment_id FROM equipment_use_events WHERE event_id = ?').get(equipmentUseId) as { equipment_id: string }).equipment_id, equipmentId);
     assert.equal((second.prepare('SELECT model_id FROM equipment WHERE id = ?').get(equipmentId) as { model_id: string }).model_id, modelId);
+    assert.equal((second.prepare("SELECT wort_loss_liters FROM brewery_process_defaults WHERE id = 'brewery'")
+      .get() as { wort_loss_liters: number }).wort_loss_liters, 1.5);
     assert.equal((second.prepare('SELECT quantity FROM inventory_discards WHERE inventory_item_id = ?').get(discardedItem) as { quantity: number }).quantity, 5);
     assert.equal((second.prepare('SELECT parent_id FROM inventory_locations WHERE id = ?').get(shelfId) as { parent_id: string }).parent_id, roomId);
     assert.equal((second.prepare('SELECT address FROM inventory_location_addresses WHERE id = ?').get(roomId) as { address: string }).address, '123 Brew Street');
@@ -425,6 +429,53 @@ test('version 21 workspace adds brewery model boil defaults and keeps unit calib
       .run(modelId, 0);
     assert.equal((upgraded.prepare('SELECT heat_loss_watts FROM equipment_model_boil_characterization WHERE model_id = ?')
       .get(modelId) as { heat_loss_watts: number }).heat_loss_watts, 0);
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
+test('version 22 workspace moves unambiguous wort loss to brewery and batch inputs', () => {
+  const id = nanoid();
+  const modelId = nanoid();
+  const unitId = nanoid();
+  const batchId = nanoid();
+  const eventId = nanoid();
+  const db = openWorkspaceDb(id);
+  db.prepare('INSERT INTO equipment_models(id, name, kind, created_at) VALUES (?, ?, ?, ?)')
+    .run(modelId, 'Kettle model', 'kettle', 1);
+  db.prepare('INSERT INTO equipment(id, name, model_id, created_at) VALUES (?, ?, ?, ?)')
+    .run(unitId, 'Kettle', modelId, 1);
+  db.prepare('INSERT INTO batches(id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+    .run(batchId, 'Existing batch', 'active', 1, 1);
+  db.prepare('INSERT INTO batch_events(id, batch_id, event_type, created_at) VALUES (?, ?, ?, ?)')
+    .run(eventId, batchId, 'transfer', 1);
+  for (const table of ['equipment_models', 'equipment_mash_assumptions', 'batch_event_inputs']) {
+    db.prepare('SELECT crsql_as_table(?)').get(table);
+    db.exec(`ALTER TABLE ${table} ADD COLUMN mash_deadspace_liters REAL`);
+    db.exec(`ALTER TABLE ${table} ADD COLUMN kettle_retention_liters REAL`);
+    db.prepare('SELECT crsql_as_crr(?)').get(table);
+  }
+  db.prepare('UPDATE equipment_models SET kettle_retention_liters = 2, mash_deadspace_liters = 1 WHERE id = ?')
+    .run(modelId);
+  db.prepare('INSERT INTO equipment_mash_assumptions(equipment_id, kettle_retention_liters) VALUES (?, ?)')
+    .run(unitId, 2);
+  db.prepare('INSERT INTO batch_event_inputs(id, kettle_retention_liters) VALUES (?, ?)')
+    .run(eventId, 1.5);
+  db.pragma('user_version = 22');
+  closeWorkspaceDb(db);
+
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.equal((upgraded.prepare("SELECT wort_loss_liters FROM brewery_process_defaults WHERE id = 'brewery'")
+      .get() as { wort_loss_liters: number }).wort_loss_liters, 2);
+    assert.equal((upgraded.prepare('SELECT wort_loss_liters FROM batch_recipe_inputs WHERE id = ?')
+      .get(batchId) as { wort_loss_liters: number }).wort_loss_liters, 1.5);
+    assert.equal((upgraded.prepare('SELECT name FROM batches WHERE id = ?')
+      .get(batchId) as { name: string }).name, 'Existing batch');
+    for (const table of ['equipment_models', 'equipment_mash_assumptions', 'batch_event_inputs']) {
+      const columns = (upgraded.pragma(`table_info(${table})`) as { name: string }[]).map(row => row.name);
+      assert.ok(!columns.includes('mash_deadspace_liters'));
+      assert.ok(!columns.includes('kettle_retention_liters'));
+    }
   } finally { closeWorkspaceDb(upgraded); }
 });
 

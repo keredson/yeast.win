@@ -18,7 +18,8 @@ try {
     const equipmentId = await api.createEquipment(db, 'Mash system', 'all_in_one');
     const equipment = { id: equipmentId, name: 'Mash system', kind: 'all_in_one' };
     await api.updateBrewingLosses(db, equipment, { mash_efficiency_pct: 75,
-      grain_absorption_l_per_kg: 0.8, mash_deadspace_liters: 0.5, kettle_retention_liters: 1 });
+      grain_absorption_l_per_kg: 0.8 });
+    await api.updateBreweryWortLoss(db, 1);
     const itemId = await api.createInventoryItem(db, 'Test malt', 'Grain', 'kg');
     const item = { id: itemId, name: 'Test malt', category: 'Grain', default_unit: 'kg', display_unit: 'kg', location_id: null };
     await api.updateIngredientProperties(db, item, { yield_pct: 80, color_lovibond: 2 });
@@ -53,8 +54,7 @@ try {
     await db.exec('INSERT INTO gravity_measurements(event_id, value, unit) VALUES (?, ?, ?)', [gravityBatch.id, 1.05, 'SG']);
     const measured = await api.latestMeasuredMashEfficiency(db, equipmentId);
     await api.updateIngredientProperties(db, item, { yield_pct: 75, color_lovibond: 3 });
-    const current = (await db.execO('SELECT * FROM equipment WHERE id = ?', [equipmentId]))[0];
-    await api.updateBrewingLosses(db, current, { mash_efficiency_pct: null });
+    await api.updateBrewingLosses(db, equipment, { mash_efficiency_pct: null });
     const nextBatchId = await api.startBatchFromRecipe(db, recipe, 'Second mash', session.account.id);
     const nextDrain = (await db.execO('SELECT id FROM batch_events WHERE batch_id = ? AND title = ?', [nextBatchId, 'Drain grain']))[0];
     const nextInputs = await db.execO('SELECT mash_efficiency_pct FROM batch_event_inputs WHERE id = ?', [nextDrain.id]);
@@ -92,5 +92,5 @@ try {
   await page.getByRole('button', { name: 'Edit planned event Drain grain' }).click();
   await page.getByText('Mash equipment').waitFor();
   await page.getByText('Collecting vessel (optional)').waitFor();
-  console.log('Mash transfer, equipment losses, ingredient properties, snapshots, and recent efficiency passed');
+  console.log('Mash transfer, brewery wort loss, ingredient properties, snapshots, and recent efficiency passed');
 } finally { await browser.close(); }
