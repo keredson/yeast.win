@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nanoid } from 'nanoid';
+import { recordSlug } from '../shared/recordSlug.ts';
 import { indexStatements, legacyEquipmentCopyStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements,
   workspaceSchemaVersion, workspaceTableColumns, legacyEquipmentModelStatements, supplyMigrationStatements } from '../shared/schema.ts';
 
@@ -245,6 +246,20 @@ export function openWorkspaceDb(id: string): Database.Database {
     })();
   }
   db.transaction(() => { for (const statement of supplyMigrationStatements) db.exec(statement); })();
+  db.transaction(() => {
+    const recipes = db.prepare(`SELECT r.id, r.name, s.slug FROM recipes r
+      LEFT JOIN recipe_slugs s ON s.id = r.id ORDER BY r.created_at, r.id`)
+      .all() as { id: string; name: string; slug: string | null }[];
+    const used = new Set(recipes.flatMap(row => [row.id, ...(row.slug ? [row.slug] : [])]));
+    const insert = db.prepare('INSERT OR IGNORE INTO recipe_slugs(id, slug) VALUES (?, ?)');
+    for (const recipe of recipes) if (!recipe.slug) {
+      const base = recordSlug(recipe.name).slice(0, 70);
+      let slug = base;
+      for (let number = 2; used.has(slug); number++) slug = `${base}-${number}`;
+      used.add(slug);
+      insert.run(recipe.id, slug);
+    }
+  })();
   const uniqueLegacyLosses = [...new Set(legacyLossValues)];
   if (uniqueLegacyLosses.length === 1 || legacyBatchLosses.length) db.transaction(() => {
     if (uniqueLegacyLosses.length === 1) db.prepare(`INSERT INTO brewery_process_defaults(id, wort_loss_liters)

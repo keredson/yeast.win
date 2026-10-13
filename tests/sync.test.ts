@@ -215,6 +215,51 @@ test('version 24 workspace adds batch origins while preserving existing batches 
   } finally { closeWorkspaceDb(upgraded); }
 });
 
+test('version 25 workspace gains recipe slugs without changing recipes or their events', () => {
+  const workspaceId = nanoid();
+  const recipeId = nanoid();
+  const eventId = nanoid();
+  const db = openWorkspaceDb(workspaceId);
+  db.prepare('INSERT INTO recipes(id, name, created_at, updated_at) VALUES (?, ?, ?, ?)')
+    .run(recipeId, 'Autumn Pale Ale', 1, 1);
+  db.prepare('INSERT INTO recipe_events(id, recipe_id, event_type, title, sort_order) VALUES (?, ?, ?, ?, ?)')
+    .run(eventId, recipeId, 'addition', 'Pale malt', 1);
+  db.prepare("SELECT crsql_as_table('recipe_slugs')").get();
+  db.exec('DROP TABLE recipe_slugs');
+  db.pragma('user_version = 25');
+  closeWorkspaceDb(db);
+  const upgraded = openWorkspaceDb(workspaceId);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.equal((upgraded.prepare('SELECT name FROM recipes WHERE id = ?').get(recipeId) as { name: string }).name,
+      'Autumn Pale Ale');
+    assert.equal((upgraded.prepare('SELECT title FROM recipe_events WHERE id = ?').get(eventId) as { title: string }).title,
+      'Pale malt');
+    assert.equal((upgraded.prepare('SELECT slug FROM recipe_slugs WHERE id = ?').get(recipeId) as { slug: string }).slug,
+      'autumn-pale-ale');
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
+test('partially upgraded recipe slugs keep edits and fill missing names without ID suffixes', () => {
+  const workspaceId = nanoid();
+  const firstId = nanoid();
+  const secondId = nanoid();
+  const db = openWorkspaceDb(workspaceId);
+  for (const id of [firstId, secondId]) db.prepare(
+    'INSERT INTO recipes(id, name, created_at, updated_at) VALUES (?, ?, ?, ?)')
+    .run(id, 'House IPA', 1, 1);
+  db.prepare('INSERT INTO recipe_slugs(id, slug) VALUES (?, ?)').run(firstId, 'favorite-ipa');
+  db.pragma('user_version = 25');
+  closeWorkspaceDb(db);
+  const upgraded = openWorkspaceDb(workspaceId);
+  try {
+    const slugs = upgraded.prepare('SELECT id, slug FROM recipe_slugs ORDER BY id').all() as { id: string; slug: string }[];
+    assert.equal(slugs.length, 2);
+    assert.equal(slugs.find(row => row.id === firstId)?.slug, 'favorite-ipa');
+    assert.equal(slugs.find(row => row.id === secondId)?.slug, 'house-ipa');
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
 test('partial version 25 upgrade keeps existing batch origin links', () => {
   const id = nanoid();
   const sourceId = nanoid();

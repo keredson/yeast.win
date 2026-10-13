@@ -44,11 +44,15 @@ test('incomplete equipment or ingredient inputs do not produce misleading gravit
     { target_fermenter_volume_liters: 20 }, {});
   assert.equal(missingRetention.originalGravity, null);
   assert.ok(missingRetention.missing.some(message => message.includes('wort loss')));
+  assert.ok(missingRetention.unavailable.originalGravity.some(message => message.includes('wort loss')));
+  assert.deepEqual(missingRetention.unavailable.colorSrm, []);
   const missingYield = calculateRecipe(events, [{ ...grain, yield_pct: null, color_lovibond: null }, yeast], equipment,
     { target_fermenter_volume_liters: 20, wort_loss_liters: 2 }, { 'grain-add': { yield_pct: 80 } });
   assert.equal(missingYield.originalGravity, null);
   assert.ok(missingYield.missing.some(message => message.includes('extract yield')));
   assert.equal(missingYield.colorSrm, null);
+  assert.ok(missingYield.unavailable.originalGravity.some(message => message.includes('extract yield')));
+  assert.ok(missingYield.unavailable.colorSrm.some(message => message.includes('color value')));
 });
 
 test('zero wort loss is an explicit recipe input', () => {

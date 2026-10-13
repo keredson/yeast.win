@@ -137,10 +137,11 @@ button, input, textarea { font: inherit; }
 .recipe-estimates h3 { margin: 0 0 14px; font-size: 18px; }
 .recipe-estimate-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 16px; }
 .recipe-estimate-grid > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.recipe-estimate-grid span { color: #728079; font-size: 12px; }
+.recipe-estimate-label { display: inline-flex; align-items: center; gap: 4px; color: #728079; font-size: 12px; }
+.recipe-estimate-help { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #728079; cursor: pointer; }
+.recipe-estimate-help:hover, .recipe-estimate-help:focus-visible { color: #267462; outline: 2px solid #267462; outline-offset: 1px; }
 .recipe-estimate-grid strong { color: #263c36; font-size: 22px; font-weight: 650; }
 .recipe-estimates .muted { margin: 12px 0 0; }
-.recipe-estimate-missing { color: #826536; }
 @media (max-width: 650px) { .recipe-estimate-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 18px; } }
 .group-tables { margin-top: 24px; gap: 30px; }
 .inventory-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
