@@ -18,8 +18,14 @@ function positive(value: unknown): number | null {
   return Number.isFinite(number) && number > 0 ? number : null;
 }
 
-// Estimates deliberately use only explicit inputs. In particular, mash efficiency
-// cannot be substituted for brewhouse efficiency without a kettle retention value.
+function nonNegative(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+// Estimates deliberately use only explicit inputs. Mash efficiency requires
+// an expected wort loss to translate kettle extract into fermenter gravity.
 export function calculateRecipe(events: Event[], inventory: InventoryItem[], equipment: Equipment[],
   recipeInputs: Record<string, unknown>, eventInputs: Record<string, Record<string, unknown>>,
   recentMashEfficiency: Record<string, number> = {}, recipeType = 'beer'): RecipeEstimate {
@@ -41,15 +47,12 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
   let efficiency: number | null = null;
   let extractVolume: number | null = targetLiters;
   if (mashEfficiency != null) {
-    const kettleId = String(drainDetails.to_vessel_id || mashEquipmentId);
-    const kettle = equipment.find(item => item.id === kettleId);
-    const kettleSpecs: EquipmentSpecifications = kettle || {};
-    const retention = kettleSpecs.kettle_retention_liters ?? (kettleId === mashEquipmentId ? mashSpecs.kettle_retention_liters : undefined);
-    if (retention != null && Number.isFinite(retention) && retention >= 0) {
+    const wortLoss = nonNegative(recipeInputs.wort_loss_liters);
+    if (wortLoss != null) {
       efficiency = mashEfficiency;
-      extractVolume = targetLiters == null ? null : targetLiters + retention;
-      efficiencyLabel = `${mashEfficiency}% mash efficiency${mashSpecs.mash_efficiency_pct == null ? ' (recent batch)' : ''}; ${retention} L kettle retention`;
-    } else if (importedBrewhouseEfficiency == null) missing.push('Set kettle retention on the collecting vessel to use mash efficiency.');
+      extractVolume = targetLiters == null ? null : targetLiters + wortLoss;
+      efficiencyLabel = `${mashEfficiency}% mash efficiency${mashSpecs.mash_efficiency_pct == null ? ' (recent batch)' : ''}; ${wortLoss} L wort loss`;
+    } else if (importedBrewhouseEfficiency == null) missing.push('Set expected wort loss in brewery or recipe settings to use mash efficiency.');
   }
   if (efficiency == null && importedBrewhouseEfficiency != null && importedBrewhouseEfficiency <= 100) {
     efficiency = importedBrewhouseEfficiency;

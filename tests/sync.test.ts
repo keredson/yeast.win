@@ -428,6 +428,53 @@ test('version 21 workspace adds brewery model boil defaults and keeps unit calib
   } finally { closeWorkspaceDb(upgraded); }
 });
 
+test('version 22 workspace moves unambiguous wort loss to brewery and batch inputs', () => {
+  const id = nanoid();
+  const modelId = nanoid();
+  const unitId = nanoid();
+  const batchId = nanoid();
+  const eventId = nanoid();
+  const db = openWorkspaceDb(id);
+  db.prepare('INSERT INTO equipment_models(id, name, kind, created_at) VALUES (?, ?, ?, ?)')
+    .run(modelId, 'Kettle model', 'kettle', 1);
+  db.prepare('INSERT INTO equipment(id, name, model_id, created_at) VALUES (?, ?, ?, ?)')
+    .run(unitId, 'Kettle', modelId, 1);
+  db.prepare('INSERT INTO batches(id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+    .run(batchId, 'Existing batch', 'active', 1, 1);
+  db.prepare('INSERT INTO batch_events(id, batch_id, event_type, created_at) VALUES (?, ?, ?, ?)')
+    .run(eventId, batchId, 'transfer', 1);
+  for (const table of ['equipment_models', 'equipment_mash_assumptions', 'batch_event_inputs']) {
+    db.prepare('SELECT crsql_as_table(?)').get(table);
+    db.exec(`ALTER TABLE ${table} ADD COLUMN mash_deadspace_liters REAL`);
+    db.exec(`ALTER TABLE ${table} ADD COLUMN kettle_retention_liters REAL`);
+    db.prepare('SELECT crsql_as_crr(?)').get(table);
+  }
+  db.prepare('UPDATE equipment_models SET kettle_retention_liters = 2, mash_deadspace_liters = 1 WHERE id = ?')
+    .run(modelId);
+  db.prepare('INSERT INTO equipment_mash_assumptions(equipment_id, kettle_retention_liters) VALUES (?, ?)')
+    .run(unitId, 2);
+  db.prepare('INSERT INTO batch_event_inputs(id, kettle_retention_liters) VALUES (?, ?)')
+    .run(eventId, 1.5);
+  db.pragma('user_version = 22');
+  closeWorkspaceDb(db);
+
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.equal((upgraded.prepare("SELECT wort_loss_liters FROM brewery_process_defaults WHERE id = 'brewery'")
+      .get() as { wort_loss_liters: number }).wort_loss_liters, 2);
+    assert.equal((upgraded.prepare('SELECT wort_loss_liters FROM batch_recipe_inputs WHERE id = ?')
+      .get(batchId) as { wort_loss_liters: number }).wort_loss_liters, 1.5);
+    assert.equal((upgraded.prepare('SELECT name FROM batches WHERE id = ?')
+      .get(batchId) as { name: string }).name, 'Existing batch');
+    for (const table of ['equipment_models', 'equipment_mash_assumptions', 'batch_event_inputs']) {
+      const columns = (upgraded.pragma(`table_info(${table})`) as { name: string }[]).map(row => row.name);
+      assert.ok(!columns.includes('mash_deadspace_liters'));
+      assert.ok(!columns.includes('kettle_retention_liters'));
+    }
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
 test('version 22 stock migrates into supplies and lots without changing ledger or event links', () => {
   const id = nanoid();
   const stockId = nanoid();

@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select } from 'antd';
 import { DeleteOutlined, DownloadOutlined, PlusOutlined, SettingOutlined, UploadOutlined } from '@ant-design/icons';
 import { addRecipePlan, createRecipe, deleteRecipe, deleteRecipePlan, hasRecipeImport, listRecipePlans, startBatchFromRecipe, updateRecipe, updateRecipePlan,
-  recipeImportSource, recipeTargetVolume, updateRecipeTargetVolume, latestMeasuredMashEfficiency,
+  recipeImportSource, recipeTargetVolume, updateRecipeTargetVolume, recipeWortLoss, updateRecipeWortLoss,
+  breweryWortLoss, updateBatchWortLoss, latestMeasuredMashEfficiency,
   type Equipment, type InventoryItem, type LocalDb, type PlanInput, type Recipe, type RecipeType } from './db.ts';
 import { RecipeImportModal } from './RecipeImportModal.tsx';
 import { PlanForm, repeatPreset, type PlanPreset } from './PlanForm.tsx';
@@ -27,7 +28,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
   onChanged: () => Promise<void>; onBatchStarted: (id: string) => void;
 }) {
   const [settingsForm] = Form.useForm<{ name: string; description?: string; recipe_type: RecipeType;
-    target_volume?: number; target_volume_unit: string }>();
+    target_volume?: number; target_volume_unit: string; wort_loss?: number }>();
   const targetVolumeUnit = useRef<string>(preferredUnits.volume);
   const [plans, setPlans] = useState<(PlanInput & { id: string })[]>([]);
   const [estimate, setEstimate] = useState<RecipeEstimate | null>(null);
@@ -37,6 +38,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [settingsError, setSettingsError] = useState('');
+  const [breweryDefaultWortLoss, setBreweryDefaultWortLoss] = useState<number | null>(null);
   const [creatingKind, setCreatingKind] = useState<string | null>(null);
   const [preset, setPreset] = useState<PlanPreset>({});
   const [editingPlan, setEditingPlan] = useState<(PlanInput & { id: string }) | null>(null);
@@ -58,11 +60,13 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
     let cancelled = false;
     setEstimate(null);
     void (async () => {
-      const [recipeRows, eventRows] = await Promise.all([
-        db.execO<{ target_fermenter_volume_liters: number | null; brewhouse_efficiency_pct: number | null }>(
-          'SELECT target_fermenter_volume_liters, brewhouse_efficiency_pct FROM recipe_inputs WHERE id = ?', [selectedId]),
+      const [recipeRows, eventRows, defaultWortLoss] = await Promise.all([
+        db.execO<{ target_fermenter_volume_liters: number | null; brewhouse_efficiency_pct: number | null;
+          wort_loss_liters: number | null }>(
+          'SELECT target_fermenter_volume_liters, brewhouse_efficiency_pct, wort_loss_liters FROM recipe_inputs WHERE id = ?', [selectedId]),
         db.execO<{ id: string; yield_pct: number | null; color_lovibond: number | null; attenuation_pct: number | null }>(`SELECT i.id, i.yield_pct, i.color_lovibond, i.attenuation_pct FROM recipe_event_inputs i
-          JOIN recipe_events e ON e.id = i.id WHERE e.recipe_id = ?`, [selectedId])
+          JOIN recipe_events e ON e.id = i.id WHERE e.recipe_id = ?`, [selectedId]),
+        breweryWortLoss(db)
       ]);
       const recent: Record<string, number> = {};
       const equipmentIds = new Set(plans.filter(plan => plan.event_type === 'transfer')
@@ -76,7 +80,8 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
           if (value != null) recent[id] = value;
         }
       }
-      const recipeInputs = recipeRows[0] || {};
+      const recipeInputs = { ...(recipeRows[0] || {}),
+        wort_loss_liters: recipeRows[0]?.wort_loss_liters ?? defaultWortLoss };
       const eventInputs = Object.fromEntries(eventRows.map(row => [row.id, row]));
       if (!cancelled) setEstimate(calculateRecipe(plans, supplies, equipmentModels, recipeInputs, eventInputs, recent,
         recipe?.recipe_type || 'beer'));
@@ -122,13 +127,15 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
   }
 
   async function saveSettings(values: { name: string; description?: string; recipe_type: RecipeType;
-    target_volume?: number; target_volume_unit: string }) {
+    target_volume?: number; target_volume_unit: string; wort_loss?: number }) {
     if (!recipe) return;
     setSettingsBusy(true); setSettingsError('');
     try {
       await updateRecipe(db, recipe.id, values.name, values.description || '', values.recipe_type);
       await updateRecipeTargetVolume(db, recipe.id, values.target_volume == null ? null
         : convertUnit(values.target_volume, values.target_volume_unit, 'L'));
+      await updateRecipeWortLoss(db, recipe.id, values.wort_loss == null ? null
+        : convertUnit(values.wort_loss, preferredUnits.volume, 'L'));
       await onChanged();
       setSettingsOpen(false);
     } catch (cause) { setSettingsError(cause instanceof Error ? cause.message : String(cause)); }
@@ -138,11 +145,14 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
   async function openSettings() {
     if (!recipe) return;
     setSettingsError('');
-    const liters = await recipeTargetVolume(db, recipe.id);
+    const [liters, recipeLoss, defaultLoss] = await Promise.all([
+      recipeTargetVolume(db, recipe.id), recipeWortLoss(db, recipe.id), breweryWortLoss(db)]);
+    setBreweryDefaultWortLoss(defaultLoss);
     targetVolumeUnit.current = preferredUnits.volume;
     settingsForm.setFieldsValue({ name: recipe.name, description: recipe.description || '', recipe_type: recipe.recipe_type || 'beer',
       target_volume: liters == null ? undefined : convertUnit(liters, 'L', preferredUnits.volume) ?? undefined,
-      target_volume_unit: preferredUnits.volume });
+      target_volume_unit: preferredUnits.volume,
+      wort_loss: recipeLoss == null ? undefined : convertUnit(recipeLoss, 'L', preferredUnits.volume) ?? undefined });
     setSettingsOpen(true);
   }
 
@@ -159,10 +169,12 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
     } catch (cause) { setSettingsError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  async function start(values: { name: string; unit_ids?: Record<string, string> }) {
+  async function start(values: { name: string; unit_ids?: Record<string, string>; wort_loss?: number }) {
     if (!recipe) return;
     try {
       const id = await startBatchFromRecipe(db, recipe, values.name.trim(), accountId, recipe.description || '', values.unit_ids);
+      if (values.wort_loss != null) await updateBatchWortLoss(db, id,
+        convertUnit(values.wort_loss, preferredUnits.volume, 'L'));
       setNewBatch(false); await onChanged(); onBatchStarted(id);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -226,6 +238,10 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
           <Form.Item name="target_volume_unit" label="Unit"><Select options={unitOptions(unitGroups.volume)}
             onChange={unit => { changeNumberUnit(settingsForm, ['target_volume'], targetVolumeUnit.current, unit);
               targetVolumeUnit.current = unit; }} /></Form.Item></div>
+        <Form.Item name="wort_loss" label={`Wort loss to fermenter (${preferredUnits.volume}, optional)`}>
+          <InputNumber className="full-width" min={0} step="any" /></Form.Item>
+        <p className="muted">Leave blank to use the brewery default{breweryDefaultWortLoss == null ? ' (not set).' :
+          ` (${Number((convertUnit(breweryDefaultWortLoss, 'L', preferredUnits.volume) || 0).toFixed(2))} ${preferredUnits.volume}).`}</p>
         {settingsError && <Alert type="error" message={settingsError} className="form-alert" />}
         <div className="recipe-settings-actions"><Button type="primary" htmlType="submit" loading={settingsBusy}>Save changes</Button>
           {importedRecipe && <Button type="text" htmlType="button" icon={<DownloadOutlined />}
@@ -260,6 +276,8 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
       <Form layout="vertical" onFinish={start} initialValues={{ name: recipe ? `${recipe.name} batch` : '' }}>
         <Form.Item name="name" label="Batch name" rules={[{ required: true }]}><Input maxLength={100} /></Form.Item>
         <RecipeEquipmentFields db={db} recipeId={recipe?.id} equipment={equipment} models={equipmentModels} />
+        <Form.Item name="wort_loss" label={`Wort loss override (${preferredUnits.volume}, optional)`}>
+          <InputNumber className="full-width" min={0} step="any" /></Form.Item>
         <Button type="primary" htmlType="submit">Create batch</Button>
       </Form>
     </Modal>

@@ -519,7 +519,7 @@ export function App() {
       <main className="app-main">
         {error && <Alert type="warning" showIcon closable onClose={() => setError('')} message={error} className="page-alert" />}
         {section === 'me' ? <AccountSection username={session.account.username} avatarSrc={avatarSrc}
-          workspaces={session.workspaces} activeWorkspaceId={workspaceId}
+          workspaces={session.workspaces} activeWorkspaceId={workspaceId} db={db} onWorkspaceDataChanged={changed}
           onCreateWorkspace={createWorkspace} onUpdateWorkspace={renameWorkspace} onDeleteWorkspace={removeWorkspace}
           onAvatarUploaded={() => { const updated = { ...session, account: { ...session.account, has_avatar: true } };
             rememberSession(updated); setSession(updated); setAvatarVersion(Date.now()); }}

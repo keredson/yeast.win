@@ -45,7 +45,7 @@ export interface EquipmentSpecifications {
   catalog_model_boil_heat_loss_watts?: number | null;
   rated_heat_removal_watts?: number | null; min_temperature_c?: number | null; max_temperature_c?: number | null;
   mash_efficiency_pct?: number | null; grain_absorption_l_per_kg?: number | null;
-  mash_deadspace_liters?: number | null; kettle_retention_liters?: number | null; temperature_offset_c?: number | null;
+  temperature_offset_c?: number | null;
   buffer_4_observed?: number | null; buffer_7_observed?: number | null;
   reference_sg?: number | null; observed_sg?: number | null;
   reference_brix?: number | null; observed_brix?: number | null;
@@ -70,7 +70,7 @@ export interface InventoryItem { id: string; name: string; category: string; def
 export interface IngredientProperties { yield_pct?: number; color_lovibond?: number; alpha_acid_pct?: number;
   hop_form?: 'pellet' | 'whole' | 'plug'; attenuation_pct?: number }
 const ingredientPropertyColumns = ['yield_pct', 'color_lovibond', 'alpha_acid_pct', 'hop_form', 'attenuation_pct'] as const;
-const equipmentAssumptionColumns = ['mash_efficiency_pct', 'grain_absorption_l_per_kg', 'mash_deadspace_liters', 'kettle_retention_liters'] as const;
+const equipmentAssumptionColumns = ['mash_efficiency_pct', 'grain_absorption_l_per_kg'] as const;
 
 function measurementKindForEquipment(kind: string): string | null {
   const kinds: Record<string, string> = { hydrometer: 'gravity', refractometer: 'gravity', thermometer: 'temperature', ph_meter: 'ph',
@@ -143,8 +143,6 @@ const effectiveEquipmentView = `CREATE TEMP VIEW effective_equipment AS
     temp.offset_c AS temperature_offset_c,
     COALESCE(mash.mash_efficiency_pct, workspace_model.mash_efficiency_pct) AS mash_efficiency_pct,
     COALESCE(mash.grain_absorption_l_per_kg, workspace_model.grain_absorption_l_per_kg) AS grain_absorption_l_per_kg,
-    COALESCE(mash.mash_deadspace_liters, workspace_model.mash_deadspace_liters) AS mash_deadspace_liters,
-    COALESCE(mash.kettle_retention_liters, workspace_model.kettle_retention_liters) AS kettle_retention_liters,
     model.model_name AS catalog_model_name, model.manufacturer AS catalog_manufacturer,
     COALESCE(workspace_model.capacity_liters, model_liquid.capacity_liters) AS model_capacity_liters,
     COALESCE(workspace_model.max_pressure_kpa, model_pressure.max_pressure_kpa) AS model_max_pressure_kpa,
@@ -211,8 +209,29 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
       const legacyVersion = legacyMeta.length
         ? (await db.execO<{ version: number }>('SELECT version FROM schema_meta LIMIT 1'))[0]?.version : undefined;
       const version = storedVersion || legacyVersion || 0;
-      const hasWorkspaceTables = (await db.execO<{ name: string }>(
-        "SELECT name FROM sqlite_master WHERE type = 'table'")).some(row => replicatedTables.includes(row.name));
+      const existingTables = new Set((await db.execO<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'table'")).map(row => row.name));
+      const hasWorkspaceTables = [...existingTables].some(name => replicatedTables.includes(name));
+      const legacyLossValues: number[] = [];
+      const legacyBatchLosses: { batch_id: string; wort_loss_liters: number }[] = [];
+      if (version < 23 && hasWorkspaceTables) {
+        for (const table of ['equipment_models', 'equipment_mash_assumptions', 'equipment']) {
+          if (!existingTables.has(table) || !(await db.execO<{ name: string }>(`PRAGMA table_info("${table}")`))
+            .some(column => column.name === 'kettle_retention_liters')) continue;
+          legacyLossValues.push(...(await db.execO<{ value: number }>(
+            `SELECT DISTINCT kettle_retention_liters AS value FROM "${table}"
+              WHERE kettle_retention_liters IS NOT NULL`)).map(row => row.value));
+        }
+        if (existingTables.has('batch_event_inputs') && existingTables.has('batch_events')
+          && (await db.execO<{ name: string }>('PRAGMA table_info(batch_event_inputs)'))
+            .some(column => column.name === 'kettle_retention_liters')) {
+          legacyBatchLosses.push(...await db.execO<{ batch_id: string; wort_loss_liters: number }>(
+            `SELECT e.batch_id, MIN(i.kettle_retention_liters) AS wort_loss_liters
+              FROM batch_event_inputs i JOIN batch_events e ON e.id = i.id
+              WHERE i.kettle_retention_liters IS NOT NULL GROUP BY e.batch_id
+              HAVING MIN(i.kettle_retention_liters) = MAX(i.kettle_retention_liters)`));
+        }
+      }
       if (version === 0 && !hasWorkspaceTables) {
         await db.tx(async tx => {
           for (const statement of schemaStatements) await tx.exec(statement);
@@ -283,6 +302,17 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
         await tx.exec('DROP TABLE equipment_legacy_migration');
       });
       await db.tx(async tx => { for (const statement of supplyMigrationStatements) await tx.exec(statement); });
+      const uniqueLegacyLosses = [...new Set(legacyLossValues)];
+      if (uniqueLegacyLosses.length === 1 || legacyBatchLosses.length) await db.tx(async tx => {
+        if (uniqueLegacyLosses.length === 1) await tx.exec(`INSERT INTO brewery_process_defaults(id, wort_loss_liters)
+          VALUES ('brewery', ?) ON CONFLICT(id) DO UPDATE SET
+            wort_loss_liters = COALESCE(brewery_process_defaults.wort_loss_liters, excluded.wort_loss_liters)`,
+        [uniqueLegacyLosses[0]]);
+        for (const row of legacyBatchLosses) await tx.exec(`INSERT INTO batch_recipe_inputs(id, wort_loss_liters)
+          VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET
+            wort_loss_liters = COALESCE(batch_recipe_inputs.wort_loss_liters, excluded.wort_loss_liters)`,
+        [row.batch_id, row.wort_loss_liters]);
+      });
       await db.exec('UPDATE equipment SET added_at = COALESCE(added_at, created_at) WHERE added_at IS NULL');
       await db.exec(`UPDATE equipment SET removed_at =
         (SELECT archived_at FROM equipment_archives WHERE equipment_id = equipment.id ORDER BY archived_at LIMIT 1)
@@ -370,8 +400,12 @@ export async function releaseEquipmentUse(db: DB, useId: string): Promise<void> 
 export async function createBatch(db: DB, name: string, description: string, accountId: string): Promise<string> {
   const id = nanoid();
   const now = nowSeconds();
-  await db.exec('INSERT INTO batches(id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-    [id, name, description || null, 'active', now, now]);
+  await db.tx(async tx => {
+    await tx.exec('INSERT INTO batches(id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [id, name, description || null, 'active', now, now]);
+    await tx.exec(`INSERT INTO batch_recipe_inputs(id, wort_loss_liters)
+      VALUES (?, (SELECT wort_loss_liters FROM brewery_process_defaults WHERE id = 'brewery'))`, [id]);
+  });
   return id;
 }
 
@@ -384,6 +418,46 @@ export async function recipeTargetVolume(db: DB, recipeId: string): Promise<numb
   const rows = await db.execO<{ target_fermenter_volume_liters: number | null }>(
     'SELECT target_fermenter_volume_liters FROM recipe_inputs WHERE id = ?', [recipeId]);
   return rows[0]?.target_fermenter_volume_liters ?? null;
+}
+
+function validWortLoss(liters: number | null): void {
+  if (liters != null && (!Number.isFinite(liters) || liters < 0)) throw new Error('Enter a valid wort loss');
+}
+
+export async function breweryWortLoss(db: DB): Promise<number | null> {
+  const rows = await db.execO<{ wort_loss_liters: number | null }>(
+    "SELECT wort_loss_liters FROM brewery_process_defaults WHERE id = 'brewery'");
+  return rows[0]?.wort_loss_liters ?? null;
+}
+
+export async function updateBreweryWortLoss(db: DB, liters: number | null): Promise<void> {
+  validWortLoss(liters);
+  await db.exec(`INSERT INTO brewery_process_defaults(id, wort_loss_liters) VALUES ('brewery', ?)
+    ON CONFLICT(id) DO UPDATE SET wort_loss_liters = excluded.wort_loss_liters`, [liters]);
+}
+
+export async function recipeWortLoss(db: DB, recipeId: string): Promise<number | null> {
+  const rows = await db.execO<{ wort_loss_liters: number | null }>(
+    'SELECT wort_loss_liters FROM recipe_inputs WHERE id = ?', [recipeId]);
+  return rows[0]?.wort_loss_liters ?? null;
+}
+
+export async function updateRecipeWortLoss(db: DB, recipeId: string, liters: number | null): Promise<void> {
+  validWortLoss(liters);
+  await db.exec(`INSERT INTO recipe_inputs(id, wort_loss_liters) VALUES (?, ?)
+    ON CONFLICT(id) DO UPDATE SET wort_loss_liters = excluded.wort_loss_liters`, [recipeId, liters]);
+}
+
+export async function batchWortLoss(db: DB, batchId: string): Promise<number | null> {
+  const rows = await db.execO<{ wort_loss_liters: number | null }>(
+    'SELECT wort_loss_liters FROM batch_recipe_inputs WHERE id = ?', [batchId]);
+  return rows[0]?.wort_loss_liters ?? null;
+}
+
+export async function updateBatchWortLoss(db: DB, batchId: string, liters: number | null): Promise<void> {
+  validWortLoss(liters);
+  await db.exec(`INSERT INTO batch_recipe_inputs(id, wort_loss_liters) VALUES (?, ?)
+    ON CONFLICT(id) DO UPDATE SET wort_loss_liters = excluded.wort_loss_liters`, [batchId, liters]);
 }
 
 export async function updateRecipeTargetVolume(db: DB, recipeId: string, liters: number | null): Promise<void> {
@@ -830,10 +904,12 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
   await db.tx(async tx => {
     await tx.exec('INSERT INTO batches(id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
       [batchId, name, description, 'active', now, now]);
-    const recipeInputs = await tx.execO<{ target_fermenter_volume_liters: number | null; brewhouse_efficiency_pct: number | null }>(
-      'SELECT target_fermenter_volume_liters, brewhouse_efficiency_pct FROM recipe_inputs WHERE id = ?', [recipe.id]);
-    if (recipeInputs.length) await tx.exec(`INSERT INTO batch_recipe_inputs(id, target_fermenter_volume_liters, brewhouse_efficiency_pct)
-      VALUES (?, ?, ?)`, [batchId, recipeInputs[0].target_fermenter_volume_liters, recipeInputs[0].brewhouse_efficiency_pct]);
+    await tx.exec(`INSERT INTO batch_recipe_inputs(id, target_fermenter_volume_liters, brewhouse_efficiency_pct, wort_loss_liters)
+      SELECT ?, r.target_fermenter_volume_liters, r.brewhouse_efficiency_pct,
+        COALESCE(r.wort_loss_liters, (SELECT wort_loss_liters FROM brewery_process_defaults WHERE id = 'brewery'))
+      FROM recipe_inputs r WHERE r.id = ?`, [batchId, recipe.id]);
+    await tx.exec(`INSERT OR IGNORE INTO batch_recipe_inputs(id, wort_loss_liters)
+      VALUES (?, (SELECT wort_loss_liters FROM brewery_process_defaults WHERE id = 'brewery'))`, [batchId]);
     for (const plan of plans) {
       await tx.exec(`INSERT INTO batch_events(id, batch_id, recipe_event_id, event_type, title, planned_at,
         anchor_event_id, offset_seconds, anchor_point, duration_seconds, instructions, created_at, created_by_account_id)
@@ -851,9 +927,7 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
       if (typeof assumptionEquipmentId === 'string') {
         const rows = await tx.execO<EquipmentSpecifications>(
           `SELECT COALESCE(a.mash_efficiency_pct, m.mash_efficiency_pct) AS mash_efficiency_pct,
-            COALESCE(a.grain_absorption_l_per_kg, m.grain_absorption_l_per_kg) AS grain_absorption_l_per_kg,
-            COALESCE(a.mash_deadspace_liters, m.mash_deadspace_liters) AS mash_deadspace_liters,
-            COALESCE(a.kettle_retention_liters, m.kettle_retention_liters) AS kettle_retention_liters
+            COALESCE(a.grain_absorption_l_per_kg, m.grain_absorption_l_per_kg) AS grain_absorption_l_per_kg
             FROM equipment e JOIN equipment_models m ON m.id = e.model_id
             LEFT JOIN equipment_mash_assumptions a ON a.equipment_id = e.id WHERE e.id = ?`, [assumptionEquipmentId]);
         if (rows.length) {
@@ -1164,7 +1238,6 @@ export async function listEquipmentModels(db: DB): Promise<Equipment[]> {
     COALESCE(m.min_temperature_c, ct.min_temperature_c) AS min_temperature_c,
     COALESCE(m.max_temperature_c, ct.max_temperature_c) AS max_temperature_c,
     m.mash_efficiency_pct, m.grain_absorption_l_per_kg,
-    m.mash_deadspace_liters, m.kettle_retention_liters,
     COALESCE(wb.heat_loss_watts, cb.heat_loss_watts) AS boil_heat_loss_watts,
     wb.heat_loss_watts AS workspace_model_boil_heat_loss_watts,
     cb.heat_loss_watts AS catalog_model_boil_heat_loss_watts
@@ -1195,7 +1268,7 @@ export async function createEquipmentUnit(db: DB, modelId: string, name: string,
 }
 
 export async function updateBrewingLosses(db: DB, item: Equipment, values: Pick<EquipmentSpecifications,
-  'mash_efficiency_pct' | 'grain_absorption_l_per_kg' | 'mash_deadspace_liters' | 'kettle_retention_liters'>): Promise<void> {
+  'mash_efficiency_pct' | 'grain_absorption_l_per_kg'>): Promise<void> {
   if (!['all_in_one', 'mash_tun', 'kettle', 'electric_kettle'].includes(item.kind)) throw new Error('Choose brewing equipment');
   for (const [key, value] of Object.entries(values)) {
     if (value != null && (!Number.isFinite(value) || value < 0 || key === 'mash_efficiency_pct' && value > 100)) {

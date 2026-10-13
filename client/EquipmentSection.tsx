@@ -384,8 +384,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  async function saveBrewingLosses(values: { mash_efficiency_pct?: number; grain_absorption_l_per_kg?: number;
-    mash_deadspace_liters?: number; kettle_retention_liters?: number }) {
+  async function saveBrewingLosses(values: { mash_efficiency_pct?: number; grain_absorption_l_per_kg?: number }) {
     if (!item) return;
     try { await updateBrewingLosses(db, item, values); setEditBrewingLosses(false); await onChanged(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
@@ -583,9 +582,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           {['all_in_one', 'mash_tun', 'kettle', 'electric_kettle'].includes(item.kind) &&
             <div className="equipment-parameter"><span>Mash efficiency: {specs.mash_efficiency_pct != null
               ? `${specs.mash_efficiency_pct}% (set)` : recentMashEfficiency != null ? `${recentMashEfficiency}% (recent batch)` : 'Not set'}<br />
-              Grain absorption: {specs.grain_absorption_l_per_kg == null ? 'Not set' : `${specs.grain_absorption_l_per_kg} L/kg`}<br />
-              Mash dead space: {specs.mash_deadspace_liters == null ? 'Not set' : `${specs.mash_deadspace_liters} L`}<br />
-              Kettle retention: {specs.kettle_retention_liters == null ? 'Not set' : `${specs.kettle_retention_liters} L`}</span>
+              Grain absorption: {specs.grain_absorption_l_per_kg == null ? 'Not set' : `${specs.grain_absorption_l_per_kg} L/kg`}</span>
               <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit brewing losses" onClick={() => setEditBrewingLosses(true)} /></div>}
           {item.measurement_channels?.map(channel => <div key={channel.id} className="equipment-parameter"><span>
               {measurementLabel(channel.measurement_kind)}: {channel.measurement_min != null && channel.measurement_max != null
@@ -794,12 +791,10 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <Button type="primary" htmlType="submit">Save capabilities</Button>
       </Form>
     </Modal>
-    <Modal title="Mash efficiency and liquid losses" open={editBrewingLosses} onCancel={() => setEditBrewingLosses(false)} footer={null} destroyOnHidden>
+    <Modal title="Mash assumptions" open={editBrewingLosses} onCancel={() => setEditBrewingLosses(false)} footer={null} destroyOnHidden>
       <Form key={item?.id} layout="vertical" onFinish={saveBrewingLosses} initialValues={specs}>
         <Form.Item name="mash_efficiency_pct" label="Mash efficiency (%)"><InputNumber className="full-width" min={0} max={100} step="any" /></Form.Item>
         <Form.Item name="grain_absorption_l_per_kg" label="Grain absorption (L per kg)"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
-        <Form.Item name="mash_deadspace_liters" label="Mash dead space (L)"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
-        <Form.Item name="kettle_retention_liters" label="Wort left in kettle after transfer (L)"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
         <Button type="primary" htmlType="submit">Save</Button>
       </Form>
     </Modal>
