@@ -193,6 +193,8 @@ export function openWorkspaceDb(id: string): Database.Database {
       db.pragma(`user_version = ${workspaceSchemaVersion}`);
     })();
   }
+  const catalogPath = join(dataDir, 'catalog.sqlite');
+  if (existsSync(catalogPath)) db.prepare('ATTACH DATABASE ? AS catalog').run(catalogPath);
   return db;
 }
 

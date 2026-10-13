@@ -4,6 +4,7 @@ import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { nanoid } from 'nanoid';
 import { boilOffKinds, capacityKinds, equipmentKinds, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import { equipmentSlug } from './equipmentRoutes.ts';
+import { openLocalCatalog } from './catalog.ts';
 import { hasGeneratedLocationSuffix, locationSlug } from './locationSlug.ts';
 import type { CatalogEquipment, MeasurementChannel } from '../shared/catalog.ts';
 import { changeColumns, indexStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements, workspaceSchemaVersion, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
@@ -63,47 +64,12 @@ export interface IngredientProperties { yield_pct?: number; color_lovibond?: num
   hop_form?: 'pellet' | 'whole' | 'plug'; attenuation_pct?: number }
 const ingredientPropertyColumns = ['yield_pct', 'color_lovibond', 'alpha_acid_pct', 'hop_form', 'attenuation_pct'] as const;
 const equipmentAssumptionColumns = ['mash_efficiency_pct', 'grain_absorption_l_per_kg', 'mash_deadspace_liters', 'kettle_retention_liters'] as const;
-const modelSpecificationColumns = ['capacity_liters', 'max_pressure_kpa', 'rated_power_watts',
-  'rated_heat_removal_watts', 'min_temperature_c', 'max_temperature_c'] as const;
 
 function measurementKindForEquipment(kind: string): string | null {
   const kinds: Record<string, string> = { hydrometer: 'gravity', refractometer: 'gravity', thermometer: 'temperature', ph_meter: 'ph',
     pressure_gauge: 'pressure', carbonation_meter: 'carbonation', dissolved_oxygen_meter: 'dissolved_oxygen',
     scale: 'mass' };
   return kinds[kind] || null;
-}
-
-export function resolveEquipmentModels(equipment: Equipment[], catalog: CatalogEquipment[]): Equipment[] {
-  const models = new Map(catalog.map(model => [model.id, model]));
-  return equipment.map(item => {
-    const model = item.catalog_model_id ? models.get(item.catalog_model_id) : undefined;
-    if (!model) return item;
-    const resolved: Equipment = { ...item, catalog_model: model };
-    for (const column of modelSpecificationColumns) {
-      (resolved as unknown as Record<string, unknown>)[column] = item[column] ?? model[column] ?? null;
-    }
-    resolved.built_in_temperature_control = !!(item.built_in_temperature_control || model.built_in_temperature_control);
-    resolved.has_heating = !!(item.has_heating || model.has_heating);
-    resolved.has_cooling = !!(item.has_cooling || model.has_cooling);
-    resolved.has_temperature_control = !!(item.has_temperature_control || model.has_temperature_control);
-    const channels = new Map<string, MeasurementChannel>(
-      (model.measurement_channels || []).map(channel => [channel.measurement_kind, channel]));
-    for (const channel of item.measurement_channels || []) {
-      const inherited = channels.get(channel.measurement_kind);
-      channels.set(channel.measurement_kind, inherited ? {
-        ...inherited, ...Object.fromEntries(Object.entries(channel).filter(([key, value]) =>
-          ['measurement_min', 'measurement_max', 'measurement_unit', 'measurement_scale'].includes(key) && value != null)),
-        id: channel.id, measurement_kind: channel.measurement_kind
-      } : channel);
-    }
-    resolved.measurement_channels = [...channels.values()];
-    const primary = resolved.measurement_channels.find(channel => channel.measurement_kind ===
-      measurementKindForEquipment(item.kind));
-    resolved.measurement_min = primary?.measurement_min ?? null;
-    resolved.measurement_max = primary?.measurement_max ?? null;
-    resolved.measurement_unit = primary?.measurement_scale || primary?.measurement_unit || null;
-    return resolved;
-  });
 }
 
 function sourceNumber(value: unknown): number | null {
@@ -154,6 +120,66 @@ export function convertInventoryUnit(quantity: number, from: string, to: string)
 let sqlitePromise: ReturnType<typeof initWasm> | undefined;
 const opened = new Map<string, Promise<DB>>();
 
+// TEMP views can refer to the attached catalog without becoming replicated
+// workspace schema. SQLite reevaluates inherited values after catalog sync.
+const effectiveEquipmentView = `CREATE TEMP VIEW effective_equipment AS
+  SELECT e.*,
+    COALESCE(liquid.capacity_liters, model_liquid.capacity_liters) AS capacity_liters,
+    COALESCE(pressure.max_pressure_kpa, model_pressure.max_pressure_kpa) AS max_pressure_kpa,
+    COALESCE(heat.rated_power_watts, model_heat.rated_power_watts) AS rated_power_watts,
+    COALESCE(cool.rated_heat_removal_watts, model_cool.rated_heat_removal_watts) AS rated_heat_removal_watts,
+    COALESCE(control.min_temperature_c, model_control.min_temperature_c) AS min_temperature_c,
+    COALESCE(control.max_temperature_c, model_control.max_temperature_c) AS max_temperature_c,
+    CASE WHEN heat.equipment_id IS NOT NULL OR model_heat.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_heating,
+    CASE WHEN cool.equipment_id IS NOT NULL OR model_cool.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_cooling,
+    CASE WHEN control.equipment_id IS NOT NULL OR model_control.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_temperature_control,
+    CASE WHEN control.equipment_id IS NOT NULL OR model_control.model_id IS NOT NULL THEN 1 ELSE NULL END AS built_in_temperature_control,
+    boil.heat_loss_watts AS boil_heat_loss_watts, temp.offset_c AS temperature_offset_c,
+    mash.mash_efficiency_pct, mash.grain_absorption_l_per_kg,
+    mash.mash_deadspace_liters, mash.kettle_retention_liters,
+    model.model_name AS catalog_model_name, model.manufacturer AS catalog_manufacturer,
+    model_liquid.capacity_liters AS model_capacity_liters,
+    model_pressure.max_pressure_kpa AS model_max_pressure_kpa,
+    model_heat.rated_power_watts AS model_rated_power_watts,
+    model_cool.rated_heat_removal_watts AS model_rated_heat_removal_watts,
+    model_control.min_temperature_c AS model_min_temperature_c,
+    model_control.max_temperature_c AS model_max_temperature_c
+  FROM main.equipment e
+  LEFT JOIN main.equipment_liquid_containment liquid ON liquid.equipment_id = e.id
+  LEFT JOIN main.equipment_pressure_rating pressure ON pressure.equipment_id = e.id
+  LEFT JOIN main.equipment_heating heat ON heat.equipment_id = e.id
+  LEFT JOIN main.equipment_cooling cool ON cool.equipment_id = e.id
+  LEFT JOIN main.equipment_temperature_control control ON control.equipment_id = e.id
+  LEFT JOIN main.equipment_boil_calibration boil ON boil.equipment_id = e.id
+  LEFT JOIN main.equipment_temperature_calibration temp ON temp.equipment_id = e.id
+  LEFT JOIN main.equipment_mash_assumptions mash ON mash.equipment_id = e.id
+  LEFT JOIN catalog.equipment_models model ON model.id = e.catalog_model_id
+  LEFT JOIN catalog.model_liquid_containment model_liquid ON model_liquid.model_id = model.id
+  LEFT JOIN catalog.model_pressure_rating model_pressure ON model_pressure.model_id = model.id
+  LEFT JOIN catalog.model_heating model_heat ON model_heat.model_id = model.id
+  LEFT JOIN catalog.model_cooling model_cool ON model_cool.model_id = model.id
+  LEFT JOIN catalog.model_temperature_control model_control ON model_control.model_id = model.id`;
+
+const effectiveMeasurementChannelsView = `CREATE TEMP VIEW effective_measurement_channels AS
+  SELECT e.id AS equipment_id, COALESCE(workspace.id, model.id) AS id,
+    model.measurement_kind,
+    COALESCE(workspace.measurement_min, model.measurement_min) AS measurement_min,
+    COALESCE(workspace.measurement_max, model.measurement_max) AS measurement_max,
+    COALESCE(workspace.measurement_unit, model.measurement_unit) AS measurement_unit,
+    COALESCE(workspace.measurement_scale, model.measurement_scale) AS measurement_scale
+  FROM main.equipment e
+  JOIN catalog.model_measurement_channels model ON model.model_id = e.catalog_model_id
+  LEFT JOIN main.equipment_measurement_channels workspace
+    ON workspace.equipment_id = e.id AND workspace.measurement_kind = model.measurement_kind
+  UNION ALL
+  SELECT workspace.equipment_id, workspace.id, workspace.measurement_kind,
+    workspace.measurement_min, workspace.measurement_max,
+    workspace.measurement_unit, workspace.measurement_scale
+  FROM main.equipment_measurement_channels workspace
+  JOIN main.equipment e ON e.id = workspace.equipment_id
+  WHERE NOT EXISTS (SELECT 1 FROM catalog.model_measurement_channels model
+    WHERE model.model_id = e.catalog_model_id AND model.measurement_kind = workspace.measurement_kind)`;
+
 export async function openLocalDb(workspaceId: string): Promise<DB> {
   let pending = opened.get(workspaceId);
   if (!pending) {
@@ -201,6 +227,10 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
           await tx.exec(`PRAGMA user_version = ${workspaceSchemaVersion}`);
         });
       }
+      await openLocalCatalog();
+      await db.exec("ATTACH DATABASE 'brewlog-catalog' AS catalog");
+      await db.exec(effectiveEquipmentView);
+      await db.exec(effectiveMeasurementChannelsView);
       return db;
     })();
     opened.set(workspaceId, pending);
@@ -853,33 +883,49 @@ export async function eventDetails(db: DB, event: ActualEvent, preferredMassUnit
 }
 
 export async function listEquipment(db: DB): Promise<Equipment[]> {
-  const [equipment, channels, points] = await Promise.all([
-    db.execO<Equipment>(`SELECT e.*, liquid.capacity_liters, pressure.max_pressure_kpa,
-      heat.rated_power_watts, cool.rated_heat_removal_watts,
-      control.min_temperature_c, control.max_temperature_c,
-      CASE WHEN heat.equipment_id IS NOT NULL THEN 1 ELSE NULL END AS has_heating,
-      CASE WHEN cool.equipment_id IS NOT NULL THEN 1 ELSE NULL END AS has_cooling,
-      CASE WHEN control.equipment_id IS NOT NULL THEN 1 ELSE NULL END AS has_temperature_control,
-      CASE WHEN control.equipment_id IS NOT NULL THEN 1 ELSE NULL END AS built_in_temperature_control,
-      boil.heat_loss_watts AS boil_heat_loss_watts, temp.offset_c AS temperature_offset_c,
-      mash.mash_efficiency_pct, mash.grain_absorption_l_per_kg,
-      mash.mash_deadspace_liters, mash.kettle_retention_liters
-      FROM equipment e
-      LEFT JOIN equipment_liquid_containment liquid ON liquid.equipment_id = e.id
-      LEFT JOIN equipment_pressure_rating pressure ON pressure.equipment_id = e.id
-      LEFT JOIN equipment_heating heat ON heat.equipment_id = e.id
-      LEFT JOIN equipment_cooling cool ON cool.equipment_id = e.id
-      LEFT JOIN equipment_temperature_control control ON control.equipment_id = e.id
-      LEFT JOIN equipment_boil_calibration boil ON boil.equipment_id = e.id
-      LEFT JOIN equipment_temperature_calibration temp ON temp.equipment_id = e.id
-      LEFT JOIN equipment_mash_assumptions mash ON mash.equipment_id = e.id
-      WHERE e.id NOT IN (SELECT equipment_id FROM equipment_archives)
-      ORDER BY e.name COLLATE NOCASE`),
-    db.execO<MeasurementChannel & { equipment_id: string }>('SELECT * FROM equipment_measurement_channels'),
+  type EffectiveEquipmentRow = Equipment & {
+    catalog_model_name: string | null; catalog_manufacturer: string | null;
+    model_capacity_liters: number | null; model_max_pressure_kpa: number | null;
+    model_rated_power_watts: number | null; model_rated_heat_removal_watts: number | null;
+    model_min_temperature_c: number | null; model_max_temperature_c: number | null;
+  };
+  const [rows, channels, modelChannels, points] = await Promise.all([
+    db.execO<EffectiveEquipmentRow>(`SELECT * FROM effective_equipment
+      WHERE id NOT IN (SELECT equipment_id FROM equipment_archives)
+      ORDER BY name COLLATE NOCASE`),
+    db.execO<MeasurementChannel & { equipment_id: string }>('SELECT * FROM effective_measurement_channels'),
+    db.execO<MeasurementChannel & { equipment_id: string }>(`SELECT e.id AS equipment_id,
+      channel.id, channel.measurement_kind, channel.measurement_min, channel.measurement_max,
+      channel.measurement_unit, channel.measurement_scale
+      FROM equipment e JOIN catalog.model_measurement_channels channel
+        ON channel.model_id = e.catalog_model_id`),
     db.execO<{ id: string; equipment_id: string; measurement_kind: string; reference_value: number; observed_value: number }>(
       'SELECT * FROM equipment_measurement_calibration_points')
   ]);
+  const equipment: Equipment[] = rows.map(row => {
+    const { catalog_model_name, catalog_manufacturer, model_capacity_liters, model_max_pressure_kpa,
+      model_rated_power_watts, model_rated_heat_removal_watts, model_min_temperature_c,
+      model_max_temperature_c, ...item } = row;
+    if (item.catalog_model_id && catalog_model_name) item.catalog_model = {
+      id: item.catalog_model_id, name: catalog_model_name, kind: item.kind,
+      manufacturer: catalog_manufacturer, capacity_liters: model_capacity_liters,
+      max_pressure_kpa: model_max_pressure_kpa, rated_power_watts: model_rated_power_watts,
+      rated_heat_removal_watts: model_rated_heat_removal_watts,
+      min_temperature_c: model_min_temperature_c, max_temperature_c: model_max_temperature_c
+    };
+    return item;
+  });
   const byId = new Map(equipment.map(item => [item.id, item]));
+  for (const channel of modelChannels) {
+    const model = byId.get(channel.equipment_id)?.catalog_model;
+    if (!model) continue;
+    (model.measurement_channels ||= []).push({ ...channel, model_id: model.id });
+    if (channel.measurement_kind === measurementKindForEquipment(model.kind)) {
+      model.measurement_min = channel.measurement_min;
+      model.measurement_max = channel.measurement_max;
+      model.measurement_unit = channel.measurement_scale || channel.measurement_unit;
+    }
+  }
   for (const channel of channels) {
     const item = byId.get(channel.equipment_id);
     if (!item) continue;
