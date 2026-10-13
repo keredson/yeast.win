@@ -239,6 +239,7 @@ button, input, textarea { font: inherit; }
   .header-brand-row { width: 100%; justify-content: flex-start; }
   .mobile-menu-button { display: inline-flex !important; color: white !important; }
   .header-controls { width: 100%; gap: 8px; }
+  .header-controls .avatar-button { margin-left: auto; }
   .workspace-select { flex: 1; width: auto; min-width: 90px; }
   .header-controls .ant-btn { font-size: 12px; padding-inline: 9px; }
   .app-body { display: block; padding: 16px 15px 50px; }
@@ -252,7 +253,6 @@ button, input, textarea { font: inherit; }
 @media (max-width: 360px) {
   .header-controls { flex-wrap: wrap; }
   .workspace-select { order: -1; flex: 1 1 100%; }
-  .header-controls .avatar-button { margin-left: auto; }
 }
 .import-recipe-choices, .import-inventory-toggle { margin: 20px 0; }
 .import-recipe-list { display: grid; gap: 10px; margin-top: 10px; }

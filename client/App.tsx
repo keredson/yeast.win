@@ -545,12 +545,12 @@ export function App() {
               showInfo={false} size={28} strokeWidth={11} strokeColor="#e7b464" trailColor="#56736f" />
           </div>
         </Tooltip>}
-        <Select className="workspace-select" value={workspaceId} placeholder="No breweries" disabled={!session.workspaces.length}
+        {session.workspaces.length > 1 && <Select className="workspace-select" value={workspaceId}
           aria-label="Brewery"
           options={session.workspaces.map(item => ({ label: item.name, value: item.id }))}
           onChange={value => {
             setWorkspaceId(value); localStorage.setItem(activeBreweryKey, value); setOpenedDb(null); showSection('batches', value);
-          }} />
+          }} />}
         {serverDisconnected && <Popover trigger="click" title="Server disconnected" content={<div className="connection-popover">
           <p>Your brewing entries are saved on this device.</p>
           <p>{autoSync ? 'They will sync when the server is available again.' : 'Sync them from Settings when the server is available again.'}</p>
