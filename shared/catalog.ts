@@ -1,15 +1,22 @@
+import type { WireChange } from './schema.ts';
+
 export interface CatalogEquipment { id: string; name: string; kind: string;
   capacity_liters?: number | null; built_in_temperature_control?: number | boolean | null; max_pressure_kpa?: number | null;
   rated_power_watts?: number | null; measurement_min?: number | null; measurement_max?: number | null;
   measurement_unit?: string | null }
 export interface CatalogInventory { id: string; name: string; category: string; unit: string }
-export interface CatalogSnapshot { version: number; equipment: CatalogEquipment[]; inventory: CatalogInventory[] }
+
+export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
+export const catalogSchemaVersion = 10;
+export const catalogTables = ['equipment', 'inventory'] as const;
 export const catalogEquipmentColumns = ['capacity_liters', 'built_in_temperature_control', 'max_pressure_kpa',
   'rated_power_watts', 'measurement_min', 'measurement_max', 'measurement_unit'] as const;
-export const catalogEquipmentTable = `CREATE TABLE IF NOT EXISTS catalog_equipment (
-  id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL,
+export const catalogEquipmentTable = `CREATE TABLE IF NOT EXISTS equipment (
+  id TEXT PRIMARY KEY NOT NULL, name TEXT, kind TEXT,
   capacity_liters REAL, built_in_temperature_control INTEGER, max_pressure_kpa REAL,
   rated_power_watts REAL, measurement_min REAL, measurement_max REAL, measurement_unit TEXT)`;
+export const catalogInventoryTable = `CREATE TABLE IF NOT EXISTS inventory (
+  id TEXT PRIMARY KEY NOT NULL, name TEXT, category TEXT, unit TEXT)`;
 
 export const inventoryCategories = ['Grain', 'Hops', 'Yeast', 'Nutrient', 'Adjunct', 'Chemical', 'Packaging', 'Other'] as const;
 

@@ -10,6 +10,7 @@ const envPath = resolve(projectRoot, '.env');
 if (existsSync(envPath)) process.loadEnvFile(envPath);
 export const dataDir = resolve(projectRoot, process.env.BREWLOG_DATA_DIR || './data');
 const extensionPath = resolve(projectRoot, 'vendor/crsqlite.so');
+const authSchemaVersion = 1;
 mkdirSync(dataDir, { recursive: true });
 
 export function assertCrSqliteAvailable(): void {
@@ -29,6 +30,11 @@ export function assertCrSqliteAvailable(): void {
 export function openAuthDb(): Database.Database {
   const db = new Database(join(dataDir, 'auth.sqlite'));
   db.pragma('journal_mode = WAL');
+  const version = db.pragma('user_version', { simple: true }) as number;
+  if (version > authSchemaVersion) {
+    db.close();
+    throw new Error(`This server cannot open auth schema ${version}; update Brewlog first.`);
+  }
   db.exec(`
     CREATE TABLE IF NOT EXISTS accounts (
       id TEXT PRIMARY KEY NOT NULL,
@@ -60,37 +66,39 @@ export function openAuthDb(): Database.Database {
       slug TEXT,
       created_at INTEGER NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS auth_meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
   `);
   const columns = db.pragma('table_info(workspaces)') as { name: string }[];
   if (!columns.some(column => column.name === 'slug')) db.exec('ALTER TABLE workspaces ADD COLUMN slug TEXT');
-  const needsRootMigration = !db.prepare("SELECT 1 FROM auth_meta WHERE key = 'nullable_root_slug_v1'").get();
-  const rows = db.prepare('SELECT id, owner_account_id, name, slug FROM workspaces ORDER BY created_at, rowid')
-    .all() as { id: string; owner_account_id: string; name: string; slug: string | null }[];
-  const used = new Map<string, Set<string>>();
-  for (const row of rows) if (row.slug) {
-    const set = used.get(row.owner_account_id) || new Set<string>();
-    set.add(row.slug); used.set(row.owner_account_id, set);
-  }
-  const update = db.prepare('UPDATE workspaces SET slug = ? WHERE id = ?');
-  for (const row of rows) if (needsRootMigration && row.slug === null) {
-    const slug = uniqueSlug(row.name, used.get(row.owner_account_id) || new Set());
-    update.run(slug, row.id);
-    const set = used.get(row.owner_account_id) || new Set<string>();
-    set.add(slug); used.set(row.owner_account_id, set);
-  }
-  if (needsRootMigration) {
-    db.transaction(() => {
+  const hasLegacyMeta = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_meta'").get();
+  const rootMigrationDone = version >= authSchemaVersion || (hasLegacyMeta
+    && !!db.prepare("SELECT 1 FROM auth_meta WHERE key = 'nullable_root_slug_v1'").get());
+  db.transaction(() => {
+    if (!rootMigrationDone) {
+      const rows = db.prepare('SELECT id, owner_account_id, name, slug FROM workspaces ORDER BY created_at, rowid')
+        .all() as { id: string; owner_account_id: string; name: string; slug: string | null }[];
+      const used = new Map<string, Set<string>>();
+      for (const row of rows) if (row.slug) {
+        const set = used.get(row.owner_account_id) || new Set<string>();
+        set.add(row.slug); used.set(row.owner_account_id, set);
+      }
+      const update = db.prepare('UPDATE workspaces SET slug = ? WHERE id = ?');
+      for (const row of rows) if (row.slug === null) {
+        const slug = uniqueSlug(row.name, used.get(row.owner_account_id) || new Set());
+        update.run(slug, row.id);
+        const set = used.get(row.owner_account_id) || new Set<string>();
+        set.add(slug); used.set(row.owner_account_id, set);
+      }
       const roots = new Set<string>();
       for (const row of rows) if (!roots.has(row.owner_account_id)) {
         roots.add(row.owner_account_id);
         db.prepare('UPDATE workspaces SET slug = NULL WHERE id = ?').run(row.id);
       }
-      db.prepare("INSERT INTO auth_meta(key, value) VALUES ('nullable_root_slug_v1', '1')").run();
-    })();
-  }
-  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS workspaces_owner_slug ON workspaces(owner_account_id, slug)');
-  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS workspaces_one_root ON workspaces(owner_account_id) WHERE slug IS NULL');
+    }
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS workspaces_owner_slug ON workspaces(owner_account_id, slug)');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS workspaces_one_root ON workspaces(owner_account_id) WHERE slug IS NULL');
+    if (hasLegacyMeta) db.exec('DROP TABLE auth_meta');
+    if (version < authSchemaVersion) db.pragma(`user_version = ${authSchemaVersion}`);
+  })();
   return db;
 }
 
@@ -136,25 +144,29 @@ export function openWorkspaceDb(id: string): Database.Database {
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');
   db.loadExtension(extensionPath);
-  db.exec('CREATE TABLE IF NOT EXISTS schema_meta(version INTEGER NOT NULL)');
-  const row = db.prepare('SELECT version FROM schema_meta LIMIT 1').get() as { version: number } | undefined;
-  if (!row) {
+  const storedVersion = db.pragma('user_version', { simple: true }) as number;
+  const hasLegacyMeta = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_meta'").get();
+  const legacyVersion = hasLegacyMeta
+    ? (db.prepare('SELECT version FROM schema_meta LIMIT 1').get() as { version: number } | undefined)?.version : undefined;
+  const version = storedVersion || legacyVersion || 0;
+  if (version === 0) {
     db.exec('BEGIN');
     try {
       for (const statement of schemaStatements) db.exec(statement);
       for (const table of replicatedTables) db.prepare('SELECT crsql_as_crr(?)').get(table);
       for (const statement of indexStatements) db.exec(statement);
-      db.prepare('INSERT INTO schema_meta(version) VALUES (?)').run(workspaceSchemaVersion);
+      if (hasLegacyMeta) db.exec('DROP TABLE schema_meta');
+      db.pragma(`user_version = ${workspaceSchemaVersion}`);
       db.exec('COMMIT');
     } catch (error) {
       if (db.inTransaction) db.exec('ROLLBACK');
       db.close();
       throw error;
     }
-  } else if (row.version < workspaceSchemaVersion) {
+  } else if (version < workspaceSchemaVersion) {
     db.exec('BEGIN');
     try {
-      if (row.version === 15) {
+      if (version === 15) {
         db.exec(schemaStatements[replicatedTables.indexOf('inventory_location_slugs')]);
         db.prepare('SELECT crsql_as_crr(?)').get('inventory_location_slugs');
       } else {
@@ -168,16 +180,22 @@ export function openWorkspaceDb(id: string): Database.Database {
         for (const table of replicatedTables) db.prepare('SELECT crsql_as_crr(?)').get(table);
         for (const statement of indexStatements) db.exec(statement);
       }
-      db.prepare('UPDATE schema_meta SET version = ?').run(workspaceSchemaVersion);
+      if (hasLegacyMeta) db.exec('DROP TABLE schema_meta');
+      db.pragma(`user_version = ${workspaceSchemaVersion}`);
       db.exec('COMMIT');
     } catch (error) {
       if (db.inTransaction) db.exec('ROLLBACK');
       db.close();
       throw error;
     }
-  } else if (row.version > workspaceSchemaVersion) {
+  } else if (version > workspaceSchemaVersion) {
     db.close();
-    throw new Error(`This server cannot open workspace schema ${row.version}; update Brewlog first.`);
+    throw new Error(`This server cannot open workspace schema ${version}; update Brewlog first.`);
+  } else if (hasLegacyMeta || storedVersion !== workspaceSchemaVersion) {
+    db.transaction(() => {
+      if (hasLegacyMeta) db.exec('DROP TABLE schema_meta');
+      db.pragma(`user_version = ${workspaceSchemaVersion}`);
+    })();
   }
   return db;
 }

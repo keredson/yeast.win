@@ -23,6 +23,8 @@ const { openAuthDb } = await import('../server/db.ts');
 test('legacy first brewery becomes the only root brewery', () => {
   const db = openAuthDb();
   try {
+    assert.equal(db.pragma('user_version', { simple: true }), 1);
+    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'auth_meta'").get(), undefined);
     const rows = db.prepare('SELECT slug FROM workspaces WHERE owner_account_id = ? ORDER BY created_at, rowid')
       .all('account') as { slug: string | null }[];
     assert.deepEqual(rows.map(row => row.slug), [null, 'downtown-brewery', 'downtown-brewery-2']);
@@ -33,4 +35,20 @@ test('legacy first brewery becomes the only root brewery', () => {
       .all('account') as { slug: string | null }[];
     assert.deepEqual(rows.map(row => row.slug), [null, 'downtown-brewery', 'downtown-brewery-2']);
   } finally { reopened.close(); }
+});
+
+test('auth upgrade respects the completed legacy root migration', () => {
+  const legacy = new Database(file);
+  legacy.exec(`UPDATE workspaces SET slug = 'homebrew' WHERE id = 'first';
+    UPDATE workspaces SET slug = NULL WHERE id = 'second';
+    CREATE TABLE auth_meta(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
+    INSERT INTO auth_meta VALUES ('nullable_root_slug_v1', '1');
+    PRAGMA user_version = 0;`);
+  legacy.close();
+  const db = openAuthDb();
+  try {
+    assert.equal(db.pragma('user_version', { simple: true }), 1);
+    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'auth_meta'").get(), undefined);
+    assert.equal((db.prepare("SELECT id FROM workspaces WHERE slug IS NULL").get() as { id: string }).id, 'second');
+  } finally { db.close(); }
 });

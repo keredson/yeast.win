@@ -46,7 +46,7 @@ The server serves the built PWA and API together on port 3001. Point your Cloudf
 
 This proof of concept does not migrate brewery databases from older schemas. Schema 7 needs a fresh brewery database and fresh browser storage; existing schema 6 databases are left untouched and rejected with an explanatory error.
 
-Accounts can register and each account can own multiple private breweries. Sync covers each full brewery; sharing, per-batch permissions and filtered sync are later targets. RAPT Pill ingestion and server Web Push reminders are specified in [DESIGN.md](DESIGN.md) but are not wired up yet. A separate read-only `data/catalog.sqlite` holds example equipment and inventory entries. Signed-in devices keep a separate local SQLite copy for offline search; copying an entry creates an independent brewery-owned item. Catalog edits on the server require incrementing `catalog_meta.version` so devices download the new snapshot.
+Accounts can register and each account can own multiple private breweries. Sync covers each full brewery; sharing, per-batch permissions and filtered sync are later targets. RAPT Pill ingestion and server Web Push reminders are specified in [DESIGN.md](DESIGN.md) but are not wired up yet. A separate `data/catalog.sqlite` holds shared equipment and inventory entries. Signed-in devices keep a separate local CR-SQLite copy for offline search; the server sends catalog changes one way using a cursor. Copying an entry creates an independent brewery-owned item. Server catalog edits are tracked by CR-SQLite and do not require a manual version bump.
 
 ## Checks
 

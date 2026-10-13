@@ -119,19 +119,24 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
     pending = (async () => {
       const sqlite = await (sqlitePromise ||= initWasm(() => wasmUrl));
       const db = await sqlite.open(`brewlog-${workspaceId}`);
-      await db.exec('CREATE TABLE IF NOT EXISTS schema_meta(version INTEGER NOT NULL)');
-      const version = await db.execO<{ version: number }>('SELECT version FROM schema_meta LIMIT 1');
-      if (!version.length) {
+      const storedVersion = (await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version;
+      const legacyMeta = await db.execO<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_meta'");
+      const legacyVersion = legacyMeta.length
+        ? (await db.execO<{ version: number }>('SELECT version FROM schema_meta LIMIT 1'))[0]?.version : undefined;
+      const version = storedVersion || legacyVersion || 0;
+      if (version === 0) {
         await db.tx(async tx => {
           for (const statement of schemaStatements) await tx.exec(statement);
           for (const table of replicatedTables) await tx.exec('SELECT crsql_as_crr(?)', [table]);
           for (const statement of indexStatements) await tx.exec(statement);
           await tx.exec('CREATE TABLE sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
-          await tx.exec('INSERT INTO schema_meta(version) VALUES (?)', [workspaceSchemaVersion]);
+          if (legacyMeta.length) await tx.exec('DROP TABLE schema_meta');
+          await tx.exec(`PRAGMA user_version = ${workspaceSchemaVersion}`);
         });
-      } else if (version[0].version < workspaceSchemaVersion) {
+      } else if (version < workspaceSchemaVersion) {
         await db.tx(async tx => {
-          if (version[0].version === 15) {
+          if (version === 15) {
             await tx.exec(schemaStatements[replicatedTables.indexOf('inventory_location_slugs')]);
             await tx.exec("SELECT crsql_as_crr('inventory_location_slugs')");
           } else {
@@ -148,10 +153,16 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
             await tx.exec('CREATE TABLE IF NOT EXISTS sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
             await tx.exec('DELETE FROM sync_state');
           }
-          await tx.exec('UPDATE schema_meta SET version = ?', [workspaceSchemaVersion]);
+          if (legacyMeta.length) await tx.exec('DROP TABLE schema_meta');
+          await tx.exec(`PRAGMA user_version = ${workspaceSchemaVersion}`);
         });
-      } else if (version[0].version > workspaceSchemaVersion) {
-        throw new Error(`This app cannot open workspace schema ${version[0].version}; update Brewlog first.`);
+      } else if (version > workspaceSchemaVersion) {
+        throw new Error(`This app cannot open workspace schema ${version}; update Brewlog first.`);
+      } else if (legacyMeta.length || storedVersion !== workspaceSchemaVersion) {
+        await db.tx(async tx => {
+          if (legacyMeta.length) await tx.exec('DROP TABLE schema_meta');
+          await tx.exec(`PRAGMA user_version = ${workspaceSchemaVersion}`);
+        });
       }
       return db;
     })();

@@ -5,7 +5,7 @@ import type Database from 'better-sqlite3';
 import { accountForToken, changePassword, clearSessionCookie, getAvatar, getPreferredUnits, login, logout,
   readSessionCookie, register, saveAvatar, savePreferredUnits, sessionCookie, sessionCookieName } from './auth.ts';
 import { assertCrSqliteAvailable, closeWorkspaceDb, createWorkspace, dataDir, deleteWorkspace, openAuthDb, openWorkspaceDb, projectRoot, updateWorkspace } from './db.ts';
-import { catalogSnapshot, openCatalogDb } from './catalog.ts';
+import { catalogChanges, openCatalogDb } from './catalog.ts';
 import { syncWorkspace, validateSyncRequest } from './sync.ts';
 import { isValidId } from '../shared/schema.ts';
 import { validPreferredUnits } from '../shared/units.ts';
@@ -154,8 +154,16 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { account, workspaces: ownerWorkspaces(account.id), preferred_units: getPreferredUnits(authDb, account.id) });
     }
     if (pathname === '/api/catalog' && req.method === 'GET') {
-      const version = Number(url.searchParams.get('version') || 0);
-      return json(res, 200, catalogSnapshot(catalogDb, Number.isSafeInteger(version) && version >= 0 ? version : 0));
+      const cursor = url.searchParams.get('cursor') || '0';
+      if (!/^\d+$/.test(cursor)) return json(res, 400, { error: 'Invalid catalog cursor' });
+      try {
+        return json(res, 200, catalogChanges(catalogDb, BigInt(cursor)));
+      } catch (cause) {
+        if (cause instanceof Error && cause.message === 'Catalog cursor is ahead of the server') {
+          return json(res, 409, { error: cause.message });
+        }
+        throw cause;
+      }
     }
     if (pathname === '/api/me/preferences' && req.method === 'PATCH') {
       const units = await readJson(req, 4 * 1024);

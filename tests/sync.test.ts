@@ -127,7 +127,8 @@ test('pre-release workspace schemas reset without carrying old event JSON', () =
   old.close();
   const db = openWorkspaceDb(id);
   try {
-    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, workspaceSchemaVersion);
+    assert.equal(db.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'schema_meta'").get(), undefined);
     assert.equal((db.prepare('SELECT COUNT(*) AS count FROM batch_events').get() as { count: number }).count, 0);
     assert.equal((db.pragma('table_info(batch_events)') as { name: string }[])
       .some(column => column.name === 'details_json'), false);
@@ -148,6 +149,25 @@ test('pre-release workspace schemas reset without carrying old event JSON', () =
   } finally { closeWorkspaceDb(db); }
 });
 
+test('current workspace data survives the move from schema_meta to user_version', () => {
+  const id = nanoid();
+  const batchId = nanoid();
+  const first = openWorkspaceDb(id);
+  try {
+    first.prepare('INSERT INTO batches(id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+      .run(batchId, 'Existing batch', 'active', 1, 1);
+    first.exec('CREATE TABLE schema_meta(version INTEGER NOT NULL); INSERT INTO schema_meta VALUES (15)');
+    first.pragma('user_version = 0');
+  } finally { closeWorkspaceDb(first); }
+  const reopened = openWorkspaceDb(id);
+  try {
+    assert.equal(reopened.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.equal(reopened.prepare("SELECT name FROM sqlite_master WHERE name = 'schema_meta'").get(), undefined);
+    assert.equal((reopened.prepare('SELECT name FROM batches WHERE id = ?').get(batchId) as { name: string }).name,
+      'Existing batch');
+  } finally { closeWorkspaceDb(reopened); }
+});
+
 test('version 12 ingredient JSON is replaced by typed columns', () => {
   const id = nanoid();
   const file = join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`);
@@ -162,7 +182,8 @@ test('version 12 ingredient JSON is replaced by typed columns', () => {
   old.close();
   const db = openWorkspaceDb(id);
   try {
-    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, workspaceSchemaVersion);
+    assert.equal(db.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'schema_meta'").get(), undefined);
     const columns = db.pragma('table_info(inventory_ingredient_properties)') as { name: string }[];
     assert.deepEqual(columns.map(column => column.name),
       ['id', 'yield_pct', 'color_lovibond', 'alpha_acid_pct', 'hop_form', 'attenuation_pct']);
@@ -182,7 +203,8 @@ test('version 14 calibration JSON table is removed on reset', () => {
   old.close();
   const db = openWorkspaceDb(id);
   try {
-    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, workspaceSchemaVersion);
+    assert.equal(db.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'schema_meta'").get(), undefined);
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'equipment_calibrations'").get(), undefined);
   } finally { closeWorkspaceDb(db); }
 });
@@ -207,7 +229,8 @@ test('version 15 adds location slugs without deleting existing locations or stoc
   old.close();
   const db = openWorkspaceDb(id);
   try {
-    assert.equal((db.prepare('SELECT version FROM schema_meta').get() as { version: number }).version, workspaceSchemaVersion);
+    assert.equal(db.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'schema_meta'").get(), undefined);
     assert.equal((db.prepare('SELECT name FROM inventory_locations WHERE id = ?').get(locationId) as { name: string }).name, 'Cellar');
     assert.equal((db.prepare('SELECT location_id FROM inventory_item_locations WHERE id = ?').get(itemId) as { location_id: string }).location_id, locationId);
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'inventory_location_slugs'").get());
