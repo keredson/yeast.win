@@ -376,8 +376,9 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
       {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
       <Form form={itemForm} layout="vertical" onFinish={create}>
         <Form.Item name="category" hidden><Input /></Form.Item>
-        <Form.Item name="name" label="Item" rules={[{ required: true, whitespace: true }]}>
-          <AutoComplete placeholder="Search supplies or enter an item" maxLength={120} disabled={!!newStockProduct}
+        {newStockProduct ? <Form.Item name="name" hidden><Input /></Form.Item>
+          : <Form.Item name="name" label="Item" rules={[{ required: true, whitespace: true }]}>
+          <AutoComplete placeholder="Search supplies or enter an item" maxLength={120}
             options={[
               ...supplies.filter(row => row.category === newItemCategory).map(row => ({ value: row.name, label: `${row.name} · Your supplies` })),
               ...catalog.filter(row => row.category === newItemCategory && !supplies.some(owned =>
@@ -393,7 +394,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
                 changeQuantityUnit(itemForm, previousItemUnit.current, nextUnit, 'starting_quantity');
                 previousItemUnit.current = nextUnit;
                 itemForm.setFieldValue('default_unit', nextUnit); } }} />
-        </Form.Item>
+        </Form.Item>}
         <Form.Item name="location_id" label="Location (optional)" normalize={(value, previousValue) => {
           if (value === newLocationOption) { openLocationCreate('item'); return previousValue; }
           return value;
