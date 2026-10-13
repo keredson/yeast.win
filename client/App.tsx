@@ -4,7 +4,7 @@ import { Alert, Avatar, Button, Card, Drawer, Empty, Form, Input, Layout, Menu, 
 import { api, ApiError, ApiUnavailableError, type PreferredUnits, type Session, type Workspace } from './api.ts';
 import { defaultPreferredUnits } from '../shared/units.ts';
 import { forgetLocalDb, openLocalDb, syncNow, type Batch, type Equipment, type InventoryItem, type InventoryLocation, type LocalDb, type Recipe, type RecipeType,
-  listBatches, listEquipment, listEquipmentModels, listInventory, listInventoryLocations, listRecipes } from './db.ts';
+  listBatches, listEquipment, listEquipmentModels, listInventory, listSupplies, listInventoryLocations, listRecipes } from './db.ts';
 import { BatchSection } from './BatchSection.tsx';
 import { RecipeSection } from './RecipeSection.tsx';
 import { RecipeTypeIcon } from './RecipeTypeIcon.tsx';
@@ -159,6 +159,7 @@ export function App() {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [supplies, setSupplies] = useState<InventoryItem[]>([]);
   const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [inventoryWorkspaceId, setInventoryWorkspaceId] = useState<string | null>(null);
   const [equipmentWorkspaceId, setEquipmentWorkspaceId] = useState<string | null>(null);
@@ -254,8 +255,11 @@ export function App() {
   useEffect(() => {
     if (!db || !workspaceId || !catalogRevision) return;
     let cancelled = false;
-    void Promise.all([listEquipment(db), listEquipmentModels(db)]).then(([items, models]) => {
-      if (!cancelled && activeWorkspaceId.current === workspaceId) { setEquipment(items); setEquipmentModels(models); }
+    void Promise.all([listEquipment(db), listEquipmentModels(db), listInventory(db), listSupplies(db)])
+      .then(([items, models, stock, supplyRows]) => {
+      if (!cancelled && activeWorkspaceId.current === workspaceId) {
+        setEquipment(items); setEquipmentModels(models); setInventory(stock); setSupplies(supplyRows);
+      }
     }).catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => { cancelled = true; };
   }, [db, workspaceId, catalogRevision]);
@@ -355,13 +359,14 @@ export function App() {
   }
 
   const refresh = useCallback(async (activeDb: LocalDb, targetWorkspaceId: string) => {
-    const [nextBatches, nextRecipes, nextInventory, nextEquipment, nextModels, nextLocations] = await Promise.all([
-      listBatches(activeDb), listRecipes(activeDb), listInventory(activeDb), listEquipment(activeDb), listEquipmentModels(activeDb), listInventoryLocations(activeDb)
+    const [nextBatches, nextRecipes, nextInventory, nextSupplies, nextEquipment, nextModels, nextLocations] = await Promise.all([
+      listBatches(activeDb), listRecipes(activeDb), listInventory(activeDb), listSupplies(activeDb), listEquipment(activeDb), listEquipmentModels(activeDb), listInventoryLocations(activeDb)
     ]);
     if (activeWorkspaceId.current !== targetWorkspaceId) return;
     setBatches(nextBatches);
     setRecipes(nextRecipes);
     setInventory(nextInventory);
+    setSupplies(nextSupplies);
     setLocations(nextLocations);
     setInventoryWorkspaceId(targetWorkspaceId);
     setEquipment(nextEquipment);
@@ -529,12 +534,12 @@ export function App() {
               equipment={equipment} equipmentModels={equipmentModels} inventory={inventory} catalogInventory={catalogInventory} preferredUnits={preferredUnits}
               selectedId={route.selectedId} onSelect={id => showItem('batches', id)} onChanged={changed} />}
             {section === 'recipes' && <RecipeSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} recipes={recipes}
-              equipment={equipment} equipmentModels={equipmentModels} inventory={inventory} catalogInventory={catalogInventory} preferredUnits={preferredUnits}
+              equipment={equipment} equipmentModels={equipmentModels} inventory={inventory} supplies={supplies} catalogInventory={catalogInventory} preferredUnits={preferredUnits}
               selectedId={route.selectedId} onSelect={id => showItem('recipes', id)}
               onChanged={changed} onBatchStarted={id => showItem('batches', id)} />}
             {section === 'inventory' && (inventoryWorkspaceId !== workspaceId ? <div className="loading-screen"><Spin description="Loading inventory" /></div>
               : <InventorySection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} items={inventory}
-                catalog={catalogInventory} preferredUnits={preferredUnits} selectedId={route.selectedId
+                supplies={supplies} catalog={catalogInventory} preferredUnits={preferredUnits} selectedId={route.selectedId
                   ? inventoryItemForPath(route.selectedId, inventory)?.id || route.selectedId : null}
                 onSelect={id => showItem('inventory', id)} onChanged={changed} />)}
             {section === 'locations' && (inventoryWorkspaceId !== workspaceId ? <div className="loading-screen"><Spin description="Loading locations" /></div>

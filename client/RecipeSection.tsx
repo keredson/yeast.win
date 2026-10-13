@@ -21,9 +21,9 @@ const recipeTypeOptions = [
   { value: 'mead', label: 'Mead' }, { value: 'cider', label: 'Cider' }
 ];
 
-export function RecipeSection({ db, basePath, accountId, recipes, equipment, equipmentModels, inventory, catalogInventory, preferredUnits, selectedId, onSelect, onChanged, onBatchStarted }: {
+export function RecipeSection({ db, basePath, accountId, recipes, equipment, equipmentModels, inventory, supplies, catalogInventory, preferredUnits, selectedId, onSelect, onChanged, onBatchStarted }: {
   db: LocalDb; basePath: string; accountId: string; recipes: Recipe[]; selectedId: string | null; onSelect: (id: string | null) => void;
-  equipment: Equipment[]; equipmentModels: Equipment[]; inventory: InventoryItem[]; catalogInventory: CatalogInventory[]; preferredUnits: PreferredUnits;
+  equipment: Equipment[]; equipmentModels: Equipment[]; inventory: InventoryItem[]; supplies: InventoryItem[]; catalogInventory: CatalogInventory[]; preferredUnits: PreferredUnits;
   onChanged: () => Promise<void>; onBatchStarted: (id: string) => void;
 }) {
   const [settingsForm] = Form.useForm<{ name: string; description?: string; recipe_type: RecipeType;
@@ -78,11 +78,11 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
       }
       const recipeInputs = recipeRows[0] || {};
       const eventInputs = Object.fromEntries(eventRows.map(row => [row.id, row]));
-      if (!cancelled) setEstimate(calculateRecipe(plans, inventory, equipmentModels, recipeInputs, eventInputs, recent,
+      if (!cancelled) setEstimate(calculateRecipe(plans, supplies, equipmentModels, recipeInputs, eventInputs, recent,
         recipe?.recipe_type || 'beer'));
     })();
     return () => { cancelled = true; };
-  }, [db, selectedId, plans, inventory, equipment, equipmentModels, settingsOpen, recipe?.recipe_type]);
+  }, [db, selectedId, plans, supplies, equipment, equipmentModels, settingsOpen, recipe?.recipe_type]);
 
   async function addRecipe(values: { name: string; description?: string; recipe_type: RecipeType }) {
     try {
@@ -248,7 +248,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
       {planDeleteError && <Alert type="error" message={planDeleteError} className="form-alert" />}
       {(editingPlan || creatingKind) && <PlanForm key={editingPlan?.id || creatingKind || 'new'} eventType={editingPlan?.event_type || creatingKind || 'addition'}
         anchors={plans.filter(item => item.id !== editingPlan?.id)} initialPlan={editingPlan || undefined}
-        equipment={equipmentModels} inventory={inventory} catalog={catalogInventory} preferredUnits={preferredUnits} preset={editingPlan ? undefined : preset} submit={addPlan}
+        equipment={equipmentModels} inventory={supplies} catalog={catalogInventory} preferredUnits={preferredUnits} preset={editingPlan ? undefined : preset} recipeMode submit={addPlan}
         extraAction={editingPlan && <Popconfirm title={`Delete ${editingPlan.title}?`}
           description="Actions timed from this one will become relative to batch start. Existing batches keep their copies."
           okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => void removePlan(editingPlan.id)}>

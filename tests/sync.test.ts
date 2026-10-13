@@ -428,6 +428,92 @@ test('version 21 workspace adds brewery model boil defaults and keeps unit calib
   } finally { closeWorkspaceDb(upgraded); }
 });
 
+test('version 22 stock migrates into supplies and lots without changing ledger or event links', () => {
+  const id = nanoid();
+  const stockId = nanoid();
+  const batchId = nanoid();
+  const eventId = nanoid();
+  const db = new Database(join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`));
+  db.loadExtension('vendor/crsqlite.so');
+  db.exec(`CREATE TABLE inventory_items(id TEXT PRIMARY KEY NOT NULL, name TEXT, category TEXT,
+      default_unit TEXT, created_at INTEGER);
+    CREATE TABLE inventory_ingredient_properties(id TEXT PRIMARY KEY NOT NULL, yield_pct REAL,
+      color_lovibond REAL, alpha_acid_pct REAL, hop_form TEXT, attenuation_pct REAL);
+    CREATE TABLE inventory_counts(id TEXT PRIMARY KEY NOT NULL, inventory_item_id TEXT,
+      quantity REAL, unit TEXT, counted_at INTEGER, created_by_account_id TEXT);
+    CREATE TABLE inventory_purchases(id TEXT PRIMARY KEY NOT NULL, inventory_item_id TEXT,
+      quantity REAL, unit TEXT, purchased_at INTEGER, supplier TEXT, lot TEXT, cost REAL);
+    CREATE TABLE batches(id TEXT PRIMARY KEY NOT NULL, name TEXT, status TEXT, created_at INTEGER, updated_at INTEGER);
+    CREATE TABLE batch_events(id TEXT PRIMARY KEY NOT NULL, batch_id TEXT, event_type TEXT,
+      actual_at INTEGER, created_at INTEGER);
+    CREATE TABLE additions(event_id TEXT PRIMARY KEY NOT NULL, inventory_item_id TEXT,
+      item_name TEXT, quantity REAL, unit TEXT)`);
+  for (const table of ['inventory_items', 'inventory_ingredient_properties', 'inventory_counts', 'inventory_purchases', 'batches', 'batch_events', 'additions']) {
+    db.prepare('SELECT crsql_as_crr(?)').get(table);
+  }
+  db.prepare('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(stockId, 'Custom grain', 'Grain', 'oz', 1);
+  db.prepare('INSERT INTO inventory_ingredient_properties(id, yield_pct, color_lovibond) VALUES (?, ?, ?)')
+    .run(stockId, 79, 3.5);
+  db.prepare('INSERT INTO inventory_counts(id, inventory_item_id, quantity, unit, counted_at) VALUES (?, ?, ?, ?, ?)')
+    .run(nanoid(), stockId, 32, 'oz', 2);
+  db.prepare('INSERT INTO inventory_purchases(id, inventory_item_id, quantity, unit, purchased_at, lot) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(nanoid(), stockId, 32, 'oz', 2, 'MALT-26-A');
+  db.prepare('INSERT INTO batches(id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+    .run(batchId, 'Existing batch', 'active', 1, 1);
+  db.prepare('INSERT INTO batch_events(id, batch_id, event_type, actual_at, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(eventId, batchId, 'addition', 3, 3);
+  db.prepare('INSERT INTO additions(event_id, inventory_item_id, item_name, quantity, unit) VALUES (?, ?, ?, ?, ?)')
+    .run(eventId, stockId, 'Custom grain', 5, 'oz');
+  db.pragma('user_version = 22');
+  db.close();
+
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    const stock = upgraded.prepare('SELECT supply_id, lot_id FROM inventory_items WHERE id = ?')
+      .get(stockId) as { supply_id: string; lot_id: string };
+    assert.ok(stock.supply_id);
+    assert.ok(stock.lot_id);
+    assert.equal((upgraded.prepare('SELECT lot_code FROM supply_lots WHERE id = ?')
+      .get(stock.lot_id) as { lot_code: string }).lot_code, 'MALT-26-A');
+    assert.equal((upgraded.prepare('SELECT yield_pct FROM supply_grain_specs WHERE supply_id = ?')
+      .get(stock.supply_id) as { yield_pct: number }).yield_pct, 79);
+    assert.equal((upgraded.prepare('SELECT color_lovibond FROM lot_grain_specs WHERE lot_id = ?')
+      .get(stock.lot_id) as { color_lovibond: number }).color_lovibond, 3.5);
+    assert.equal((upgraded.prepare('SELECT supply_id FROM additions WHERE event_id = ?')
+      .get(eventId) as { supply_id: string }).supply_id, stock.supply_id);
+    assert.equal((upgraded.prepare('SELECT quantity FROM inventory_counts WHERE inventory_item_id = ?')
+      .get(stockId) as { quantity: number }).quantity, 32);
+    assert.equal((upgraded.prepare('SELECT name FROM batches WHERE id = ?')
+      .get(batchId) as { name: string }).name, 'Existing batch');
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
+test('partly migrated stock keeps its chosen supply and existing lot properties', () => {
+  const id = nanoid();
+  const stockId = nanoid();
+  const supplyId = nanoid();
+  const lotId = nanoid();
+  const db = openWorkspaceDb(id);
+  db.prepare('INSERT INTO supplies(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(supplyId, 'Mosaic', 'Hops', 'g', 1);
+  db.prepare('INSERT INTO supply_lots(id, supply_id, lot_code, created_at) VALUES (?, ?, ?, ?)')
+    .run(lotId, supplyId, '2026-A', 1);
+  db.prepare('INSERT INTO lot_hop_specs(lot_id, alpha_acid_pct) VALUES (?, ?)').run(lotId, 13.2);
+  db.prepare('INSERT INTO inventory_items(id, name, category, default_unit, supply_id, lot_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(stockId, 'Mosaic', 'Hops', 'g', supplyId, lotId, 1);
+  db.pragma('user_version = 22');
+  closeWorkspaceDb(db);
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.deepEqual(upgraded.prepare('SELECT supply_id, lot_id FROM inventory_items WHERE id = ?').get(stockId),
+      { supply_id: supplyId, lot_id: lotId });
+    assert.equal((upgraded.prepare('SELECT alpha_acid_pct FROM lot_hop_specs WHERE lot_id = ?')
+      .get(lotId) as { alpha_acid_pct: number }).alpha_acid_pct, 13.2);
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
 test('version 20 equipment splits into models and physical units while preserving event links', () => {
   const id = nanoid();
   const unitId = nanoid();

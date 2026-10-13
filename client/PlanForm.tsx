@@ -49,12 +49,13 @@ interface Values {
   duration_value?: number; duration_unit?: typeof timeUnits[number]['value'];
 }
 
-export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory, catalog, preferredUnits, preset, allowRecordNow = false, extraAction, submit }: {
+export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory, catalog, preferredUnits, preset, recipeMode = false, allowRecordNow = false, extraAction, submit }: {
   anchors: Anchor[];
   eventType: string;
   initialPlan?: PlanInput & { id: string };
   equipment: Equipment[]; inventory: InventoryItem[]; catalog: CatalogInventory[]; preferredUnits: PreferredUnits;
   preset?: PlanPreset;
+  recipeMode?: boolean;
   allowRecordNow?: boolean;
   extraAction?: ReactNode;
   submit: (input: PlanInput, recordNow?: boolean, addAnother?: boolean) => Promise<void>;
@@ -66,12 +67,13 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
   const offset = initialPlan?.offset_seconds ?? preset?.offsetSeconds ?? 0;
   const offsetUnit = offset === 0 ? timeUnits[1] : [...timeUnits].reverse().find(item => Math.abs(offset) % item.multiplier === 0) || timeUnits[0];
   const genericPitch = kind === 'addition' && initialPlan?.title === 'Pitch yeast'
-    && initialDetails.item_category === 'Yeast' && !initialDetails.inventory_item_id && !initialDetails.catalog_item_id
+    && initialDetails.item_category === 'Yeast' && !initialDetails.inventory_item_id && !initialDetails.supply_id && !initialDetails.catalog_item_id
     && (!initialDetails.item_name || initialDetails.item_name === 'Yeast');
   const unspecifiedAddition = kind === 'addition' && !!initialPlan && !!initialDetails.item_category
-    && !initialDetails.item_name && !initialDetails.inventory_item_id && !initialDetails.catalog_item_id;
+    && !initialDetails.item_name && !initialDetails.inventory_item_id && !initialDetails.supply_id && !initialDetails.catalog_item_id;
   const initialItem = genericPitch || unspecifiedAddition ? '' : String(initialDetails.item_name || initialPlan?.title || preset?.title || '');
-  const initialCategory = String(initialDetails.item_category || inventory.find(item => item.id === initialDetails.inventory_item_id)?.category
+  const initialCategory = String(initialDetails.item_category || inventory.find(item => item.id === (recipeMode
+    ? initialDetails.supply_id : initialDetails.inventory_item_id))?.category
     || catalog.find(item => item.id === initialDetails.catalog_item_id || item.name === initialItem)?.category || preset?.itemCategory || '');
   const initialUnit = String(initialDetails.display_unit || initialDetails.container_unit || initialDetails.unit ||
     (kind === 'transfer' || kind === 'packaging' ? preferredUnits.volume
@@ -169,7 +171,10 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
         }
         const owned = inventory.find(item => item.category === values.item_category && item.name.toLowerCase() === itemName.toLowerCase());
         const known = catalog.find(item => item.category === values.item_category && item.name.toLowerCase() === itemName.toLowerCase());
-        if (owned) details.inventory_item_id = owned.id;
+        if (owned) {
+          if (recipeMode) details.supply_id = owned.id;
+          else { details.inventory_item_id = owned.id; details.supply_id = owned.supply_id || undefined; }
+        }
         else if (known) details.catalog_item_id = known.id;
       }
       await submit({

@@ -7,7 +7,7 @@ import { equipmentSlug } from './equipmentRoutes.ts';
 import { openLocalCatalog } from './catalog.ts';
 import { hasGeneratedLocationSuffix, locationSlug } from './locationSlug.ts';
 import type { CatalogEquipment, MeasurementChannel } from '../shared/catalog.ts';
-import { changeColumns, indexStatements, legacyEquipmentCopyStatements, legacyEquipmentModelStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements,
+import { changeColumns, indexStatements, legacyEquipmentCopyStatements, legacyEquipmentModelStatements, supplyMigrationStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements,
   workspaceSchemaVersion, workspaceTableColumns, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 import { convertUnit, formatQuantity, storageUnit } from '../shared/units.ts';
@@ -29,7 +29,7 @@ export type ActualEvent = BatchEvent;
 export interface PlanDetails {
   anchor_point?: string; duration_seconds?: number; note?: string;
   phase?: string; mode?: string; target_value?: number; target_unit?: string;
-  item_category?: string; item_name?: string; catalog_item_id?: string; inventory_item_id?: string;
+  item_category?: string; item_name?: string; catalog_item_id?: string; inventory_item_id?: string; supply_id?: string;
   quantity?: number; unit?: string; display_unit?: string;
   measurement_kind?: string; to_vessel_id?: string; to_vessel_name?: string;
   purpose?: string; mash_equipment_id?: string; equipment_id?: string;
@@ -63,6 +63,7 @@ const equipmentCalibrationColumns = ['buffer_4_observed', 'buffer_7_observed', '
   'reference_brix', 'observed_brix', 'reference_g', 'observed_g', 'reference_kpa', 'observed_kpa',
   'reference_volumes', 'observed_volumes', 'reference_mg_l', 'observed_mg_l'] as const;
 export interface InventoryItem { id: string; name: string; category: string; default_unit: string; display_unit: string;
+  supply_id?: string | null; lot_id?: string | null; lot_code?: string | null; catalog_supply_id?: string | null;
   location_id: string | null; location_name?: string | null;
   yield_pct?: number | null; color_lovibond?: number | null; alpha_acid_pct?: number | null;
   hop_form?: IngredientProperties['hop_form'] | null; attenuation_pct?: number | null }
@@ -101,13 +102,6 @@ export function ingredientProperties(item: InventoryItem | null | undefined): In
     .map(column => [column, item[column]])) as IngredientProperties;
 }
 
-async function writeIngredientProperties(db: Pick<DB, 'exec'>, id: string, values: IngredientProperties): Promise<void> {
-  const columns = ingredientPropertyColumns;
-  await db.exec(`INSERT INTO inventory_ingredient_properties(id, ${columns.join(', ')})
-    VALUES (?, ${columns.map(() => '?').join(', ')})
-    ON CONFLICT(id) DO UPDATE SET ${columns.map(column => `${column} = excluded.${column}`).join(', ')}`,
-  [id, ...columns.map(column => values[column] ?? null)]);
-}
 export interface InventoryLocation { id: string; name: string; parent_id: string | null; slug: string; address: string | null }
 export interface InventoryMovement { id: string; kind: 'Purchased' | 'Counted' | 'Used' | 'Discarded' | 'Moved in' | 'Moved out'; quantity: number; unit: string; at: number }
 
@@ -288,6 +282,7 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
         for (const statement of legacyEquipmentModelStatements(columns)) await tx.exec(statement);
         await tx.exec('DROP TABLE equipment_legacy_migration');
       });
+      await db.tx(async tx => { for (const statement of supplyMigrationStatements) await tx.exec(statement); });
       await db.exec('UPDATE equipment SET added_at = COALESCE(added_at, created_at) WHERE added_at IS NULL');
       await db.exec(`UPDATE equipment SET removed_at =
         (SELECT archived_at FROM equipment_archives WHERE equipment_id = equipment.id ORDER BY archived_at LIMIT 1)
@@ -438,7 +433,7 @@ export type IngredientImportChoice = { mode: 'unlinked' } | { mode: 'existing'; 
 
 const planPayloads = {
   recipe: {
-    addition: ['recipe_additions', ['item_category', 'item_name', 'catalog_item_id', 'inventory_item_id', 'quantity', 'unit', 'display_unit']],
+    addition: ['recipe_additions', ['item_category', 'item_name', 'catalog_item_id', 'inventory_item_id', 'supply_id', 'quantity', 'unit', 'display_unit']],
     temperature_control: ['recipe_temperature_control_events', ['phase', 'mode', 'target_value', 'target_unit', 'equipment_id']],
     pressure_control: ['recipe_pressure_control_events', ['target_value', 'target_unit', 'equipment_id']],
     measurement: ['recipe_measurement_targets', ['measurement_kind', 'target_value', 'target_unit']],
@@ -446,7 +441,7 @@ const planPayloads = {
     packaging: ['recipe_packaging', ['container_name', 'container_size', 'container_count', 'container_unit']]
   },
   batch: {
-    addition: ['additions', ['item_category', 'item_name', 'catalog_item_id', 'inventory_item_id', 'quantity', 'unit', 'display_unit']],
+    addition: ['additions', ['item_category', 'item_name', 'catalog_item_id', 'inventory_item_id', 'supply_id', 'quantity', 'unit', 'display_unit']],
     temperature_control: ['temperature_control_events', ['phase', 'mode', 'target_value', 'target_unit', 'equipment_id']],
     pressure_control: ['pressure_control_events', ['target_value', 'target_unit', 'equipment_id']],
     measurement: ['batch_measurement_targets', ['measurement_kind', 'target_value', 'target_unit']],
@@ -529,9 +524,14 @@ export async function importRecipes(db: DB, source: {
         ingredientIds.set(ingredient.key, choice.inventoryItemId);
       } else {
         const id = nanoid();
+        const supplyId = nanoid();
+        const lotId = nanoid();
         if (!choice.unit) throw new Error(`Choose a unit for ${ingredient.name}`);
-        await tx.exec('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)',
-          [id, ingredient.name, ingredient.category, storageUnit(choice.unit), now]);
+        await tx.exec('INSERT INTO supplies(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)',
+          [supplyId, ingredient.name, ingredient.category, storageUnit(choice.unit), now]);
+        await tx.exec('INSERT INTO supply_lots(id, supply_id, created_at) VALUES (?, ?, ?)', [lotId, supplyId, now]);
+        await tx.exec(`INSERT INTO inventory_items(id, name, category, default_unit, supply_id, lot_id, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`, [id, ingredient.name, ingredient.category, storageUnit(choice.unit), supplyId, lotId, now]);
         const example = selected.flatMap(recipe => recipe.actions).find(action => action.ingredientKey === ingredient.key);
         const source = example?.inputs || {};
         const numeric = (key: string) => source[key] == null || source[key] === '' ? undefined : Number(source[key]);
@@ -543,7 +543,15 @@ export async function importRecipes(db: DB, source: {
             : ingredient.category === 'Yeast' ? { attenuation_pct: numeric('attenuation') } : {};
         const validProperties = Object.fromEntries(Object.entries(properties).filter(([, value]) => value != null
           && (typeof value !== 'number' || Number.isFinite(value)))) as IngredientProperties;
-        if (Object.keys(validProperties).length) await writeIngredientProperties(tx, id, validProperties);
+        if (Object.keys(validProperties).length) {
+          const table = ingredient.category === 'Hops' ? 'supply_hop_specs' : ingredient.category === 'Yeast'
+            ? 'supply_yeast_specs' : 'supply_grain_specs';
+          const columns = ingredient.category === 'Hops' ? ['alpha_acid_pct', 'hop_form']
+            : ingredient.category === 'Yeast' ? ['attenuation_pct'] : ['yield_pct', 'color_lovibond'];
+          if (['Grain', 'Adjunct', 'Hops', 'Yeast'].includes(ingredient.category)) await tx.exec(
+            `INSERT INTO ${table}(supply_id, ${columns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')})`,
+            [supplyId, ...columns.map(column => validProperties[column as keyof IngredientProperties] ?? null)]);
+        }
         if (choice.unit !== storageUnit(choice.unit)) await tx.exec(
           'INSERT INTO inventory_display_units(id, display_unit) VALUES (?, ?)', [id, choice.unit]);
         ingredientIds.set(ingredient.key, id);
@@ -566,7 +574,10 @@ export async function importRecipes(db: DB, source: {
         const eventId = eventIds.get(action.key)!;
         const details = { ...action.details };
         const inventoryId = action.ingredientKey && ingredientIds.get(action.ingredientKey);
-        if (inventoryId) details.inventory_item_id = inventoryId;
+        if (inventoryId) {
+          const linked = await tx.execO<{ supply_id: string | null }>('SELECT supply_id FROM inventory_items WHERE id = ?', [inventoryId]);
+          if (linked[0]?.supply_id) details.supply_id = linked[0].supply_id;
+        }
         await tx.exec(`INSERT INTO recipe_events(id, recipe_id, event_type, title, planned_at, anchor_event_id,
           offset_seconds, anchor_point, duration_seconds, instructions, sort_order) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
         [eventId, recipeId, action.eventType, action.title, action.anchorKey ? eventIds.get(action.anchorKey) || null : null,
@@ -657,11 +668,30 @@ export interface PlanInput {
   details: PlanDetails;
 }
 
+async function resolveRecipeSupply(db: Pick<DB, 'exec' | 'execO'>, input: PlanInput): Promise<PlanInput> {
+  if (input.event_type !== 'addition' || input.details.supply_id) return input;
+  const catalogId = input.details.catalog_item_id;
+  const known = catalogId ? await db.execO<{ name: string; category: string; unit: string }>(
+    'SELECT name, category, unit FROM catalog.supplies WHERE id = ?', [catalogId]) : [];
+  const name = known[0]?.name || input.details.item_name?.trim();
+  const category = known[0]?.category || input.details.item_category;
+  if (!name || !category) return input;
+  const existing = catalogId && known.length ? await db.execO<{ id: string }>(
+    'SELECT id FROM supplies WHERE catalog_supply_id = ?', [catalogId]) : await db.execO<{ id: string }>(
+    'SELECT id FROM supplies WHERE category = ? AND lower(trim(name)) = lower(trim(?)) LIMIT 1', [category, name]);
+  const supplyId = existing[0]?.id || nanoid();
+  if (!existing.length) await db.exec(`INSERT INTO supplies(id, name, category, default_unit, catalog_supply_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)`, [supplyId, name, category, known[0]?.unit || storageUnit(input.details.unit || 'each'),
+      known.length ? catalogId || null : null, nowSeconds()]);
+  return { ...input, details: { ...input.details, supply_id: supplyId, inventory_item_id: undefined } };
+}
+
 export async function addRecipePlan(db: DB, recipeId: string, input: PlanInput): Promise<string> {
   const id = nanoid();
   const order = await db.execO<{ next_order: number }>(
     'SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_order FROM recipe_events WHERE recipe_id = ?', [recipeId]);
   await db.tx(async tx => {
+    input = await resolveRecipeSupply(tx, input);
     await tx.exec(`INSERT INTO recipe_events(id, recipe_id, event_type, title, planned_at, anchor_event_id, offset_seconds,
       anchor_point, duration_seconds, instructions, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, recipeId, input.event_type, input.title, input.planned_at ?? null, input.anchor_event_id ?? null,
@@ -698,6 +728,7 @@ async function validatePlanAnchor(db: DB, table: 'recipe_events' | 'batch_events
 export async function updateRecipePlan(db: DB, recipeId: string, planId: string, input: PlanInput): Promise<void> {
   await validatePlanAnchor(db, 'recipe_events', 'recipe_id', recipeId, planId, input.anchor_event_id);
   await db.tx(async tx => {
+    input = await resolveRecipeSupply(tx, input);
     await tx.exec(`UPDATE recipe_events SET event_type = ?, title = ?, planned_at = ?, anchor_event_id = ?,
       offset_seconds = ?, anchor_point = ?, duration_seconds = ?, instructions = ? WHERE id = ? AND recipe_id = ?`,
     [input.event_type, input.title, input.planned_at ?? null, input.anchor_event_id ?? null,
@@ -760,6 +791,8 @@ export async function updateBatchPlan(db: DB, batchId: string, planId: string, i
 export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string, accountId: string,
   description = recipe.description || '', unitIds: Record<string, string> = {}): Promise<string> {
   const plans = await listRecipePlans(db, recipe.id);
+  const stock = await listInventory(db);
+  const suppliesForRecipe = await listSupplies(db);
   const referencedModels = new Set(plans.flatMap(plan =>
     [plan.details.equipment_id, plan.details.mash_equipment_id, plan.details.to_vessel_id]
       .filter((id): id is string => typeof id === 'string' && !!id)));
@@ -775,10 +808,14 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
     }
     modelToUnit.set(modelId, choice);
   }
-  const physicalDetails = (details: PlanDetails): PlanDetails => ({ ...details,
-    equipment_id: details.equipment_id ? modelToUnit.get(details.equipment_id) : undefined,
-    mash_equipment_id: details.mash_equipment_id ? modelToUnit.get(details.mash_equipment_id) : undefined,
-    to_vessel_id: details.to_vessel_id ? modelToUnit.get(details.to_vessel_id) : undefined });
+  const physicalDetails = (details: PlanDetails): PlanDetails => {
+    const matchingStock = details.supply_id ? stock.filter(item => item.supply_id === details.supply_id) : [];
+    return { ...details,
+      inventory_item_id: matchingStock.length === 1 ? matchingStock[0].id : undefined,
+      equipment_id: details.equipment_id ? modelToUnit.get(details.equipment_id) : undefined,
+      mash_equipment_id: details.mash_equipment_id ? modelToUnit.get(details.mash_equipment_id) : undefined,
+      to_vessel_id: details.to_vessel_id ? modelToUnit.get(details.to_vessel_id) : undefined };
+  };
   const latestEfficiencies = new Map<string, number | null>();
   for (const plan of plans) {
     const details = physicalDetails(plan.details);
@@ -828,13 +865,12 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
           }
         }
       }
-      if (typeof details.inventory_item_id === 'string') {
-        // A linked inventory item supplies the calculation defaults. Imported values
-        // remain in the original file, even when the item has no property set.
-        for (const column of ingredientPropertyColumns) snapshot[column] = null;
-        const rows = await tx.execO<InventoryItem>(
-          'SELECT * FROM inventory_ingredient_properties WHERE id = ?', [details.inventory_item_id]);
-        if (rows.length) for (const [column, value] of Object.entries(ingredientProperties(rows[0]))) snapshot[column] = value;
+      if (typeof details.supply_id === 'string') {
+        // Snapshot the effective lot when one stock row is known; otherwise use
+        // the brewery supply defaults until a particular lot is recorded.
+        const source = stock.find(item => item.id === details.inventory_item_id)
+          || suppliesForRecipe.find(item => item.id === details.supply_id);
+        if (source) for (const [column, value] of Object.entries(ingredientProperties(source))) snapshot[column] = value;
       }
       if (Object.values(snapshot).some(value => value != null)) {
         const columns = [...ingredientPropertyColumns, ...equipmentAssumptionColumns];
@@ -891,8 +927,8 @@ export async function recordEvent(db: DB, input: EventInput): Promise<string> {
     }
     if (input.endedAt != null) await tx.exec('INSERT INTO event_ends(id, ended_at) VALUES (?, ?)', [id, input.endedAt]);
     if (input.endedAt != null) await tx.exec('UPDATE batch_events SET duration_seconds = NULL WHERE id = ?', [id]);
-    const payload = input.payload;
-    if (!payload) return;
+    if (!input.payload) return;
+    const payload = input.eventType === 'addition' ? await resolvedAdditionPayload(tx, input.payload) : input.payload;
     const table = input.measurementKind ? measurementTables[input.measurementKind] : {
       addition: 'additions', temperature_control: 'temperature_control_events', pressure_control: 'pressure_control_events',
       transfer: 'transfers', packaging: 'packaging'
@@ -904,6 +940,7 @@ export async function recordEvent(db: DB, input: EventInput): Promise<string> {
       [id, ...Object.values(payload)]);
     if (input.eventType === 'addition' && typeof payload.item_name === 'string') {
       await tx.exec('UPDATE batch_events SET title = ? WHERE id = ?', [payload.item_name, id]);
+      await snapshotAdditionLot(tx, id, payload.inventory_item_id);
     }
     if (input.eventType === 'transfer') await updateTransferName(tx, id, payload.to_vessel_id);
   });
@@ -914,6 +951,26 @@ const eventPayloadTables: Record<string, string> = {
   addition: 'additions', temperature_control: 'temperature_control_events', pressure_control: 'pressure_control_events',
   transfer: 'transfers', packaging: 'packaging'
 };
+
+async function resolvedAdditionPayload(db: Pick<DB, 'execO'>, payload: NonNullable<EventInput['payload']>): Promise<NonNullable<EventInput['payload']>> {
+  const itemId = payload?.inventory_item_id;
+  if (typeof itemId !== 'string') return payload;
+  const rows = await db.execO<{ supply_id: string | null }>('SELECT supply_id FROM inventory_items WHERE id = ?', [itemId]);
+  if (!rows.length) throw new Error('Inventory stock not found');
+  return { ...payload, supply_id: rows[0].supply_id };
+}
+
+async function snapshotAdditionLot(db: Pick<DB, 'exec' | 'execO'>, eventId: string, itemId: unknown): Promise<void> {
+  if (typeof itemId !== 'string') return;
+  const stock = (await listInventory(db)).find(item => item.id === itemId);
+  if (!stock) return;
+  const properties = ingredientProperties(stock);
+  if (!Object.keys(properties).length) return;
+  const columns = ingredientPropertyColumns;
+  await db.exec(`INSERT INTO batch_event_inputs(id, ${columns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')})
+    ON CONFLICT(id) DO UPDATE SET ${columns.map(column => `${column} = excluded.${column}`).join(', ')}`,
+  [eventId, ...columns.map(column => properties[column] ?? null)]);
+}
 
 export async function eventFormData(db: DB, event: ActualEvent): Promise<{ measurementKind?: MeasurementKind; payload: Record<string, string | number | null> }> {
   if (event.event_type === 'measurement') {
@@ -943,11 +1000,13 @@ export async function updateEvent(db: DB, event: ActualEvent, input: EventInput)
     if (input.endedAt != null) await tx.exec('UPDATE batch_events SET duration_seconds = NULL WHERE id = ?', [event.id]);
     const table = input.measurementKind ? measurementTables[input.measurementKind] : eventPayloadTables[input.eventType];
     if (!table) throw new Error('Unsupported event payload');
-    const columns = Object.keys(input.payload);
+    const payload = input.eventType === 'addition' ? await resolvedAdditionPayload(tx, input.payload) : input.payload;
+    const columns = Object.keys(payload);
     await tx.exec(`UPDATE ${table} SET ${columns.map(column => `${column} = ?`).join(', ')} WHERE event_id = ?`,
-      [...Object.values(input.payload), event.id]);
-    if (input.eventType === 'addition' && typeof input.payload.item_name === 'string') {
-      await tx.exec('UPDATE batch_events SET title = ? WHERE id = ?', [input.payload.item_name, event.id]);
+      [...Object.values(payload), event.id]);
+    if (input.eventType === 'addition' && typeof payload.item_name === 'string') {
+      await tx.exec('UPDATE batch_events SET title = ? WHERE id = ?', [payload.item_name, event.id]);
+      await snapshotAdditionLot(tx, event.id, payload.inventory_item_id);
     }
     if (input.eventType === 'transfer') {
       await tx.exec('UPDATE transfers SET from_vessel_id = NULL WHERE event_id = ?', [event.id]);
@@ -1505,14 +1564,50 @@ export async function deleteEquipment(db: DB, id: string): Promise<void> {
   await db.exec('UPDATE equipment SET removed_at = ? WHERE id = ? AND removed_at IS NULL', [nowSeconds(), id]);
 }
 
-export async function listInventory(db: DB): Promise<InventoryItem[]> {
-  return db.execO<InventoryItem>(`SELECT i.id, i.name, i.category, i.default_unit,
+export async function listInventory(db: Pick<DB, 'execO'>): Promise<InventoryItem[]> {
+  return db.execO<InventoryItem>(`SELECT i.id, COALESCE(s.name, i.name) AS name,
+    COALESCE(s.category, i.category) AS category, i.default_unit,
+    i.supply_id, i.lot_id, lot.lot_code, s.catalog_supply_id,
     COALESCE(d.display_unit, i.default_unit) AS display_unit, l.location_id, places.name AS location_name,
-    p.yield_pct, p.color_lovibond, p.alpha_acid_pct, p.hop_form, p.attenuation_pct FROM inventory_items i
+    COALESCE(lg.yield_pct, sg.yield_pct, cg.yield_pct, p.yield_pct) AS yield_pct,
+    COALESCE(lg.color_lovibond, sg.color_lovibond, cg.color_lovibond, p.color_lovibond) AS color_lovibond,
+    COALESCE(lh.alpha_acid_pct, sh.alpha_acid_pct, ch.alpha_acid_pct, p.alpha_acid_pct) AS alpha_acid_pct,
+    COALESCE(lh.hop_form, sh.hop_form, ch.hop_form, p.hop_form) AS hop_form,
+    COALESCE(ly.attenuation_pct, sy.attenuation_pct, cy.attenuation_pct, p.attenuation_pct) AS attenuation_pct
+    FROM inventory_items i
+    LEFT JOIN supplies s ON s.id = i.supply_id
+    LEFT JOIN supply_lots lot ON lot.id = i.lot_id
+    LEFT JOIN supply_grain_specs sg ON sg.supply_id = s.id
+    LEFT JOIN supply_hop_specs sh ON sh.supply_id = s.id
+    LEFT JOIN supply_yeast_specs sy ON sy.supply_id = s.id
+    LEFT JOIN lot_grain_specs lg ON lg.lot_id = lot.id
+    LEFT JOIN lot_hop_specs lh ON lh.lot_id = lot.id
+    LEFT JOIN lot_yeast_specs ly ON ly.lot_id = lot.id
+    LEFT JOIN catalog.supply_grain_specs cg ON cg.supply_id = s.catalog_supply_id
+    LEFT JOIN catalog.supply_hop_specs ch ON ch.supply_id = s.catalog_supply_id
+    LEFT JOIN catalog.supply_yeast_specs cy ON cy.supply_id = s.catalog_supply_id
     LEFT JOIN inventory_ingredient_properties p ON p.id = i.id
     LEFT JOIN inventory_display_units d ON d.id = i.id
     LEFT JOIN inventory_item_locations l ON l.id = i.id
     LEFT JOIN inventory_locations places ON places.id = l.location_id ORDER BY i.name COLLATE NOCASE`);
+}
+
+export async function listSupplies(db: Pick<DB, 'execO'>): Promise<InventoryItem[]> {
+  return db.execO<InventoryItem>(`SELECT s.id, s.id AS supply_id, s.name, s.category,
+    s.default_unit, s.default_unit AS display_unit, NULL AS location_id, s.catalog_supply_id,
+    COALESCE(g.yield_pct, cg.yield_pct) AS yield_pct,
+    COALESCE(g.color_lovibond, cg.color_lovibond) AS color_lovibond,
+    COALESCE(h.alpha_acid_pct, ch.alpha_acid_pct) AS alpha_acid_pct,
+    COALESCE(h.hop_form, ch.hop_form) AS hop_form,
+    COALESCE(y.attenuation_pct, cy.attenuation_pct) AS attenuation_pct
+    FROM supplies s
+    LEFT JOIN supply_grain_specs g ON g.supply_id = s.id
+    LEFT JOIN supply_hop_specs h ON h.supply_id = s.id
+    LEFT JOIN supply_yeast_specs y ON y.supply_id = s.id
+    LEFT JOIN catalog.supply_grain_specs cg ON cg.supply_id = s.catalog_supply_id
+    LEFT JOIN catalog.supply_hop_specs ch ON ch.supply_id = s.catalog_supply_id
+    LEFT JOIN catalog.supply_yeast_specs cy ON cy.supply_id = s.catalog_supply_id
+    ORDER BY s.name COLLATE NOCASE`);
 }
 
 export async function updateIngredientProperties(db: DB, item: InventoryItem, properties: IngredientProperties): Promise<void> {
@@ -1529,8 +1624,39 @@ export async function updateIngredientProperties(db: DB, item: InventoryItem, pr
     } else if (typeof value !== 'number' || !Number.isFinite(value) || value < 0
       || key !== 'color_lovibond' && value > 100) throw new Error(`Enter a valid ${key.replaceAll('_', ' ')}`);
   }
-  if (Object.keys(values).length) await writeIngredientProperties(db, item.id, values);
-  else await db.exec('DELETE FROM inventory_ingredient_properties WHERE id = ?', [item.id]);
+  const table = item.category === 'Hops' ? 'supply_hop_specs' : item.category === 'Yeast'
+    ? 'supply_yeast_specs' : 'supply_grain_specs';
+  if (!item.supply_id) throw new Error('Supply not found');
+  const columns = allowed[item.category];
+  await db.exec(`INSERT INTO ${table}(supply_id, ${columns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')})
+    ON CONFLICT(supply_id) DO UPDATE SET ${columns.map(column => `${column} = excluded.${column}`).join(', ')}`,
+  [item.supply_id, ...columns.map(column => values[column] ?? null)]);
+}
+
+export async function supplyIngredientProperties(db: DB, item: InventoryItem): Promise<IngredientProperties> {
+  if (!item.supply_id) return {};
+  const table = item.category === 'Hops' ? 'supply_hop_specs' : item.category === 'Yeast'
+    ? 'supply_yeast_specs' : 'supply_grain_specs';
+  return (await db.execO<IngredientProperties>(`SELECT * FROM ${table} WHERE supply_id = ?`, [item.supply_id]))[0] || {};
+}
+
+export async function updateLotIngredientProperties(db: DB, item: InventoryItem, properties: IngredientProperties): Promise<void> {
+  if (!item.lot_id) throw new Error('Lot not found');
+  const columns = item.category === 'Hops' ? ['alpha_acid_pct', 'hop_form']
+    : item.category === 'Yeast' ? ['attenuation_pct']
+      : ['yield_pct', 'color_lovibond'];
+  const table = item.category === 'Hops' ? 'lot_hop_specs' : item.category === 'Yeast'
+    ? 'lot_yeast_specs' : 'lot_grain_specs';
+  await db.exec(`INSERT INTO ${table}(lot_id, ${columns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')})
+    ON CONFLICT(lot_id) DO UPDATE SET ${columns.map(column => `${column} = excluded.${column}`).join(', ')}`,
+  [item.lot_id, ...columns.map(column => properties[column as keyof IngredientProperties] ?? null)]);
+}
+
+export async function lotIngredientProperties(db: DB, item: InventoryItem): Promise<IngredientProperties> {
+  if (!item.lot_id) return {};
+  const table = item.category === 'Hops' ? 'lot_hop_specs' : item.category === 'Yeast'
+    ? 'lot_yeast_specs' : 'lot_grain_specs';
+  return (await db.execO<IngredientProperties>(`SELECT * FROM ${table} WHERE lot_id = ?`, [item.lot_id]))[0] || {};
 }
 
 export async function listInventoryLocations(db: DB): Promise<InventoryLocation[]> {
@@ -1625,8 +1751,10 @@ function sameInventoryProduct(item: InventoryItem, name: string, category: strin
   return item.category === category && item.name.trim().toLocaleLowerCase() === name.trim().toLocaleLowerCase();
 }
 
-export function stockAtLocation(items: InventoryItem[], name: string, category: string, locationId: string | null): InventoryItem | undefined {
-  return items.find(item => sameInventoryProduct(item, name, category) && item.location_id === locationId);
+export function stockAtLocation(items: InventoryItem[], name: string, category: string, locationId: string | null,
+  lotCode: string | null = null): InventoryItem | undefined {
+  return items.find(item => sameInventoryProduct(item, name, category) && item.location_id === locationId
+    && (item.lot_code || null) === lotCode);
 }
 
 export async function listInventoryMovements(db: DB, itemId: string): Promise<InventoryMovement[]> {
@@ -1678,17 +1806,31 @@ export function inventoryBalance(rows: InventoryMovement[], unit: string): numbe
 
 export async function createInventoryItem(db: DB, name: string, category: string, defaultUnit: string,
   startingQuantity: number | null = null, accountId: string | null = null, displayUnit = defaultUnit,
-  locationId: string | null = null): Promise<string> {
+  locationId: string | null = null, catalogSupplyId: string | null = null, lotCode: string | null = null): Promise<string> {
   const items = await listInventory(db);
-  if (stockAtLocation(items, name, category, locationId)) throw new Error('This item already exists at that location');
+  const cleanLot = lotCode?.trim() || null;
+  if (stockAtLocation(items, name, category, locationId, cleanLot)) throw new Error('This lot already exists at that location');
   if (items.some(item => sameInventoryProduct(item, name, category)) && (!startingQuantity || startingQuantity <= 0))
     throw new Error('Enter a positive quantity to add this existing item');
   if (locationId && !(await listInventoryLocations(db)).some(location => location.id === locationId)) throw new Error('Location not found');
   const id = nanoid();
   const now = nowSeconds();
   await db.tx(async tx => {
-    await tx.exec('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)',
-      [id, name, category, defaultUnit, now]);
+    const existingSupply = await tx.execO<{ id: string }>(
+      'SELECT id FROM supplies WHERE category = ? AND lower(trim(name)) = lower(trim(?)) LIMIT 1', [category, name]);
+    const supplyId = existingSupply[0]?.id || nanoid();
+    if (!existingSupply.length) await tx.exec(`INSERT INTO supplies(id, name, category, default_unit, catalog_supply_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`, [supplyId, name, category, defaultUnit, catalogSupplyId, now]);
+    else if (catalogSupplyId) await tx.exec('UPDATE supplies SET catalog_supply_id = COALESCE(catalog_supply_id, ?) WHERE id = ?',
+      [catalogSupplyId, supplyId]);
+    const existingLot = await tx.execO<{ id: string }>(`SELECT id FROM supply_lots WHERE supply_id = ?
+      AND (lot_code = ? OR lot_code IS NULL AND ? IS NULL) ORDER BY created_at, id LIMIT 1`,
+    [supplyId, cleanLot, cleanLot]);
+    const lotId = existingLot[0]?.id || nanoid();
+    if (!existingLot.length) await tx.exec('INSERT INTO supply_lots(id, supply_id, lot_code, created_at) VALUES (?, ?, ?, ?)',
+      [lotId, supplyId, cleanLot, now]);
+    await tx.exec(`INSERT INTO inventory_items(id, name, category, default_unit, supply_id, lot_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`, [id, name, category, defaultUnit, supplyId, lotId, now]);
     if (locationId) await tx.exec('INSERT INTO inventory_item_locations(id, location_id) VALUES (?, ?)', [id, locationId]);
     if (displayUnit !== defaultUnit) await tx.exec('INSERT INTO inventory_display_units(id, display_unit) VALUES (?, ?)',
       [id, displayUnit]);
@@ -1707,7 +1849,7 @@ export async function moveInventoryStock(db: DB, source: InventoryItem, destinat
   const converted = convertInventoryUnit(quantity, unit, source.default_unit);
   if (converted == null) throw new Error('Choose a compatible unit');
   if (available == null || converted > available + 1e-9) throw new Error('Cannot move more than the available stock');
-  let target = stockAtLocation(await listInventory(db), source.name, source.category, destinationId);
+  let target = (await listInventory(db)).find(item => item.lot_id === source.lot_id && item.location_id === destinationId);
   if (target && convertInventoryUnit(quantity, unit, target.default_unit) == null) throw new Error('Destination uses an incompatible unit');
   if (!target) target = { ...source, id: nanoid(), location_id: destinationId };
   const latest = await db.execO<{ at: number | null }>(`SELECT MAX(at) AS at FROM (
@@ -1720,8 +1862,9 @@ export async function moveInventoryStock(db: DB, source: InventoryItem, destinat
   [source.id, target.id, source.id, target.id, source.id, target.id, source.id, target.id, source.id, target.id, source.id, target.id]);
   await db.tx(async tx => {
     if (!(await tx.execO('SELECT id FROM inventory_items WHERE id = ?', [target.id])).length) {
-      await tx.exec('INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)',
-        [target.id, target.name, target.category, target.default_unit, nowSeconds()]);
+      await tx.exec(`INSERT INTO inventory_items(id, name, category, default_unit, supply_id, lot_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [target.id, target.name, target.category, target.default_unit, source.supply_id, source.lot_id, nowSeconds()]);
       if (destinationId) await tx.exec('INSERT INTO inventory_item_locations(id, location_id) VALUES (?, ?)', [target.id, destinationId]);
       if (target.display_unit !== target.default_unit) await tx.exec('INSERT INTO inventory_display_units(id, display_unit) VALUES (?, ?)',
         [target.id, target.display_unit]);

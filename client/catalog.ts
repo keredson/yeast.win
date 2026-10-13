@@ -1,6 +1,6 @@
 import initWasm, { type DB } from '@vlcn.io/crsqlite-wasm';
 import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
-import { catalogModelTables, catalogInventoryTable, catalogSchemaVersion, catalogTables,
+import { catalogModelTables, catalogSupplyTables, catalogSchemaVersion, catalogTables,
   type CatalogChanges, type CatalogEquipment, type CatalogInventory, type CatalogMeasurementChannel } from '../shared/catalog.ts';
 import { changeColumns } from '../shared/schema.ts';
 import { decodeChange } from '../shared/wire.ts';
@@ -28,12 +28,11 @@ export function openLocalCatalog(): Promise<DB> {
           ...Object.keys(catalogModelTables)]) await tx.exec(`DROP TABLE IF EXISTS "${table}"`);
         await tx.exec('DROP TABLE IF EXISTS catalog_meta');
         await tx.exec('DROP TABLE IF EXISTS catalog_sync_state');
-        for (const statement of Object.values(catalogModelTables)) await tx.exec(statement);
-        await tx.exec(catalogInventoryTable);
+        for (const statement of [...Object.values(catalogModelTables), ...Object.values(catalogSupplyTables)]) await tx.exec(statement);
         for (const table of catalogTables) await tx.exec('SELECT crsql_as_crr(?)', [table]);
         await tx.exec('CREATE TABLE IF NOT EXISTS sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
         await tx.exec('DELETE FROM sync_state');
-        await tx.exec(`PRAGMA user_version = ${catalogSchemaVersion}`);
+        await tx.exec('PRAGMA user_version = 12');
       });
     } else if (version > catalogSchemaVersion) {
       throw new Error(`This app cannot open catalog schema ${version}; update Brewlog first.`);
@@ -44,6 +43,24 @@ export function openLocalCatalog(): Promise<DB> {
         const clock = await tx.execO<{ name: string }>(
           "SELECT name FROM sqlite_master WHERE name = 'model_boil_characterization__crsql_clock'");
         if (!clock.length) await tx.exec("SELECT crsql_as_crr('model_boil_characterization')");
+        await tx.exec('PRAGMA user_version = 13');
+      });
+    }
+    if ((await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version === 13) {
+      await db.tx(async tx => {
+        for (const statement of Object.values(catalogSupplyTables)) await tx.exec(statement);
+        for (const table of Object.keys(catalogSupplyTables)) {
+          const clock = await tx.execO<{ name: string }>(
+            "SELECT name FROM sqlite_master WHERE name = ?", [`${table}__crsql_clock`]);
+          if (!clock.length) await tx.exec('SELECT crsql_as_crr(?)', [table]);
+        }
+        const old = await tx.execO<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'inventory'");
+        if (old.length) {
+          await tx.exec('INSERT OR IGNORE INTO supplies(id, name, category, unit) SELECT id, name, category, unit FROM inventory');
+          const clock = await tx.execO<{ name: string }>("SELECT name FROM sqlite_master WHERE name = 'inventory__crsql_clock'");
+          if (clock.length) await tx.exec("SELECT crsql_as_table('inventory')");
+          await tx.exec('DROP TABLE inventory');
+        }
         await tx.exec(`PRAGMA user_version = ${catalogSchemaVersion}`);
       });
     }
@@ -64,7 +81,11 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
     db.execO<{ model_id: string; min_temperature_c: number | null; max_temperature_c: number | null }>(
       'SELECT * FROM model_temperature_control'),
     db.execO<CatalogMeasurementChannel>('SELECT * FROM model_measurement_channels'),
-    db.execO<CatalogInventory>('SELECT id, name, category, unit FROM inventory ORDER BY name COLLATE NOCASE')
+    db.execO<CatalogInventory>(`SELECT s.id, s.name, s.category, s.unit,
+      g.yield_pct, g.color_lovibond, h.alpha_acid_pct, h.hop_form, y.attenuation_pct
+      FROM supplies s LEFT JOIN supply_grain_specs g ON g.supply_id = s.id
+      LEFT JOIN supply_hop_specs h ON h.supply_id = s.id
+      LEFT JOIN supply_yeast_specs y ON y.supply_id = s.id ORDER BY s.name COLLATE NOCASE`)
   ]);
   const byId = new Map(models.map(model => [model.id, { ...model, measurement_channels: [] as CatalogMeasurementChannel[] }]));
   for (const row of liquid) Object.assign(byId.get(row.model_id) || {},

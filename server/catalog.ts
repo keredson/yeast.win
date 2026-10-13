@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { join, resolve } from 'node:path';
-import { catalogModelTables, catalogInventoryTable, catalogSchemaVersion,
+import { catalogModelTables, catalogSupplyTables, catalogSchemaVersion,
   catalogTables, initialCatalogEquipment, initialCatalogInventory,
   antonPaarEquipment, vevorModelName,
   type CatalogChanges, type CatalogEquipment, type CatalogInventory } from '../shared/catalog.ts';
@@ -62,8 +62,7 @@ export function openCatalogDb(dataDir: string): Database.Database {
       for (const table of ['catalog_equipment', 'catalog_inventory', 'equipment', 'inventory',
         ...Object.keys(catalogModelTables)]) db.exec(`DROP TABLE IF EXISTS "${table}"`);
       db.exec('DROP TABLE IF EXISTS catalog_meta');
-      for (const statement of Object.values(catalogModelTables)) db.exec(statement);
-      db.exec(catalogInventoryTable);
+      for (const statement of [...Object.values(catalogModelTables), ...Object.values(catalogSupplyTables)]) db.exec(statement);
       for (const table of catalogTables) db.prepare('SELECT crsql_as_crr(?)').get(table);
       const addModel = db.prepare(`INSERT INTO equipment_models(id, manufacturer, model_name, kind)
         VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`);
@@ -76,7 +75,7 @@ export function openCatalogDb(dataDir: string): Database.Database {
       const addChannel = db.prepare(`INSERT INTO model_measurement_channels
         (id, model_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
         VALUES (?, ?, ?, ?, ?, ?, ?)`);
-      const addInventory = db.prepare(`INSERT INTO inventory(id, name, category, unit) VALUES (?, ?, ?, ?)
+      const addInventory = db.prepare(`INSERT INTO supplies(id, name, category, unit) VALUES (?, ?, ?, ?)
         ON CONFLICT(id) DO NOTHING`);
       for (const item of [...oldEquipment, ...initialCatalogEquipment]) {
         if (!addModel.run(item.id, item.manufacturer ?? null, item.name, item.kind).changes) continue;
@@ -110,7 +109,7 @@ export function openCatalogDb(dataDir: string): Database.Database {
       for (const item of [...oldInventory, ...initialCatalogInventory]) {
         addInventory.run(item.id, item.name, item.category, item.unit);
       }
-      db.pragma(`user_version = ${catalogSchemaVersion}`);
+      db.pragma('user_version = 12');
     })();
   }
   if ((db.pragma('user_version', { simple: true }) as number) === 12) {
@@ -119,6 +118,27 @@ export function openCatalogDb(dataDir: string): Database.Database {
       if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'model_boil_characterization__crsql_clock'").get()) {
         db.prepare("SELECT crsql_as_crr('model_boil_characterization')").get();
       }
+      db.pragma('user_version = 13');
+    })();
+  }
+  if ((db.pragma('user_version', { simple: true }) as number) === 13) {
+    db.transaction(() => {
+      for (const statement of Object.values(catalogSupplyTables)) db.exec(statement);
+      for (const table of Object.keys(catalogSupplyTables)) {
+        if (!db.prepare('SELECT 1 FROM sqlite_master WHERE name = ?').get(`${table}__crsql_clock`)) {
+          db.prepare('SELECT crsql_as_crr(?)').get(table);
+        }
+      }
+      if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inventory'").get()) {
+        db.exec('INSERT OR IGNORE INTO supplies(id, name, category, unit) SELECT id, name, category, unit FROM inventory');
+        if (db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'inventory__crsql_clock'").get()) {
+          db.prepare("SELECT crsql_as_table('inventory')").get();
+        }
+        db.exec('DROP TABLE inventory');
+      }
+      const crystal = db.prepare('SELECT 1 FROM supplies WHERE id = ?').get('inventory_crystal_60');
+      if (crystal) db.prepare('INSERT OR IGNORE INTO supply_grain_specs(supply_id, color_lovibond) VALUES (?, ?)')
+        .run('inventory_crystal_60', 60);
       db.pragma(`user_version = ${catalogSchemaVersion}`);
     })();
   }
