@@ -1,8 +1,9 @@
 import Database from 'better-sqlite3';
 import { join, resolve } from 'node:path';
-import { catalogEquipmentColumns, catalogEquipmentTable, catalogInventoryTable, catalogSchemaVersion,
+import { catalogModelTables, catalogInventoryTable, catalogSchemaVersion,
   catalogTables, initialCatalogEquipment, initialCatalogInventory,
   type CatalogChanges, type CatalogEquipment, type CatalogInventory } from '../shared/catalog.ts';
+import { boilOffKinds, vesselKinds } from '../shared/equipment.ts';
 import { encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 import { projectRoot } from './db.ts';
 
@@ -23,32 +24,59 @@ export function openCatalogDb(dataDir: string): Database.Database {
     const hasLegacyMeta = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'catalog_meta'").get();
     const legacyVersion = hasLegacyMeta
       ? (db.prepare('SELECT version FROM catalog_meta LIMIT 1').get() as { version: number } | undefined)?.version : undefined;
-    // Version 9 already uses CR-SQLite. Retain direct server edits while the
-    // table names and change history move to the new schema.
-    const oldEquipment = legacyVersion === 9
-      ? db.prepare('SELECT * FROM catalog_equipment').all() as CatalogEquipment[] : [];
-    const oldInventory = legacyVersion === 9
-      ? db.prepare('SELECT * FROM catalog_inventory').all() as CatalogInventory[] : [];
+    const oldEquipment = version === 10
+      ? db.prepare('SELECT * FROM equipment').all() as CatalogEquipment[] : [];
+    const oldInventory = version === 10
+      ? db.prepare('SELECT * FROM inventory').all() as CatalogInventory[]
+      : legacyVersion === 9 ? db.prepare('SELECT * FROM catalog_inventory').all() as CatalogInventory[] : [];
     db.transaction(() => {
-      if (legacyVersion === 9) {
-        for (const table of ['catalog_equipment', 'catalog_inventory']) {
-          db.prepare('SELECT crsql_as_table(?)').get(table);
-        }
+      const clocks = db.prepare("SELECT name FROM sqlite_master WHERE name LIKE '%__crsql_clock'").all() as { name: string }[];
+      for (const row of clocks) {
+        db.prepare('SELECT crsql_as_table(?)').get(row.name.replace('__crsql_clock', ''));
       }
-      db.exec('DROP TABLE IF EXISTS catalog_equipment');
-      db.exec('DROP TABLE IF EXISTS catalog_inventory');
+      for (const table of ['catalog_equipment', 'catalog_inventory', 'equipment', 'inventory',
+        ...Object.keys(catalogModelTables)]) db.exec(`DROP TABLE IF EXISTS "${table}"`);
       db.exec('DROP TABLE IF EXISTS catalog_meta');
-      db.exec(catalogEquipmentTable);
+      for (const statement of Object.values(catalogModelTables)) db.exec(statement);
       db.exec(catalogInventoryTable);
       for (const table of catalogTables) db.prepare('SELECT crsql_as_crr(?)').get(table);
-      const addEquipment = db.prepare(`INSERT INTO equipment(id, name, kind, ${catalogEquipmentColumns.join(', ')})
-        VALUES (?, ?, ?, ${catalogEquipmentColumns.map(() => '?').join(', ')})
-        ON CONFLICT(id) DO NOTHING`);
+      const addModel = db.prepare(`INSERT INTO equipment_models(id, manufacturer, model_name, kind)
+        VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`);
+      const addLiquid = db.prepare('INSERT INTO model_liquid_containment(model_id, capacity_liters) VALUES (?, ?)');
+      const addPressure = db.prepare('INSERT INTO model_pressure_rating(model_id, max_pressure_kpa) VALUES (?, ?)');
+      const addHeating = db.prepare('INSERT INTO model_heating(model_id, rated_power_watts) VALUES (?, ?)');
+      const addCooling = db.prepare('INSERT INTO model_cooling(model_id, rated_heat_removal_watts) VALUES (?, ?)');
+      const addControl = db.prepare(`INSERT INTO model_temperature_control(model_id, min_temperature_c, max_temperature_c)
+        VALUES (?, ?, ?)`);
+      const addChannel = db.prepare(`INSERT INTO model_measurement_channels
+        (id, model_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`);
       const addInventory = db.prepare(`INSERT INTO inventory(id, name, category, unit) VALUES (?, ?, ?, ?)
         ON CONFLICT(id) DO NOTHING`);
-      for (const item of [...oldEquipment, ...initialCatalogEquipment]) addEquipment.run(item.id, item.name, item.kind,
-        ...catalogEquipmentColumns.map(column => column === 'built_in_temperature_control'
-          ? Number(!!item[column]) : item[column] ?? null));
+      for (const item of [...oldEquipment, ...initialCatalogEquipment]) {
+        if (!addModel.run(item.id, item.manufacturer ?? null, item.name, item.kind).changes) continue;
+        if (vesselKinds.has(item.kind) || item.capacity_liters != null) addLiquid.run(item.id, item.capacity_liters ?? null);
+        if (item.max_pressure_kpa != null) addPressure.run(item.id, item.max_pressure_kpa);
+        if (boilOffKinds.has(item.kind) || item.rated_power_watts != null) addHeating.run(item.id, item.rated_power_watts ?? null);
+        if (item.rated_heat_removal_watts != null) addCooling.run(item.id, item.rated_heat_removal_watts);
+        if (item.built_in_temperature_control || boilOffKinds.has(item.kind)
+          || item.kind === 'fermentation_temperature_control') {
+          addControl.run(item.id, item.min_temperature_c ?? null, item.max_temperature_c ?? null);
+        }
+        const measurementKind: Record<string, string> = { hydrometer: 'gravity', refractometer: 'gravity',
+          thermometer: 'temperature', ph_meter: 'ph', pressure_gauge: 'pressure',
+          carbonation_meter: 'carbonation', dissolved_oxygen_meter: 'dissolved_oxygen', scale: 'mass' };
+        const kind = measurementKind[item.kind];
+        if (kind) {
+          const scale = ['SG', '°Plato', '°Brix', 'pH'].includes(item.measurement_unit || '')
+            ? item.measurement_unit : null;
+          addChannel.run(`${item.id}:${kind}`, item.id, kind, item.measurement_min ?? null,
+            item.measurement_max ?? null, scale ? null : item.measurement_unit ?? null, scale);
+        }
+        if (['equipment_tilt', 'equipment_rapt_pill'].includes(item.id)) {
+          addChannel.run(`${item.id}:temperature`, item.id, 'temperature', null, null, '°C', null);
+        }
+      }
       for (const item of [...oldInventory, ...initialCatalogInventory]) {
         addInventory.run(item.id, item.name, item.category, item.unit);
       }

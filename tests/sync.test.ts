@@ -144,22 +144,25 @@ test('pre-release workspace schemas reset without carrying old event JSON', () =
       assert.equal((db.pragma(`table_info(${table})`) as { name: string }[]).some(column => column.name === 'inputs_json'), false);
     }
     const equipmentColumns = db.pragma('table_info(equipment)') as { name: string }[];
-    assert.ok(equipmentColumns.some(column => column.name === 'capacity_liters'));
+    assert.equal(equipmentColumns.some(column => column.name === 'capacity_liters'), false);
     assert.equal(equipmentColumns.some(column => column.name === 'specification_json'), false);
+    assert.ok((db.pragma('table_info(equipment_liquid_containment)') as { name: string }[])
+      .some(column => column.name === 'capacity_liters'));
+    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'equipment_measurement_channels'").get());
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'equipment_calibrations'").get(), undefined);
     assert.equal((db.pragma('table_info(temperature_measurements)') as { name: string }[])
       .some(column => column.name === 'calibration_id'), false);
   } finally { closeWorkspaceDb(db); }
 });
 
-test('current workspace data survives the move from schema_meta to user_version', () => {
+test('current schema data survives the move from schema_meta to user_version', () => {
   const id = nanoid();
   const batchId = nanoid();
   const first = openWorkspaceDb(id);
   try {
     first.prepare('INSERT INTO batches(id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
       .run(batchId, 'Existing batch', 'active', 1, 1);
-    first.exec('CREATE TABLE schema_meta(version INTEGER NOT NULL); INSERT INTO schema_meta VALUES (15)');
+    first.exec(`CREATE TABLE schema_meta(version INTEGER NOT NULL); INSERT INTO schema_meta VALUES (${workspaceSchemaVersion})`);
     first.pragma('user_version = 0');
   } finally { closeWorkspaceDb(first); }
   const reopened = openWorkspaceDb(id);
@@ -212,7 +215,7 @@ test('version 14 calibration JSON table is removed on reset', () => {
   } finally { closeWorkspaceDb(db); }
 });
 
-test('version 15 adds location slugs without deleting existing locations or stock', () => {
+test('version 15 workspace resets for the capability schema', () => {
   const id = nanoid();
   const file = join(process.env.BREWLOG_DATA_DIR!, `${id}.sqlite`);
   const old = new Database(file);
@@ -234,13 +237,13 @@ test('version 15 adds location slugs without deleting existing locations or stoc
   try {
     assert.equal(db.pragma('user_version', { simple: true }), workspaceSchemaVersion);
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'schema_meta'").get(), undefined);
-    assert.equal((db.prepare('SELECT name FROM inventory_locations WHERE id = ?').get(locationId) as { name: string }).name, 'Cellar');
-    assert.equal((db.prepare('SELECT location_id FROM inventory_item_locations WHERE id = ?').get(itemId) as { location_id: string }).location_id, locationId);
+    assert.equal(db.prepare('SELECT name FROM inventory_locations WHERE id = ?').get(locationId), undefined);
+    assert.equal(db.prepare('SELECT location_id FROM inventory_item_locations WHERE id = ?').get(itemId), undefined);
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name = 'inventory_location_slugs'").get());
   } finally { closeWorkspaceDb(db); }
 });
 
-test('version 16 adds optional location addresses without losing locations', () => {
+test('version 16 workspace resets for the capability schema', () => {
   const id = nanoid();
   const locationId = nanoid();
   const db = openWorkspaceDb(id);
@@ -255,8 +258,8 @@ test('version 16 adds optional location addresses without losing locations', () 
   const upgraded = openWorkspaceDb(id);
   try {
     assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
-    assert.equal((upgraded.prepare('SELECT name FROM inventory_locations WHERE id = ?').get(locationId) as { name: string }).name, 'Garage');
-    assert.equal((upgraded.prepare('SELECT slug FROM inventory_location_slugs WHERE id = ?').get(locationId) as { slug: string }).slug, 'garage');
+    assert.equal(upgraded.prepare('SELECT name FROM inventory_locations WHERE id = ?').get(locationId), undefined);
+    assert.equal(upgraded.prepare('SELECT slug FROM inventory_location_slugs WHERE id = ?').get(locationId), undefined);
     upgraded.prepare('INSERT INTO inventory_location_addresses(id, address) VALUES (?, ?)').run(locationId, '123 Brew Street');
     assert.equal((upgraded.prepare('SELECT address FROM inventory_location_addresses WHERE id = ?').get(locationId) as { address: string }).address, '123 Brew Street');
   } finally { closeWorkspaceDb(upgraded); }

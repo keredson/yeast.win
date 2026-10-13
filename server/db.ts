@@ -166,24 +166,16 @@ export function openWorkspaceDb(id: string): Database.Database {
   } else if (version < workspaceSchemaVersion) {
     db.exec('BEGIN');
     try {
-      if (version >= 15) {
-        for (const table of version === 15
-          ? ['inventory_location_slugs', 'inventory_location_addresses']
-          : ['inventory_location_addresses']) {
-          db.exec(schemaStatements[replicatedTables.indexOf(table)]);
-          db.prepare('SELECT crsql_as_crr(?)').get(table);
-        }
-      } else {
-        for (const table of [...replicatedTables, ...retiredReplicatedTables]) {
-          const exists = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
-          if (!exists) continue;
-          db.prepare('SELECT crsql_as_table(?)').get(table);
-          db.exec(`DROP TABLE "${table}"`);
-        }
-        for (const statement of schemaStatements) db.exec(statement);
-        for (const table of replicatedTables) db.prepare('SELECT crsql_as_crr(?)').get(table);
-        for (const statement of indexStatements) db.exec(statement);
+      // Pre-release capability split resets workspace data and CR-SQLite history.
+      for (const table of [...replicatedTables, ...retiredReplicatedTables]) {
+        const exists = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+        if (!exists) continue;
+        db.prepare('SELECT crsql_as_table(?)').get(table);
+        db.exec(`DROP TABLE "${table}"`);
       }
+      for (const statement of schemaStatements) db.exec(statement);
+      for (const table of replicatedTables) db.prepare('SELECT crsql_as_crr(?)').get(table);
+      for (const statement of indexStatements) db.exec(statement);
       if (hasLegacyMeta) db.exec('DROP TABLE schema_meta');
       db.pragma(`user_version = ${workspaceSchemaVersion}`);
       db.exec('COMMIT');

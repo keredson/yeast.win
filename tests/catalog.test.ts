@@ -7,11 +7,16 @@ import Database from 'better-sqlite3';
 import { catalogChanges, openCatalogDb } from '../server/catalog.ts';
 import { decodeChange } from '../shared/wire.ts';
 import { changeColumns } from '../shared/schema.ts';
-import { catalogEquipmentTable, catalogInventoryTable, catalogTables } from '../shared/catalog.ts';
+import { catalogModelTables, catalogInventoryTable, catalogTables, catalogSchemaVersion } from '../shared/catalog.ts';
 
 function rows(db: Database.Database) {
   return {
-    equipment: db.prepare('SELECT * FROM equipment').all() as { id: string; name: string; kind: string; built_in_temperature_control: number | null; max_pressure_kpa: number | null }[],
+    equipment: db.prepare(`SELECT m.id, m.model_name AS name, m.kind,
+      CASE WHEN control.model_id IS NOT NULL THEN 1 ELSE NULL END AS built_in_temperature_control,
+      pressure.max_pressure_kpa FROM equipment_models m
+      LEFT JOIN model_temperature_control control ON control.model_id = m.id
+      LEFT JOIN model_pressure_rating pressure ON pressure.model_id = m.id`).all() as {
+      id: string; name: string; kind: string; built_in_temperature_control: number | null; max_pressure_kpa: number | null }[],
     inventory: db.prepare('SELECT * FROM inventory').all() as { id: string; name: string; category: string; unit: string }[]
   };
 }
@@ -28,7 +33,7 @@ test('existing catalog gains new equipment and inventory without item capacity',
   const db = openCatalogDb(dir);
   try {
     const snapshot = rows(db);
-    assert.equal(db.pragma('user_version', { simple: true }), 10);
+    assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_brewzilla_35l_g4')?.kind, 'all_in_one');
     const gf30 = snapshot.equipment.find(row => row.id === 'equipment_grainfather_gf30');
     assert.equal(gf30?.kind, 'fermenter');
@@ -40,7 +45,14 @@ test('existing catalog gains new equipment and inventory without item capacity',
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_vevor_35l')?.name,
       'VEVOR Electric Brewing System 9.2 Gal/35 L Brewing Pot');
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_vevor_35l')?.kind, 'all_in_one');
-    assert.equal((db.pragma('table_info(equipment)') as { name: string }[])
+    assert.equal((db.prepare('SELECT capacity_liters FROM model_liquid_containment WHERE model_id = ?')
+      .get('equipment_vevor_35l') as { capacity_liters: number }).capacity_liters, 35);
+    assert.ok(db.prepare('SELECT model_id FROM model_heating WHERE model_id = ?').get('equipment_vevor_35l'));
+    assert.ok(db.prepare('SELECT model_id FROM model_temperature_control WHERE model_id = ?').get('equipment_vevor_35l'));
+    assert.deepEqual((db.prepare('SELECT measurement_kind FROM model_measurement_channels WHERE model_id = ? ORDER BY measurement_kind')
+      .all('equipment_rapt_pill') as { measurement_kind: string }[]).map(row => row.measurement_kind),
+    ['gravity', 'temperature']);
+    assert.equal((db.pragma('table_info(equipment_models)') as { name: string }[])
       .some(column => column.name === 'specification_json'), false);
     assert.deepEqual(snapshot.inventory.find(row => row.id === 'inventory_bottle_12oz'),
       { id: 'inventory_bottle_12oz', name: '12 oz bottle', category: 'Packaging', unit: 'each' });
@@ -62,7 +74,7 @@ test('existing catalog models use the combined fermentation control choice', () 
   const db = openCatalogDb(dir);
   try {
     const snapshot = rows(db);
-    assert.equal(db.pragma('user_version', { simple: true }), 10);
+    assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_rapt_chamber')?.kind, 'fermentation_temperature_control');
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_grainfather_gc4')?.kind, 'fermentation_temperature_control');
   } finally { db.close(); }
@@ -80,7 +92,7 @@ test('version 5 catalog restores VEVOR as an all-in-one system', () => {
   const db = openCatalogDb(dir);
   try {
     const snapshot = rows(db);
-    assert.equal(db.pragma('user_version', { simple: true }), 10);
+    assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
     assert.equal(snapshot.equipment.find(row => row.id === 'equipment_vevor_35l')?.kind, 'all_in_one');
   } finally { db.close(); }
 });
@@ -101,7 +113,7 @@ test('version 9 CRR catalog keeps direct server edits when removing prefixes', (
 
   const db = openCatalogDb(dir);
   try {
-    assert.equal(db.pragma('user_version', { simple: true }), 10);
+    assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
     assert.deepEqual(db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'catalog_%'").all(), []);
     assert.equal((db.prepare('SELECT name FROM inventory WHERE id = ?').get('inventory_maris_otter') as { name: string }).name,
       'My edited malt');
@@ -117,7 +129,7 @@ test('catalog sends only CR-SQLite changes after the client cursor', () => {
   const replica = new Database(':memory:');
   replica.loadExtension(join(process.cwd(), 'vendor/crsqlite.so'));
   try {
-    replica.exec(catalogEquipmentTable);
+    for (const statement of Object.values(catalogModelTables)) replica.exec(statement);
     replica.exec(catalogInventoryTable);
     for (const table of catalogTables) replica.prepare('SELECT crsql_as_crr(?)').get(table);
     const apply = replica.prepare(`INSERT INTO crsql_changes (${changeColumns.map(column => `"${column}"`).join(', ')})
@@ -142,8 +154,17 @@ test('catalog sends only CR-SQLite changes after the client cursor', () => {
       .get('personal_ingredient') as { name: string }).name, 'My grain');
     assert.deepEqual(catalogChanges(db, BigInt(delta.serverCursor)).changes, []);
 
+    db.prepare('UPDATE model_heating SET rated_power_watts = ? WHERE model_id = ?')
+      .run(2100, 'equipment_vevor_35l');
+    const powerDelta = catalogChanges(db, BigInt(delta.serverCursor));
+    assert.equal(powerDelta.changes.length, 1);
+    assert.equal(powerDelta.changes[0].table, 'model_heating');
+    for (const change of powerDelta.changes) apply.run(...decodeChange(change));
+    assert.equal((replica.prepare('SELECT rated_power_watts FROM model_heating WHERE model_id = ?')
+      .get('equipment_vevor_35l') as { rated_power_watts: number }).rated_power_watts, 2100);
+
     db.prepare('DELETE FROM inventory WHERE id = ?').run('inventory_maris_otter');
-    const deletion = catalogChanges(db, BigInt(delta.serverCursor));
+    const deletion = catalogChanges(db, BigInt(powerDelta.serverCursor));
     assert.ok(deletion.changes.length > 0);
     for (const change of deletion.changes) apply.run(...decodeChange(change));
     assert.equal(replica.prepare('SELECT id FROM inventory WHERE id = ?').get('inventory_maris_otter'), undefined);
