@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, AutoComplete, Button, Checkbox, Dropdown, Empty, Form, Input, InputNumber, Modal, Select, Table } from 'antd';
 import { MoreOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
 import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
-import { addInventoryEntry, convertInventoryUnit, createInventoryItem, deleteInventoryLocation, inventoryBalance, inventoryLocationPath,
+import { addInventoryEntry, convertInventoryUnit, createInventoryItem, inventoryBalance, inventoryLocationPath,
   listInventoryBalances, listInventoryLocations, listInventoryMovements, moveInventoryStock, saveInventoryLocation, stockAtLocation,
   updateIngredientProperties, ingredientProperties, type IngredientProperties, type InventoryItem, type InventoryLocation, type InventoryMovement, type LocalDb } from './db.ts';
 import { formatTime } from './time.ts';
@@ -11,6 +11,7 @@ import { compoundMassUnit, formatQuantity, quantityForStorage, quantityUnitsForC
 import { QuantityFields } from './QuantityFields.tsx';
 import { changeQuantityUnit } from './unitFields.ts';
 import { inventoryPathSegment } from './inventoryRoutes.ts';
+import { LocationFields } from './LocationFields.tsx';
 
 function onHandQuantity(item: InventoryItem, balance: number): string {
   if (item.display_unit === compoundMassUnit) return formatQuantity(balance, item.default_unit, compoundMassUnit);
@@ -18,14 +19,6 @@ function onHandQuantity(item: InventoryItem, balance: number): string {
   return amount == null ? 'Needs conversion' : String(Number(amount.toFixed(6)));
 }
 const newLocationOption = '__new_location__';
-
-function locationTree(locations: InventoryLocation[], parentId: string | null = null, seen = new Set<string>()): (InventoryLocation & { children?: InventoryLocation[] })[] {
-  return locations.filter(location => location.parent_id === parentId && !seen.has(location.id)).map(location => {
-    const branch = new Set(seen).add(location.id);
-    const children = locationTree(locations, location.id, branch);
-    return { ...location, ...(children.length ? { children } : {}) };
-  });
-}
 
 export function InventorySection({ db, basePath, accountId, items, catalog, preferredUnits, selectedId, onSelect, onChanged }: {
   db: LocalDb; basePath: string; accountId: string; items: InventoryItem[]; catalog: CatalogInventory[]; preferredUnits: PreferredUnits;
@@ -35,7 +28,6 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
   const [onHand, setOnHand] = useState<Record<string, number | null>>({});
   const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [locationsOpen, setLocationsOpen] = useState(false);
-  const [locationEditing, setLocationEditing] = useState<string | null>(null);
   const [moveItemId, setMoveItemId] = useState<string | null>(null);
   const [locationReturn, setLocationReturn] = useState<'item' | 'move' | null>(null);
   const [newItemCategory, setNewItemCategory] = useState<string | null>(null);
@@ -90,7 +82,6 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
   }
 
   function openLocationCreate(returnTo: 'item' | 'move') {
-    setLocationEditing(null);
     locationForm.resetFields();
     setLocationReturn(returnTo);
     setLocationsOpen(true);
@@ -147,19 +138,14 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
 
   async function saveLocation(values: { name: string; parent_id?: string }) {
     try {
-      const id = await saveInventoryLocation(db, values.name, values.parent_id || null, locationEditing || undefined);
+      const id = await saveInventoryLocation(db, values.name, values.parent_id || null);
       setLocations(await listInventoryLocations(db));
       if (locationReturn === 'item') itemForm.setFieldValue('location_id', id);
       if (locationReturn === 'move') moveForm.setFieldValue('location_id', id);
-      if (locationReturn) setLocationsOpen(false);
-      setLocationEditing(null); locationForm.resetFields(); setLocationReturn(null);
+      setLocationsOpen(false);
+      locationForm.resetFields(); setLocationReturn(null);
       await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-  }
-
-  async function removeLocation(id: string) {
-    try { await deleteInventoryLocation(db, id); setLocations(await listInventoryLocations(db)); await onChanged(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
   async function move(values: { location_id?: string; unit: string; quantity?: number; pounds?: number; ounces?: number; all?: boolean }) {
@@ -194,8 +180,7 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
 
   return <div className="section-page">
     {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
-    {!selectedId ? <section className="record-index"><div className="section-heading"><div><span className="eyebrow">Stock ledger</span><h1>Inventory</h1></div>
-      <Button onClick={() => setLocationsOpen(true)}>Manage locations</Button></div>
+    {!selectedId ? <section className="record-index"><div className="section-heading"><div><span className="eyebrow">Stock ledger</span><h1>Inventory</h1></div></div>
       <p className="muted">Purchases, uses from batches, and physical counts.</p>
       {items.length > 0 && <div className="group-tables">{categories.map(category => {
         const rows = items.filter(row => row.category === category);
@@ -311,24 +296,12 @@ export function InventorySection({ db, basePath, accountId, items, catalog, pref
         <Button type="primary" htmlType="submit">Move stock</Button>
       </Form>
     </Modal>
-    <Modal title="Inventory locations" open={locationsOpen} onCancel={() => { setLocationsOpen(false); setLocationReturn(null); }}
+    <Modal title="New location" open={locationsOpen} onCancel={() => { setLocationsOpen(false); setLocationReturn(null); }}
       footer={null} width={620} zIndex={locationReturn ? 1100 : undefined}>
       {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
-      <p className="muted">Create a room, shelf, or building at any level.</p>
-      {locations.length > 0 && <Table<InventoryLocation> dataSource={locationTree(locations)} rowKey="id" size="small" pagination={false}
-        expandable={{ expandedRowKeys: locations.map(location => location.id) }}
-        columns={[{ title: 'Location', dataIndex: 'name' },
-          { title: '', width: 155, render: (_, row) => <><Button type="link" onClick={() => { setLocationEditing(row.id);
-            locationForm.setFieldsValue({ name: row.name, parent_id: row.parent_id || undefined }); }}>Edit</Button>
-            <Button type="link" danger onClick={() => void removeLocation(row.id)}>Delete</Button></> }]} />}
-      <h3>{locationEditing ? 'Edit location' : 'New location'}</h3>
       <Form form={locationForm} layout="vertical" onFinish={saveLocation}>
-        <Form.Item name="name" label="Name" rules={[{ required: true, whitespace: true }]}><Input maxLength={100} placeholder="Back room" /></Form.Item>
-        {locationOptions.some(option => option.value !== locationEditing) &&
-          <Form.Item name="parent_id" label="Inside (optional)"><Select allowClear placeholder="Top level"
-            options={locationOptions.filter(option => option.value !== locationEditing)} /></Form.Item>}
-        <Button type="primary" htmlType="submit">{locationEditing ? 'Save location' : 'Add location'}</Button>
-        {locationEditing && <Button onClick={() => { setLocationEditing(null); locationForm.resetFields(); }}>Cancel edit</Button>}
+        <LocationFields locations={locations} />
+        <Button type="primary" htmlType="submit">Add location</Button>
       </Form>
     </Modal>
     <Modal title={entryKind === 'count' ? `Count ${entryItem?.name || 'stock'}` : entryKind === 'discard'

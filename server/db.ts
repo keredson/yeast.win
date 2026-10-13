@@ -154,15 +154,20 @@ export function openWorkspaceDb(id: string): Database.Database {
   } else if (row.version < workspaceSchemaVersion) {
     db.exec('BEGIN');
     try {
-      for (const table of [...replicatedTables, ...retiredReplicatedTables]) {
-        const exists = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
-        if (!exists) continue;
-        db.prepare('SELECT crsql_as_table(?)').get(table);
-        db.exec(`DROP TABLE "${table}"`);
+      if (row.version === 15) {
+        db.exec(schemaStatements[replicatedTables.indexOf('inventory_location_slugs')]);
+        db.prepare('SELECT crsql_as_crr(?)').get('inventory_location_slugs');
+      } else {
+        for (const table of [...replicatedTables, ...retiredReplicatedTables]) {
+          const exists = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+          if (!exists) continue;
+          db.prepare('SELECT crsql_as_table(?)').get(table);
+          db.exec(`DROP TABLE "${table}"`);
+        }
+        for (const statement of schemaStatements) db.exec(statement);
+        for (const table of replicatedTables) db.prepare('SELECT crsql_as_crr(?)').get(table);
+        for (const statement of indexStatements) db.exec(statement);
       }
-      for (const statement of schemaStatements) db.exec(statement);
-      for (const table of replicatedTables) db.prepare('SELECT crsql_as_crr(?)').get(table);
-      for (const statement of indexStatements) db.exec(statement);
       db.prepare('UPDATE schema_meta SET version = ?').run(workspaceSchemaVersion);
       db.exec('COMMIT');
     } catch (error) {

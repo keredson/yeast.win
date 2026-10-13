@@ -1,9 +1,10 @@
 import initWasm, { type DB } from '@vlcn.io/crsqlite-wasm';
 import { fetchApi } from './api.ts';
 import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
-import { nanoid } from 'nanoid';
+import { customAlphabet, nanoid } from 'nanoid';
 import { boilOffKinds, capacityKinds, equipmentKinds, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import { equipmentSlug } from './equipmentRoutes.ts';
+import { recordSlug } from './recordSlug.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
 import { changeColumns, indexStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements, workspaceSchemaVersion, type SyncRequest, type SyncResponse } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
@@ -93,7 +94,8 @@ async function writeIngredientProperties(db: Pick<DB, 'exec'>, id: string, value
     ON CONFLICT(id) DO UPDATE SET ${columns.map(column => `${column} = excluded.${column}`).join(', ')}`,
   [id, ...columns.map(column => values[column] ?? null)]);
 }
-export interface InventoryLocation { id: string; name: string; parent_id: string | null }
+export interface InventoryLocation { id: string; name: string; parent_id: string | null; slug: string }
+const locationSlugSuffix = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 8);
 export interface InventoryMovement { id: string; kind: 'Purchased' | 'Counted' | 'Used' | 'Discarded' | 'Moved in' | 'Moved out'; quantity: number; unit: string; at: number }
 
 const inventoryMassInGrams: Record<string, number> = { g: 1, kg: 1000, oz: 28.349523125, lb: 453.59237, 'lb + oz': 28.349523125 };
@@ -129,18 +131,23 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
         });
       } else if (version[0].version < workspaceSchemaVersion) {
         await db.tx(async tx => {
-          for (const table of [...replicatedTables, ...retiredReplicatedTables]) {
-            const exists = await tx.execO<{ name: string }>(
-              "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [table]);
-            if (!exists.length) continue;
-            await tx.exec('SELECT crsql_as_table(?)', [table]);
-            await tx.exec(`DROP TABLE "${table}"`);
+          if (version[0].version === 15) {
+            await tx.exec(schemaStatements[replicatedTables.indexOf('inventory_location_slugs')]);
+            await tx.exec("SELECT crsql_as_crr('inventory_location_slugs')");
+          } else {
+            for (const table of [...replicatedTables, ...retiredReplicatedTables]) {
+              const exists = await tx.execO<{ name: string }>(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [table]);
+              if (!exists.length) continue;
+              await tx.exec('SELECT crsql_as_table(?)', [table]);
+              await tx.exec(`DROP TABLE "${table}"`);
+            }
+            for (const statement of schemaStatements) await tx.exec(statement);
+            for (const table of replicatedTables) await tx.exec('SELECT crsql_as_crr(?)', [table]);
+            for (const statement of indexStatements) await tx.exec(statement);
+            await tx.exec('CREATE TABLE IF NOT EXISTS sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
+            await tx.exec('DELETE FROM sync_state');
           }
-          for (const statement of schemaStatements) await tx.exec(statement);
-          for (const table of replicatedTables) await tx.exec('SELECT crsql_as_crr(?)', [table]);
-          for (const statement of indexStatements) await tx.exec(statement);
-          await tx.exec('CREATE TABLE IF NOT EXISTS sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
-          await tx.exec('DELETE FROM sync_state');
           await tx.exec('UPDATE schema_meta SET version = ?', [workspaceSchemaVersion]);
         });
       } else if (version[0].version > workspaceSchemaVersion) {
@@ -993,7 +1000,15 @@ export async function updateIngredientProperties(db: DB, item: InventoryItem, pr
 }
 
 export async function listInventoryLocations(db: DB): Promise<InventoryLocation[]> {
-  return db.execO<InventoryLocation>('SELECT id, name, parent_id FROM inventory_locations ORDER BY name COLLATE NOCASE, id');
+  const missing = await db.execO<{ id: string; name: string }>(`SELECT l.id, l.name FROM inventory_locations l
+    LEFT JOIN inventory_location_slugs s ON s.id = l.id WHERE s.id IS NULL`);
+  for (const row of missing) {
+    const idHex = [...row.id].map(char => char.charCodeAt(0).toString(16).padStart(2, '0')).join('');
+    const slug = `${recordSlug(row.name).slice(0, 14)}-${idHex}`;
+    await db.exec('INSERT OR IGNORE INTO inventory_location_slugs(id, slug) VALUES (?, ?)', [row.id, slug]);
+  }
+  return db.execO<InventoryLocation>(`SELECT l.id, l.name, l.parent_id, s.slug FROM inventory_locations l
+    JOIN inventory_location_slugs s ON s.id = l.id ORDER BY l.name COLLATE NOCASE, l.id`);
 }
 
 export function inventoryLocationPath(locationId: string | null, locations: InventoryLocation[]): string {
@@ -1012,10 +1027,16 @@ export function inventoryLocationPath(locationId: string | null, locations: Inve
   return names.join(' / ') || 'Unknown location';
 }
 
-export async function saveInventoryLocation(db: DB, name: string, parentId: string | null, id?: string): Promise<string> {
+export async function saveInventoryLocation(db: DB, name: string, parentId: string | null, id?: string, slug?: string): Promise<string> {
   const clean = name.trim();
   if (!clean) throw new Error('Enter a location name');
   const locations = await listInventoryLocations(db);
+  const chosenSlug = slug?.trim() || (id ? locations.find(location => location.id === id)?.slug
+    : `${recordSlug(clean).slice(0, 40)}-${locationSlugSuffix()}`);
+  if (!chosenSlug || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(chosenSlug) || chosenSlug.length > 80)
+    throw new Error('Use lowercase letters, numbers, and hyphens for the slug');
+  if (locations.some(location => location.id !== id && (location.slug === chosenSlug || location.id === chosenSlug)))
+    throw new Error('That location slug is already in use');
   if (parentId && !locations.some(location => location.id === parentId)) throw new Error('Parent location not found');
   if (locations.some(location => location.id !== id && location.parent_id === parentId && location.name.toLowerCase() === clean.toLowerCase()))
     throw new Error('A location with this name already exists here');
@@ -1025,11 +1046,17 @@ export async function saveInventoryLocation(db: DB, name: string, parentId: stri
       if (current === id) throw new Error('A location cannot contain itself');
       current = locations.find(location => location.id === current)?.parent_id || null;
     }
-    await db.exec('UPDATE inventory_locations SET name = ?, parent_id = ? WHERE id = ?', [clean, parentId, id]);
+    await db.tx(async tx => {
+      await tx.exec('UPDATE inventory_locations SET name = ?, parent_id = ? WHERE id = ?', [clean, parentId, id]);
+      await tx.exec('UPDATE inventory_location_slugs SET slug = ? WHERE id = ?', [chosenSlug, id]);
+    });
     return id;
   }
   const nextId = nanoid();
-  await db.exec('INSERT INTO inventory_locations(id, name, parent_id, created_at) VALUES (?, ?, ?, ?)', [nextId, clean, parentId, nowSeconds()]);
+  await db.tx(async tx => {
+    await tx.exec('INSERT INTO inventory_locations(id, name, parent_id, created_at) VALUES (?, ?, ?, ?)', [nextId, clean, parentId, nowSeconds()]);
+    await tx.exec('INSERT INTO inventory_location_slugs(id, slug) VALUES (?, ?)', [nextId, chosenSlug]);
+  });
   return nextId;
 }
 
@@ -1039,7 +1066,10 @@ export async function deleteInventoryLocation(db: DB, id: string): Promise<void>
     db.execO('SELECT id FROM inventory_item_locations WHERE location_id = ? LIMIT 1', [id])
   ]);
   if (children.length || stock.length) throw new Error('Move stock and child locations before deleting this location');
-  await db.exec('DELETE FROM inventory_locations WHERE id = ?', [id]);
+  await db.tx(async tx => {
+    await tx.exec('DELETE FROM inventory_location_slugs WHERE id = ?', [id]);
+    await tx.exec('DELETE FROM inventory_locations WHERE id = ?', [id]);
+  });
 }
 
 function sameInventoryProduct(item: InventoryItem, name: string, category: string): boolean {

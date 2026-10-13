@@ -1,0 +1,141 @@
+import { useEffect, useState } from 'react';
+import { Alert, Button, Form, Modal, Popconfirm } from 'antd';
+import { DeleteOutlined, EnvironmentOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
+import { convertInventoryUnit, deleteInventoryLocation, inventoryLocationPath, listInventoryBalances, saveInventoryLocation,
+  type InventoryItem, type InventoryLocation, type LocalDb } from './db.ts';
+import { LocationFields } from './LocationFields.tsx';
+import { locationAncestors, locationDescendantIds } from './locationRoutes.ts';
+import { inventoryPathSegment } from './inventoryRoutes.ts';
+import { compoundMassUnit, formatQuantity } from '../shared/units.ts';
+
+function LocationBranch({ parentId, locations, items, basePath, onSelect, visited = new Set<string>() }: {
+  parentId: string | null; locations: InventoryLocation[]; items: InventoryItem[]; basePath: string;
+  onSelect: (id: string) => void; visited?: Set<string>;
+}) {
+  const children = locations.filter(location => !visited.has(location.id)
+    && (location.parent_id === parentId || parentId === null && location.parent_id
+      && !locations.some(parent => parent.id === location.parent_id)));
+  if (!children.length) return null;
+  return <ul className="location-tree">{children.map(location => {
+    const descendantIds = locationDescendantIds(location.id, locations);
+    const directCount = items.filter(item => item.location_id === location.id).length;
+    const totalCount = items.filter(item => item.location_id && descendantIds.has(item.location_id)).length;
+    return <li key={location.id}>
+      <a className="location-node" href={`${basePath}/location/${location.slug}`}
+        onClick={event => { event.preventDefault(); onSelect(location.id); }}>
+        <EnvironmentOutlined aria-hidden />
+        <span className="location-node-text"><strong>{location.name}</strong><small>{directCount} here · {totalCount} including sublocations</small></span>
+      </a>
+      <LocationBranch parentId={location.id} locations={locations} items={items} basePath={basePath}
+        onSelect={onSelect} visited={new Set([...visited, location.id])} />
+    </li>;
+  })}</ul>;
+}
+
+export function LocationsSection({ db, basePath, locations, items, selectedId, onSelect, onInventorySelect, onChanged }: {
+  db: LocalDb; basePath: string; locations: InventoryLocation[]; items: InventoryItem[];
+  selectedId: string | null; onSelect: (id: string | null) => void; onInventorySelect: (id: string) => void;
+  onChanged: () => Promise<void>;
+}) {
+  const [form] = Form.useForm<{ name: string; parent_id?: string; slug?: string }>();
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState('');
+  const [balances, setBalances] = useState<Record<string, number | null>>({});
+  const selected = locations.find(location => location.id === selectedId) || null;
+  const ancestors = selected ? locationAncestors(selected, locations) : [];
+  const directItems = items.filter(item => item.location_id === selectedId && !!selectedId);
+  const categories = [...new Set(directItems.map(item => item.category))].sort();
+  const unassigned = items.filter(item => !item.location_id);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listInventoryBalances(db, items).then(result => { if (!cancelled) setBalances(result); })
+      .catch(cause => { if (!cancelled) setError(String(cause)); });
+    return () => { cancelled = true; };
+  }, [db, items]);
+
+  function openCreate(parentId: string | null) {
+    form.resetFields();
+    form.setFieldsValue({ parent_id: parentId || undefined });
+    setError(''); setCreating(true);
+  }
+
+  function openSettings() {
+    if (!selected) return;
+    form.setFieldsValue({ name: selected.name, parent_id: selected.parent_id || undefined, slug: selected.slug });
+    setError(''); setEditing(true);
+  }
+
+  async function save(values: { name: string; parent_id?: string; slug?: string }) {
+    try {
+      const id = await saveInventoryLocation(db, values.name, values.parent_id || null,
+        editing ? selected?.id : undefined, editing ? values.slug : undefined);
+      setCreating(false); setEditing(false); form.resetFields();
+      await onChanged();
+      if (editing) onSelect(id);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
+  async function remove() {
+    if (!selected) return;
+    try {
+      await deleteInventoryLocation(db, selected.id);
+      setEditing(false); onSelect(selected.parent_id); await onChanged();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
+  const stockRows = (rows: InventoryItem[]) => <div className="location-stock-list">{rows.map(item => {
+    const balance = balances[item.id];
+    const converted = balance == null || item.display_unit === compoundMassUnit ? balance
+      : convertInventoryUnit(balance, item.default_unit, item.display_unit);
+    const displayed = converted == null ? converted === null ? 'Needs conversion' : '—'
+      : formatQuantity(converted, item.display_unit === compoundMassUnit ? item.default_unit : item.display_unit,
+        item.display_unit === compoundMassUnit ? compoundMassUnit : undefined);
+    return <a key={item.id} href={`${basePath}/inventory/${inventoryPathSegment(item, items)}`}
+      onClick={event => { event.preventDefault(); onInventorySelect(item.id); }}>
+      <span>{item.name}</span><small>{displayed}</small>
+    </a>;
+  })}</div>;
+
+  return <div className="section-page">
+    {error && !creating && !editing && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
+    {!selectedId ? <section className="record-index location-index">
+      <div className="section-heading"><div><span className="eyebrow">Storage map</span><h1>Locations</h1></div></div>
+      <p className="muted">Rooms, shelves, and other places where stock is kept.</p>
+      {locations.length > 0 && <div className="location-map"><LocationBranch parentId={null} locations={locations} items={items}
+        basePath={basePath} onSelect={id => onSelect(id)} /></div>}
+      {unassigned.length > 0 && <section className="location-stock-section"><h2>Unassigned stock</h2>{stockRows(unassigned)}</section>}
+      <Button className="location-add" type="text" icon={<PlusOutlined />} onClick={() => openCreate(null)}>Add location</Button>
+    </section> : !selected ? <p className="muted">Location not found.</p> : <section className="record-detail location-detail">
+      <nav className="location-breadcrumb" aria-label="Location path">
+        <a href={`${basePath}/locations`} onClick={event => { event.preventDefault(); onSelect(null); }}>Locations</a>
+        {ancestors.map(ancestor => <span key={ancestor.id}><span aria-hidden="true"> / </span>
+          <a href={`${basePath}/location/${ancestor.slug}`} onClick={event => { event.preventDefault(); onSelect(ancestor.id); }}>{ancestor.name}</a></span>)}
+      </nav>
+      <div className="content-heading"><div><span className="eyebrow">{inventoryLocationPath(selected.id, locations)}</span>
+        <h2>{selected.name}</h2></div><div className="heading-actions">
+        <Button type="text" shape="circle" icon={<SettingOutlined />} aria-label="Location settings" title="Location settings"
+          onClick={openSettings} /></div></div>
+      {locations.some(location => location.parent_id === selected.id) && <section className="location-stock-section">
+        <h3>Inside {selected.name}</h3><div className="location-map"><LocationBranch parentId={selected.id} locations={locations}
+          items={items} basePath={basePath} onSelect={id => onSelect(id)} /></div></section>}
+      <section className="location-stock-section"><h3>Stock here</h3>
+        {directItems.length ? categories.map(category => <div key={category} className="location-stock-category">
+          <h4>{category}</h4>{stockRows(directItems.filter(item => item.category === category))}</div>)
+          : <p className="muted">No stock at this location.</p>}</section>
+      <Button className="location-add" type="text" icon={<PlusOutlined />} onClick={() => openCreate(selected.id)}>New sublocation</Button>
+    </section>}
+    <Modal title={editing ? 'Location settings' : 'New location'} open={creating || editing}
+      onCancel={() => { setCreating(false); setEditing(false); setError(''); }} footer={null} forceRender>
+      {error && <Alert type="error" message={error} className="form-alert" />}
+      <Form form={form} layout="vertical" onFinish={save}>
+        <LocationFields locations={locations} editingId={editing ? selected?.id : null} showSlug={editing} />
+        <div className="recipe-settings-actions"><Button type="primary" htmlType="submit">{editing ? 'Save changes' : 'Add location'}</Button>
+          {editing && <Popconfirm title={`Delete ${selected?.name}?`}
+            description="Move its stock and child locations before deleting it." okText="Delete" okButtonProps={{ danger: true }}
+            onConfirm={() => void remove()}><Button type="text" danger icon={<DeleteOutlined />}>Delete location</Button></Popconfirm>}</div>
+      </Form>
+    </Modal>
+  </div>;
+}

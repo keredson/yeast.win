@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppstoreOutlined, BookOutlined, DisconnectOutlined, InboxOutlined, MenuOutlined, ToolOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, BookOutlined, DisconnectOutlined, EnvironmentOutlined, InboxOutlined, MenuOutlined, ToolOutlined } from '@ant-design/icons';
 import { Alert, Avatar, Button, Card, Drawer, Empty, Form, Input, Layout, Menu, Popover, Select, Spin, Tooltip, Typography } from 'antd';
 import { api, ApiError, ApiUnavailableError, type PreferredUnits, type Session, type Workspace } from './api.ts';
 import { defaultPreferredUnits } from '../shared/units.ts';
-import { forgetLocalDb, openLocalDb, syncNow, type Batch, type Equipment, type InventoryItem, type LocalDb, type Recipe, type RecipeType,
-  listBatches, listEquipment, listInventory, listRecipes } from './db.ts';
+import { forgetLocalDb, openLocalDb, syncNow, type Batch, type Equipment, type InventoryItem, type InventoryLocation, type LocalDb, type Recipe, type RecipeType,
+  listBatches, listEquipment, listInventory, listInventoryLocations, listRecipes } from './db.ts';
 import { BatchSection } from './BatchSection.tsx';
 import { RecipeSection } from './RecipeSection.tsx';
 import { RecipeTypeIcon } from './RecipeTypeIcon.tsx';
@@ -12,22 +12,24 @@ import { InventorySection } from './InventorySection.tsx';
 import { inventoryItemForPath, inventoryPathSegment } from './inventoryRoutes.ts';
 import { equipmentItemForPath, equipmentPathSegment } from './equipmentRoutes.ts';
 import { EquipmentSection } from './EquipmentSection.tsx';
+import { LocationsSection } from './LocationsSection.tsx';
+import { locationForPath } from './locationRoutes.ts';
 import { AccountSection } from './AccountSection.tsx';
 import { openLocalCatalog, readLocalCatalog, syncLocalCatalog } from './catalog.ts';
 import type { CatalogEquipment, CatalogInventory } from '../shared/catalog.ts';
 
-type Section = 'batches' | 'recipes' | 'inventory' | 'equipment' | 'me';
+type Section = 'batches' | 'recipes' | 'inventory' | 'equipment' | 'locations' | 'me';
 interface Route { section: Section; selectedId: string | null; slug: string | null }
-const detailPaths = { batches: 'batch', recipes: 'recipe', inventory: 'inventory', equipment: 'equipment' } as const;
+const detailPaths = { batches: 'batch', recipes: 'recipe', inventory: 'inventory', equipment: 'equipment', locations: 'location' } as const;
 
 function routeFromPath(path: string): Route {
   if (path === '/me') return { section: 'me', selectedId: null, slug: null };
   const prefix = /^\/brewery\/([a-z0-9-]+)(?=\/|$)/.exec(path);
   const slug = prefix?.[1] || null;
   const localPath = prefix ? path.slice(prefix[0].length) || '/' : path;
-  for (const section of ['batches', 'recipes', 'inventory', 'equipment'] as const) {
+  for (const section of ['batches', 'recipes', 'inventory', 'equipment', 'locations'] as const) {
     if (localPath === `/${section}`) return { section, selectedId: null, slug };
-    const segmentPattern = section === 'inventory' || section === 'equipment' ? '[A-Za-z0-9_-]+' : '[A-Za-z0-9_-]{10,32}';
+    const segmentPattern = section === 'inventory' || section === 'equipment' || section === 'locations' ? '[A-Za-z0-9_-]+' : '[A-Za-z0-9_-]{10,32}';
     const match = new RegExp(`^/${detailPaths[section]}/(${segmentPattern})$`).exec(localPath);
     if (match) return { section, selectedId: match[1], slug };
   }
@@ -47,20 +49,21 @@ const navItems = [
   { key: 'batches', label: 'Batches', icon: AppstoreOutlined },
   { key: 'recipes', label: 'Recipes', icon: BookOutlined },
   { key: 'inventory', label: 'Inventory', icon: InboxOutlined },
+  { key: 'locations', label: 'Locations', icon: EnvironmentOutlined },
   { key: 'equipment', label: 'Equipment', icon: ToolOutlined }
 ] as const;
 type RecordSection = Exclude<Section, 'me'>;
 type NavRecord = { id: string; name: string; recipe_type?: RecipeType | null };
 type RecentItems = Record<RecordSection, string[]>;
-const recordSections: RecordSection[] = ['batches', 'recipes', 'inventory', 'equipment'];
-const emptyRecents = (): RecentItems => ({ batches: [], recipes: [], inventory: [], equipment: [] });
+const recordSections: RecordSection[] = ['batches', 'recipes', 'inventory', 'equipment', 'locations'];
+const emptyRecents = (): RecentItems => ({ batches: [], recipes: [], inventory: [], equipment: [], locations: [] });
 
 function SectionNavigation({ route, recent, records, onNavigate }: {
   route: Route; recent: RecentItems; records: Record<RecordSection, NavRecord[]>;
   onNavigate: (section: RecordSection, id: string | null) => void;
 }) {
   const items = navItems.flatMap(({ key, label, icon: Icon }) => {
-    const links = (key === 'inventory' || key === 'equipment' ? [] : recent[key]).map(id => records[key].find(item => item.id === id))
+    const links = (key === 'inventory' || key === 'equipment' || key === 'locations' ? [] : recent[key]).map(id => records[key].find(item => item.id === id))
       .filter((item): item is NavRecord => !!item);
     return [{ key, label, icon: <Icon /> }, ...links.map(item => ({
       key: `${key}:${item.id}`, className: 'nav-recent-item',
@@ -71,7 +74,7 @@ function SectionNavigation({ route, recent, records, onNavigate }: {
     }))];
   });
   return <Menu mode="inline"
-    selectedKeys={route.section === 'me' ? [] : [route.selectedId && route.section !== 'inventory' && route.section !== 'equipment'
+    selectedKeys={route.section === 'me' ? [] : [route.selectedId && route.section !== 'inventory' && route.section !== 'equipment' && route.section !== 'locations'
       ? `${route.section}:${route.selectedId}` : route.section]}
     items={items}
     onClick={({ key }) => { const [section, id] = key.split(':'); onNavigate(section as RecordSection, id || null); }} />;
@@ -156,6 +159,7 @@ export function App() {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [inventoryWorkspaceId, setInventoryWorkspaceId] = useState<string | null>(null);
   const [equipmentWorkspaceId, setEquipmentWorkspaceId] = useState<string | null>(null);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
@@ -296,6 +300,15 @@ export function App() {
     if (route.selectedId !== found.id) setRoute(current => ({ ...current, selectedId: found.id }));
   }, [route.section, route.selectedId, equipment, equipmentWorkspaceId, workspaceId, session?.workspaces]);
 
+  useEffect(() => {
+    if (route.section !== 'locations' || !route.selectedId || inventoryWorkspaceId !== workspaceId) return;
+    const found = locationForPath(route.selectedId, locations);
+    if (!found) return;
+    const path = routePath('locations', found.slug, workspaceBase(workspaceId, session?.workspaces || []));
+    if (location.pathname !== path) history.replaceState(null, '', path);
+    if (route.selectedId !== found.id) setRoute(current => ({ ...current, selectedId: found.id }));
+  }, [route.section, route.selectedId, locations, inventoryWorkspaceId, workspaceId, session?.workspaces]);
+
   function showSection(next: Section, targetWorkspaceId = workspaceId) {
     const base = workspaceBase(targetWorkspaceId, session?.workspaces || []);
     const path = routePath(next, null, base);
@@ -308,8 +321,9 @@ export function App() {
     const base = workspaceBase(workspaceId, session?.workspaces || []);
     const inventoryItem = next === 'inventory' && id ? inventory.find(row => row.id === id) : null;
     const equipmentItem = next === 'equipment' && id ? equipment.find(row => row.id === id) : null;
+    const locationItem = next === 'locations' && id ? locations.find(row => row.id === id) : null;
     const segment = inventoryItem ? inventoryPathSegment(inventoryItem, inventory)
-      : equipmentItem ? equipmentPathSegment(equipmentItem, equipment) : id;
+      : equipmentItem ? equipmentPathSegment(equipmentItem, equipment) : locationItem ? locationItem.slug : id;
     const path = routePath(next, segment, base);
     if (location.pathname !== path || location.search) history.pushState(null, '', path);
     setRoute({ section: next, selectedId: id, slug: base.split('/')[2] || null });
@@ -326,13 +340,14 @@ export function App() {
   }
 
   const refresh = useCallback(async (activeDb: LocalDb, targetWorkspaceId: string) => {
-    const [nextBatches, nextRecipes, nextInventory, nextEquipment] = await Promise.all([
-      listBatches(activeDb), listRecipes(activeDb), listInventory(activeDb), listEquipment(activeDb)
+    const [nextBatches, nextRecipes, nextInventory, nextEquipment, nextLocations] = await Promise.all([
+      listBatches(activeDb), listRecipes(activeDb), listInventory(activeDb), listEquipment(activeDb), listInventoryLocations(activeDb)
     ]);
     if (activeWorkspaceId.current !== targetWorkspaceId) return;
     setBatches(nextBatches);
     setRecipes(nextRecipes);
     setInventory(nextInventory);
+    setLocations(nextLocations);
     setInventoryWorkspaceId(targetWorkspaceId);
     setEquipment(nextEquipment);
     setEquipmentWorkspaceId(targetWorkspaceId);
@@ -473,11 +488,11 @@ export function App() {
 
     <div className="app-body">
       <Layout.Sider className="app-nav" width={220} theme="light" aria-label="Sections">
-        <SectionNavigation route={route} recent={recent} records={{ batches, recipes, inventory, equipment }}
+        <SectionNavigation route={route} recent={recent} records={{ batches, recipes, inventory, equipment, locations }}
           onNavigate={(name, id) => id ? showItem(name, id) : showSection(name)} />
       </Layout.Sider>
       <Drawer className="mobile-nav-drawer" title="Sections" placement="left" width={250} open={menuOpen} onClose={() => setMenuOpen(false)}>
-        <div className="drawer-nav"><SectionNavigation route={route} recent={recent} records={{ batches, recipes, inventory, equipment }}
+        <div className="drawer-nav"><SectionNavigation route={route} recent={recent} records={{ batches, recipes, inventory, equipment, locations }}
           onNavigate={(name, id) => { id ? showItem(name, id) : showSection(name); setMenuOpen(false); }} /></div>
       </Drawer>
       <main className="app-main">
@@ -506,6 +521,10 @@ export function App() {
                 catalog={catalogInventory} preferredUnits={preferredUnits} selectedId={route.selectedId
                   ? inventoryItemForPath(route.selectedId, inventory)?.id || route.selectedId : null}
                 onSelect={id => showItem('inventory', id)} onChanged={changed} />)}
+            {section === 'locations' && (inventoryWorkspaceId !== workspaceId ? <div className="loading-screen"><Spin description="Loading locations" /></div>
+              : <LocationsSection key={workspaceId} db={db} basePath={activeBase} locations={locations} items={inventory}
+                selectedId={route.selectedId ? locationForPath(route.selectedId, locations)?.id || route.selectedId : null}
+                onSelect={id => showItem('locations', id)} onInventorySelect={id => showItem('inventory', id)} onChanged={changed} />)}
             {section === 'equipment' && (equipmentWorkspaceId !== workspaceId ? <div className="loading-screen"><Spin description="Loading equipment" /></div>
               : <EquipmentSection key={workspaceId} db={db} basePath={activeBase} equipment={equipment}
                 catalog={catalogEquipment} preferredUnits={preferredUnits} selectedId={route.selectedId

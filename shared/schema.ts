@@ -46,6 +46,7 @@ const definitions: Record<string, string> = {
   inventory_items: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL, default_unit TEXT NOT NULL, created_at INTEGER NOT NULL`,
   inventory_ingredient_properties: `id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL, alpha_acid_pct REAL, hop_form TEXT, attenuation_pct REAL`,
   inventory_locations: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, parent_id TEXT, created_at INTEGER NOT NULL`,
+  inventory_location_slugs: `id TEXT PRIMARY KEY NOT NULL, slug TEXT NOT NULL`,
   inventory_item_locations: `id TEXT PRIMARY KEY NOT NULL, location_id TEXT`,
   inventory_moves: `id TEXT PRIMARY KEY NOT NULL, from_item_id TEXT NOT NULL, to_item_id TEXT NOT NULL, quantity REAL NOT NULL, unit TEXT NOT NULL, moved_at INTEGER NOT NULL`,
   inventory_display_units: `id TEXT PRIMARY KEY NOT NULL, display_unit TEXT NOT NULL`,
@@ -110,7 +111,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 15;
+export const workspaceSchemaVersion = 16;
 export const retiredReplicatedTables = ['equipment_calibrations'] as const;
 
 export function isValidId(value: unknown): value is string {
