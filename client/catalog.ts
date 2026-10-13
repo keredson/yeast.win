@@ -4,9 +4,11 @@ import { catalogModelTables, catalogSupplyTables, catalogSchemaVersion, catalogT
   type CatalogChanges, type CatalogEquipment, type CatalogInventory, type CatalogMeasurementChannel } from '../shared/catalog.ts';
 import { changeColumns } from '../shared/schema.ts';
 import { decodeChange } from '../shared/wire.ts';
+import { fetchApi } from './api.ts';
 
 let opened: Promise<DB> | undefined;
-let syncing: Promise<void> | undefined;
+let syncing: Promise<boolean> | undefined;
+const catalogRefreshIntervalMs = 7 * 24 * 60 * 60_000;
 
 export function openLocalCatalog(): Promise<DB> {
   if (!opened) opened = (async () => {
@@ -115,12 +117,16 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
   return { equipment, inventory };
 }
 
-export function syncLocalCatalog(db: DB): Promise<void> {
+export function syncLocalCatalog(db: DB): Promise<boolean> {
   if (syncing) return syncing;
   syncing = (async () => {
-    const rows = await db.execO<{ value: string }>("SELECT value FROM sync_state WHERE key = 'serverCursor'");
-    const cursor = rows[0]?.value || '0';
-    const response = await fetch(`/api/catalog?cursor=${cursor}`, { credentials: 'same-origin' });
+    const rows = await db.execO<{ key: string; value: string }>(
+      "SELECT key, value FROM sync_state WHERE key IN ('serverCursor', 'lastRefreshAt')");
+    const cursor = rows.find(row => row.key === 'serverCursor')?.value || '0';
+    const lastRefreshAt = Number(rows.find(row => row.key === 'lastRefreshAt')?.value);
+    const now = Date.now();
+    if (lastRefreshAt > 0 && now >= lastRefreshAt && now - lastRefreshAt < catalogRefreshIntervalMs) return false;
+    const response = await fetchApi(`/api/catalog?cursor=${cursor}`, { credentials: 'same-origin' });
     if (!response.ok) throw new Error('Catalog sync failed');
     const result = await response.json() as CatalogChanges;
     if (!/^\d+$/.test(result.serverCursor) || !Array.isArray(result.changes)
@@ -133,7 +139,10 @@ export function syncLocalCatalog(db: DB): Promise<void> {
       for (const change of result.changes) await tx.exec(insert, decodeChange(change));
       await tx.exec(`INSERT INTO sync_state(key, value) VALUES ('serverCursor', ?)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [result.serverCursor]);
+      await tx.exec(`INSERT INTO sync_state(key, value) VALUES ('lastRefreshAt', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [String(Date.now())]);
     });
+    return true;
   })().finally(() => { syncing = undefined; });
   return syncing;
 }

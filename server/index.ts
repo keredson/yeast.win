@@ -109,7 +109,6 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', 'http://localhost');
     const pathname = url.pathname;
     if (!pathname.startsWith('/api/')) return serveStatic(req, res, pathname);
-    if (pathname === '/api/health' && req.method === 'GET') return json(res, 200, { ok: true });
     if (pathname === '/api/register' && req.method === 'POST') {
       const registrationKey = req.socket.remoteAddress || 'unknown';
       const now = Date.now();

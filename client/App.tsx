@@ -145,7 +145,46 @@ function timeSinceSync(lastSyncedAt: number | null, now: number): string {
   return `Last synced ${Math.floor(hours / 24)} days ago`;
 }
 
+const activeWindowMs = 5 * 60_000;
+
+function useAppActive(): boolean {
+  const lastActivity = useRef(Date.now());
+  const [active, setActive] = useState(document.visibilityState === 'visible');
+
+  useEffect(() => {
+    const markActivity = () => {
+      if (document.visibilityState !== 'visible') return;
+      lastActivity.current = Date.now();
+      setActive(true);
+    };
+    const checkActivity = () => {
+      setActive(document.visibilityState === 'visible' && Date.now() - lastActivity.current < activeWindowMs);
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') markActivity();
+      else setActive(false);
+    };
+    window.addEventListener('focus', markActivity);
+    window.addEventListener('pointerdown', markActivity);
+    window.addEventListener('keydown', markActivity);
+    window.addEventListener('scroll', markActivity, true);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    const timer = window.setInterval(checkActivity, 15_000);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', markActivity);
+      window.removeEventListener('pointerdown', markActivity);
+      window.removeEventListener('keydown', markActivity);
+      window.removeEventListener('scroll', markActivity, true);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, []);
+
+  return active;
+}
+
 export function App() {
+  const appActive = useAppActive();
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
@@ -153,6 +192,7 @@ export function App() {
   const db = openedDb?.workspaceId === workspaceId ? openedDb.db : null;
   const activeWorkspaceId = useRef(workspaceId);
   activeWorkspaceId.current = workspaceId;
+  const lastAutomaticSyncAttempt = useRef(new Map<string, number>());
   const [route, setRoute] = useState<Route>(() => routeFromPath(location.pathname));
   const section = route.section;
   const [autoSync, setAutoSync] = useState(() => localStorage.getItem(autoSyncKey) !== '0');
@@ -201,22 +241,6 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!session) return;
-    let cancelled = false;
-    const checkConnection = () => {
-      void api('/health').then(() => {
-        if (!cancelled) setServerDisconnected(false);
-      }).catch(cause => {
-        if (!cancelled) setServerDisconnected(cause instanceof ApiUnavailableError);
-      });
-    };
-    checkConnection();
-    const timer = window.setInterval(checkConnection, 30_000);
-    window.addEventListener('online', checkConnection);
-    return () => { cancelled = true; window.clearInterval(timer); window.removeEventListener('online', checkConnection); };
-  }, [session?.account.id]);
-
-  useEffect(() => {
     setLastSyncedAt(workspaceId ? Number(localStorage.getItem(lastSyncKey(workspaceId))) || null : null);
     setSyncPhase('idle');
   }, [workspaceId]);
@@ -227,30 +251,34 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!session) return;
+    if (!session || !appActive) return;
     let cancelled = false;
     const load = async () => {
       const catalogDb = await openLocalCatalog();
       const cached = await readLocalCatalog(catalogDb);
       if (!cancelled) { setCatalogEquipment(cached.equipment); setCatalogInventory(cached.inventory); }
       try {
-        await syncLocalCatalog(catalogDb);
+        const refreshed = await syncLocalCatalog(catalogDb);
+        if (!refreshed || cancelled) return;
+        setServerDisconnected(false);
         const updated = await readLocalCatalog(catalogDb);
-        if (!cancelled) {
-          setCatalogEquipment(updated.equipment);
-          setCatalogInventory(updated.inventory);
-          setCatalogRevision(revision => revision + 1);
-        }
-      } catch { /* Cached catalog remains searchable offline. */ }
+        if (cancelled) return;
+        setCatalogEquipment(updated.equipment);
+        setCatalogInventory(updated.inventory);
+        setCatalogRevision(revision => revision + 1);
+      } catch (cause) {
+        if (!cancelled && cause instanceof ApiUnavailableError) setServerDisconnected(true);
+        // Cached catalog remains searchable offline.
+      }
     };
     const refreshCatalog = () => {
       void load().catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
     };
     refreshCatalog();
-    const timer = window.setInterval(refreshCatalog, 5 * 60_000);
+    const timer = window.setInterval(refreshCatalog, 60 * 60_000);
     window.addEventListener('online', refreshCatalog);
     return () => { cancelled = true; window.clearInterval(timer); window.removeEventListener('online', refreshCatalog); };
-  }, [session?.account.id]);
+  }, [session?.account.id, appActive]);
 
   useEffect(() => {
     if (!db || !workspaceId || !catalogRevision) return;
@@ -396,32 +424,40 @@ export function App() {
     }
   }, [refresh]);
 
+  const runAutomaticSync = useCallback((activeDb: LocalDb, targetWorkspaceId: string) => {
+    const now = Date.now();
+    const lastAttempt = Math.max(lastAutomaticSyncAttempt.current.get(targetWorkspaceId) || 0,
+      Number(localStorage.getItem(lastSyncKey(targetWorkspaceId))) || 0);
+    if (now - lastAttempt < 60_000) return;
+    lastAutomaticSyncAttempt.current.set(targetWorkspaceId, now);
+    void runSync(activeDb, targetWorkspaceId);
+  }, [runSync]);
+
   useEffect(() => {
     if (!workspaceId || !session) return;
     let cancelled = false;
     setOpenedDb(null);
     openLocalDb(workspaceId).then(async activeDb => {
       if (cancelled) return;
-      setOpenedDb({ workspaceId, db: activeDb });
       await refresh(activeDb, workspaceId);
-      if (autoSync) await runSync(activeDb, workspaceId);
+      if (!cancelled) setOpenedDb({ workspaceId, db: activeDb });
     }).catch(cause => setError(cause instanceof Error ? cause.message : String(cause)));
     return () => { cancelled = true; };
-  }, [workspaceId, session, refresh, runSync, autoSync]);
+  }, [workspaceId, session, refresh]);
 
   useEffect(() => {
-    if (!db || !workspaceId || !autoSync) return;
-    const callback = () => { void runSync(db, workspaceId); };
-    const timer = window.setInterval(callback, 30_000);
+    if (!db || !workspaceId || !autoSync || !appActive) return;
+    const callback = () => { runAutomaticSync(db, workspaceId); };
+    callback();
+    const timer = window.setInterval(callback, 5 * 60_000);
     window.addEventListener('online', callback);
     return () => { window.clearInterval(timer); window.removeEventListener('online', callback); };
-  }, [db, workspaceId, runSync, autoSync]);
+  }, [db, workspaceId, runAutomaticSync, autoSync, appActive]);
 
   const changed = useCallback(async () => {
     if (!db || !workspaceId) return;
     await refresh(db, workspaceId);
-    if (autoSync) void runSync(db, workspaceId);
-  }, [db, workspaceId, refresh, runSync, autoSync]);
+  }, [db, workspaceId, refresh]);
 
   async function createWorkspace(name: string) {
     if (!session) return;
