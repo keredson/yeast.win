@@ -524,6 +524,10 @@ export function App() {
   const avatarSrc = session.account.has_avatar ? `/api/me/avatar?v=${avatarVersion}` : undefined;
   const preferredUnits = session.preferred_units || defaultPreferredUnits;
   const activeBase = workspaceBase(workspaceId, session.workspaces);
+  const headerProgress = syncPhase === 'syncing' && syncProgress
+    ? { label: syncProgress.phase === 'uploading' ? 'Sending' : 'Applying', ...syncProgress }
+    : catalogSyncProgress && syncPhase !== 'syncing'
+      ? { label: 'Updating catalog', ...catalogSyncProgress } : null;
 
   return <div className="app-shell">
     <header className="app-header">
@@ -532,6 +536,11 @@ export function App() {
           icon={<MenuOutlined />} onClick={() => setMenuOpen(true)} />
         <div className="brand"><img className="brand-mark" src="/icon.svg" alt="" /><div><strong>Brewlog</strong><small>Batch-first brewing</small></div></div>
       </div>
+      {headerProgress && <div className="header-sync-progress" role="status" aria-live="polite">
+        <span>{headerProgress.label}: {headerProgress.applied} of {headerProgress.total} changes</span>
+        <Progress percent={headerProgress.total ? Math.round(headerProgress.applied / headerProgress.total * 100) : 100}
+          showInfo={false} size="small" strokeColor="#e7b464" trailColor="#56736f" />
+      </div>}
       <div className="header-controls">
         <Select className="workspace-select" value={workspaceId} placeholder="No breweries" disabled={!session.workspaces.length}
           aria-label="Brewery"
@@ -564,16 +573,6 @@ export function App() {
           onNavigate={(name, id) => { id ? showItem(name, id) : showSection(name); setMenuOpen(false); }} /></div>
       </Drawer>
       <main className="app-main">
-        {syncPhase === 'syncing' && syncProgress && <div className="sync-progress" role="status" aria-live="polite">
-          <span>{syncProgress.phase === 'uploading' ? 'Sending' : 'Applying'} {syncProgress.applied} of {syncProgress.total} changes</span>
-          <Progress percent={syncProgress.total ? Math.round(syncProgress.applied / syncProgress.total * 100) : 100}
-            showInfo={false} size="small" />
-        </div>}
-        {catalogSyncProgress && syncPhase !== 'syncing' && <div className="sync-progress" role="status" aria-live="polite">
-          <span>Updating shared catalog: {catalogSyncProgress.applied} of {catalogSyncProgress.total} changes</span>
-          <Progress percent={catalogSyncProgress.total ? Math.round(catalogSyncProgress.applied / catalogSyncProgress.total * 100) : 100}
-            showInfo={false} size="small" />
-        </div>}
         {error && <Alert type="warning" showIcon closable onClose={() => setError('')} message={error} className="page-alert" />}
         {section === 'me' ? <AccountSection username={session.account.username} avatarSrc={avatarSrc}
           workspaces={session.workspaces} activeWorkspaceId={workspaceId} db={db} onWorkspaceDataChanged={changed}
