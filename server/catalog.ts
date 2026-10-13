@@ -5,6 +5,8 @@ import { catalogModelTables, catalogSupplyTables, catalogSchemaVersion,
   antonPaarEquipment, vevorModelName,
   type CatalogChanges, type CatalogEquipment, type CatalogInventory } from '../shared/catalog.ts';
 import { boilOffKinds, vesselKinds } from '../shared/equipment.ts';
+import { catalogManufacturers, catalogModelImages, expandedCatalogEquipment,
+  existingModelSources } from '../shared/catalogEquipmentExpansion.ts';
 import { encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 import { projectRoot } from './db.ts';
 
@@ -139,7 +141,110 @@ export function openCatalogDb(dataDir: string): Database.Database {
       const crystal = db.prepare('SELECT 1 FROM supplies WHERE id = ?').get('inventory_crystal_60');
       if (crystal) db.prepare('INSERT OR IGNORE INTO supply_grain_specs(supply_id, color_lovibond) VALUES (?, ?)')
         .run('inventory_crystal_60', 60);
-      db.pragma(`user_version = ${catalogSchemaVersion}`);
+      db.pragma('user_version = 14');
+    })();
+  }
+  if ((db.pragma('user_version', { simple: true }) as number) === 14) {
+    // CR-SQLite refreshes the altered table's triggers on commit. Creating and
+    // writing a second CRR in that same transaction leaves its schema cache stale.
+    db.transaction(() => {
+      const missingColumns = ['product_url', 'image_url', 'thumbnail_url'].filter(column =>
+        !(db.pragma('table_info(equipment_models)') as { name: string }[]).some(row => row.name === column));
+      if (missingColumns.length) {
+        db.prepare("SELECT crsql_begin_alter('equipment_models')").get();
+        for (const column of missingColumns) db.exec(`ALTER TABLE equipment_models ADD COLUMN ${column} TEXT`);
+        db.prepare("SELECT crsql_commit_alter('equipment_models')").get();
+      }
+    })();
+    db.transaction(() => {
+      db.exec(catalogModelTables.manufacturers);
+      if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'manufacturers__crsql_clock'").get()) {
+        db.prepare("SELECT crsql_as_crr('manufacturers')").get();
+      }
+      const addManufacturer = db.prepare(`INSERT INTO manufacturers(name, website_url, logo_url) VALUES (?, ?, ?)
+        ON CONFLICT(name) DO UPDATE SET website_url = COALESCE(manufacturers.website_url, excluded.website_url),
+        logo_url = COALESCE(manufacturers.logo_url, excluded.logo_url)`);
+      for (const maker of catalogManufacturers) addManufacturer.run(maker.name, maker.website_url,
+        'logo_url' in maker ? maker.logo_url : null);
+      for (const row of db.prepare('SELECT DISTINCT manufacturer FROM equipment_models WHERE manufacturer IS NOT NULL').all() as { manufacturer: string }[]) {
+        addManufacturer.run(row.manufacturer, null, null);
+      }
+      const updateModel = db.prepare(`UPDATE equipment_models SET
+        manufacturer = COALESCE(manufacturer, @manufacturer),
+        product_url = COALESCE(product_url, @product_url),
+        image_url = COALESCE(image_url, @image_url),
+        thumbnail_url = COALESCE(thumbnail_url, @thumbnail_url) WHERE id = @id`);
+      const insertModel = db.prepare(`INSERT OR IGNORE INTO equipment_models
+        (id, manufacturer, model_name, kind, product_url, image_url, thumbnail_url)
+        VALUES (@id, @manufacturer, @name, @kind, @product_url, @image_url, @thumbnail_url)`);
+      const fill = (table: string, column: string, id: string, value: number | undefined) => {
+        if (value == null) return;
+        db.prepare(`INSERT INTO ${table}(model_id, ${column}) VALUES (?, ?)
+          ON CONFLICT(model_id) DO UPDATE SET ${column} = COALESCE(${table}.${column}, excluded.${column})`).run(id, value);
+      };
+      const addChannel = db.prepare(`INSERT OR IGNORE INTO model_measurement_channels
+        (id, model_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`);
+      const addModelValues = (item: CatalogEquipment) => {
+        if (vesselKinds.has(item.kind)) db.prepare('INSERT OR IGNORE INTO model_liquid_containment(model_id) VALUES (?)').run(item.id);
+        if (boilOffKinds.has(item.kind)) db.prepare('INSERT OR IGNORE INTO model_heating(model_id) VALUES (?)').run(item.id);
+        fill('model_liquid_containment', 'capacity_liters', item.id, item.capacity_liters ?? undefined);
+        fill('model_pressure_rating', 'max_pressure_kpa', item.id, item.max_pressure_kpa ?? undefined);
+        fill('model_heating', 'rated_power_watts', item.id, item.rated_power_watts ?? undefined);
+        fill('model_cooling', 'rated_heat_removal_watts', item.id, item.rated_heat_removal_watts ?? undefined);
+        if (item.built_in_temperature_control) db.prepare(`INSERT OR IGNORE INTO model_temperature_control
+          (model_id, min_temperature_c, max_temperature_c) VALUES (?, ?, ?)`).run(item.id,
+          item.min_temperature_c ?? null, item.max_temperature_c ?? null);
+        const measurementKinds: Record<string, string> = { hydrometer: 'gravity', thermometer: 'temperature',
+          ph_meter: 'ph', refractometer: 'gravity', scale: 'mass' };
+        const measurementKind = measurementKinds[item.kind];
+        if (measurementKind) {
+          const scale = ['SG', '°Plato', '°Brix', 'pH'].includes(item.measurement_unit || '') ? item.measurement_unit : null;
+          addChannel.run(`${item.id}:${measurementKind}`, item.id, measurementKind,
+            item.measurement_min ?? null, item.measurement_max ?? null,
+            scale ? null : item.measurement_unit ?? null, scale);
+        }
+        for (const channel of item.measurement_channels || []) addChannel.run(channel.id, item.id,
+          channel.measurement_kind, channel.measurement_min ?? null, channel.measurement_max ?? null,
+          channel.measurement_unit ?? null, channel.measurement_scale ?? null);
+      };
+      for (const item of expandedCatalogEquipment) {
+        const params = { ...item, manufacturer: item.manufacturer ?? null, product_url: item.product_url ?? null,
+          image_url: item.image_url ?? null, thumbnail_url: item.thumbnail_url ?? null };
+        insertModel.run(params);
+        updateModel.run(params);
+        addModelValues(item);
+      }
+      for (const [id, source] of Object.entries(existingModelSources)) {
+        updateModel.run({ id, manufacturer: source.manufacturer ?? null, product_url: source.product_url ?? null,
+          image_url: null, thumbnail_url: null });
+        if (source.capacity_liters != null) fill('model_liquid_containment', 'capacity_liters', id, source.capacity_liters);
+        if (source.rated_power_watts != null) fill('model_heating', 'rated_power_watts', id, source.rated_power_watts);
+        if (source.measurement_min != null || source.measurement_max != null) {
+          const kind = id === 'equipment_thermapen_one' ? 'temperature' : 'gravity';
+          const scale = ['SG', '°Plato', '°Brix', 'pH'].includes(source.measurement_unit || '');
+          db.prepare(`UPDATE model_measurement_channels SET
+            measurement_min = COALESCE(measurement_min, ?), measurement_max = COALESCE(measurement_max, ?),
+            measurement_unit = COALESCE(measurement_unit, ?), measurement_scale = COALESCE(measurement_scale, ?)
+            WHERE id = ?`).run(source.measurement_min ?? null, source.measurement_max ?? null,
+            scale ? null : source.measurement_unit ?? null, scale ? source.measurement_unit : null, `${id}:${kind}`);
+        }
+      }
+      const inferredManufacturers: [string, string][] = [
+        ['equipment_anton_paar_', 'Anton Paar'], ['equipment_rapt_', 'KegLand'],
+        ['equipment_fermzilla_', 'KegLand'], ['equipment_brewzilla_', 'KegLand'],
+        ['equipment_digiboil_', 'KegLand'], ['equipment_grainfather_', 'Grainfather']
+      ];
+      const assignManufacturer = db.prepare(`UPDATE equipment_models SET manufacturer = ?
+        WHERE id = ? AND manufacturer IS NULL`);
+      for (const { id } of db.prepare('SELECT id FROM equipment_models').all() as { id: string }[]) {
+        const maker = inferredManufacturers.find(([prefix]) => id.startsWith(prefix))?.[1];
+        if (maker) assignManufacturer.run(maker, id);
+      }
+      for (const [id, images] of Object.entries(catalogModelImages)) {
+        updateModel.run({ id, manufacturer: null, product_url: null, ...images });
+      }
+      db.pragma('user_version = 15');
     })();
   }
   db.prepare(`UPDATE equipment_models SET model_name = ?

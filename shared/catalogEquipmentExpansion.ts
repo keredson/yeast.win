@@ -1,0 +1,180 @@
+import type { CatalogEquipment } from './catalog.ts';
+
+// Product pages are manufacturer sources for the model identity and populated specifications.
+// Leave variant-dependent ratings empty on model names that span multiple electrical versions.
+export const catalogManufacturers = [
+  { name: 'Anton Paar', website_url: 'https://www.anton-paar.com/' },
+  { name: 'Anvil Brewing', website_url: 'https://anvilbrewing.com/' },
+  { name: 'Apera Instruments', website_url: 'https://aperainst.com/' },
+  { name: 'Baron Brew Equipment', website_url: 'https://tilthydrometer.com/',
+    logo_url: 'https://tilthydrometer.com/cdn/shop/files/tilt-logo_32x32.png?v=1613503240' },
+  { name: 'Blichmann Engineering', website_url: 'https://www.blichmannengineering.com/' },
+  { name: 'BrewBuilt', website_url: 'https://brewbuilt.com/',
+    logo_url: 'https://brewbuilt.com/cdn/shop/files/BrewBuilt_Full_Logo_Black_49d93f87-4e74-46c3-96bc-b5bca620b5c2.png?crop=center&height=32&v=1767988859&width=32' },
+  { name: 'Brewtools', website_url: 'https://www.brewtools.com/' },
+  { name: 'Clawhammer Supply', website_url: 'https://www.clawhammersupply.com/',
+    logo_url: 'https://www.clawhammersupply.com/cdn/shop/files/favicon.png?crop=center&height=32&v=1723832723&width=32' },
+  { name: 'Escali', website_url: 'https://escali.com/' },
+  { name: 'Grainfather', website_url: 'https://grainfather.com/' },
+  { name: 'Hanna Instruments', website_url: 'https://hannainst.com/' },
+  { name: 'Inkbird', website_url: 'https://www.inkbird.com/',
+    logo_url: 'https://www.inkbird.com/cdn/shop/files/logo_icon_ink.png?crop=center&height=32&v=1705477109&width=32' },
+  { name: 'KegLand', website_url: 'https://kegland.com.au/',
+    logo_url: 'https://kegland.com.au/cdn/shop/files/favicon.png?crop=center&height=32&v=1674426047&width=32' },
+  { name: 'Kegco', website_url: 'https://kegco.com/',
+    logo_url: 'https://kegco.com/cdn/shop/files/favicon_96x96.png?v=1711484858' },
+  { name: 'Milwaukee Instruments', website_url: 'https://milwaukeeinstruments.com/' },
+  { name: 'Northern Brewer', website_url: 'https://www.northernbrewer.com/' },
+  { name: 'Speidel', website_url: 'https://www.speidels-braumeister.de/',
+    logo_url: 'https://www.speidels-braumeister.de/files/share/favicon-32x32.png' },
+  { name: 'Spike Brewing', website_url: 'https://spikebrewing.com/',
+    logo_url: 'https://spikebrewing.com/cdn/shop/files/favicon.png?v=1644277722' },
+  { name: 'Ss Brewtech', website_url: 'https://www.ssbrewtech.com/',
+    logo_url: 'https://www.ssbrewtech.com/cdn/shop/files/FB_2019_LOGO_180x180.jpg?v=1614286535' },
+  { name: 'ThermoWorks', website_url: 'https://www.thermoworks.com/' },
+  { name: 'VEVOR', website_url: 'https://www.vevor.com/' }
+] as const;
+
+export const expandedCatalogEquipment: CatalogEquipment[] = [
+  { id: 'equipment_brewtools_b40pro_230v', name: 'Brewtools B40pro 230 V', manufacturer: 'Brewtools', kind: 'all_in_one',
+    capacity_liters: 46, rated_power_watts: 3200, built_in_temperature_control: true,
+    product_url: 'https://docs.brewtools.com/brewing/pro-series-brewing-system/pro-series-brewing-system' },
+  { id: 'equipment_brewtools_b80pro_230v', name: 'Brewtools B80pro 230 V', manufacturer: 'Brewtools', kind: 'all_in_one',
+    capacity_liters: 90, rated_power_watts: 6000, built_in_temperature_control: true,
+    product_url: 'https://docs.brewtools.com/brewing/pro-series-brewing-system/pro-series-brewing-system' },
+  { id: 'equipment_clawhammer_10_5_120v', name: 'Clawhammer Supply 10.5 gal 120 V Brewing System', manufacturer: 'Clawhammer Supply',
+    kind: 'all_in_one', capacity_liters: 39.7471, rated_power_watts: 1650, built_in_temperature_control: true,
+    product_url: 'https://www.clawhammersupply.com/products/digital-electric-120v-homebrew-beer-system' },
+  { id: 'equipment_grainfather_g70v2', name: 'Grainfather G70v2 230 V', manufacturer: 'Grainfather', kind: 'all_in_one',
+    rated_power_watts: 3300, built_in_temperature_control: true,
+    product_url: 'https://us.grainfather.com/pages/compare-the-grainfather-brewing-systems' },
+  { id: 'equipment_speidel_braumeister_plus_20', name: 'Speidel Braumeister PLUS 20 L', manufacturer: 'Speidel', kind: 'all_in_one',
+    rated_power_watts: 2000, built_in_temperature_control: true,
+    product_url: 'https://shop.speidels-braumeister.de/en/20-litre-braumeister/20-litre-braumeister-plus1' },
+  { id: 'equipment_speidel_braumeister_plus_50', name: 'Speidel Braumeister PLUS 50 L', manufacturer: 'Speidel', kind: 'all_in_one',
+    rated_power_watts: 3200, built_in_temperature_control: true,
+    product_url: 'https://www.speidels-braumeister.de/en/braumeister/braumeister-comparison.html' },
+  { id: 'equipment_digiboil_35l_240v', name: 'KegLand DigiBoil 35 L 240 V', manufacturer: 'KegLand', kind: 'electric_kettle',
+    capacity_liters: 35, rated_power_watts: 2400, built_in_temperature_control: true,
+    product_url: 'https://kegland.com.au/products/35l-digiboil-digital-turbo-boiler-2400watt' },
+  { id: 'equipment_spike_flex_plus_7gal', name: 'Spike FLEX+ 7 gal', manufacturer: 'Spike Brewing', kind: 'fermenter',
+    capacity_liters: 26.4979, max_pressure_kpa: 103.421,
+    product_url: 'https://spikebrewing.com/products/flexplus' },
+  { id: 'equipment_spike_og_kettle_10gal', name: 'Spike OG Kettle 10 gal', manufacturer: 'Spike Brewing', kind: 'kettle',
+    capacity_liters: 37.8541, product_url: 'https://spikebrewing.com/products/the-og-kettle-new?var=43407266021612' },
+  { id: 'equipment_ss_unitank_2_0_7gal', name: 'Ss Brewtech Unitank 2.0 7 gal', manufacturer: 'Ss Brewtech', kind: 'fermenter',
+    capacity_liters: 26.4979, max_pressure_kpa: 103.421, product_url: 'https://www.ssbrewtech.com/products/unitank-2-0' },
+  { id: 'equipment_ss_brew_bucket_7gal', name: 'Ss Brewtech Brew Bucket 2.0 7 gal', manufacturer: 'Ss Brewtech', kind: 'fermenter',
+    capacity_liters: 26.4979, product_url: 'https://www.ssbrewtech.com/products/brew-bucket-2-0' },
+  { id: 'equipment_ss_brew_kettle_10gal', name: 'Ss Brewtech Brew Kettle 10 gal', manufacturer: 'Ss Brewtech', kind: 'kettle',
+    capacity_liters: 37.8541, product_url: 'https://www.ssbrewtech.com/products/ss-tc-brew-kettle' },
+  { id: 'equipment_blichmann_boiler_g2_10gal', name: 'Blichmann BoilerMaker G2 10 gal', manufacturer: 'Blichmann Engineering',
+    kind: 'kettle', capacity_liters: 37.8541,
+    product_url: 'https://www.blichmannengineering.com/product/10-gallon-boilermaker-g2-group/' },
+  { id: 'equipment_brewbuilt_x3_uni_7gal', name: 'BrewBuilt X3 Jacketed Uni 7 gal', manufacturer: 'BrewBuilt',
+    kind: 'fermenter', capacity_liters: 29.3748,
+    product_url: 'https://brewbuilt.com/products/brewbuilt-x3-jacketed-uni-conical-fermenter' },
+  { id: 'equipment_brewbuilt_electric_kettle_10gal', name: 'BrewBuilt Electric Brewing Kettle 10 gal 240 V',
+    manufacturer: 'BrewBuilt', kind: 'electric_kettle', capacity_liters: 37.8541, rated_power_watts: 3750,
+    product_url: 'https://brewbuilt.com/products/brewbuilt-electric-brewing-kettle-tc-fpt-ball-valve' },
+  { id: 'equipment_kegco_km5g_sth', name: 'Kegco KM5G-STH Ball Lock Keg 5 gal', manufacturer: 'Kegco', kind: 'keg',
+    capacity_liters: 19, product_url: 'https://kegco.com/products/5-gallon-ball-lock-keg-with-strap-handle' },
+  { id: 'equipment_big_mouth_bubbler_evo2_6_5gal', name: 'Northern Brewer Big Mouth Bubbler EVO 2 6.5 gal',
+    manufacturer: 'Northern Brewer', kind: 'fermenter', capacity_liters: 24.6052,
+    product_url: 'https://www.northernbrewer.com/products/big-mouth-bubbler-evo-2-6-5-gallon' },
+  { id: 'equipment_tilt_pro', name: 'Tilt Pro Hydrometer and Thermometer', manufacturer: 'Baron Brew Equipment', kind: 'hydrometer',
+    measurement_min: 0.99, measurement_max: 1.12, measurement_unit: 'SG',
+    measurement_channels: [{ id: 'equipment_tilt_pro:temperature', model_id: 'equipment_tilt_pro',
+      measurement_kind: 'temperature', measurement_min: -17.8, measurement_max: 60, measurement_unit: '°C' }],
+    product_url: 'https://tilthydrometer.com/products/tilt-pro-wireless-hydrometer-and-thermometer' },
+  { id: 'equipment_hanna_hi981031', name: 'Hanna HI981031 Beer pH Tester', manufacturer: 'Hanna Instruments', kind: 'ph_meter',
+    measurement_min: 0, measurement_max: 12, measurement_unit: 'pH',
+    product_url: 'https://hannainst.com/beer-ph-tester.html' },
+  { id: 'equipment_milwaukee_mw102', name: 'Milwaukee MW102 PRO+ pH Meter', manufacturer: 'Milwaukee Instruments', kind: 'ph_meter',
+    measurement_min: -2, measurement_max: 16, measurement_unit: 'pH',
+    product_url: 'https://milwaukeeinstruments.com/milwaukee-MW102-pro-ph-meter-with-temperature-probe/' }
+];
+
+// These image URLs come from the product pages' image metadata. Keep them separate
+// from capability data so a missing or changed photo never affects the model specs.
+export const catalogModelImages: Record<string, { image_url: string; thumbnail_url: string }> = {
+  equipment_clawhammer_10_5_120v: {
+    image_url: 'https://www.clawhammersupply.com/cdn/shop/files/10_Gallon_120_Transparent.png?crop=center&height=630&v=1731513286&width=1200',
+    thumbnail_url: 'https://www.clawhammersupply.com/cdn/shop/files/10_Gallon_120_Transparent.png?crop=center&height=160&v=1731513286&width=160' },
+  equipment_speidel_braumeister_plus_20: {
+    image_url: 'https://shop.speidels-braumeister.de/media/images/info/BM20_Vorteile.jpg',
+    thumbnail_url: 'https://shop.speidels-braumeister.de/media/images/info/BM20_Vorteile.jpg' },
+  equipment_digiboil_35l_240v: {
+    image_url: 'https://kegland.com.au/cdn/shop/files/KL07252_-_35L_DigiBoil_-01.jpg?v=1755839833',
+    thumbnail_url: 'https://kegland.com.au/cdn/shop/files/KL07252_-_35L_DigiBoil_-01.jpg?v=1755839833&width=160' },
+  equipment_spike_flex_plus_7gal: {
+    image_url: 'https://cdn.shopify.com/s/files/1/0152/1071/products/FLEX_3-port-Front_1500x1500_SE.jpg?v=1614972300',
+    thumbnail_url: 'https://cdn.shopify.com/s/files/1/0152/1071/products/FLEX_3-port-Front_1500x1500_SE.jpg?v=1614972300&width=160' },
+  equipment_spike_og_kettle_10gal: {
+    image_url: 'https://cdn.shopify.com/s/files/1/0152/1071/products/10GSpike_Kettle_1cde49bd-5b97-4cfd-8db9-84cebec27419.jpg?v=1666716668',
+    thumbnail_url: 'https://cdn.shopify.com/s/files/1/0152/1071/products/10GSpike_Kettle_1cde49bd-5b97-4cfd-8db9-84cebec27419.jpg?v=1666716668&width=160' },
+  equipment_ss_brew_bucket_7gal: {
+    image_url: 'https://www.ssbrewtech.com/cdn/shop/files/BrewBucket_hero2_update_600x.jpg?v=1731694093',
+    thumbnail_url: 'https://www.ssbrewtech.com/cdn/shop/files/BrewBucket_hero2_update_600x.jpg?v=1731694093&width=160' },
+  equipment_ss_brew_kettle_10gal: {
+    image_url: 'https://www.ssbrewtech.com/cdn/shop/products/A7R9966_9ffa304f-4ef1-4c50-84ed-07bff65ce6db_600x.jpg?v=1587576717',
+    thumbnail_url: 'https://www.ssbrewtech.com/cdn/shop/products/A7R9966_9ffa304f-4ef1-4c50-84ed-07bff65ce6db_600x.jpg?v=1587576717&width=160' },
+  equipment_brewbuilt_x3_uni_7gal: {
+    image_url: 'https://brewbuilt.com/cdn/shop/files/58873.png?v=1766514754',
+    thumbnail_url: 'https://brewbuilt.com/cdn/shop/files/58873.png?v=1766514754&width=160' },
+  equipment_brewbuilt_electric_kettle_10gal: {
+    image_url: 'https://brewbuilt.com/cdn/shop/files/45793.png?v=1777652567',
+    thumbnail_url: 'https://brewbuilt.com/cdn/shop/files/45793.png?v=1777652567&width=160' },
+  equipment_kegco_km5g_sth: {
+    image_url: 'https://kegco.com/cdn/shop/files/KM5G-STH-1500.jpg?v=1790886241',
+    thumbnail_url: 'https://kegco.com/cdn/shop/files/KM5G-STH-1500.jpg?v=1790886241&width=160' },
+  equipment_big_mouth_bubbler_evo2_6_5gal: {
+    image_url: 'https://www.northernbrewer.com/cdn/shop/products/41326-Big-Mouth-Bubbler-EVO2-6.5-Gallon-Fermentor_cdc1cc77-dbd4-4529-ad58-880eb2497bb2.jpg?v=1756920482',
+    thumbnail_url: 'https://www.northernbrewer.com/cdn/shop/products/41326-Big-Mouth-Bubbler-EVO2-6.5-Gallon-Fermentor_cdc1cc77-dbd4-4529-ad58-880eb2497bb2.jpg?v=1756920482&width=160' },
+  equipment_hanna_hi981031: {
+    image_url: 'https://cdn11.bigcommerce.com/s-l8qlnhq2eh/products/5594/images/10352/beer-ph-tester-720-hi981031__19677.1574433300.386.513.jpg?c=2',
+    thumbnail_url: 'https://cdn11.bigcommerce.com/s-l8qlnhq2eh/products/5594/images/10352/beer-ph-tester-720-hi981031__19677.1574433300.386.513.jpg?c=2' },
+  equipment_milwaukee_mw102: {
+    image_url: 'https://cdn11.bigcommerce.com/s-m1jiibmpmc/products/125/images/1249/MW102__84826.1608135308.386.513.jpg?c=2',
+    thumbnail_url: 'https://cdn11.bigcommerce.com/s-m1jiibmpmc/products/125/images/1249/MW102__84826.1608135308.386.513.jpg?c=2' },
+  equipment_rapt_pill: {
+    image_url: 'https://kegland.com.au/cdn/shop/files/KL20596-YELLOWBaseModel-RAPTPill-00.jpg?v=1759890866',
+    thumbnail_url: 'https://kegland.com.au/cdn/shop/files/KL20596-YELLOWBaseModel-RAPTPill-00.jpg?v=1759890866&width=160' },
+  equipment_inkbird_itc_308: {
+    image_url: 'https://www.inkbird.com/cdn/shop/files/temperature-controller-itc-308-series-659693.png?v=1745376388',
+    thumbnail_url: 'https://www.inkbird.com/cdn/shop/files/temperature-controller-itc-308-series-659693.png?v=1745376388&width=160' },
+  equipment_thermapen_one: {
+    image_url: 'https://www.thermoworks.com/cdn/shop/files/Thermapen_ONE_-_RED_-_Angle_2-1.webp?v=1773247034',
+    thumbnail_url: 'https://www.thermoworks.com/cdn/shop/files/Thermapen_ONE_-_RED_-_Angle_2-1.webp?v=1773247034&width=160' },
+  equipment_brewzilla_35l_g4: {
+    image_url: 'https://kegland.com.au/cdn/shop/files/KL27434_-_Gen4.1_BrewZilla_35L_-_01-01.jpg?v=1722301795',
+    thumbnail_url: 'https://kegland.com.au/cdn/shop/files/KL27434_-_Gen4.1_BrewZilla_35L_-_01-01.jpg?v=1722301795&width=160' },
+  equipment_vevor_35l: {
+    image_url: 'https://img.vevorstatic.com/us%2FPJNJQBXGO220V0G5NV2%2Fgoods_grid-v9%2Fbeer-brewer-m100-1.2.jpg?timestamp=1658110399000&format=webp',
+    thumbnail_url: 'https://img.vevorstatic.com/us%2FPJNJQBXGO220V0G5NV2%2Fgoods_grid-v9%2Fbeer-brewer-m100-1.2.jpg?timestamp=1658110399000&format=webp&width=160' }
+};
+
+// Existing model IDs retain their names and user edits; these source fields fill only missing values.
+export const existingModelSources: Record<string, Pick<CatalogEquipment,
+  'manufacturer' | 'product_url' | 'capacity_liters' | 'rated_power_watts' | 'measurement_min' | 'measurement_max' |
+  'measurement_unit' | 'min_temperature_c' | 'max_temperature_c'>> = {
+  equipment_grainfather_g30: { manufacturer: 'Grainfather', product_url: 'https://us.grainfather.com/pages/compare-the-grainfather-brewing-systems' },
+  equipment_grainfather_g40: { manufacturer: 'Grainfather', product_url: 'https://us.grainfather.com/pages/compare-the-grainfather-brewing-systems' },
+  equipment_anvil_foundry_10_5: { manufacturer: 'Anvil Brewing', product_url: 'https://anvilbrewing.com/foundry-10-5/', capacity_liters: 39.7471 },
+  equipment_grainfather_gf30: { manufacturer: 'Grainfather', product_url: 'https://us.grainfather.com/pages/gf30-showcase', capacity_liters: 30, rated_power_watts: 30 },
+  equipment_inkbird_itc_308: { manufacturer: 'Inkbird', product_url: 'https://www.inkbird.com/collections/best-seller/products/temperature-controller-itc-308' },
+  equipment_tilt: { manufacturer: 'Baron Brew Equipment', product_url: 'https://tilthydrometer.com/',
+    measurement_min: 0.99, measurement_max: 1.12, measurement_unit: 'SG' },
+  equipment_rapt_pill: { manufacturer: 'KegLand', product_url: 'https://kegland.com.au/products/yellow-rapt-pill-hydrometer-thermometer-wifi-bluetooth' },
+  equipment_thermapen_one: { manufacturer: 'ThermoWorks', product_url: 'https://www.thermoworks.com/products/thermapen-one', measurement_min: -50, measurement_max: 300, measurement_unit: '°C' },
+  equipment_apera_ph60: { manufacturer: 'Apera Instruments',
+    product_url: 'https://aperainst.com/ph60-premium-waterproof-ph-tester-ph-meter-with-replaceable-probe-and-blacklight-apera-instruments' },
+  equipment_escali_primo: { manufacturer: 'Escali', product_url: 'https://kitchensupply.com/products/primo-digital-scale' },
+  equipment_anton_paar_easydens: { manufacturer: 'Anton Paar',
+    product_url: 'https://www.anton-paar.com/ca-en/products/details/beer-hydrometer-easydens/' },
+  equipment_anton_paar_smartref: { manufacturer: 'Anton Paar',
+    product_url: 'https://www.anton-paar.com/sg-en/products/details/smartref/' },
+  equipment_vevor_35l: { manufacturer: 'VEVOR', product_url: 'https://eur.vevor.com/beer-brewing-system-c_11816/vevor-all-in-one-grain-brewing-system-home-beer-brewer-w-circulating-pump-30-l-p_010108577563', rated_power_watts: 2500 },
+  equipment_digiboil_35l: { manufacturer: 'KegLand', product_url: 'https://kegland.com.au/products/35l-digiboil-digital-turbo-boiler-2400watt' },
+  equipment_brewzilla_35l_g4: { manufacturer: 'KegLand', product_url: 'https://kegland.com.au/products/brewzilla-35l-gen-4' }
+};

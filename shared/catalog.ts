@@ -5,6 +5,8 @@ export interface MeasurementChannel { id: string; measurement_kind: string;
   measurement_unit?: string | null; measurement_scale?: string | null }
 export interface CatalogMeasurementChannel extends MeasurementChannel { model_id: string }
 export interface CatalogEquipment { id: string; name: string; kind: string; manufacturer?: string | null;
+  product_url?: string | null; image_url?: string | null; thumbnail_url?: string | null;
+  manufacturer_website_url?: string | null; manufacturer_logo_url?: string | null;
   has_liquid_containment?: boolean; has_pressure_rating?: boolean;
   has_heating?: boolean; has_cooling?: boolean; has_temperature_control?: boolean;
   capacity_liters?: number | null; built_in_temperature_control?: number | boolean | null; max_pressure_kpa?: number | null;
@@ -18,11 +20,14 @@ export interface CatalogInventory { id: string; name: string; category: string; 
   hop_form?: string | null; attenuation_pct?: number | null }
 
 export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
-export const catalogSchemaVersion = 14;
+export const catalogSchemaVersion = 15;
 export const vevorModelName = 'VEVOR Electric Brewing System 9.2 Gal/35 L';
 export const catalogModelTables = {
+  manufacturers: `CREATE TABLE IF NOT EXISTS manufacturers (
+    name TEXT PRIMARY KEY NOT NULL, website_url TEXT, logo_url TEXT)`,
   equipment_models: `CREATE TABLE IF NOT EXISTS equipment_models (
-    id TEXT PRIMARY KEY NOT NULL, manufacturer TEXT, model_name TEXT, kind TEXT)`,
+    id TEXT PRIMARY KEY NOT NULL, manufacturer TEXT, model_name TEXT, kind TEXT,
+    product_url TEXT, image_url TEXT, thumbnail_url TEXT)`,
   model_liquid_containment: `CREATE TABLE IF NOT EXISTS model_liquid_containment (
     model_id TEXT PRIMARY KEY NOT NULL, capacity_liters REAL)`,
   model_pressure_rating: `CREATE TABLE IF NOT EXISTS model_pressure_rating (

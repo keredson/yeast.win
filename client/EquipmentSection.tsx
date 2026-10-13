@@ -618,8 +618,10 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       {matchingModels.length ? <div className="equipment-catalog-list" role="list">
         {matchingModels.map(model => <div key={model.id} role="listitem">
           <button type="button" className="equipment-catalog-option" onClick={() => chooseCatalogModel(model)}>
-            <strong>{model.name}</strong><span>{equipmentKindLabel(model.kind)}{model.measurement_channels?.length
-              ? ` · ${channelSummary(model.measurement_channels)}` : ''}</span>
+            {model.thumbnail_url && <img className="equipment-catalog-thumbnail" src={model.thumbnail_url} alt="" loading="lazy" />}
+            <span className="equipment-catalog-option-name"><strong>{model.name}</strong>
+              <small>{equipmentKindLabel(model.kind)}{model.measurement_channels?.length
+                ? ` · ${channelSummary(model.measurement_channels)}` : ''}</small></span>
           </button>
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching equipment' : 'No catalog equipment available'} />}
@@ -642,7 +644,20 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       onCancel={closeCreation} footer={null} destroyOnHidden>
       {creatingKind && <Form key={`${creatingKind}:${selectedCatalogModel?.id || 'custom'}`} form={equipmentForm} layout="vertical" onFinish={create} preserve={false}
         initialValues={initialEquipmentValues}>
-        {selectedCatalogModel && <p className="muted">Based on {selectedCatalogModel.name}. Review the settings before adding it.</p>}
+        {selectedCatalogModel && <div className="equipment-catalog-source">
+          {selectedCatalogModel.image_url && <img src={selectedCatalogModel.image_url} alt={selectedCatalogModel.name} />}
+          {selectedCatalogModel.manufacturer && <div className="equipment-catalog-manufacturer">
+            {selectedCatalogModel.manufacturer_logo_url && <img src={selectedCatalogModel.manufacturer_logo_url} alt="" />}
+            {selectedCatalogModel.manufacturer_website_url
+              ? <a href={selectedCatalogModel.manufacturer_website_url} target="_blank" rel="noopener noreferrer">
+                {selectedCatalogModel.manufacturer}</a>
+              : selectedCatalogModel.manufacturer}
+          </div>}
+          <p className="muted">Based on {selectedCatalogModel.name}. Review the settings before adding it.
+            {selectedCatalogModel.product_url && <> <a href={selectedCatalogModel.product_url} target="_blank"
+              rel="noopener noreferrer">Product details</a></>}
+          </p>
+        </div>}
         <Form.Item name="name" label="Name" rules={[{ required: true, whitespace: true }]}>
           <Input placeholder="Equipment name" maxLength={120} />
         </Form.Item>

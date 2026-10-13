@@ -133,6 +133,60 @@ test('version 12 catalog adds replicated boil defaults while preserving catalog 
   } finally { db.close(); }
 });
 
+test('version 14 catalog gains manufacturers, product media, and models without replacing edits', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
+  const old = new Database(join(dir, 'catalog.sqlite'));
+  old.loadExtension(join(process.cwd(), 'vendor/crsqlite.so'));
+  old.exec(`CREATE TABLE equipment_models(id TEXT PRIMARY KEY NOT NULL, manufacturer TEXT, model_name TEXT, kind TEXT)`);
+  for (const [name, statement] of Object.entries({ ...catalogModelTables, ...catalogSupplyTables })) {
+    if (name !== 'manufacturers' && name !== 'equipment_models') old.exec(statement);
+  }
+  for (const table of ['equipment_models', ...catalogTables.filter(table => table !== 'manufacturers' && table !== 'equipment_models')]) {
+    old.prepare('SELECT crsql_as_crr(?)').get(table);
+  }
+  old.prepare('INSERT INTO equipment_models(id, manufacturer, model_name, kind) VALUES (?, ?, ?, ?)')
+    .run('equipment_vevor_35l', null, 'My renamed VEVOR', 'all_in_one');
+  old.prepare('INSERT INTO model_heating(model_id, rated_power_watts) VALUES (?, ?)').run('equipment_vevor_35l', 2100);
+  old.prepare('INSERT INTO supplies(id, name, category, unit) VALUES (?, ?, ?, ?)').run('my_hop', 'My hop', 'Hops', 'g');
+  old.pragma('user_version = 14');
+  old.close();
+
+  const db = openCatalogDb(dir);
+  try {
+    assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
+    const vevor = db.prepare(`SELECT manufacturer, model_name, product_url, image_url, thumbnail_url
+      FROM equipment_models WHERE id = 'equipment_vevor_35l'`).get() as Record<string, string>;
+    assert.equal(vevor.model_name, 'My renamed VEVOR');
+    assert.equal(vevor.manufacturer, 'VEVOR');
+    assert.match(vevor.product_url, /vevor\.com/);
+    assert.match(vevor.image_url, /vevorstatic\.com/);
+    assert.ok(vevor.thumbnail_url);
+    assert.equal((db.prepare("SELECT rated_power_watts FROM model_heating WHERE model_id = 'equipment_vevor_35l'")
+      .get() as { rated_power_watts: number }).rated_power_watts, 2100);
+    assert.equal((db.prepare("SELECT name FROM supplies WHERE id = 'my_hop'").get() as { name: string }).name, 'My hop');
+    assert.equal((db.prepare("SELECT capacity_liters FROM model_liquid_containment WHERE model_id = 'equipment_spike_flex_plus_7gal'")
+      .get() as { capacity_liters: number }).capacity_liters, 26.4979);
+    assert.equal((db.prepare("SELECT website_url, logo_url FROM manufacturers WHERE name = 'Spike Brewing'")
+      .get() as { website_url: string; logo_url: string }).website_url, 'https://spikebrewing.com/');
+    assert.ok(catalogChanges(db, 0n).changes.some(change => change.table === 'manufacturers'));
+  } finally { db.close(); }
+});
+
+test('partially upgraded version 14 catalog preserves manufacturer metadata', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
+  const old = openCatalogDb(dir);
+  old.prepare("SELECT crsql_as_table('manufacturers')").get();
+  old.prepare("UPDATE manufacturers SET logo_url = 'https://example.test/my-logo.png' WHERE name = 'Spike Brewing'").run();
+  old.pragma('user_version = 14');
+  old.close();
+  const db = openCatalogDb(dir);
+  try {
+    assert.equal((db.prepare("SELECT logo_url FROM manufacturers WHERE name = 'Spike Brewing'")
+      .get() as { logo_url: string }).logo_url, 'https://example.test/my-logo.png');
+    assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'manufacturers__crsql_clock'").get());
+  } finally { db.close(); }
+});
+
 test('partially upgraded catalog preserves boil defaults when enabling replication', () => {
   const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
   const db = openCatalogDb(dir);
