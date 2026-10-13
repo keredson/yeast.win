@@ -21,7 +21,7 @@ The app should work for a homebrewer with one operation and for an account that 
 | Database | Location | Sync | Purpose |
 | --- | --- | --- | --- |
 | Auth DB | Server only | Never synced as a database to browsers | Login/session data, account avatars, preferred units, integration credentials, push subscriptions, and server jobs. Later: workspace memberships and sharing grants. |
-| Shared catalog DB | Server and devices | Read-only to clients | Common equipment and inventory templates. The server stores `catalog.sqlite`; devices keep a separate persistent SQLite copy and refresh it by version. Copying a template creates an independent brewery item. Templates include common ingredients, supplies, vessels, and instruments. |
+| Shared catalog DB | Server and devices | One-way CR-SQLite changes from server to devices | Common equipment and inventory templates. The server stores `catalog.sqlite`; devices keep a separate persistent CR-SQLite copy and apply only changes after their last server cursor. Copying a template creates an independent brewery item. Templates include common ingredients, supplies, vessels, and instruments. |
 | Workspace DB | Server and authorized devices | Whole-DB sync initially; filtered batch sync later | Batches, plans, actual events, equipment instances, calibrations, inventory, and photos. One DB represents a brewery, not an account or a batch. |
 
 The UI calls each operation a **brewery**; APIs and database tables retain `workspace` as their internal name. An account can own several private breweries. A shared batch stays in its brewery's workspace DB. Batch sharing, follower databases, and workspace membership are **later implementation targets**; they do not block the initial whole-workspace app.
@@ -152,6 +152,8 @@ Inventory is a ledger, not a mutable `quantity_on_hand` field. Additions and pac
 ## Sync and authorization
 
 Initially, sync all CRR changes between an account's device and each private workspace DB it opens. `crsql_changes.db_version` is the replication cursor; `received_at` is for provenance and ingest ordering, not for completeness of sync. Retain source site IDs and use idempotent application/retry. Transport 64-bit SQLite cursor values as BigInt or decimal strings rather than assuming every value fits a JavaScript `number`. HTTPS request/response is sufficient for correctness; WebSockets can reduce latency. Authentication is required, but there is no per-batch permission filtering in the initial implementation.
+
+The shared catalog uses CRR tables and the same change encoding. Devices request changes after their stored server cursor and apply them locally; they never upload catalog changes. Normal updates transfer changed rows only. A new device receives the full history once. Schema upgrades may reset a pre-release local catalog and its cursor.
 
 ### Later: sharing and filtered sync
 
