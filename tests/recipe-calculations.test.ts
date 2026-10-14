@@ -36,6 +36,27 @@ test('sums losses from post-boil equipment for OG, FG and ABV', () => {
   assert.match(result.efficiencyLabel!, /2 L post-boil loss/);
 });
 
+test('batch estimates use event snapshots, unit efficiency, and the batch wort loss override', () => {
+  const stock = [{ ...grain, yield_pct: 60, color_lovibond: 20 }, { ...yeast, attenuation_pct: 50 }];
+  const batchEvents = events.map(event => event.id === 'grain-add' ? { ...event, details: {
+    ...event.details, quantity: 6 } } : event);
+  const result = calculateRecipe(batchEvents, stock, equipment,
+    { target_fermenter_volume_liters: 25, wort_loss_liters: 3 }, {
+      drain: { mash_efficiency_pct: 70 },
+      'grain-add': { yield_pct: 80, color_lovibond: 2, grain_class: 'base' },
+      pitch: { attenuation_pct: 75 }
+    }, {}, 'beer', null, 'batch');
+  const expectedOg = 1 + (6 / 0.45359237 * 46 * .8 * .7) / (28 / 3.785411784) / 1000;
+  assert.ok(Math.abs(result.originalGravity! - expectedOg) < .000001);
+  assert.ok(Math.abs(result.finalGravity! - (1 + (expectedOg - 1) * .25)) < .000001);
+  assert.match(result.efficiencyLabel!, /70% mash efficiency.*3 L post-boil loss/);
+  assert.ok(result.sources.targetLiters.some(line => line.includes('25 L (batch inputs)')));
+  assert.ok(result.sources.originalGravity.some(line => line.includes('6 kg (batch action); extract yield 80% (batch event input)')));
+  assert.ok(result.sources.originalGravity.some(line => line.includes('3 L (batch input)')));
+  assert.ok(result.sources.finalGravity.some(line => line.includes('75% (batch event input)')));
+  assert.ok(result.sources.colorSrm.some(line => line.includes('2 °L (batch event input)')));
+});
+
 test('imported brewhouse efficiency works without selected equipment', () => {
   const imported = calculateRecipe(events, [grain, yeast], [], { target_fermenter_volume_liters: 20, brewhouse_efficiency_pct: 70 }, {});
   assert.ok(imported.originalGravity! > 1.053 && imported.originalGravity! < 1.055);

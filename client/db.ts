@@ -1080,8 +1080,8 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
   await db.tx(async tx => {
     await tx.exec('INSERT INTO batches(id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
       [batchId, name, description, 'active', now, now]);
-    await tx.exec(`INSERT INTO batch_recipe_inputs(id, target_fermenter_volume_liters, brewhouse_efficiency_pct)
-      SELECT ?, r.target_fermenter_volume_liters, r.brewhouse_efficiency_pct
+    await tx.exec(`INSERT INTO batch_recipe_inputs(id, target_fermenter_volume_liters, brewhouse_efficiency_pct, wort_loss_liters)
+      SELECT ?, r.target_fermenter_volume_liters, r.brewhouse_efficiency_pct, r.wort_loss_liters
       FROM recipe_inputs r WHERE r.id = ?`, [batchId, recipe.id]);
     await tx.exec('INSERT OR IGNORE INTO batch_recipe_inputs(id) VALUES (?)', [batchId]);
     for (const plan of plans) {
@@ -1176,8 +1176,8 @@ export async function startBatchFromPrevious(db: DB, sourceBatchId: string, name
     await tx.exec('INSERT INTO batches(id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
       [batchId, name, description || null, 'active', now, now]);
     await tx.exec('INSERT INTO batch_origins(id, source_batch_id) VALUES (?, ?)', [batchId, sourceBatchId]);
-    await tx.exec(`INSERT INTO batch_recipe_inputs(id, target_fermenter_volume_liters, brewhouse_efficiency_pct)
-      SELECT ?, target_fermenter_volume_liters, brewhouse_efficiency_pct
+    await tx.exec(`INSERT INTO batch_recipe_inputs(id, target_fermenter_volume_liters, brewhouse_efficiency_pct, wort_loss_liters)
+      SELECT ?, target_fermenter_volume_liters, brewhouse_efficiency_pct, wort_loss_liters
       FROM batch_recipe_inputs WHERE id = ?`, [batchId, sourceBatchId]);
     await tx.exec('INSERT OR IGNORE INTO batch_recipe_inputs(id) VALUES (?)', [batchId]);
     for (const plan of plans) {

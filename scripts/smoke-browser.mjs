@@ -138,6 +138,7 @@ try {
   const batchName = await page.getByLabel('Batch name').inputValue();
   await page.getByRole('button', { name: 'Create batch' }).click();
   await page.getByRole('heading', { name: batchName }).waitFor();
+  await page.getByRole('region', { name: 'Batch details' }).getByText('Expected OG').waitFor();
   if (!/^\/batch\/[A-Za-z0-9_-]{10,32}$/.test(new URL(page.url()).pathname) || new URL(page.url()).search) {
     throw new Error('Default brewery batch should use a clean root URL');
   }

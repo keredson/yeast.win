@@ -3,6 +3,7 @@ import { Alert, Button, Empty, Form, Input, Modal, Select } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { addBatchPlan, createBatch, eventDetails, eventFormData, listEvents, listPhotos, releaseEquipmentUse,
   startBatchFromRecipe, startBatchFromTemplate, startBatchFromPrevious, updateBatchPlan,
+  breweryMashEfficiency, latestMeasuredMashEfficiencySource,
   type ActualEvent, type Batch, type Equipment, type InventoryItem,
   type LocalDb, type MeasurementKind, type PlanInput, type Recipe, type RecipeType } from './db.ts';
 import { kindLabel } from './constants.ts';
@@ -13,6 +14,8 @@ import { EventTimeline } from './EventTimeline.tsx';
 import { RecipeEquipmentFields } from './RecipeEquipmentFields.tsx';
 import type { PreferredUnits } from './api.ts';
 import type { CatalogInventory, CatalogSupplyCategory } from '../shared/catalog.ts';
+import { calculateRecipe, type RecipeEstimate } from './recipeCalculations.ts';
+import { CalculationsCard } from './CalculationsCard.tsx';
 
 export function BatchSection({ db, basePath, accountId, batches, recipes, equipment, equipmentModels, inventory, catalogInventory, catalogCategories, preferredUnits, selectedId, onSelect, onChanged }: {
   db: LocalDb; basePath: string; accountId: string; batches: Batch[]; recipes: Recipe[]; equipment: Equipment[]; equipmentModels: Equipment[]; inventory: InventoryItem[];
@@ -22,6 +25,8 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   const [events, setEvents] = useState<ActualEvent[]>([]);
   const [details, setDetails] = useState<Record<string, string>>({});
   const [photos, setPhotos] = useState<{ id: string; url: string; batch_event_id: string | null; created_at: number }[]>([]);
+  const [estimate, setEstimate] = useState<RecipeEstimate | null>(null);
+  const [estimateType, setEstimateType] = useState<RecipeType>('beer');
   const [newBatch, setNewBatch] = useState(false);
   const [newBatchForm] = Form.useForm();
   const startFrom = Form.useWatch('start_from', newBatchForm) as string | undefined;
@@ -53,6 +58,41 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   }
   useEffect(() => { void refreshDetail(); }, [db, selectedId, batches]);
   useEffect(() => () => { for (const photo of photos) URL.revokeObjectURL(photo.url); }, [photos]);
+  useEffect(() => {
+    if (!selectedId) { setEstimate(null); return; }
+    let cancelled = false;
+    setEstimate(null);
+    void (async () => {
+      const [batchRows, eventRows, typeRows, breweryEfficiency] = await Promise.all([
+        db.execO<{ target_fermenter_volume_liters: number | null; brewhouse_efficiency_pct: number | null;
+          wort_loss_liters: number | null }>(
+          'SELECT target_fermenter_volume_liters, brewhouse_efficiency_pct, wort_loss_liters FROM batch_recipe_inputs WHERE id = ?', [selectedId]),
+        db.execO<Record<string, unknown> & { id: string }>(`SELECT i.* FROM batch_event_inputs i
+          JOIN batch_events e ON e.id = i.id WHERE e.batch_id = ?`, [selectedId]),
+        db.execO<{ recipe_type: RecipeType }>(`SELECT rt.recipe_type FROM batch_events e
+          JOIN recipe_events re ON re.id = e.recipe_event_id
+          JOIN recipe_types rt ON rt.id = re.recipe_id WHERE e.batch_id = ? LIMIT 1`, [selectedId]),
+        breweryMashEfficiency(db)
+      ]);
+      const recent: Record<string, { value: number; batchName: string }> = {};
+      const equipmentIds = new Set(events.filter(event => event.event_type === 'transfer'
+        && event.details.purpose === 'drain_grain').map(event => String(event.details.mash_equipment_id
+          || events.find(item => item.id === event.anchor_event_id)?.details.equipment_id || '')));
+      for (const id of equipmentIds) {
+        if (id) {
+          const value = await latestMeasuredMashEfficiencySource(db, id);
+          if (value != null) recent[id] = value;
+        }
+      }
+      const recipeType = typeRows[0]?.recipe_type || 'beer';
+      if (!cancelled) {
+        setEstimateType(recipeType);
+        setEstimate(calculateRecipe(events.filter(event => event.skipped_at == null), inventory, equipment, batchRows[0] || {},
+          Object.fromEntries(eventRows.map(row => [row.id, row])), recent, recipeType, breweryEfficiency, 'batch'));
+      }
+    })().catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => { cancelled = true; };
+  }, [db, selectedId, events, inventory, equipment]);
 
   async function changed() { await refreshDetail(); await onChanged(); }
 
@@ -120,6 +160,8 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
             onClick={event => { event.preventDefault(); onSelect(batch.source_batch_id!); }}>{batch.source_batch_name}</a>
           : 'a previous batch'}</p>}
         </div></div>
+      {estimate && <CalculationsCard estimate={estimate} volumeUnit={preferredUnits.volume}
+        showColor={estimateType === 'beer'} label="Batch details" />}
       <EventTimeline events={events} batchStartAt={batch.created_at} equipment={equipment} details={details} photos={photos}
         onEdit={event => event.actual_at != null ? void recordOrEdit(event as ActualEvent) : setEditingPlan(event as ActualEvent)}
         onRecord={event => void recordOrEdit(event)}
