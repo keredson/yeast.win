@@ -42,8 +42,8 @@ const navItems = [
   { key: 'batches', label: 'Batches', icon: AppstoreOutlined },
   { key: 'recipes', label: 'Recipes', icon: BookOutlined },
   { key: 'inventory', label: 'Inventory', icon: InboxOutlined },
-  { key: 'locations', label: 'Locations', icon: EnvironmentOutlined },
-  { key: 'equipment', label: 'Equipment', icon: ToolOutlined }
+  { key: 'equipment', label: 'Equipment', icon: ToolOutlined },
+  { key: 'locations', label: 'Locations', icon: EnvironmentOutlined }
 ] as const;
 type RecordSection = Exclude<Section, 'me' | 'home'>;
 type NavRecord = { id: string; name: string; recipe_type?: RecipeType | null };
@@ -624,10 +624,12 @@ export function App() {
                 onSelect={id => showItem('inventory', id)} onChanged={changed} />)}
             {section === 'locations' && (inventoryWorkspaceId !== workspaceId ? <div className="loading-screen"><Spin description="Loading locations" /></div>
               : <LocationsSection key={workspaceId} db={db} basePath={activeBase} locations={locations} items={inventory} supplies={supplies}
+                equipment={equipment} equipmentModels={equipmentModels} onEquipmentSelect={id => showItem('equipment', id)}
                 selectedId={route.selectedId ? locationForPath(route.selectedId, locations)?.id || route.selectedId : null}
                 onSelect={id => showItem('locations', id)} onInventorySelect={id => showItem('inventory', id)} onChanged={changed} />)}
             {section === 'equipment' && (equipmentWorkspaceId !== workspaceId ? <div className="loading-screen"><Spin description="Loading equipment" /></div>
               : <EquipmentSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} batches={batches} equipment={equipment} models={equipmentModels}
+                locations={locations}
                 catalog={catalogEquipment} preferredUnits={preferredUnits} selectedId={route.selectedId
                   ? equipmentModelForPath(route.selectedId, equipmentModels)?.id
                     || equipmentUnitForPath(route.selectedId, equipment, equipmentModels)?.id || route.selectedId : null}
