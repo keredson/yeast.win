@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Alert, Button, Checkbox, Dropdown, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Table, Tooltip } from 'antd';
 import { CloudOutlined, ContainerOutlined, ControlOutlined, DashboardOutlined, EditOutlined, ExperimentOutlined,
-  FireOutlined, PlusOutlined, SwapOutlined } from '@ant-design/icons';
+  FireOutlined, MoreOutlined, PlusOutlined, SwapOutlined } from '@ant-design/icons';
 import { boilOffKinds, capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { assignEquipmentToBatch, createEquipment, createEquipmentUnit, deleteEquipment, listEquipmentUses, releaseEquipmentUse,
+import { assignEquipmentToBatch, createEquipment, createEquipmentUnit, deleteEquipment, deleteEquipmentUnits,
+  listEquipmentUses, releaseEquipmentUse,
   addEquipmentModelCapability, removeEquipmentModelCapability, restoreEquipmentModelCapability,
   updateEquipmentBoilHeatLoss, clearEquipmentBoilHeatLoss,
   updateEquipmentModelBoilHeatLoss, clearEquipmentModelBoilHeatLoss,
@@ -174,6 +175,9 @@ function equipmentCapabilities(row: Equipment): ReactNode {
     <Tooltip key={label} title={label}><span role="img" aria-label={label} className="equipment-capability">{icon}</span></Tooltip>)}</div> : '—';
 }
 
+type EquipmentIndexRow = { key: string; model: Equipment; units: Equipment[]; locationId?: string | null;
+  child?: boolean; children?: EquipmentIndexRow[] };
+
 export function EquipmentSection({ db, basePath, accountId, batches, equipment, models, locations, catalog, preferredUnits, selectedId, onSelect, onSelectBatch, onChanged }: {
   db: LocalDb; basePath: string; accountId: string; batches: Batch[]; equipment: Equipment[]; models: Equipment[]; locations: InventoryLocation[];
   catalog: CatalogEquipment[]; preferredUnits: PreferredUnits;
@@ -202,6 +206,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const [newTemperatureCalibration, setNewTemperatureCalibration] = useState(false);
   const [editIdentity, setEditIdentity] = useState(false);
   const [editLocation, setEditLocation] = useState(false);
+  const [indexDeleteRow, setIndexDeleteRow] = useState<EquipmentIndexRow | null>(null);
   const [locationReturn, setLocationReturn] = useState<'create' | 'unit' | 'edit' | null>(null);
   const [editPostBoilLoss, setEditPostBoilLoss] = useState(false);
   const [recentMashEfficiency, setRecentMashEfficiency] = useState<number | null>(null);
@@ -239,6 +244,20 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           channel.measurement_scale || channel.measurement_unit || undefined) : 'Available' }))
   ] : [];
   const selectedModel = models.find(row => row.id === selectedId) || null;
+  const indexRows: EquipmentIndexRow[] = [...models].sort((a, b) => a.name.localeCompare(b.name)).map(model => {
+    const units = equipment.filter(unit => unit.model_id === model.id);
+    const byLocation = new Map<string | null, Equipment[]>();
+    for (const unit of units) {
+      const locationId = unit.location_id || null;
+      byLocation.set(locationId, [...(byLocation.get(locationId) || []), unit]);
+    }
+    const locationsRows = [...byLocation.entries()].sort(([a], [b]) =>
+      (inventoryLocationPath(a, locations) || 'No location').localeCompare(inventoryLocationPath(b, locations) || 'No location'));
+    return { key: `model:${model.id}`, model, units,
+      ...(locationsRows.length === 1 ? { locationId: locationsRows[0][0] } : {}),
+      ...(locationsRows.length > 1 ? { children: locationsRows.map(([locationId, group]) => ({
+        key: `location:${model.id}:${locationId || 'none'}`, model, units: group, locationId, child: true })) } : {}) };
+  });
   const unitFormModel = models.find(row => row.id === catalogUnitModelId) || selectedModel;
   const catalogParent = selectedModel ? catalog.find(row => row.id === selectedModel.catalog_model_id) : undefined;
   const activeModel = selectedModel || itemModel;
@@ -629,6 +648,15 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
+  async function removeIndexRow() {
+    if (!indexDeleteRow?.units.length) return;
+    try {
+      await deleteEquipmentUnits(db, indexDeleteRow.units.map(unit => unit.id));
+      setIndexDeleteRow(null);
+      await onChanged();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
   async function saveCalibration(values: { parameters: Record<string, number> }) {
     if (!item || !profile) return;
     try {
@@ -682,21 +710,42 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           <Button icon={<PlusOutlined />}>Define equipment</Button>
         </Dropdown>
       </div>
-      {models.length > 0 && <Table<Equipment> className="equipment-table" dataSource={[...models].sort((a, b) => a.name.localeCompare(b.name))}
-        rowKey="id" pagination={false} size="small" tableLayout="fixed" columns={[
-          { title: 'Model', dataIndex: 'name', width: '50%', render: (_, row) => {
-            const catalogImage = catalog.find(model => model.id === row.catalog_model_id);
-            const thumbnail = modelThumbnails[row.id] || catalogImage?.thumbnail_src || catalogImage?.image_src;
+      {indexRows.length > 0 && <Table<EquipmentIndexRow> key={indexRows.filter(row => row.children).map(row => row.key).join(',')}
+        className="equipment-table" dataSource={indexRows}
+        rowKey="key" pagination={false} size="small" tableLayout="fixed" defaultExpandAllRows scroll={{ x: 650 }} columns={[
+          { title: 'Model', key: 'model', width: 290, render: (_, row) => {
+            if (row.child) return null;
+            const catalogImage = catalog.find(model => model.id === row.model.catalog_model_id);
+            const thumbnail = modelThumbnails[row.model.id] || catalogImage?.thumbnail_src || catalogImage?.image_src;
             return <a className="equipment-model-table-name"
-              href={`${basePath}/equipment/${equipmentModelPathSegment(row, models)}`}
-              onClick={event => { event.preventDefault(); onSelect(row.id); }}>
+              href={`${basePath}/equipment/${equipmentModelPathSegment(row.model, models)}`}
+              onClick={event => { event.preventDefault(); onSelect(row.model.id); }}>
               {thumbnail && <img src={thumbnail} alt="" loading="lazy" />}
-              {row.name}
+              {row.model.name}
             </a>;
           } },
-          { title: 'Units', key: 'units', width: '20%', render: (_: unknown, row: Equipment) =>
-            equipment.filter(unit => unit.model_id === row.id).length },
-          { title: 'Capabilities', key: 'capabilities', width: '30%', render: (_: unknown, row: Equipment) => equipmentCapabilities(row) }
+          { title: 'Location', key: 'location', width: 175, render: (_, row) => row.locationId !== undefined
+            ? inventoryLocationPath(row.locationId, locations) || 'No location' : '' },
+          { title: 'Units', key: 'units', width: 85, align: 'right', render: (_, row) => row.units.length },
+          { title: 'Capabilities', key: 'capabilities', width: 140, render: (_, row) => row.child ? null : equipmentCapabilities(row.model) },
+          { title: '', key: 'actions', width: 55, align: 'right', render: (_, row) => <Popconfirm
+            title={row.child ? `Delete ${row.units.length} ${row.units.length === 1 ? 'unit' : 'units'} of ${row.model.name} at ${inventoryLocationPath(row.locationId || null, locations) || 'No location'}?`
+              : `Delete all units of ${row.model.name}?`}
+            description="The units are removed from your equipment list. Their batch history and calibrations remain."
+            okText="Delete" okButtonProps={{ danger: true }} trigger={[]}
+            open={indexDeleteRow?.key === row.key}
+            onConfirm={() => void removeIndexRow()} onCancel={() => setIndexDeleteRow(null)}>
+            <Dropdown trigger={['click']} menu={{ items: [
+              ...(!row.child ? [{ key: 'add', label: 'Add unit' }] : []),
+              ...(row.units.length ? [{ key: 'delete', label: row.child ? 'Delete units at location' : 'Delete all units', danger: true }] : [])
+            ], onClick: ({ key }) => {
+              if (key === 'add') { setCatalogUnitModelId(row.model.id); setAddingUnit(true); }
+              if (key === 'delete') setIndexDeleteRow(row);
+            } }}>
+              <Button type="text" shape="circle" icon={<MoreOutlined />}
+                aria-label={`Actions for ${row.child ? `${row.model.name} at ${inventoryLocationPath(row.locationId || null, locations) || 'No location'}` : row.model.name}`} />
+            </Dropdown>
+          </Popconfirm> }
         ]} />}
     </section> : selectedModel ? <section className="record-detail">
       <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(selectedModel.kind)}</span>

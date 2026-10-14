@@ -2078,6 +2078,16 @@ export async function deleteEquipment(db: DB, id: string): Promise<void> {
   });
 }
 
+export async function deleteEquipmentUnits(db: DB, unitIds: string[]): Promise<void> {
+  await db.tx(async tx => {
+    const removedAt = nowSeconds();
+    for (const id of unitIds) {
+      await tx.exec('UPDATE equipment SET removed_at = ? WHERE id = ? AND removed_at IS NULL', [removedAt, id]);
+      await tx.exec('DELETE FROM equipment_locations WHERE id = ?', [id]);
+    }
+  });
+}
+
 export async function listInventory(db: Pick<DB, 'execO'>): Promise<InventoryItem[]> {
   return db.execO<InventoryItem>(`SELECT i.id, COALESCE(s.name, i.name) AS name,
     COALESCE(s.category, i.category) AS category, i.default_unit,
