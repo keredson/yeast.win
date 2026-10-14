@@ -8,7 +8,7 @@ import { catalogModelTables, catalogSupplyTables, catalogSchemaVersion,
   type CatalogChanges, type CatalogEquipment, type CatalogInventory } from '../shared/catalog.ts';
 import { boilOffKinds, vesselKinds } from '../shared/equipment.ts';
 import { catalogManufacturers, expandedCatalogEquipment,
-  existingModelSources } from '../shared/catalogEquipmentExpansion.ts';
+  existingModelSources, catalogMeasurementUpdates } from '../shared/catalogEquipmentExpansion.ts';
 import { encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 import { projectRoot } from './db.ts';
 
@@ -29,6 +29,16 @@ function seedModelImages(db: Database.Database): void {
   for (const id of bundledModelIds()) {
     const path = join(projectRoot, 'assets/catalog/models', id);
     insert.run(id, readFileSync(`${path}.jpg`), 'image/jpeg', readFileSync(`${path}-thumb.jpg`), 'image/jpeg');
+  }
+}
+
+function seedManufacturerLogos(db: Database.Database): void {
+  const insert = db.prepare(`INSERT OR IGNORE INTO manufacturer_logos
+    (manufacturer_name, image_bytes, mime_type) VALUES (?, ?, ?)`);
+  for (const maker of catalogManufacturers) {
+    const slug = maker.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const path = join(projectRoot, 'assets/catalog/manufacturers', `${slug}.png`);
+    if (existsSync(path)) insert.run(maker.name, readFileSync(path), 'image/png');
   }
 }
 
@@ -361,6 +371,54 @@ export function openCatalogDb(dataDir: string): Database.Database {
         }
       }
       db.pragma('user_version = 19');
+    })();
+  }
+  if ((db.pragma('user_version', { simple: true }) as number) === 19) {
+    db.transaction(() => {
+      db.prepare(`UPDATE equipment_models SET product_url = ?
+        WHERE id = ? AND product_url = ?`).run(
+          'https://us.grainfather.com/products/g40-brewing-system', 'equipment_grainfather_g40',
+          'https://us.grainfather.com/pages/compare-the-grainfather-brewing-systems');
+      const updateModel = db.prepare(`UPDATE equipment_models SET
+        manufacturer = COALESCE(manufacturer, ?), product_url = COALESCE(product_url, ?)
+        WHERE id = ?`);
+      const fill = (table: string, column: string, id: string, value: number | null | undefined) => {
+        if (value == null) return;
+        db.prepare(`INSERT INTO ${table}(model_id, ${column}) VALUES (?, ?)
+          ON CONFLICT(model_id) DO UPDATE SET ${column} = COALESCE(${table}.${column}, excluded.${column})`)
+          .run(id, value);
+      };
+      for (const item of [...expandedCatalogEquipment, ...Object.entries(existingModelSources)
+        .map(([id, source]) => ({ id, ...source }))]) {
+        updateModel.run(item.manufacturer ?? null, item.product_url ?? null, item.id);
+        fill('model_liquid_containment', 'capacity_liters', item.id, item.capacity_liters);
+        fill('model_heating', 'rated_power_watts', item.id, item.rated_power_watts);
+        fill('model_cooling', 'rated_heat_removal_watts', item.id, item.rated_heat_removal_watts);
+        fill('model_temperature_control', 'min_temperature_c', item.id, item.min_temperature_c);
+        fill('model_temperature_control', 'max_temperature_c', item.id, item.max_temperature_c);
+      }
+      const fillChannel = db.prepare(`INSERT INTO model_measurement_channels
+        (id, model_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
+        VALUES (@id, @model_id, @measurement_kind, @measurement_min, @measurement_max, @measurement_unit, @measurement_scale)
+        ON CONFLICT(id) DO UPDATE SET
+          measurement_min = COALESCE(model_measurement_channels.measurement_min, excluded.measurement_min),
+          measurement_max = COALESCE(model_measurement_channels.measurement_max, excluded.measurement_max),
+          measurement_unit = COALESCE(model_measurement_channels.measurement_unit, excluded.measurement_unit),
+          measurement_scale = COALESCE(model_measurement_channels.measurement_scale, excluded.measurement_scale)`);
+      for (const item of catalogMeasurementUpdates) fillChannel.run({
+        id: `${item.model_id}:${item.measurement_kind}`,
+        model_id: item.model_id,
+        measurement_kind: item.measurement_kind,
+        measurement_min: item.measurement_min,
+        measurement_max: item.measurement_max,
+        measurement_unit: 'measurement_unit' in item ? item.measurement_unit : null,
+        measurement_scale: 'measurement_scale' in item ? item.measurement_scale : null
+      });
+      // Version 16 seeded the media available at that time. Later bundled
+      // photos and logos need their own CRR rows on upgraded catalogs too.
+      seedModelImages(db);
+      seedManufacturerLogos(db);
+      db.pragma('user_version = 20');
     })();
   }
   db.prepare(`UPDATE equipment_models SET model_name = ?

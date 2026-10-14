@@ -168,6 +168,14 @@ export function openLocalCatalog(): Promise<DB> {
         await tx.exec(`PRAGMA user_version = ${catalogSchemaVersion}`);
       });
     }
+    if ((await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version === 19) {
+      await db.tx(async tx => {
+        const syncState = await tx.execO<{ name: string }>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sync_state'");
+        if (syncState.length) await tx.exec("DELETE FROM sync_state WHERE key = 'lastRefreshAt'");
+        await tx.exec('PRAGMA user_version = 20');
+      });
+    }
     return db;
   })().catch(error => { opened = undefined; throw error; });
   return opened;

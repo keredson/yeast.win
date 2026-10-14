@@ -427,6 +427,49 @@ test('existing catalog updates previous VEVOR names and preserves edits', () => 
   } finally { reopened.close(); }
 });
 
+test('catalog spec and media refresh fills gaps without replacing catalog edits', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
+  const old = openCatalogDb(dir);
+  try {
+    old.prepare('UPDATE model_liquid_containment SET capacity_liters = NULL WHERE model_id = ?')
+      .run('equipment_grainfather_g40');
+    old.prepare('UPDATE model_heating SET rated_power_watts = ? WHERE model_id = ?')
+      .run(2900, 'equipment_grainfather_g40');
+    old.prepare('UPDATE model_cooling SET rated_heat_removal_watts = NULL WHERE model_id = ?')
+      .run('equipment_grainfather_gc4');
+    old.prepare('UPDATE model_measurement_channels SET measurement_max = NULL WHERE id = ?')
+      .run('equipment_tilt:temperature');
+    old.prepare('DELETE FROM model_images WHERE model_id = ?').run('equipment_grainfather_g40');
+    old.prepare('UPDATE equipment_models SET product_url = ? WHERE id = ?').run(
+      'https://us.grainfather.com/pages/compare-the-grainfather-brewing-systems', 'equipment_grainfather_g40');
+    old.prepare('INSERT INTO supplies(id,name,category,unit) VALUES (?,?,?,?)')
+      .run('custom_grain', 'My grain', 'Grain', 'g');
+    old.pragma('user_version = 19');
+  } finally { old.close(); }
+  const upgraded = openCatalogDb(dir);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), catalogSchemaVersion);
+    assert.equal((upgraded.prepare('SELECT capacity_liters FROM model_liquid_containment WHERE model_id = ?')
+      .get('equipment_grainfather_g40') as { capacity_liters: number }).capacity_liters, 46);
+    assert.equal((upgraded.prepare('SELECT rated_power_watts FROM model_heating WHERE model_id = ?')
+      .get('equipment_grainfather_g40') as { rated_power_watts: number }).rated_power_watts, 2900);
+    assert.equal((upgraded.prepare('SELECT product_url FROM equipment_models WHERE id = ?')
+      .get('equipment_grainfather_g40') as { product_url: string }).product_url,
+      'https://us.grainfather.com/products/g40-brewing-system');
+    assert.equal((upgraded.prepare('SELECT rated_heat_removal_watts FROM model_cooling WHERE model_id = ?')
+      .get('equipment_grainfather_gc4') as { rated_heat_removal_watts: number }).rated_heat_removal_watts, 196);
+    assert.equal((upgraded.prepare('SELECT measurement_max FROM model_measurement_channels WHERE id = ?')
+      .get('equipment_tilt:temperature') as { measurement_max: number }).measurement_max, 85);
+    const photo = upgraded.prepare('SELECT image_bytes, thumbnail_bytes, image_mime_type FROM model_images WHERE model_id = ?')
+      .get('equipment_grainfather_g40') as { image_bytes: Buffer; thumbnail_bytes: Buffer; image_mime_type: string };
+    assert.ok(photo.image_bytes.length > 0);
+    assert.ok(photo.thumbnail_bytes.length > 0);
+    assert.equal(photo.image_mime_type, 'image/jpeg');
+    assert.equal((upgraded.prepare('SELECT name FROM supplies WHERE id = ?')
+      .get('custom_grain') as { name: string }).name, 'My grain');
+  } finally { upgraded.close(); }
+});
+
 test('version 9 CRR catalog keeps direct server edits when removing prefixes', () => {
   const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
   const old = new Database(join(dir, 'catalog.sqlite'));
