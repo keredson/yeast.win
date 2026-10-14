@@ -12,11 +12,11 @@ import { EventForm } from './EventForm.tsx';
 import { EventTimeline } from './EventTimeline.tsx';
 import { RecipeEquipmentFields } from './RecipeEquipmentFields.tsx';
 import type { PreferredUnits } from './api.ts';
-import type { CatalogInventory, CatalogSupplyCategory } from '../shared/catalog.ts';
+import type { CatalogInventory } from '../shared/catalog.ts';
 
-export function BatchSection({ db, basePath, accountId, batches, recipes, equipment, equipmentModels, inventory, catalogInventory, catalogCategories, preferredUnits, selectedId, onSelect, onChanged }: {
+export function BatchSection({ db, basePath, accountId, batches, recipes, equipment, equipmentModels, inventory, catalogInventory, preferredUnits, selectedId, onSelect, onChanged }: {
   db: LocalDb; basePath: string; accountId: string; batches: Batch[]; recipes: Recipe[]; equipment: Equipment[]; equipmentModels: Equipment[]; inventory: InventoryItem[];
-  catalogInventory: CatalogInventory[]; catalogCategories: CatalogSupplyCategory[]; preferredUnits: PreferredUnits; selectedId: string | null;
+  catalogInventory: CatalogInventory[]; preferredUnits: PreferredUnits; selectedId: string | null;
   onSelect: (id: string | null) => void; onChanged: () => Promise<void>;
 }) {
   const [events, setEvents] = useState<ActualEvent[]>([]);
@@ -158,13 +158,13 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
       open={!!(editingPlan || creatingKind)} onCancel={() => { setCreatingKind(null); setEditingPlan(null); }} footer={null} destroyOnHidden>
       {(editingPlan || creatingKind) && <PlanForm key={editingPlan?.id || creatingKind || 'new'}
         eventType={editingPlan?.event_type || creatingKind || 'addition'} anchors={events.filter(item => item.id !== editingPlan?.id)}
-        initialPlan={editingPlan || undefined} equipment={equipment} inventory={inventory} catalog={catalogInventory} catalogCategories={catalogCategories}
+        initialPlan={editingPlan || undefined} equipment={equipment} inventory={inventory} catalog={catalogInventory}
         preferredUnits={preferredUnits} preset={editingPlan ? undefined : preset} allowRecordNow submit={saveAction} />}
     </Modal>
     <Modal title={recordingEvent?.actual_at != null ? `Edit: ${recordingEvent.title}` : `Record: ${recordingEvent?.title || ''}`}
       open={!!recordingEvent} onCancel={() => { setRecordingEvent(null); setEditingData(null); }} footer={null} destroyOnHidden width={600}>
       {batch && recordingEvent && <EventForm key={recordingEvent.id} db={db} batchId={batch.id} accountId={accountId}
-        equipment={equipment} inventory={inventory} catalogCategories={catalogCategories} preferredUnits={preferredUnits} initialPlan={recordingEvent}
+        equipment={equipment} inventory={inventory} preferredUnits={preferredUnits} initialPlan={recordingEvent}
         initialEvent={recordingEvent.actual_at != null ? recordingEvent : null} initialData={editingData}
         onSaved={async () => { setRecordingEvent(null); setEditingData(null); await changed(); }} />}
     </Modal>

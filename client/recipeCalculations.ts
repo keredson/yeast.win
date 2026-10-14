@@ -129,6 +129,13 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
   for (const event of events) {
     if (event.event_type !== 'addition') continue;
     const details = event.details;
+    if (details.item_category === 'Other fermentables') {
+      const name = String(details.item_name || event.title);
+      gravityMissing.push(`Expected OG does not yet include ${name}.`);
+      colorMissing.push(`Estimated beer color does not yet include ${name}.`);
+      colorReady = false;
+      continue;
+    }
     if (details.item_category !== 'Grain' && details.item_category !== 'Adjunct') continue;
     if (details.item_category === 'Adjunct') {
       const message = 'Gravity estimates do not yet include adjunct extract.';
@@ -166,7 +173,8 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
   if (!grainCount) { const message = 'Add grain with an amount and extract yield.';
     missing.push(message); gravityMissing.push(message); }
   const canEstimateGravity = !!targetLiters && !!efficiency && grainCount > 0
-    && !gravityMissing.some(message => message.includes('adjunct') || message.startsWith('Set an amount'));
+    && !gravityMissing.some(message => message.includes('adjunct') || message.startsWith('Set an amount')
+      || message.startsWith('Expected OG does not yet include'));
   const gallons = extractVolume == null ? null : convertUnit(extractVolume, 'L', 'US gal');
   const targetGallons = targetLiters == null ? null : convertUnit(targetLiters, 'L', 'US gal');
   // Morey's beer color approximation from malt color units (MCU).

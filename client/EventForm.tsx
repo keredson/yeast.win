@@ -6,7 +6,7 @@ import { addPhoto, recordEvent, skipBatchEvent, updateEvent, updatePhotoEvent, t
 import type { PreferredUnits } from './api.ts';
 import { compoundMassUnit, gravityScales, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions } from '../shared/units.ts';
 import { supportsDuration } from './planTiming.ts';
-import type { CatalogSupplyCategory } from '../shared/catalog.ts';
+import { inventoryCategories } from '../shared/catalog.ts';
 import { QuantityFields } from './QuantityFields.tsx';
 import { changeNumberUnit, changeQuantityUnit } from './unitFields.ts';
 import { vesselKinds } from '../shared/equipment.ts';
@@ -43,9 +43,9 @@ interface Values {
   container_unit?: string; container_count?: number;
 }
 
-export function EventForm({ db, batchId, accountId, equipment, inventory, catalogCategories, preferredUnits, initialPlan, initialEvent, initialData, onSaved }: {
+export function EventForm({ db, batchId, accountId, equipment, inventory, preferredUnits, initialPlan, initialEvent, initialData, onSaved }: {
   db: LocalDb; batchId: string; accountId: string; equipment: Equipment[];
-  inventory: InventoryItem[]; catalogCategories: CatalogSupplyCategory[]; preferredUnits: PreferredUnits; initialPlan?: Plan | null;
+  inventory: InventoryItem[]; preferredUnits: PreferredUnits; initialPlan?: Plan | null;
   initialEvent?: ActualEvent | null; initialData?: { measurementKind?: MeasurementKind; payload: Record<string, string | number | null> } | null;
   onSaved: () => Promise<void>;
 }) {
@@ -215,7 +215,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, catalo
     </>}
     {kind === 'addition' && <>
       <>
-        <Form.Item name="item_category" label="Type"><Select options={[...new Set([...catalogCategories.map(row => row.name),
+        <Form.Item name="item_category" label="Type"><Select options={[...new Set([...inventoryCategories,
           ...inventory.map(row => row.category), ...(initialCategory ? [initialCategory] : [])])].map(value => ({ value, label: value }))}
           onChange={() => form.setFieldsValue({ inventory_item_id: undefined, item_name: undefined, unit: preferredUnits.mass,
             quantity: undefined, pounds: undefined, ounces: undefined })} /></Form.Item>

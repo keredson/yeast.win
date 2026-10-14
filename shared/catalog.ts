@@ -17,23 +17,14 @@ export interface CatalogEquipment { id: string; name: string; kind: string; manu
   measurement_unit?: string | null; measurement_channels?: CatalogMeasurementChannel[] }
 export interface CatalogInventory { id: string; name: string; category: string; unit: string;
   yield_pct?: number | null; color_lovibond?: number | null; alpha_acid_pct?: number | null;
+  typical_brix?: number | null; extract_color_value?: number | null; extract_color_scale?: string | null;
+  extract_color_reference_value?: number | null; extract_color_reference_unit?: string | null;
   hop_form?: string | null; attenuation_pct?: number | null; grain_class?: string | null;
   manufacturer?: string | null; product_url?: string | null;
   image_src?: string | null }
-export interface CatalogSupplyCategory { name: string; sort_order: number }
-
-export function catalogCategoryOptions(rows: CatalogSupplyCategory[], products: CatalogInventory[]): CatalogSupplyCategory[] {
-  const categories = new Map(rows.map(row => [row.name, row]));
-  for (const product of products) {
-    if (product.category && !categories.has(product.category)) {
-      categories.set(product.category, { name: product.category, sort_order: 1000 });
-    }
-  }
-  return [...categories.values()].sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
-}
-
 export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
-export const catalogSchemaVersion = 30;
+export const catalogSchemaVersion = 31;
+export const inventoryCategories = ['Grain', 'Other fermentables', 'Hops', 'Yeast', 'Nutrient', 'Adjunct', 'Chemical', 'Packaging', 'Other'] as const;
 export const catalogModelTables = {
   manufacturers: `CREATE TABLE IF NOT EXISTS manufacturers (
     name TEXT PRIMARY KEY NOT NULL, website_url TEXT)`,
@@ -62,12 +53,13 @@ export const catalogModelTables = {
     measurement_min REAL, measurement_max REAL, measurement_unit TEXT, measurement_scale TEXT)`
 } as const;
 export const catalogSupplyTables = {
-  supply_categories: `CREATE TABLE IF NOT EXISTS supply_categories (
-    name TEXT PRIMARY KEY NOT NULL, sort_order INTEGER NOT NULL DEFAULT 1000)`,
   supplies: `CREATE TABLE IF NOT EXISTS supplies (
     id TEXT PRIMARY KEY NOT NULL, name TEXT, category TEXT, unit TEXT)`,
   supply_grain_specs: `CREATE TABLE IF NOT EXISTS supply_grain_specs (
     supply_id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL)`,
+  supply_other_fermentable_specs: `CREATE TABLE IF NOT EXISTS supply_other_fermentable_specs (
+    supply_id TEXT PRIMARY KEY NOT NULL, typical_brix REAL, extract_color_value REAL,
+    extract_color_scale TEXT, extract_color_reference_value REAL, extract_color_reference_unit TEXT)`,
   supply_hop_specs: `CREATE TABLE IF NOT EXISTS supply_hop_specs (
     supply_id TEXT PRIMARY KEY NOT NULL, alpha_acid_pct REAL, hop_form TEXT)`,
   supply_yeast_specs: `CREATE TABLE IF NOT EXISTS supply_yeast_specs (
@@ -83,6 +75,7 @@ export const catalogTables = [...Object.keys(catalogModelTables), ...Object.keys
 
 export function unitForCategory(category: string, preferredMass: string): string {
   if (category === 'Grain') return 'lb + oz';
+  if (category === 'Other fermentables') return preferredMass;
   if (category === 'Yeast') return 'packet';
   if (category === 'Packaging') return 'each';
   if (category === 'Chemical') return 'mL';

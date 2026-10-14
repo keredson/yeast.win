@@ -76,11 +76,17 @@ const definitions: Record<string, string> = {
   supply_media: `id TEXT PRIMARY KEY NOT NULL, product_url TEXT,
     image_bytes BLOB, image_mime_type TEXT`,
   supply_grain_specs: `supply_id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL, grain_class TEXT`,
+  supply_other_fermentable_specs: `supply_id TEXT PRIMARY KEY NOT NULL, typical_brix REAL,
+    extract_color_value REAL, extract_color_scale TEXT, extract_color_reference_value REAL,
+    extract_color_reference_unit TEXT`,
   supply_hop_specs: `supply_id TEXT PRIMARY KEY NOT NULL, alpha_acid_pct REAL, hop_form TEXT`,
   supply_yeast_specs: `supply_id TEXT PRIMARY KEY NOT NULL, attenuation_pct REAL`,
   supply_lots: `id TEXT PRIMARY KEY NOT NULL, supply_id TEXT NOT NULL, lot_code TEXT,
     crop_year INTEGER, best_before INTEGER, created_at INTEGER NOT NULL`,
   lot_grain_specs: `lot_id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL`,
+  lot_other_fermentable_specs: `lot_id TEXT PRIMARY KEY NOT NULL, typical_brix REAL,
+    extract_color_value REAL, extract_color_scale TEXT, extract_color_reference_value REAL,
+    extract_color_reference_unit TEXT`,
   lot_hop_specs: `lot_id TEXT PRIMARY KEY NOT NULL, alpha_acid_pct REAL, hop_form TEXT`,
   lot_yeast_specs: `lot_id TEXT PRIMARY KEY NOT NULL, attenuation_pct REAL`,
   inventory_items: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL,
@@ -329,12 +335,27 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 35;
+export const workspaceSchemaVersion = 36;
 export const primingSugarCategoryMigrationStatements = [
   `UPDATE inventory_items SET category = 'Adjunct' WHERE category = 'Other' AND supply_id IN
     (SELECT id FROM supplies WHERE catalog_supply_id = 'inventory_priming_sugar')`,
   `UPDATE supplies SET category = 'Adjunct'
     WHERE catalog_supply_id = 'inventory_priming_sugar' AND category = 'Other'`
+] as const;
+export const otherFermentablesMigrationStatements = [
+  `UPDATE supplies SET category = 'Other fermentables'
+    WHERE catalog_supply_id = 'inventory_priming_sugar' AND category IN ('Other', 'Adjunct')`,
+  `UPDATE inventory_items SET category = 'Other fermentables'
+    WHERE supply_id IN (SELECT id FROM supplies WHERE catalog_supply_id = 'inventory_priming_sugar')
+      AND category IN ('Other', 'Adjunct')`,
+  `UPDATE recipe_additions SET item_category = 'Other fermentables'
+    WHERE item_category IN ('Other', 'Adjunct') AND
+      (catalog_item_id = 'inventory_priming_sugar' OR supply_id IN
+        (SELECT id FROM supplies WHERE catalog_supply_id = 'inventory_priming_sugar'))`,
+  `UPDATE additions SET item_category = 'Other fermentables'
+    WHERE item_category IN ('Other', 'Adjunct') AND
+      (catalog_item_id = 'inventory_priming_sugar' OR supply_id IN
+        (SELECT id FROM supplies WHERE catalog_supply_id = 'inventory_priming_sugar'))`
 ] as const;
 export const retiredReplicatedTables = ['equipment_calibrations', 'equipment_characterization_observations'] as const;
 

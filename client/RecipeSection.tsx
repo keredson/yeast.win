@@ -11,7 +11,7 @@ import { recipePathSegment } from './recipeRoutes.ts';
 import { kindLabel } from './constants.ts';
 import { EventTimeline } from './EventTimeline.tsx';
 import { RecipeTypeIcon } from './RecipeTypeIcon.tsx';
-import type { CatalogInventory, CatalogSupplyCategory } from '../shared/catalog.ts';
+import type { CatalogInventory } from '../shared/catalog.ts';
 import type { PreferredUnits } from './api.ts';
 import { convertUnit, unitGroups, unitOptions } from '../shared/units.ts';
 import { changeNumberUnit } from './unitFields.ts';
@@ -33,9 +33,9 @@ function EstimateTile({ label, value, help, sources }: { label: string; value: s
     </Tooltip></span><strong>{value ?? '—'}</strong></div>;
 }
 
-export function RecipeSection({ db, basePath, accountId, recipes, equipment, equipmentModels, inventory, supplies, catalogInventory, catalogCategories, preferredUnits, selectedId, onSelect, onChanged, onBatchStarted }: {
+export function RecipeSection({ db, basePath, accountId, recipes, equipment, equipmentModels, inventory, supplies, catalogInventory, preferredUnits, selectedId, onSelect, onChanged, onBatchStarted }: {
   db: LocalDb; basePath: string; accountId: string; recipes: Recipe[]; selectedId: string | null; onSelect: (id: string | null) => void;
-  equipment: Equipment[]; equipmentModels: Equipment[]; inventory: InventoryItem[]; supplies: InventoryItem[]; catalogInventory: CatalogInventory[]; catalogCategories: CatalogSupplyCategory[]; preferredUnits: PreferredUnits;
+  equipment: Equipment[]; equipmentModels: Equipment[]; inventory: InventoryItem[]; supplies: InventoryItem[]; catalogInventory: CatalogInventory[]; preferredUnits: PreferredUnits;
   onChanged: () => Promise<void>; onBatchStarted: (id: string) => void;
 }) {
   const [settingsForm] = Form.useForm<{ name: string; slug: string; description?: string; recipe_type: RecipeType;
@@ -314,7 +314,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
       {planDeleteError && <Alert type="error" message={planDeleteError} className="form-alert" />}
       {(editingPlan || creatingKind) && <PlanForm key={editingPlan?.id || creatingKind || 'new'} eventType={editingPlan?.event_type || creatingKind || 'addition'}
         anchors={plans.filter(item => item.id !== editingPlan?.id)} initialPlan={editingPlan || undefined}
-        equipment={equipmentModels} inventory={supplies} catalog={catalogInventory} catalogCategories={catalogCategories} preferredUnits={preferredUnits} preset={editingPlan ? undefined : preset} recipeMode submit={addPlan}
+        equipment={equipmentModels} inventory={supplies} catalog={catalogInventory} preferredUnits={preferredUnits} preset={editingPlan ? undefined : preset} recipeMode submit={addPlan}
         extraAction={editingPlan && <Popconfirm title={`Delete ${editingPlan.title}?`}
           description="Actions timed from this one will become relative to batch start. Existing batches keep their copies."
           okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => void removePlan(editingPlan.id)}>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, AutoComplete, Button, Checkbox, Dropdown, Empty, Form, Input, InputNumber, Modal, Select, Table } from 'antd';
 import { EditOutlined, MoreOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
-import { unitForCategory, type CatalogInventory, type CatalogSupplyCategory } from '../shared/catalog.ts';
+import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
 import { addInventoryEntry, convertInventoryUnit, createInventoryItem, inventoryBalance, inventoryLocationPath,
   listInventoryBalances, listInventoryLocations, listInventoryMovements, moveInventoryStock, saveInventoryLocation, stockAtLocation,
   updateIngredientProperties, updateLotIngredientProperties, supplyIngredientProperties, lotIngredientProperties, ingredientProperties,
@@ -93,6 +93,17 @@ function PropertyFields({ category, includeClass = false }: { category: string; 
     {['Grain', 'Adjunct'].includes(category) && <><Form.Item name="yield_pct" label="Extract yield (%)">
       <InputNumber className="full-width" min={0} max={100} step="any" /></Form.Item>
       <Form.Item name="color_lovibond" label="Color (°L)"><InputNumber className="full-width" min={0} step="any" /></Form.Item></>}
+    {category === 'Other fermentables' && <>
+      <Form.Item name="typical_brix" label="Typical °Brix"><InputNumber className="full-width" min={0} max={100} step="any" /></Form.Item>
+      <div className="form-pair"><Form.Item name="extract_color_value" label="Extract color">
+        <InputNumber className="full-width" min={0} step="any" /></Form.Item>
+        <Form.Item name="extract_color_scale" label="Color scale"><Select allowClear
+          options={['°L', 'SRM', 'EBC'].map(value => ({ value, label: value }))} /></Form.Item></div>
+      <div className="form-pair"><Form.Item name="extract_color_reference_value" label="Color measured at">
+        <InputNumber className="full-width" min={0} step="any" /></Form.Item>
+        <Form.Item name="extract_color_reference_unit" label="Reference unit"><Select allowClear
+          options={['°P', '% w/v'].map(value => ({ value, label: value }))} /></Form.Item></div>
+    </>}
     {category === 'Hops' && <><Form.Item name="alpha_acid_pct" label="Alpha acid (%)">
       <InputNumber className="full-width" min={0} max={100} step="any" /></Form.Item>
       <Form.Item name="hop_form" label="Form"><Select allowClear options={[
@@ -103,8 +114,8 @@ function PropertyFields({ category, includeClass = false }: { category: string; 
   </>;
 }
 
-export function InventorySection({ db, basePath, accountId, items, supplies, catalog, catalogCategories, preferredUnits, selectedId, onSelect, onChanged }: {
-  db: LocalDb; basePath: string; accountId: string; items: InventoryItem[]; supplies: InventoryItem[]; catalog: CatalogInventory[]; catalogCategories: CatalogSupplyCategory[]; preferredUnits: PreferredUnits;
+export function InventorySection({ db, basePath, accountId, items, supplies, catalog, preferredUnits, selectedId, onSelect, onChanged }: {
+  db: LocalDb; basePath: string; accountId: string; items: InventoryItem[]; supplies: InventoryItem[]; catalog: CatalogInventory[]; preferredUnits: PreferredUnits;
   selectedId: string | null; onSelect: (id: string | null) => void; onChanged: () => Promise<void>;
 }) {
   const [movements, setMovements] = useState<StockMovement[]>([]);
@@ -130,7 +141,6 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const [editingProductImage, setEditingProductImage] = useState(false);
   const [imageEdit, setImageEdit] = useState<File | null | undefined>();
   const [creatingCustomProduct, setCreatingCustomProduct] = useState(false);
-  const [customCategoryEditable, setCustomCategoryEditable] = useState(false);
   const [supplyThumbnails, setSupplyThumbnails] = useState<Record<string, string>>({});
   const [ingredientSettingsOpen, setIngredientSettingsOpen] = useState(false);
   const [supplyProperties, setSupplyProperties] = useState<IngredientProperties>({});
@@ -169,9 +179,9 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const moveItem = items.find(row => row.id === moveItemId) || null;
   const itemDisplayUnit = item?.default_unit === 'oz' && preferredUnits.mass === compoundMassUnit
     ? compoundMassUnit : productRows[0]?.display_unit || item?.display_unit || item?.default_unit;
-  const categories = [...new Set([...catalogCategories.map(row => row.name),
+  const categories = [...new Set([...inventoryCategories,
     ...supplies.map(row => row.category)])].filter(Boolean);
-  const addCategories = categories.filter(category => category !== 'Other');
+  const addCategories = inventoryCategories.filter(category => category !== 'Other');
   const activeLocationId = locations.some(location => location.id === locationFilterId) ? locationFilterId : null;
   const locationFilterLabel = inventoryLocationPath(activeLocationId, locations) || 'All locations';
   const locationFilterWidth = Math.max(18, Math.min(42, locationFilterLabel.length + 5));
@@ -192,7 +202,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   function openCreate(category: string, product?: InventoryItem, lotCode?: string | null, lockLot = false,
     catalogProduct?: CatalogInventory) {
     itemForm.resetFields();
-    const unit = product?.default_unit || unitForCategory(category, preferredUnits.mass);
+    const unit = product?.default_unit || catalogProduct?.unit || unitForCategory(category, preferredUnits.mass);
     previousItemUnit.current = unit;
     itemForm.setFieldsValue({ category, name: product?.name, lot_code: lotCode || undefined,
       default_unit: unit, location_id: activeLocationId || undefined });
@@ -200,7 +210,6 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
     setSelectedCatalogProduct(catalogProduct || null);
     setCatalogProductChosen(false);
     setCreatingCustomProduct(false);
-    setCustomCategoryEditable(false);
     setNewStockLotCode(lockLot ? lotCode || null : undefined);
     setNewItemCategory(category);
   }
@@ -218,7 +227,6 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   function createOtherProduct() {
     openCreate('Other');
     setCreatingCustomProduct(true);
-    setCustomCategoryEditable(true);
   }
 
   function addCategory(category: string) {
@@ -349,12 +357,14 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
             : catalog.find(row => row.category === values.category && row.name === values.name)?.id || null,
           values.lot_code || null, creatingCustomProduct ? {
             grain_class: values.grain_class, yield_pct: values.yield_pct, color_lovibond: values.color_lovibond,
-            alpha_acid_pct: values.alpha_acid_pct, hop_form: values.hop_form, attenuation_pct: values.attenuation_pct
+            alpha_acid_pct: values.alpha_acid_pct, hop_form: values.hop_form, attenuation_pct: values.attenuation_pct,
+            typical_brix: values.typical_brix, extract_color_value: values.extract_color_value,
+            extract_color_scale: values.extract_color_scale, extract_color_reference_value: values.extract_color_reference_value,
+            extract_color_reference_unit: values.extract_color_reference_unit
           } : undefined);
       }
       setNewItemCategory(null); setNewStockProduct(null); setNewStockLotCode(undefined);
       setSelectedCatalogProduct(null); setCatalogProductChosen(false); setCreatingCustomProduct(false);
-      setCustomCategoryEditable(false);
       itemForm.resetFields(); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -444,7 +454,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
         <div className="content-heading"><div><span className="eyebrow">{item.category}</span><h2>{item.name}</h2>
           <p className="muted">{balance === undefined ? 'Calculating stock' : balance === null ? 'Balance needs unit conversion'
             : `${formatStockQuantity(balance, item.default_unit, itemDisplayUnit || item.default_unit)} estimated on hand`}</p></div>
-          <div className="heading-actions">{['Grain', 'Adjunct', 'Hops', 'Yeast'].includes(item.category) &&
+          <div className="heading-actions">{['Grain', 'Other fermentables', 'Adjunct', 'Hops', 'Yeast'].includes(item.category) &&
             <Button icon={<SettingOutlined />} onClick={() => {
                 setError(''); void supplyIngredientProperties(db, item).then(values => {
                   setSupplyProperties(values); setIngredientSettingsOpen(true);
@@ -477,6 +487,8 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
           currentIngredientProperties.alpha_acid_pct != null && `Alpha acid ${currentIngredientProperties.alpha_acid_pct}%`,
           currentIngredientProperties.hop_form && `${currentIngredientProperties.hop_form} hops`,
           currentIngredientProperties.attenuation_pct != null && `Attenuation ${currentIngredientProperties.attenuation_pct}%`,
+          currentIngredientProperties.typical_brix != null && `Typical ${currentIngredientProperties.typical_brix} °Brix`,
+          currentIngredientProperties.extract_color_value != null && `Extract color ${currentIngredientProperties.extract_color_value} ${currentIngredientProperties.extract_color_scale || ''}${currentIngredientProperties.extract_color_reference_value != null ? ` at ${currentIngredientProperties.extract_color_reference_value} ${currentIngredientProperties.extract_color_reference_unit || ''}` : ''}`,
           item.grain_class && `${item.grain_class} grain class`
         ].filter(Boolean).join(' · ')}</p>}
         <h3>Lots and locations</h3>
@@ -490,7 +502,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
             stockQuantity(row.rows, onHand, item.default_unit, itemDisplayUnit || item.default_unit) },
           { title: '', key: 'actions', width: 60, align: 'right', render: (_, row) => <Dropdown trigger={['click']}
             menu={{ items: [
-              ...(row.lotItem && ['Grain', 'Adjunct', 'Hops', 'Yeast'].includes(item.category)
+              ...(row.lotItem && ['Grain', 'Other fermentables', 'Adjunct', 'Hops', 'Yeast'].includes(item.category)
                 ? [{ key: 'lot', label: 'Edit lot properties' }] : []),
               ...(row.lotItem ? [{ key: 'add', label: 'Add stock' }] : []),
               ...(row.stockItem ? [{ key: 'purchase', label: 'Buy' }, { key: 'count', label: 'Count' },
@@ -570,7 +582,9 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
           <button type="button" className="catalog-explorer-option" onClick={() => chooseCatalogProduct(product)}>
             <span className="catalog-explorer-option-name"><strong>{product.name}</strong>
               <small>{product.category}{product.yield_pct != null ? ` · ${product.yield_pct}% yield` : ''}
-                {product.color_lovibond != null ? ` · ${product.color_lovibond} °L` : ''}</small></span>
+                {product.color_lovibond != null ? ` · ${product.color_lovibond} °L` : ''}
+                {product.typical_brix != null ? ` · ${product.typical_brix} °Brix` : ''}
+                {product.extract_color_value != null ? ` · ${product.extract_color_value} ${product.extract_color_scale || ''}` : ''}</small></span>
             {product.image_src && <img className="catalog-explorer-thumbnail" src={product.image_src} alt="" loading="lazy" />}
           </button>
         </div>)}
@@ -598,25 +612,14 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
         <Button type="primary" htmlType="submit">Save lot properties</Button>
       </Form>
     </Modal>
-    <Modal title={newStockProduct ? `Add ${newStockProduct.name} stock` : customCategoryEditable ? 'Specify product' : creatingCustomProduct && newItemCategory
+    <Modal title={newStockProduct ? `Add ${newStockProduct.name} stock` : creatingCustomProduct && newItemCategory
       ? `Specify ${newItemCategory.toLowerCase()} product` : newItemCategory
       ? `New ${newItemCategory.toLowerCase()} item` : 'New inventory item'} open={!!newItemCategory}
       onCancel={() => { setNewItemCategory(null); setNewStockProduct(null); setNewStockLotCode(undefined);
-        setSelectedCatalogProduct(null); setCatalogProductChosen(false); setCreatingCustomProduct(false);
-        setCustomCategoryEditable(false); }} footer={null} destroyOnHidden>
+        setSelectedCatalogProduct(null); setCatalogProductChosen(false); setCreatingCustomProduct(false); }} footer={null} destroyOnHidden>
       {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
       <Form form={itemForm} layout="vertical" onFinish={create}>
-        {customCategoryEditable ? <Form.Item name="category" label="Category" rules={[{ required: true, whitespace: true }]}>
-          <AutoComplete options={categories.map(category => ({ value: category }))} maxLength={80}
-            placeholder="Choose or enter a category" onChange={value => {
-              const nextUnit = categories.includes(value) ? unitForCategory(value, preferredUnits.mass) : 'each';
-              if (nextUnit !== previousItemUnit.current) {
-                changeQuantityUnit(itemForm, previousItemUnit.current, nextUnit, 'starting_quantity');
-                previousItemUnit.current = nextUnit;
-                itemForm.setFieldValue('default_unit', nextUnit);
-              }
-            }} />
-        </Form.Item> : <Form.Item name="category" hidden><Input /></Form.Item>}
+        <Form.Item name="category" hidden><Input /></Form.Item>
         {newStockProduct || catalogProductChosen ? <Form.Item name="name" hidden><Input /></Form.Item>
           : <Form.Item name="name" label={creatingCustomProduct ? 'Product name' : 'Item'}
             rules={[{ required: true, whitespace: true }]}>

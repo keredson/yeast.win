@@ -8,7 +8,7 @@ import { fillMissingRecipeBatchSizes } from '../shared/batchSize.ts';
 import { retiredGenericSupplies } from '../shared/retiredGenericSupplies.ts';
 import { indexStatements, legacyEquipmentCopyStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements,
   workspaceSchemaVersion, workspaceTableColumns, legacyEquipmentModelStatements, supplyMigrationStatements,
-  primingSugarCategoryMigrationStatements } from '../shared/schema.ts';
+  primingSugarCategoryMigrationStatements, otherFermentablesMigrationStatements } from '../shared/schema.ts';
 
 export const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const envPath = resolve(projectRoot, '.env');
@@ -269,6 +269,7 @@ export function openWorkspaceDb(id: string): Database.Database {
   db.transaction(() => {
     for (const statement of supplyMigrationStatements) db.exec(statement);
     if (version < 35) for (const statement of primingSugarCategoryMigrationStatements) db.exec(statement);
+    if (version < 36) for (const statement of otherFermentablesMigrationStatements) db.exec(statement);
   })();
   db.transaction(() => {
     const recipes = db.prepare(`SELECT r.id, r.name, s.slug FROM recipes r

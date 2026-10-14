@@ -12,8 +12,8 @@ try {
   await page.goto(process.env.BREWLOG_TEST_URL || 'http://127.0.0.1:5173');
   await page.getByRole('button', { name: 'Create account' }).click();
   await page.getByLabel('Username').fill(`inventory-catalog-${Date.now()}`);
-  await page.getByLabel('Password', { exact: true }).fill('smoke123');
-  await page.getByLabel('Confirm password').fill('smoke123');
+  await page.getByLabel('Password', { exact: true }).fill('smoke-test-1234');
+  await page.getByLabel('Confirm password').fill('smoke-test-1234');
   await page.locator('.login-card form button[type="submit"]').click();
   await page.getByRole('button', { name: 'Account settings' }).waitFor({ timeout: 30_000 });
   await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Inventory' }).first().click();
@@ -22,13 +22,20 @@ try {
   if (await page.getByRole('button', { name: 'Add from catalog' }).count()) {
     throw new Error('Inventory index still has a top-level catalog button');
   }
-  await page.locator('.inventory-add-types').getByRole('link', { name: 'other' }).click();
-  const other = page.getByRole('dialog', { name: 'Specify product' });
-  await other.getByRole('combobox', { name: 'Category' }).fill('Spices');
-  await other.getByRole('combobox', { name: 'Product name' }).fill('Smoke spice');
+  await page.locator('.inventory-add-types').getByRole('link', { name: 'other', exact: true }).click();
+  const other = page.getByRole('dialog', { name: 'Specify other product' });
+  if (await other.getByRole('combobox', { name: 'Category' }).count()) {
+    throw new Error('Categories should be defined by the app');
+  }
+  await other.locator('input#name').fill('Smoke spice');
   await other.getByRole('button', { name: 'Save product' }).click();
   await other.waitFor({ state: 'hidden' });
-  await page.getByRole('heading', { name: 'Spices' }).waitFor();
+  await page.getByRole('heading', { name: 'Other', exact: true }).waitFor();
+  await page.locator('.inventory-add-types').getByRole('link', { name: 'other fermentables' }).click();
+  const fermentables = page.getByRole('dialog', { name: 'Add from catalog' });
+  await fermentables.getByRole('button', { name: /Briess CBW® Golden Light DME/ }).waitFor({ timeout: 60_000 });
+  await fermentables.getByRole('button', { name: /Fresh apple cider/ }).waitFor();
+  await fermentables.locator('.ant-modal-close').click();
 
   await page.locator('.inventory-add-types').getByRole('link', { name: 'nutrient' }).click();
   const explorer = page.getByRole('dialog', { name: 'Add from catalog' });
@@ -77,7 +84,7 @@ try {
   const grainExplorer = page.getByRole('dialog', { name: 'Add from catalog' });
   await grainExplorer.getByRole('button', { name: 'Specify grain not in catalog' }).click();
   const custom = page.getByRole('dialog', { name: 'Specify grain product' });
-  await custom.getByRole('combobox', { name: 'Product name' }).fill('House malt');
+  await custom.locator('input#name').fill('House malt');
   await custom.getByRole('spinbutton', { name: 'Extract yield (%)' }).fill('79');
   await custom.getByRole('spinbutton', { name: 'Color (°L)' }).fill('3');
   await custom.getByRole('button', { name: 'Save product' }).click();

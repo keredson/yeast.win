@@ -10,7 +10,8 @@ import { recordSlug } from './recordSlug.ts';
 import type { CatalogEquipment, MeasurementChannel } from '../shared/catalog.ts';
 import { changeColumns, indexStatements, legacyEquipmentCopyStatements, legacyEquipmentModelStatements,
   supplyMigrationStatements, primingSugarCategoryMigrationStatements, nowSeconds, replicatedTables,
-  retiredReplicatedTables, schemaStatements, workspaceSchemaVersion, workspaceTableColumns } from '../shared/schema.ts';
+  retiredReplicatedTables, schemaStatements, workspaceSchemaVersion, workspaceTableColumns,
+  otherFermentablesMigrationStatements } from '../shared/schema.ts';
 import type { SqlChangeRow } from '../shared/wire.ts';
 import { changeTuple, decodeItem, encodeItem, maxSequence, readSequence, syncContentType,
   syncProtocolVersion, validChangeTuple, type ChangeTuple } from '../shared/cborSync.ts';
@@ -98,11 +99,16 @@ export interface InventoryItem { id: string; name: string; category: string; def
   grain_class?: string | null;
   location_id: string | null; location_name?: string | null;
   yield_pct?: number | null; color_lovibond?: number | null; alpha_acid_pct?: number | null;
+  typical_brix?: number | null; extract_color_value?: number | null; extract_color_scale?: string | null;
+  extract_color_reference_value?: number | null; extract_color_reference_unit?: string | null;
   hop_form?: IngredientProperties['hop_form'] | null; attenuation_pct?: number | null }
 export interface IngredientProperties { yield_pct?: number; color_lovibond?: number; alpha_acid_pct?: number;
   hop_form?: 'pellet' | 'whole' | 'plug'; attenuation_pct?: number;
-  grain_class?: 'base' | 'kilned' | 'caramel' | 'roasted' | 'flaked' | 'other' }
-const ingredientPropertyColumns = ['yield_pct', 'color_lovibond', 'alpha_acid_pct', 'hop_form', 'attenuation_pct', 'grain_class'] as const;
+  grain_class?: 'base' | 'kilned' | 'caramel' | 'roasted' | 'flaked' | 'other';
+  typical_brix?: number; extract_color_value?: number; extract_color_scale?: '°L' | 'SRM' | 'EBC';
+  extract_color_reference_value?: number; extract_color_reference_unit?: '°P' | '% w/v' }
+const ingredientPropertyColumns = ['yield_pct', 'color_lovibond', 'alpha_acid_pct', 'hop_form', 'attenuation_pct', 'grain_class',
+  'typical_brix', 'extract_color_value', 'extract_color_scale', 'extract_color_reference_value', 'extract_color_reference_unit'] as const;
 const equipmentAssumptionColumns = ['mash_efficiency_pct', 'grain_absorption_l_per_kg'] as const;
 
 function measurementKindForEquipment(kind: string): string | null {
@@ -356,6 +362,7 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
             for (const statement of supplyMigrationStatements) await tx.exec(statement);
             for (const statement of primingSugarCategoryMigrationStatements) await tx.exec(statement);
           }
+          if (version < 36) for (const statement of otherFermentablesMigrationStatements) await tx.exec(statement);
           if (changed) await tx.exec('DELETE FROM sync_state');
           if (legacyMeta.length) await tx.exec('DROP TABLE schema_meta');
           await tx.exec(`PRAGMA user_version = ${workspaceSchemaVersion}`);
@@ -2108,19 +2115,27 @@ export async function listInventory(db: Pick<DB, 'execO'>): Promise<InventoryIte
     COALESCE(lh.alpha_acid_pct, sh.alpha_acid_pct, ch.alpha_acid_pct, p.alpha_acid_pct) AS alpha_acid_pct,
     COALESCE(lh.hop_form, sh.hop_form, ch.hop_form, p.hop_form) AS hop_form,
     COALESCE(ly.attenuation_pct, sy.attenuation_pct, cy.attenuation_pct, p.attenuation_pct) AS attenuation_pct
+    ,COALESCE(lo.typical_brix, so.typical_brix, co.typical_brix) AS typical_brix
+    ,COALESCE(lo.extract_color_value, so.extract_color_value, co.extract_color_value) AS extract_color_value
+    ,COALESCE(lo.extract_color_scale, so.extract_color_scale, co.extract_color_scale) AS extract_color_scale
+    ,COALESCE(lo.extract_color_reference_value, so.extract_color_reference_value, co.extract_color_reference_value) AS extract_color_reference_value
+    ,COALESCE(lo.extract_color_reference_unit, so.extract_color_reference_unit, co.extract_color_reference_unit) AS extract_color_reference_unit
     FROM inventory_items i
     LEFT JOIN supplies s ON s.id = i.supply_id
     LEFT JOIN supply_lots lot ON lot.id = i.lot_id
     LEFT JOIN supply_grain_specs sg ON sg.supply_id = s.id
     LEFT JOIN supply_hop_specs sh ON sh.supply_id = s.id
     LEFT JOIN supply_yeast_specs sy ON sy.supply_id = s.id
+    LEFT JOIN supply_other_fermentable_specs so ON so.supply_id = s.id
     LEFT JOIN lot_grain_specs lg ON lg.lot_id = lot.id
     LEFT JOIN lot_hop_specs lh ON lh.lot_id = lot.id
     LEFT JOIN lot_yeast_specs ly ON ly.lot_id = lot.id
+    LEFT JOIN lot_other_fermentable_specs lo ON lo.lot_id = lot.id
     LEFT JOIN catalog.supply_grain_specs cg ON cg.supply_id = s.catalog_supply_id
     LEFT JOIN catalog.supply_grain_classes cgclass ON cgclass.supply_id = s.catalog_supply_id
     LEFT JOIN catalog.supply_hop_specs ch ON ch.supply_id = s.catalog_supply_id
     LEFT JOIN catalog.supply_yeast_specs cy ON cy.supply_id = s.catalog_supply_id
+    LEFT JOIN catalog.supply_other_fermentable_specs co ON co.supply_id = s.catalog_supply_id
     LEFT JOIN inventory_ingredient_properties p ON p.id = i.id
     LEFT JOIN inventory_display_units d ON d.id = i.id
     LEFT JOIN inventory_item_locations l ON l.id = i.id
@@ -2135,15 +2150,22 @@ export async function listSupplies(db: Pick<DB, 'execO'>): Promise<InventoryItem
     COALESCE(g.color_lovibond, cg.color_lovibond) AS color_lovibond,
     COALESCE(h.alpha_acid_pct, ch.alpha_acid_pct) AS alpha_acid_pct,
     COALESCE(h.hop_form, ch.hop_form) AS hop_form,
-    COALESCE(y.attenuation_pct, cy.attenuation_pct) AS attenuation_pct
+    COALESCE(y.attenuation_pct, cy.attenuation_pct) AS attenuation_pct,
+    COALESCE(o.typical_brix, co.typical_brix) AS typical_brix,
+    COALESCE(o.extract_color_value, co.extract_color_value) AS extract_color_value,
+    COALESCE(o.extract_color_scale, co.extract_color_scale) AS extract_color_scale,
+    COALESCE(o.extract_color_reference_value, co.extract_color_reference_value) AS extract_color_reference_value,
+    COALESCE(o.extract_color_reference_unit, co.extract_color_reference_unit) AS extract_color_reference_unit
     FROM supplies s
     LEFT JOIN supply_grain_specs g ON g.supply_id = s.id
     LEFT JOIN supply_hop_specs h ON h.supply_id = s.id
     LEFT JOIN supply_yeast_specs y ON y.supply_id = s.id
+    LEFT JOIN supply_other_fermentable_specs o ON o.supply_id = s.id
     LEFT JOIN catalog.supply_grain_specs cg ON cg.supply_id = s.catalog_supply_id
     LEFT JOIN catalog.supply_grain_classes cgclass ON cgclass.supply_id = s.catalog_supply_id
     LEFT JOIN catalog.supply_hop_specs ch ON ch.supply_id = s.catalog_supply_id
     LEFT JOIN catalog.supply_yeast_specs cy ON cy.supply_id = s.catalog_supply_id
+    LEFT JOIN catalog.supply_other_fermentable_specs co ON co.supply_id = s.catalog_supply_id
     ORDER BY s.name COLLATE NOCASE`);
 }
 
@@ -2201,6 +2223,8 @@ export async function updateIngredientProperties(db: DB, item: InventoryItem, pr
 function ingredientPropertyInsert(category: string, properties: IngredientProperties) {
   const allowed: Record<string, (keyof IngredientProperties)[]> = {
     Grain: ['yield_pct', 'color_lovibond', 'grain_class'], Adjunct: ['yield_pct', 'color_lovibond'],
+    'Other fermentables': ['typical_brix', 'extract_color_value', 'extract_color_scale',
+      'extract_color_reference_value', 'extract_color_reference_unit'],
     Hops: ['alpha_acid_pct', 'hop_form'], Yeast: ['attenuation_pct']
   };
   if (!allowed[category]) throw new Error('This inventory category has no calculation properties');
@@ -2211,11 +2235,15 @@ function ingredientPropertyInsert(category: string, properties: IngredientProper
       if (!['base', 'kilned', 'caramel', 'roasted', 'flaked', 'other'].includes(String(value))) throw new Error('Choose a grain class');
     } else if (key === 'hop_form') {
       if (!['pellet', 'whole', 'plug'].includes(String(value))) throw new Error('Choose a hop form');
+    } else if (key === 'extract_color_scale') {
+      if (!['°L', 'SRM', 'EBC'].includes(String(value))) throw new Error('Choose a color scale');
+    } else if (key === 'extract_color_reference_unit') {
+      if (!['°P', '% w/v'].includes(String(value))) throw new Error('Choose a color reference unit');
     } else if (typeof value !== 'number' || !Number.isFinite(value) || value < 0
-      || key !== 'color_lovibond' && value > 100) throw new Error(`Enter a valid ${key.replaceAll('_', ' ')}`);
+      || ['yield_pct', 'typical_brix'].includes(key) && value > 100) throw new Error(`Enter a valid ${key.replaceAll('_', ' ')}`);
   }
   const table = category === 'Hops' ? 'supply_hop_specs' : category === 'Yeast'
-    ? 'supply_yeast_specs' : 'supply_grain_specs';
+    ? 'supply_yeast_specs' : category === 'Other fermentables' ? 'supply_other_fermentable_specs' : 'supply_grain_specs';
   const columns = allowed[category];
   return { table, columns, values: columns.map(column => values[column] ?? null) };
 }
@@ -2223,7 +2251,7 @@ function ingredientPropertyInsert(category: string, properties: IngredientProper
 export async function supplyIngredientProperties(db: DB, item: InventoryItem): Promise<IngredientProperties> {
   if (!item.supply_id) return {};
   const table = item.category === 'Hops' ? 'supply_hop_specs' : item.category === 'Yeast'
-    ? 'supply_yeast_specs' : 'supply_grain_specs';
+    ? 'supply_yeast_specs' : item.category === 'Other fermentables' ? 'supply_other_fermentable_specs' : 'supply_grain_specs';
   return (await db.execO<IngredientProperties>(`SELECT * FROM ${table} WHERE supply_id = ?`, [item.supply_id]))[0] || {};
 }
 
@@ -2231,9 +2259,10 @@ export async function updateLotIngredientProperties(db: DB, item: InventoryItem,
   if (!item.lot_id) throw new Error('Lot not found');
   const columns = item.category === 'Hops' ? ['alpha_acid_pct', 'hop_form']
     : item.category === 'Yeast' ? ['attenuation_pct']
-      : ['yield_pct', 'color_lovibond'];
+      : item.category === 'Other fermentables' ? ['typical_brix', 'extract_color_value', 'extract_color_scale',
+          'extract_color_reference_value', 'extract_color_reference_unit'] : ['yield_pct', 'color_lovibond'];
   const table = item.category === 'Hops' ? 'lot_hop_specs' : item.category === 'Yeast'
-    ? 'lot_yeast_specs' : 'lot_grain_specs';
+    ? 'lot_yeast_specs' : item.category === 'Other fermentables' ? 'lot_other_fermentable_specs' : 'lot_grain_specs';
   await db.exec(`INSERT INTO ${table}(lot_id, ${columns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')})
     ON CONFLICT(lot_id) DO UPDATE SET ${columns.map(column => `${column} = excluded.${column}`).join(', ')}`,
   [item.lot_id, ...columns.map(column => properties[column as keyof IngredientProperties] ?? null)]);
@@ -2242,7 +2271,7 @@ export async function updateLotIngredientProperties(db: DB, item: InventoryItem,
 export async function lotIngredientProperties(db: DB, item: InventoryItem): Promise<IngredientProperties> {
   if (!item.lot_id) return {};
   const table = item.category === 'Hops' ? 'lot_hop_specs' : item.category === 'Yeast'
-    ? 'lot_yeast_specs' : 'lot_grain_specs';
+    ? 'lot_yeast_specs' : item.category === 'Other fermentables' ? 'lot_other_fermentable_specs' : 'lot_grain_specs';
   return (await db.execO<IngredientProperties>(`SELECT * FROM ${table} WHERE lot_id = ?`, [item.lot_id]))[0] || {};
 }
 

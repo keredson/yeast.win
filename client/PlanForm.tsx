@@ -6,7 +6,7 @@ import type { Equipment, InventoryItem, PlanDetails, PlanInput } from './db.ts';
 import { vesselKinds } from '../shared/equipment.ts';
 import { compoundMassUnit, convertUnit, gravityScales, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions } from '../shared/units.ts';
 import { planDuration, supportsDuration } from './planTiming.ts';
-import { unitForCategory, type CatalogInventory, type CatalogSupplyCategory } from '../shared/catalog.ts';
+import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
 import { QuantityFields } from './QuantityFields.tsx';
 import type { PreferredUnits } from './api.ts';
 import { changeNumberUnit, changeQuantityUnit } from './unitFields.ts';
@@ -49,11 +49,11 @@ interface Values {
   duration_value?: number; duration_unit?: typeof timeUnits[number]['value'];
 }
 
-export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory, catalog, catalogCategories, preferredUnits, preset, recipeMode = false, allowRecordNow = false, extraAction, submit }: {
+export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory, catalog, preferredUnits, preset, recipeMode = false, allowRecordNow = false, extraAction, submit }: {
   anchors: Anchor[];
   eventType: string;
   initialPlan?: PlanInput & { id: string };
-  equipment: Equipment[]; inventory: InventoryItem[]; catalog: CatalogInventory[]; catalogCategories: CatalogSupplyCategory[]; preferredUnits: PreferredUnits;
+  equipment: Equipment[]; inventory: InventoryItem[]; catalog: CatalogInventory[]; preferredUnits: PreferredUnits;
   preset?: PlanPreset;
   recipeMode?: boolean;
   allowRecordNow?: boolean;
@@ -75,7 +75,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
   const initialCategory = String(initialDetails.item_category || inventory.find(item => item.id === (recipeMode
     ? initialDetails.supply_id : initialDetails.inventory_item_id))?.category
     || catalog.find(item => item.id === initialDetails.catalog_item_id || item.name === initialItem)?.category || preset?.itemCategory || '');
-  const categoryNames = [...new Set([...catalogCategories.map(row => row.name),
+  const categoryNames = [...new Set([...inventoryCategories,
     ...inventory.map(row => row.category), ...(initialCategory ? [initialCategory] : [])])];
   const initialUnit = String(initialDetails.display_unit || initialDetails.container_unit || initialDetails.unit ||
     (kind === 'transfer' || kind === 'packaging' ? preferredUnits.volume

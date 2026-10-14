@@ -139,15 +139,17 @@ export function openCatalogDb(dataDir: string): Database.Database {
     db.close();
     throw new Error(`This server cannot open catalog version ${version}; update Brewlog first.`);
   }
-  if (version < catalogSchemaVersion) db.transaction(() => {
+  db.transaction(() => {
+    if (hasTable(db, 'supply_categories')) {
+      if (hasTable(db, 'supply_categories__crsql_clock')) db.prepare("SELECT crsql_as_table('supply_categories')").get();
+      db.exec('DROP TABLE supply_categories');
+    }
     ensureTables(db);
-    migrateColumns(db);
-    migrateLegacyRows(db);
-    // Preserve the categories already represented by catalog products, including
-    // when upgrading a catalog whose category table was only partly populated.
-    db.exec(`INSERT OR IGNORE INTO supply_categories(name, sort_order)
-      SELECT DISTINCT category, 1000 FROM supplies WHERE category IS NOT NULL AND trim(category) <> ''`);
-    db.pragma(`user_version = ${catalogSchemaVersion}`);
+    if (version < catalogSchemaVersion) {
+      migrateColumns(db);
+      migrateLegacyRows(db);
+      db.pragma(`user_version = ${catalogSchemaVersion}`);
+    }
   })();
   return db;
 }

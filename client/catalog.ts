@@ -1,7 +1,7 @@
 import initWasm, { type DB } from '@vlcn.io/crsqlite-wasm';
 import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
-import { catalogCategoryOptions, catalogModelTables, catalogSupplyTables, catalogSchemaVersion, catalogTables,
-  type CatalogEquipment, type CatalogInventory, type CatalogMeasurementChannel, type CatalogSupplyCategory } from '../shared/catalog.ts';
+import { catalogModelTables, catalogSupplyTables, catalogSchemaVersion, catalogTables,
+  type CatalogEquipment, type CatalogInventory, type CatalogMeasurementChannel } from '../shared/catalog.ts';
 import { changeColumns } from '../shared/schema.ts';
 import { maxSequence, readSequence, syncProtocolVersion, validChangeTuple, type ChangeTuple } from '../shared/cborSync.ts';
 import { fetchApi } from './api.ts';
@@ -265,22 +265,35 @@ export function openLocalCatalog(): Promise<DB> {
       });
     }
     if ((await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version === 29) {
+      await db.exec('PRAGMA user_version = 30');
+    }
+    if ((await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version === 30) {
       await db.tx(async tx => {
-        await tx.exec(catalogSupplyTables.supply_categories);
-        const clock = await tx.execO<{ name: string }>(
-          "SELECT name FROM sqlite_master WHERE name = 'supply_categories__crsql_clock'");
-        if (!clock.length) await tx.exec("SELECT crsql_as_crr('supply_categories')");
-        await tx.exec("DELETE FROM sync_state WHERE key = 'lastRefreshAt'");
-        await tx.exec('PRAGMA user_version = 30');
+        await tx.exec('PRAGMA user_version = 31');
       });
     }
+    // Reconcile a schema already marked current by an interrupted or concurrent upgrade.
+    await db.tx(async tx => {
+      await tx.exec(catalogSupplyTables.supply_other_fermentable_specs);
+      const specsClock = await tx.execO<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE name = 'supply_other_fermentable_specs__crsql_clock'");
+      if (!specsClock.length) await tx.exec("SELECT crsql_as_crr('supply_other_fermentable_specs')");
+      const table = await tx.execO<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'supply_categories'");
+      if (table.length) {
+        const clock = await tx.execO<{ name: string }>(
+          "SELECT name FROM sqlite_master WHERE name = 'supply_categories__crsql_clock'");
+        if (clock.length) await tx.exec("SELECT crsql_as_table('supply_categories')");
+        await tx.exec('DROP TABLE supply_categories');
+      }
+    });
     return db;
   })().catch(error => { opened = undefined; throw error; });
   return opened;
 }
 
-export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEquipment[]; inventory: CatalogInventory[]; categories: CatalogSupplyCategory[] }> {
-  const [models, liquid, pressure, heating, boil, cooling, control, channels, modelImages, logos, inventory, supplyImages, categories] = await Promise.all([
+export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEquipment[]; inventory: CatalogInventory[] }> {
+  const [models, liquid, pressure, heating, boil, cooling, control, channels, modelImages, logos, inventory, supplyImages] = await Promise.all([
     db.execO<{ id: string; name: string; kind: string; manufacturer: string | null;
       product_url: string | null; manufacturer_website_url: string | null }>(
       `SELECT m.id, m.model_name AS name, m.kind, m.manufacturer, m.product_url,
@@ -301,15 +314,17 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
       mime_type: string | null }>('SELECT * FROM manufacturer_logos'),
     db.execO<CatalogInventory>(`SELECT s.id, s.name, s.category, s.unit,
       g.yield_pct, g.color_lovibond, h.alpha_acid_pct, h.hop_form, y.attenuation_pct,
+      other.typical_brix, other.extract_color_value, other.extract_color_scale,
+      other.extract_color_reference_value, other.extract_color_reference_unit,
       gc.grain_class, p.manufacturer, p.product_url
       FROM supplies s LEFT JOIN supply_grain_specs g ON g.supply_id = s.id
+      LEFT JOIN supply_other_fermentable_specs other ON other.supply_id = s.id
       LEFT JOIN supply_hop_specs h ON h.supply_id = s.id
       LEFT JOIN supply_yeast_specs y ON y.supply_id = s.id
       LEFT JOIN supply_grain_classes gc ON gc.supply_id = s.id
       LEFT JOIN supply_products p ON p.supply_id = s.id ORDER BY s.name COLLATE NOCASE`),
     db.execO<{ supply_id: string; image_bytes: Uint8Array | null; image_mime_type: string | null }>(
-      'SELECT * FROM supply_images'),
-    db.execO<CatalogSupplyCategory>('SELECT name, sort_order FROM supply_categories ORDER BY sort_order, name COLLATE NOCASE')
+      'SELECT * FROM supply_images')
   ]);
   const oldMediaUrls = catalogMediaUrls;
   catalogMediaUrls = [];
@@ -363,9 +378,7 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
     return { ...model, measurement_min: primary?.measurement_min, measurement_max: primary?.measurement_max,
       measurement_unit: primary?.measurement_scale || primary?.measurement_unit };
   });
-  // An upgraded offline device may have product rows before it receives the new
-  // category table. Derive those options from its cached catalog until sync completes.
-  return { equipment, inventory, categories: catalogCategoryOptions(categories, inventory) };
+  return { equipment, inventory };
 }
 
 export function syncLocalCatalog(db: DB, onProgress?: (applied: number, total: number) => void): Promise<boolean> {

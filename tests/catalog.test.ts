@@ -5,27 +5,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { catalogChanges, openCatalogDb } from '../server/catalog.ts';
-import { catalogCategoryOptions, catalogSchemaVersion } from '../shared/catalog.ts';
+import { catalogSchemaVersion } from '../shared/catalog.ts';
 
 function directory(): string { return mkdtempSync(join(tmpdir(), 'brewlog-catalog-')); }
-
-test('cached products provide category options before new category rows sync', () => {
-  const products = [
-    { id: 'a', name: 'Malt', category: 'Grain', unit: 'g' },
-    { id: 'b', name: 'Cider', category: 'Juice & must', unit: 'L' },
-    { id: 'c', name: 'More malt', category: 'Grain', unit: 'g' }
-  ];
-  assert.deepEqual(catalogCategoryOptions([], products).map(row => row.name), ['Grain', 'Juice & must']);
-  assert.deepEqual(catalogCategoryOptions([{ name: 'Juice & must', sort_order: 5 }], products)
-    .map(row => row.name), ['Juice & must', 'Grain']);
-});
 
 test('a new catalog has the current schema and no bundled products', () => {
   const db = openCatalogDb(directory());
   try {
     assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
     assert.equal((db.prepare('SELECT count(*) AS n FROM supplies').get() as { n: number }).n, 0);
-    assert.equal((db.prepare('SELECT count(*) AS n FROM supply_categories').get() as { n: number }).n, 0);
+    assert.equal(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'supply_categories'").get(), undefined);
     assert.equal((db.prepare('SELECT count(*) AS n FROM equipment_models').get() as { n: number }).n, 0);
   } finally { db.close(); }
 });
@@ -48,30 +37,47 @@ test('catalog content and CR-SQLite changes persist across a schema upgrade', ()
     assert.deepEqual((after.prepare("SELECT image_bytes FROM supply_images WHERE supply_id='malt'")
       .get() as { image_bytes: Buffer }).image_bytes, image);
     assert.ok(after.prepare("SELECT id FROM equipment_models WHERE id='kettle'").get());
-    assert.deepEqual(after.prepare("SELECT name,sort_order FROM supply_categories WHERE name='Grain'").get(),
-      { name: 'Grain', sort_order: 1000 });
+    assert.equal(after.prepare("SELECT 1 FROM sqlite_master WHERE name = 'supply_categories'").get(), undefined);
     assert.ok(catalogChanges(after, 0n).changes.length > 0);
     assert.equal(after.pragma('integrity_check', { simple: true }), 'ok');
   } finally { after.close(); }
 });
 
-test('partially created categories survive upgrade and missing product categories are added', () => {
+test('previous category rows retire without disturbing products and specifications', () => {
   const dir = directory();
   const before = openCatalogDb(dir);
+  before.exec('CREATE TABLE supply_categories(name TEXT PRIMARY KEY NOT NULL, sort_order INTEGER NOT NULL DEFAULT 1000)');
+  before.prepare("SELECT crsql_as_crr('supply_categories')").get();
   before.prepare("INSERT INTO supplies(id,name,category,unit) VALUES ('grain','My malt','Grain','g')").run();
   before.prepare("INSERT INTO supplies(id,name,category,unit) VALUES ('hop','My hop','Hops','g')").run();
   before.prepare("INSERT INTO supply_categories(name,sort_order) VALUES ('Grain',4)").run();
   before.prepare("INSERT INTO supply_categories(name,sort_order) VALUES ('Juice & must',5)").run();
-  before.pragma('user_version = 29');
+  before.pragma('user_version = 30');
   before.close();
 
   const after = openCatalogDb(dir);
   try {
-    assert.deepEqual(after.prepare('SELECT name,sort_order FROM supply_categories ORDER BY sort_order,name').all(), [
-      { name: 'Grain', sort_order: 4 }, { name: 'Juice & must', sort_order: 5 },
-      { name: 'Hops', sort_order: 1000 }
-    ]);
+    assert.equal(after.prepare("SELECT 1 FROM sqlite_master WHERE name = 'supply_categories'").get(), undefined);
     assert.equal((after.prepare('SELECT count(*) AS n FROM supplies').get() as { n: number }).n, 2);
+    assert.ok(after.prepare("SELECT 1 FROM sqlite_master WHERE name = 'supply_other_fermentable_specs'").get());
+    assert.equal(after.pragma('integrity_check', { simple: true }), 'ok');
+  } finally { after.close(); }
+});
+
+test('a catalog marked current repairs a partially created fermentable specification table', () => {
+  const dir = directory();
+  const before = openCatalogDb(dir);
+  before.prepare("INSERT INTO supplies(id,name,category,unit) VALUES ('syrup','My syrup','Other fermentables','mL')").run();
+  before.prepare("INSERT INTO equipment_models(id,model_name,kind) VALUES ('mill','My mill','mill')").run();
+  before.exec('DROP TABLE supply_other_fermentable_specs');
+  before.close();
+
+  const after = openCatalogDb(dir);
+  try {
+    assert.equal(after.pragma('user_version', { simple: true }), catalogSchemaVersion);
+    assert.ok(after.prepare("SELECT name FROM sqlite_master WHERE name = 'supply_other_fermentable_specs'").get());
+    assert.ok(after.prepare("SELECT id FROM supplies WHERE id='syrup'").get());
+    assert.ok(after.prepare("SELECT id FROM equipment_models WHERE id='mill'").get());
     assert.equal(after.pragma('integrity_check', { simple: true }), 'ok');
   } finally { after.close(); }
 });
