@@ -336,6 +336,7 @@ try {
   await page.getByText('Capacity: 35 L').waitFor();
   await page.getByRole('button', { name: 'Edit model capacity' }).click();
   await vevorModelCapacityDialog.getByRole('button', { name: 'Remove capability' }).click();
+  await page.locator('.ant-popconfirm').getByText('Remove liquid capacity from this model?').waitFor();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Remove' }).click();
   await page.getByText(/^Capacity:/).waitFor({ state: 'hidden' });
   if (await page.getByText(/^Capacity:/).count()) throw new Error('Removed model capacity is still displayed');
@@ -426,6 +427,7 @@ try {
   await page.getByRole('button', { name: 'Edit model temperature range' }).click();
   const modelTemperatureDialog = page.getByRole('dialog', { name: 'Edit model temperature range' });
   await modelTemperatureDialog.getByRole('button', { name: 'Remove capability' }).click();
+  await page.locator('.ant-popconfirm').getByText('Remove temperature measurement from this model?').waitFor();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Remove' }).click();
   await page.getByText(/^Temperature:/).waitFor({ state: 'hidden' });
   if (await page.getByText(/^Temperature:/).count()) throw new Error('Removed catalog channel is still on the model');
