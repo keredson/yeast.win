@@ -21,8 +21,15 @@ try {
 
   await page.getByRole('button', { name: 'Add from catalog' }).click();
   const explorer = page.getByRole('dialog', { name: 'Add from catalog' });
+  await explorer.getByRole('searchbox', { name: 'Search inventory products' }).fill('Fermaid');
+  for (const name of ['Fermaid O', 'Fermaid K', 'Fermaid A', 'Fermaid Performens M']) {
+    await explorer.getByRole('button', { name: new RegExp(name) }).waitFor({ timeout: 60_000 });
+  }
+  await explorer.getByRole('searchbox', { name: 'Search inventory products' }).fill('');
   await explorer.getByRole('combobox', { name: 'Filter inventory type' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="Grain"]').click();
+  await explorer.getByRole('searchbox', { name: 'Search inventory products' }).fill('Crisp Malt Finest Maris Otter');
+  await explorer.getByRole('button', { name: /Crisp Malt Finest Maris Otter/ }).waitFor({ timeout: 60_000 });
   await explorer.getByRole('searchbox', { name: 'Search inventory products' }).fill('Briess Caramel Malt 60L');
   const product = explorer.getByRole('button', { name: /Briess Caramel Malt 60L/ });
   await product.waitFor({ timeout: 60_000 });

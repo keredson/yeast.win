@@ -123,6 +123,55 @@ test('version 23 catalog adds Lallemand package photos', () => {
   } finally { upgraded.close(); }
 });
 
+test('version 25 catalog gains Fermaid and more malt brands without replacing existing data', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-more-supplies-'));
+  const before = openCatalogDb(dir);
+  const addedIds = ['supply_fermaid_o', 'supply_fermaid_k', 'supply_fermaid_a',
+    'supply_fermaid_performens_m', 'supply_crisp_maris_otter', 'supply_crisp_best_ale',
+    'supply_simpsons_maris_otter', 'supply_simpsons_golden_promise'];
+  for (const id of addedIds) {
+    before.prepare('DELETE FROM supply_images WHERE supply_id = ?').run(id);
+    before.prepare('DELETE FROM supply_grain_specs WHERE supply_id = ?').run(id);
+    before.prepare('DELETE FROM supply_grain_classes WHERE supply_id = ?').run(id);
+    before.prepare('DELETE FROM supply_products WHERE supply_id = ?').run(id);
+    before.prepare('DELETE FROM supplies WHERE id = ?').run(id);
+  }
+  before.prepare('INSERT INTO supplies(id, name, category, unit) VALUES (?, ?, ?, ?)')
+    .run('custom_nutrient', 'My nutrient', 'Nutrient', 'g');
+  before.prepare('INSERT INTO supplies(id, name, category, unit) VALUES (?, ?, ?, ?)')
+    .run('supply_fermaid_o', 'My renamed Fermaid O', 'Nutrient', 'g');
+  before.prepare('INSERT INTO supply_products(supply_id, manufacturer, product_url) VALUES (?, ?, ?)')
+    .run('supply_fermaid_o', 'Lallemand', 'https://example.com/my-fermaid');
+  const editedImage = Buffer.from([137, 80, 78, 71, 1, 2]);
+  before.prepare('INSERT INTO supply_images(supply_id, image_bytes, image_mime_type) VALUES (?, ?, ?)')
+    .run('supply_fermaid_o', editedImage, 'image/png');
+  before.pragma('user_version = 25');
+  before.close();
+
+  const upgraded = openCatalogDb(dir);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), catalogSchemaVersion);
+    assert.ok(upgraded.prepare('SELECT 1 FROM supplies WHERE id = ?').get('custom_nutrient'));
+    assert.equal((upgraded.prepare('SELECT name FROM supplies WHERE id = ?').get('supply_fermaid_o') as {
+      name: string }).name, 'My renamed Fermaid O');
+    assert.equal((upgraded.prepare('SELECT product_url FROM supply_products WHERE supply_id = ?')
+      .get('supply_fermaid_o') as { product_url: string }).product_url, 'https://example.com/my-fermaid');
+    assert.deepEqual((upgraded.prepare('SELECT image_bytes FROM supply_images WHERE supply_id = ?')
+      .get('supply_fermaid_o') as { image_bytes: Buffer }).image_bytes, editedImage);
+    for (const id of addedIds) {
+      assert.ok(upgraded.prepare('SELECT 1 FROM supplies WHERE id = ?').get(id), `${id} was not added`);
+      if (id !== 'supply_fermaid_o') {
+        assert.ok((upgraded.prepare('SELECT length(image_bytes) AS bytes FROM supply_images WHERE supply_id = ?')
+          .get(id) as { bytes: number }).bytes > 1000, `${id} has no bundled image`);
+      }
+    }
+    assert.equal((upgraded.prepare('SELECT yield_pct FROM supply_grain_specs WHERE supply_id = ?')
+      .get('supply_crisp_maris_otter') as { yield_pct: number }).yield_pct, 80.6);
+    assert.equal((upgraded.prepare('SELECT grain_class FROM supply_grain_classes WHERE supply_id = ?')
+      .get('supply_simpsons_golden_promise') as { grain_class: string }).grain_class, 'base');
+  } finally { upgraded.close(); }
+});
+
 test('version 21 separates US and EU VEVOR systems without replacing catalog edits', () => {
   for (const edited of [false, true]) {
     const dir = mkdtempSync(join(tmpdir(), 'brewlog-vevor-region-'));

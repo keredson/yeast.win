@@ -541,6 +541,32 @@ export function openCatalogDb(dataDir: string): Database.Database {
       db.pragma('user_version = 25');
     })();
   }
+  if ((db.pragma('user_version', { simple: true }) as number) === 25) {
+    db.transaction(() => {
+      const addManufacturer = db.prepare(`INSERT OR IGNORE INTO manufacturers(name, website_url) VALUES (?, ?)`);
+      for (const maker of catalogSupplyManufacturers) addManufacturer.run(maker.name, maker.website_url);
+      const addSupply = db.prepare('INSERT OR IGNORE INTO supplies(id, name, category, unit) VALUES (?, ?, ?, ?)');
+      const addProduct = db.prepare(`INSERT OR IGNORE INTO supply_products
+        (supply_id, manufacturer, product_url, spec_source_url) VALUES (?, ?, ?, ?)`);
+      const addClass = db.prepare('INSERT OR IGNORE INTO supply_grain_classes(supply_id, grain_class) VALUES (?, ?)');
+      const addGrain = db.prepare(`INSERT OR IGNORE INTO supply_grain_specs
+        (supply_id, yield_pct, color_lovibond) VALUES (?, ?, ?)`);
+      for (const product of expandedCatalogSupplies.filter(item =>
+        item.id.startsWith('supply_fermaid_') || item.id.startsWith('supply_crisp_')
+        || item.id.startsWith('supply_simpsons_'))) {
+        addSupply.run(product.id, product.name, product.category, product.unit);
+        addProduct.run(product.id, product.manufacturer, product.product_url, product.spec_source_url ?? null);
+        if (product.grain_class) {
+          addClass.run(product.id, product.grain_class);
+          if (product.yield_pct != null || product.color_lovibond != null) {
+            addGrain.run(product.id, product.yield_pct ?? null, product.color_lovibond ?? null);
+          }
+        }
+      }
+      seedSupplyImages(db);
+      db.pragma('user_version = 26');
+    })();
+  }
   db.prepare(`UPDATE equipment_models SET model_name = ?
     WHERE id = ? AND model_name IN (?, ?)`).run(vevorModelName, 'equipment_vevor_35l',
     'VEVOR Electric Brewing System 9.2 Gal/35 L Brewing Pot', 'VEVOR 35 L');
