@@ -33,10 +33,6 @@ yarn start
 
 The server serves the built PWA and API together on port 3001. Point your Cloudflare Tunnel at that port using one HTTPS hostname. Keep `data/` and the downloaded `vendor/crsqlite.so` on the host; `data/` holds the auth, catalog, and brewery databases. Back up the SQLite database files consistently, including their WAL files, or use SQLite's backup API. Do not copy a live database file alone as a backup.
 
-The shared catalog's authoritative copy is `data/catalog.sqlite` (or `BREWLOG_DATA_DIR/catalog.sqlite`). Product records and images live in that database. Code upgrades its schema but does not seed or overwrite catalog content. A fresh server starts with an empty catalog; restore a catalog backup to populate it. Run `yarn catalog:backup` to create an integrity-checked snapshot in `data/backups/`, or pass a destination path. The backup uses SQLite's online backup API and includes committed WAL changes. Restore with the server stopped, keeping the existing file as a recovery copy until the restored database has been checked. Keep these backups outside Git and off the host as part of normal data backups.
-
-If a second checkout shares the catalog through a symlink, point its `data/catalog.sqlite` at the authoritative file. The server resolves the symlink before opening or attaching the database so both checkouts use the same SQLite WAL and shared-memory files.
-
 ## Current workflow
 
 - Create separate breweries for your home setup and commercial operation.
