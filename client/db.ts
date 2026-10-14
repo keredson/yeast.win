@@ -22,6 +22,8 @@ import { repeatBatchActions } from './batchRepeat.ts';
 import { appBatchSizeLiters, fillMissingRecipeBatchSizes, importedRecipeBatchSize } from '../shared/batchSize.ts';
 import { effectiveSuppliesView } from '../shared/effectiveSupplies.ts';
 
+const profileOpen = new URLSearchParams(location.search).has('profileOpen');
+
 export type LocalDb = DB;
 export interface Batch { id: string; name: string; description: string | null; status: string; created_at: number;
   source_batch_id?: string | null; source_batch_name?: string | null }
@@ -265,8 +267,13 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
   let pending = opened.get(workspaceId);
   if (!pending) {
     pending = (async () => {
+      const began = performance.now();
+      const profile = (step: string) => { if (profileOpen)
+        console.info(`[open data] ${step}: ${(performance.now() - began).toFixed(1)} ms`); };
       const sqlite = await (sqlitePromise ||= initWasm(() => wasmUrl));
+      profile('SQLite WASM ready');
       const db = await sqlite.open(`brewlog-${workspaceId}`);
+      profile('Workspace file open');
       const storedVersion = (await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version;
       const legacyMeta = await db.execO<{ name: string }>(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_meta'");
@@ -369,6 +376,7 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
           await tx.exec(`PRAGMA user_version = ${workspaceSchemaVersion}`);
         });
       }
+      profile('Workspace schema reconciled');
       if (version > 0 && version < 32) await db.tx(async tx => {
         await tx.exec(`INSERT OR IGNORE INTO supply_grain_specs(supply_id, color_lovibond)
           SELECT id, 60 FROM supplies WHERE catalog_supply_id = 'inventory_crystal_60'`);
@@ -390,6 +398,7 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
         await tx.exec('DROP TABLE equipment_legacy_migration');
       });
       await db.tx(async tx => { for (const statement of supplyMigrationStatements) await tx.exec(statement); });
+      profile('Legacy data repairs complete');
       const uniqueLegacyLosses = [...new Set(legacyLossValues)];
       if (uniqueLegacyLosses.length === 1 || legacyBatchLosses.length) await db.tx(async tx => {
         if (uniqueLegacyLosses.length === 1) await tx.exec(`INSERT INTO brewery_process_defaults(id, wort_loss_liters)
@@ -414,10 +423,12 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
         (SELECT archived_at FROM equipment_archives WHERE equipment_id = equipment.id ORDER BY archived_at LIMIT 1)
         WHERE removed_at IS NULL AND id IN (SELECT equipment_id FROM equipment_archives)`);
       await openLocalCatalog();
+      profile('Catalog file ready');
       await db.exec("ATTACH DATABASE 'brewlog-catalog' AS catalog");
       await db.exec(effectiveEquipmentView);
       await db.exec(effectiveMeasurementChannelsView);
       await db.exec(effectiveSuppliesView);
+      profile('Views ready');
       return db;
     })().catch(cause => { opened.delete(workspaceId); throw cause; });
     opened.set(workspaceId, pending);

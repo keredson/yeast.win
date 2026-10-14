@@ -74,6 +74,7 @@ function SectionNavigation({ route, recent, records, onNavigate }: {
 }
 const cachedSessionKey = 'brewlog:last-session';
 const signedOutKey = 'brewlog:signed-out';
+const profileOpen = new URLSearchParams(location.search).has('profileOpen');
 const autoSyncKey = 'brewlog:auto-sync';
 const activeBreweryKey = 'brewlog:active-brewery';
 
@@ -252,7 +253,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!session || !appActive) return;
+    if (!session || !appActive || !db) return;
     let cancelled = false;
     let catalogLoaded = false;
     let running = false;
@@ -263,6 +264,7 @@ export function App() {
         const catalogDb = await openLocalCatalog();
         if (!catalogLoaded) {
           const cached = await readLocalCatalog(catalogDb);
+          if (profileOpen) console.info(`[open catalog] Read ${cached.equipment.length} models and ${cached.inventory.length} supplies`);
           if (!cancelled) { setCatalogEquipment(cached.equipment); setCatalogInventory(cached.inventory); }
           catalogLoaded = true;
         }
@@ -271,6 +273,7 @@ export function App() {
           catalogChecked = true;
           if (!cancelled) setCatalogSyncProgress({ applied, total });
         });
+        if (profileOpen) console.info(`[open catalog] Sync complete; changed: ${refreshed}`);
         if (!cancelled) setCatalogSyncProgress(null);
         if (cancelled) return;
         if (catalogChecked) setServerDisconnected(false);
@@ -281,6 +284,7 @@ export function App() {
         setCatalogInventory(updated.inventory);
         setCatalogRevision(revision => revision + 1);
       } catch (cause) {
+        if (profileOpen) console.info(`[open catalog] Sync failed: ${cause instanceof Error ? cause.message : String(cause)}`);
         if (!cancelled) setCatalogSyncProgress(null);
         if (!cancelled && cause instanceof ApiUnavailableError) setServerDisconnected(true);
         // Cached catalog remains searchable offline.
@@ -293,7 +297,7 @@ export function App() {
     const timer = window.setInterval(refreshCatalog, 60 * 60_000);
     window.addEventListener('online', refreshCatalog);
     return () => { cancelled = true; window.clearInterval(timer); window.removeEventListener('online', refreshCatalog); };
-  }, [session?.account.id, appActive]);
+  }, [session?.account.id, appActive, db]);
 
   useEffect(() => {
     if (!db || !workspaceId || !catalogRevision) return;
@@ -488,9 +492,14 @@ export function App() {
     if (!workspaceId || !session) return;
     let cancelled = false;
     setOpenedDb(null);
+    const openingStarted = performance.now();
     openLocalDb(workspaceId).then(async activeDb => {
       if (cancelled) return;
+      if (profileOpen)
+        console.info(`[open data] Database ready: ${(performance.now() - openingStarted).toFixed(1)} ms`);
       await refresh(activeDb, workspaceId);
+      if (profileOpen)
+        console.info(`[open data] Initial lists ready: ${(performance.now() - openingStarted).toFixed(1)} ms`);
       if (!cancelled) setOpenedDb({ workspaceId, db: activeDb });
     }).catch(cause => setError(cause instanceof Error ? cause.message : String(cause)));
     return () => { cancelled = true; };

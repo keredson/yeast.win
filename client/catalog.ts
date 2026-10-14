@@ -11,6 +11,7 @@ let syncing: Promise<boolean> | undefined;
 type CatalogMediaKind = 'supply' | 'model' | 'thumbnail' | 'logo';
 const mediaCache = new Map<string, Promise<string | null>>();
 let mediaGeneration = 0;
+const profileOpen = new URLSearchParams(location.search).has('profileOpen');
 
 export function catalogMediaGeneration(): number { return mediaGeneration; }
 
@@ -52,8 +53,13 @@ const catalogRefreshIntervalMs = 24 * 60 * 60_000;
 
 export function openLocalCatalog(): Promise<DB> {
   if (!opened) opened = (async () => {
+    const began = performance.now();
+    const profile = (step: string) => { if (profileOpen)
+      console.info(`[open catalog] ${step}: ${(performance.now() - began).toFixed(1)} ms`); };
     const sqlite = await initWasm(() => wasmUrl);
+    profile('SQLite WASM ready');
     const db = await sqlite.open('brewlog-catalog');
+    profile('Catalog file open');
     const version = (await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version;
     if (version === 11) {
       await db.exec('PRAGMA user_version = 12');
@@ -326,6 +332,7 @@ export function openLocalCatalog(): Promise<DB> {
         await tx.exec('DROP TABLE supply_categories');
       }
     });
+    profile('Catalog schema ready');
     return db;
   })().catch(error => { opened = undefined; throw error; });
   return opened;
