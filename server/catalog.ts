@@ -150,7 +150,7 @@ export function openCatalogDb(dataDir: string): Database.Database {
   if (version === catalogSchemaVersion && hasTable(db, 'supply_container_specs__crsql_clock')) return db;
   if (version > catalogSchemaVersion) {
     db.close();
-    throw new Error(`This server cannot open catalog version ${version}; update Brewlog first.`);
+    throw new Error(`This server cannot open catalog version ${version}; update Yeast.Win! first.`);
   }
   db.transaction(() => {
     if (hasTable(db, 'supply_categories')) {

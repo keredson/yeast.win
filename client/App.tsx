@@ -601,7 +601,7 @@ export function App() {
       <div className="header-brand-row">
         <Button className="mobile-menu-button" type="text" shape="circle" aria-label="Open navigation"
           icon={<MenuOutlined />} onClick={() => setMenuOpen(true)} />
-        <div className="brand"><img className="brand-mark" src="/icon.svg" alt="" /><strong>Brewlog</strong></div>
+        <div className="brand"><img className="brand-mark" src="/icon.svg" alt="" /><strong>Yeast.Win!</strong></div>
       </div>
       <div className="header-controls">
         {headerProgress && <Tooltip title={`${headerProgress.label}: ${headerProgress.applied} of ${headerProgress.total} changes`}>

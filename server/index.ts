@@ -298,8 +298,8 @@ const server = createServer(async (req, res) => {
   }
 });
 
-if (devSocket) server.listen(devSocket, () => console.log(`Brewlog server listening on ${devSocket}`));
-else server.listen(port, '0.0.0.0', () => console.log(`Brewlog server listening on port ${port}`));
+if (devSocket) server.listen(devSocket, () => console.log(`Yeast.Win! server listening on ${devSocket}`));
+else server.listen(port, '0.0.0.0', () => console.log(`Yeast.Win! server listening on port ${port}`));
 
 function shutdown() {
   server.close();

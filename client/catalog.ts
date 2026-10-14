@@ -113,7 +113,7 @@ export function openLocalCatalog(): Promise<DB> {
         await tx.exec(`PRAGMA user_version = ${catalogSchemaVersion}`);
       });
     } else if (version > catalogSchemaVersion) {
-      throw new Error(`This app cannot open catalog schema ${version}; update Brewlog first.`);
+      throw new Error(`This app cannot open catalog schema ${version}; update Yeast.Win! first.`);
     }
     if ((await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version === 12) {
       await db.tx(async tx => {

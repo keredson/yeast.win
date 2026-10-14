@@ -25,9 +25,9 @@ function socketIsLive() {
     });
   });
 }
-if (await socketIsLive()) throw new Error(`Brewlog API already running at ${socketPath}`);
+if (await socketIsLive()) throw new Error(`Yeast.Win! API already running at ${socketPath}`);
 if (existsSync(socketPath)) unlinkSync(socketPath);
-console.log(`Brewlog API socket: ${socketPath}`);
+console.log(`Yeast.Win! API socket: ${socketPath}`);
 const child = spawn('yarn', ['concurrently', '-k', 'yarn dev:server', 'yarn dev:web'], {
   cwd: projectRoot,
   stdio: 'inherit',

@@ -1,6 +1,6 @@
-# Brewlog
+# Yeast.Win!
 
-Brewlog is a batch-first homebrewing PWA. Each brewery has its own SQLite database. The browser keeps a persistent local CR-SQLite database for offline use and syncs changes with a TypeScript server on your machine. The server also has a separate, private SQLite database for login and brewery ownership. APIs and database tables still use `workspace` as the internal name for a brewery.
+Yeast.Win! is a batch-first fermentation PWA. Each brewery has its own SQLite database. The browser keeps a persistent local CR-SQLite database for offline use and syncs changes with a TypeScript server on your machine. The server also has a separate, private SQLite database for login and brewery ownership. APIs and database tables still use `workspace` as the internal name for a brewery.
 
 ## Run locally
 

@@ -17,14 +17,14 @@ function loginPath(): string {
 }
 
 function brand(): string {
-  return '<div class="public-brand"><img src="/icon.svg" alt="" width="42" height="42"><strong>Brewlog</strong></div>';
+  return '<div class="public-brand"><img src="/icon.svg" alt="" width="42" height="42"><strong>Yeast.Win!</strong></div>';
 }
 
 function splash(): void {
   root.innerHTML = `<main class="public-page"><div class="public-shell">${brand()}
     <section class="public-hero"><p class="public-eyebrow">Free and open source</p>
-    <h1>Keep the brew process in view.</h1>
-    <p>Plan a batch, record what happened, and keep your brewery data available on this device.</p>
+    <h1>Keep fermentation in view.</h1>
+    <p>Plan a batch, record what happened, and keep your batch data available on this device.</p>
     <div class="public-actions"><a class="public-primary" href="/login">Sign in</a>
     <a class="public-secondary" href="/login?mode=signup">Create account</a></div></section></div></main>`;
 }
@@ -79,7 +79,7 @@ function login(message = ''): void {
 
 function loader(): { update: (loaded: number, total: number) => void; stage: (message: string) => void } {
   root.innerHTML = `<main class="public-page"><div class="public-shell">${brand()}
-    <section class="public-card public-loading" role="status" aria-live="polite"><h1>Opening Brewlog</h1>
+    <section class="public-card public-loading" role="status" aria-live="polite"><h1>Opening Yeast.Win!</h1>
     <p class="public-stage">Preparing the app…</p><progress max="100"></progress>
     <p class="public-count"></p></section></div></main>`;
   const progress = root.querySelector('progress')!;
@@ -145,7 +145,7 @@ async function loadApp(): Promise<void> {
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
     root.innerHTML = `<main class="public-page"><div class="public-shell">${brand()}
-      <section class="public-card"><h1>Could not open Brewlog</h1><p class="public-error"></p>
+      <section class="public-card"><h1>Could not open Yeast.Win!</h1><p class="public-error"></p>
       <button class="public-primary" type="button">Try again</button></section></div></main>`;
     root.querySelector('.public-error')!.textContent = message;
     root.querySelector('button')!.addEventListener('click', () => void loadApp());

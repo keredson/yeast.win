@@ -33,9 +33,9 @@ export default defineConfig(({ command }) => {
     VitePWA({
       registerType: 'autoUpdate',
       manifest: {
-        name: 'Brewlog',
-        short_name: 'Brewlog',
-        description: 'A batch-first brewing log',
+        name: 'Yeast.Win!',
+        short_name: 'Yeast.Win!',
+        description: 'Plan and track your fermentation batches',
         theme_color: '#193b39',
         background_color: '#f5f3ed',
         display: 'standalone',

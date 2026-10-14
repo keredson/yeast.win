@@ -1,10 +1,12 @@
-# Brewlog design
+# Yeast.Win! design
 
 Status: working design, 2026-10-11. This records the decisions made so far and the parts that still need validation. It is a product and data model design, not an executable SQL migration.
 
 ## Purpose
 
-Brewlog is an offline-capable PWA for recording **what happened to a batch and when**. A recipe is a reusable plan for events; a batch is the actual brewing record. The primary screen is a batch timeline that shows planned work, completed work, measurements, sensor data, and photos together.
+Yeast.Win! is an offline-capable PWA for recording **what happened to a batch and when**. A recipe is a reusable plan for events; a batch is the actual fermentation record. The primary screen is a batch timeline that shows planned work, completed work, measurements, sensor data, and photos together.
+
+The public brand is **Yeast.Win!**, matching the `yeast.win` domain. Existing `brewlog` names in database files, browser storage, cookies, cache entries, environment variables, and the development socket are stable internal identifiers. Keep them compatible across the rebrand so existing users retain sessions and offline data.
 
 The app should work for a homebrewer with one operation and for an account that also runs a separate brewery. It should support multiple contributors, selective batch sharing, equipment calibration, inventory, RAPT Pill readings, and reminders.
 
@@ -15,7 +17,7 @@ The app should work for a homebrewer with one operation and for an account that 
 - **UI:** One responsive PWA must work on mobile, tablet, and desktop. Use Ant Design components where they fit, with layouts and touch targets adapted to each viewport. Prototype the batch timeline and event-entry flow at all three sizes. Component selection does not affect the data model.
 - **Server:** A small Node.js service written in TypeScript runs on our own machine. It handles login, whole-workspace sync, sensor ingestion, push scheduling, and backups. It does not run UI analysis queries. SQLite is the server storage engine. The same TypeScript definitions can describe event payloads and sync messages on client and server; runtime input validation is still required.
 - **Exposure:** `cloudflared` publishes the app and API on a stable HTTPS hostname through Cloudflare Tunnel. Prefer one origin for the PWA and API. No Cloudflare Worker is required for each sync request. If the machine or tunnel is down, the installed PWA remains usable locally, but sync, sensor ingestion, and server-triggered reminders pause.
-- **Replication:** Evaluate `cr-sqlite` CRRs for mergeable tables and implement the browser/server transport over HTTPS, with WebSockets if useful. Start with whole-workspace sync. The transport belongs to Brewlog; CR-SQLite does not provide application authorization policies.
+- **Replication:** Evaluate `cr-sqlite` CRRs for mergeable tables and implement the browser/server transport over HTTPS, with WebSockets if useful. Start with whole-workspace sync. The transport belongs to Yeast.Win!; CR-SQLite does not provide application authorization policies.
 
 ### Form conventions
 

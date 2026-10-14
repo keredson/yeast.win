@@ -40,7 +40,7 @@ export function openAuthDb(): Database.Database {
   if (version === authSchemaVersion) return db;
   if (version > authSchemaVersion) {
     db.close();
-    throw new Error(`This server cannot open auth schema ${version}; update Brewlog first.`);
+    throw new Error(`This server cannot open auth schema ${version}; update Yeast.Win! first.`);
   }
   db.exec(`
     CREATE TABLE IF NOT EXISTS accounts (
@@ -209,7 +209,7 @@ export function openWorkspaceDb(id: string): Database.Database {
     }
   } else if (version > workspaceSchemaVersion) {
     db.close();
-    throw new Error(`This server cannot open workspace schema ${version}; update Brewlog first.`);
+    throw new Error(`This server cannot open workspace schema ${version}; update Yeast.Win! first.`);
   } else {
     db.exec('BEGIN');
     try {

@@ -342,7 +342,7 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
           if (legacyMeta.length) await tx.exec('DROP TABLE schema_meta');
         });
       } else if (version > workspaceSchemaVersion) {
-        throw new Error(`This app cannot open workspace schema ${version}; update Brewlog first.`);
+        throw new Error(`This app cannot open workspace schema ${version}; update Yeast.Win! first.`);
       } else {
         await db.tx(async tx => {
           const existing = new Set((await tx.execO<{ name: string }>(
