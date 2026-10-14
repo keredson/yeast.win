@@ -2,9 +2,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Alert, Button, Checkbox, Dropdown, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Table, Tooltip } from 'antd';
 import { CloudOutlined, ContainerOutlined, ControlOutlined, DashboardOutlined, EditOutlined, ExperimentOutlined,
   FireOutlined, MoreOutlined, PlusOutlined, SwapOutlined } from '@ant-design/icons';
-import { boilOffKinds, capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
+import { boilOffKinds, capacityKinds, equipmentKindLabel, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { catalogModelKinds, queryCatalogModels } from './catalog.ts';
+import { queryCatalogModels } from './catalog.ts';
 import { WorkspaceThumbnail } from './WorkspaceThumbnail.tsx';
 import { assignEquipmentToBatch, createEquipment, createEquipmentUnit, deleteEquipment, deleteEquipmentUnits,
   listEquipmentUses, releaseEquipmentUse,
@@ -140,8 +140,21 @@ const calibrationProfiles: Record<string, { fields: { key: string; label: string
   ] }
 };
 
-const equipmentMenuItems = equipmentGroups.map(group => ({ key: group.key, label: group.label,
-  children: group.kinds.map(kind => ({ key: kind, label: equipmentKindLabel(kind) })) }));
+const equipmentAddCategories = [
+  { key: 'brewing-system', label: 'brewing system', kinds: ['electric_kettle', 'all_in_one'] },
+  { key: 'kettle', label: 'kettle', kinds: ['kettle'] },
+  { key: 'mash-tun', label: 'mash tun', kinds: ['mash_tun'] },
+  { key: 'fermenter', label: 'fermenter', kinds: ['fermenter'] },
+  { key: 'keg', label: 'keg', kinds: ['keg'] },
+  { key: 'chiller', label: 'chiller', kinds: ['chiller', 'glycol_chiller'] },
+  { key: 'temperature-control', label: 'temperature control', kinds: [
+    'fermentation_temperature_control', 'refrigerator', 'temperature_controller'] },
+  { key: 'pump', label: 'pump', kinds: ['pump'] },
+  { key: 'measuring-instrument', label: 'measuring instrument', kinds: [
+    'hydrometer', 'thermometer', 'refractometer', 'ph_meter', 'pressure_gauge',
+    'carbonation_meter', 'dissolved_oxygen_meter', 'scale'] },
+  { key: 'other', label: 'other', kinds: ['other'] }
+] as const;
 
 function addEquipmentTitle(kind: string): string {
   const label = equipmentKindLabel(kind);
@@ -190,10 +203,10 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const [creatingKind, setCreatingKind] = useState<string | null>(null);
   const [addingUnit, setAddingUnit] = useState(false);
   const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
+  const [catalogCategoryKey, setCatalogCategoryKey] = useState<string | null>(null);
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogKind, setCatalogKind] = useState<string | undefined>();
   const [catalogForOwned, setCatalogForOwned] = useState<CatalogEquipment[]>([]);
-  const [catalogKinds, setCatalogKinds] = useState<string[]>([]);
   const [matchingModels, setMatchingModels] = useState<CatalogEquipment[]>([]);
   const [selectedCatalogModel, setSelectedCatalogModel] = useState<CatalogEquipment | null>(null);
   const [catalogUnitModelId, setCatalogUnitModelId] = useState<string | null>(null);
@@ -229,6 +242,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const [postBoilLossForm] = Form.useForm();
   const modelLossUnit = useRef(preferredUnits.volume);
   const unitLossUnit = useRef(preferredUnits.volume);
+  const catalogAddCategory = equipmentAddCategories.find(category => category.key === catalogCategoryKey);
   const catalog = [...catalogForOwned, ...matchingModels];
   const ownedCatalogIds = models.map(row => row.catalog_model_id).filter((id): id is string => !!id).join('\u0000');
   useEffect(() => {
@@ -241,14 +255,13 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   useEffect(() => {
     if (!catalogPickerOpen) { setMatchingModels([]); return; }
     let cancelled = false;
-    void Promise.all([catalogModelKinds(), queryCatalogModels({ category: catalogKind, query: catalogQuery, limit: null })])
-      .then(([kinds, rows]) => { if (!cancelled) {
-        setCatalogKinds(kinds.sort((left, right) => equipmentKindLabel(left).localeCompare(equipmentKindLabel(right))));
-        setMatchingModels(rows);
-      } })
+    const category = equipmentAddCategories.find(entry => entry.key === catalogCategoryKey);
+    void queryCatalogModels({ category: catalogKind, query: catalogQuery, limit: null })
+      .then(rows => { if (!cancelled) setMatchingModels(category
+        ? rows.filter(row => (category.kinds as readonly string[]).includes(row.kind)) : rows); })
       .catch(cause => { if (!cancelled) setError(String(cause)); });
     return () => { cancelled = true; };
-  }, [catalogPickerOpen, catalogKind, catalogQuery, catalogRevision]);
+  }, [catalogPickerOpen, catalogCategoryKey, catalogKind, catalogQuery, catalogRevision]);
   const item = equipment.find(row => row.id === selectedId) || null;
   const itemModel = item ? models.find(row => row.id === item.model_id) : undefined;
   const itemCatalogModel = itemModel ? catalog.find(row => row.id === itemModel.catalog_model_id) : undefined;
@@ -676,8 +689,20 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  const addMenu = { items: equipmentMenuItems, triggerSubMenuAction: 'click' as const,
-    onClick: ({ key }: { key: string }) => { setSelectedCatalogModel(null); setCreatingKind(key); } };
+  function addCategory(key: string) {
+    const category = equipmentAddCategories.find(entry => entry.key === key);
+    if (!category) return;
+    setCatalogCategoryKey(key);
+    setCatalogQuery('');
+    setCatalogKind(category.kinds.length === 1 ? category.kinds[0] : undefined);
+    setMatchingModels([]);
+    setCatalogPickerOpen(true);
+  }
+  function createCustomEquipment(kind: string) {
+    setCatalogPickerOpen(false);
+    setSelectedCatalogModel(null);
+    setCreatingKind(kind);
+  }
   const missingCapabilities = selectedModel ? [
     ...(!selectedModel.has_liquid_containment ? [{ key: 'liquid_containment', label: 'Liquid capacity' }] : []),
     ...(!selectedModel.has_pressure_rating ? [{ key: 'pressure_rating', label: 'Pressure rating' }] : []),
@@ -708,14 +733,6 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
     {!selectedId ? <section className="record-index equipment-index"><div className="section-heading"><div><span className="eyebrow">Your gear</span><h1>Equipment</h1></div></div>
       <p className="muted">Measurements, control settings, and transfers can reference your equipment.</p>
-      <div className="equipment-add-actions">
-        {models.length > 0 && <Button icon={<PlusOutlined />} onClick={() => { setCatalogUnitModelId(null); setAddingUnit(true); }}>Add unit</Button>}
-        <Button icon={<PlusOutlined />} onClick={() => { setCatalogQuery(''); setCatalogKind(undefined);
-          setCatalogPickerOpen(true); }}>Add from catalog</Button>
-        <Dropdown trigger={['click']} menu={addMenu} placement="bottomLeft">
-          <Button icon={<PlusOutlined />}>Define equipment</Button>
-        </Dropdown>
-      </div>
       {indexRows.length > 0 && <Table<EquipmentIndexRow> key={indexRows.filter(row => row.children).map(row => row.key).join(',')}
         className="equipment-table" dataSource={indexRows}
         rowKey="key" pagination={false} size="small" tableLayout="fixed"
@@ -760,6 +777,10 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
             </Dropdown>
           </Popconfirm> }
         ]} />}
+      <p className="equipment-add-types">Add {equipmentAddCategories.map((category, index) =>
+        <span key={category.key}>{index > 0 && (index === equipmentAddCategories.length - 1 ? ', or ' : ', ')}
+          <a href={`${basePath}/equipment`} onClick={event => { event.preventDefault(); addCategory(category.key); }}>
+            {category.label}</a></span>)}.</p>
     </section> : selectedModel ? <section className="record-detail">
       <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(selectedModel.kind)}</span>
         <h2>{selectedModel.name}</h2></div>
@@ -974,13 +995,16 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <Button type="primary" htmlType="submit" disabled={imageEdit === undefined}>Save image</Button>
       </Form>
     </Modal>
-    <Modal title="Add from catalog" open={catalogPickerOpen} onCancel={() => setCatalogPickerOpen(false)} footer={null} destroyOnHidden>
-      <div className="catalog-explorer-filters">
+    <Modal title={catalogAddCategory ? `Add ${catalogAddCategory.label === 'other' ? 'other equipment' : catalogAddCategory.label}`
+      : 'Add equipment'} open={catalogPickerOpen}
+      onCancel={() => setCatalogPickerOpen(false)} footer={null} destroyOnHidden>
+      <div className={`catalog-explorer-filters${catalogAddCategory?.kinds.length === 1 ? ' catalog-explorer-filters-single' : ''}`}>
         <Input.Search aria-label="Search equipment models" placeholder="Search equipment models" allowClear value={catalogQuery}
           onChange={event => setCatalogQuery(event.target.value)} />
-        <Select aria-label="Filter equipment type" placeholder="All equipment types" allowClear showSearch optionFilterProp="label"
+        {catalogAddCategory && catalogAddCategory.kinds.length > 1 && <Select aria-label="Filter equipment type"
+          placeholder="All types" allowClear showSearch optionFilterProp="label"
           value={catalogKind} onChange={setCatalogKind}
-          options={catalogKinds.map(kind => ({ value: kind, label: equipmentKindLabel(kind) }))} />
+          options={catalogAddCategory.kinds.map(kind => ({ value: kind, label: equipmentKindLabel(kind) }))} />}
       </div>
       {matchingModels.length ? <div className="catalog-explorer-list" role="list">
         {matchingModels.map(model => <div key={model.id} role="listitem">
@@ -992,6 +1016,14 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           </button>
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching equipment' : 'No catalog equipment available'} />}
+      {catalogAddCategory && (catalogKind || catalogAddCategory.kinds.length === 1
+        ? <Button type="link" className="catalog-create-custom"
+          onClick={() => createCustomEquipment(catalogKind || catalogAddCategory.kinds[0])}>
+          Specify {catalogKind ? equipmentKindLabel(catalogKind).toLowerCase() : catalogAddCategory.label} not in catalog</Button>
+        : <Dropdown trigger={['click']} menu={{ items: catalogAddCategory.kinds.map(kind => ({
+          key: kind, label: equipmentKindLabel(kind) })), onClick: ({ key }) => createCustomEquipment(key) }}>
+          <Button type="link" className="catalog-create-custom">Specify equipment not in catalog</Button>
+        </Dropdown>)}
     </Modal>
     <Modal title="Add equipment unit" open={addingUnit}
       onCancel={() => { setAddingUnit(false); setCatalogUnitModelId(null); }} footer={null} destroyOnHidden>

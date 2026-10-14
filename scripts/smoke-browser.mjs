@@ -60,10 +60,24 @@ async function choosePlanKind(page, buttonName, kind) {
   if (kind === 'Measurement') await page.getByRole('menuitem', { name: 'Temperature', exact: true }).click();
 }
 
-async function chooseEquipmentType(page, buttonName, group, kind) {
-  await page.getByRole('button', { name: buttonName }).click();
-  await page.getByRole('menuitem', { name: group }).click();
-  await page.getByRole('menuitem', { name: kind, exact: true }).click();
+async function chooseEquipmentType(page, _buttonName, _group, kind) {
+  const category = ({ 'Electric kettle': 'brewing system', 'Wort chiller': 'chiller',
+    'Fermentation temperature control': 'temperature control', 'pH meter': 'measuring instrument',
+    Refractometer: 'measuring instrument' })[kind] || kind.toLowerCase();
+  await page.locator('.equipment-add-types').getByRole('link', { name: category, exact: true }).click();
+  const picker = page.getByRole('dialog', { name: `Add ${category}` });
+  const customMenu = picker.getByRole('button', { name: 'Specify equipment not in catalog' });
+  if (await customMenu.count()) {
+    await customMenu.click();
+    await page.getByRole('menuitem', { name: kind, exact: true }).click();
+  } else {
+    await picker.getByRole('button', { name: `Specify ${category} not in catalog` }).click();
+  }
+}
+
+async function openEquipmentCatalog(page, category) {
+  await page.locator('.equipment-add-types').getByRole('link', { name: category, exact: true }).click();
+  return page.getByRole('dialog', { name: `Add ${category}` });
 }
 
 async function localBreweryBlocks(page, id) {
@@ -293,14 +307,15 @@ try {
   if (!await page.locator('.app-nav').evaluate(element => element.classList.contains('ant-layout-sider'))) {
     throw new Error('Desktop navigation is not an Ant Design Sider');
   }
-  await page.getByRole('button', { name: 'Add from catalog' }).click();
-  const catalogDialog = page.getByRole('dialog', { name: 'Add from catalog' });
-  await catalogDialog.getByRole('searchbox', { name: 'Search equipment models' }).fill('Inkbird');
-  await catalogDialog.getByRole('button', { name: /Inkbird ITC-308\b/ }).first().waitFor();
-  if (!await catalogDialog.getByRole('button', { name: /Inkbird ITC-308\b/ }).count()
-    || !await catalogDialog.getByRole('button', { name: /Inkbird ITC-308-WIFI/ }).count()) {
+  const temperatureCatalog = await openEquipmentCatalog(page, 'temperature control');
+  await temperatureCatalog.getByRole('searchbox', { name: 'Search equipment models' }).fill('Inkbird');
+  await temperatureCatalog.getByRole('button', { name: /Inkbird ITC-308\b/ }).first().waitFor();
+  if (!await temperatureCatalog.getByRole('button', { name: /Inkbird ITC-308\b/ }).count()
+    || !await temperatureCatalog.getByRole('button', { name: /Inkbird ITC-308-WIFI/ }).count()) {
     throw new Error('Merged catalog should offer both Inkbird ITC-308 models');
   }
+  await temperatureCatalog.locator('.ant-modal-close').click();
+  const catalogDialog = await openEquipmentCatalog(page, 'brewing system');
   await catalogDialog.getByRole('searchbox', { name: 'Search equipment models' }).fill('VEVOR');
   await catalogDialog.getByRole('button', { name: /VEVOR Electric Brewing System 9.2 Gal\/35 L/ }).first().click();
   const catalogEquipmentDialog = page.getByRole('dialog', { name: 'Add all-in-one brewing system' });
@@ -385,8 +400,7 @@ try {
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
   await page.waitForURL('**/equipment/vevor-electric-brewing-system-9-2-gal-35-l');
   await navigateSection(page, 'Equipment');
-  await page.getByRole('button', { name: 'Add from catalog' }).click();
-  const existingModelPicker = page.getByRole('dialog', { name: 'Add from catalog' });
+  const existingModelPicker = await openEquipmentCatalog(page, 'brewing system');
   await existingModelPicker.getByRole('searchbox', { name: 'Search equipment models' }).fill('VEVOR Electric Brewing System 9.2 Gal/35 L');
   await existingModelPicker.getByRole('button', { name: /VEVOR Electric Brewing System 9.2 Gal\/35 L/ }).first().click();
   await page.waitForURL('**/equipment');
@@ -432,8 +446,7 @@ try {
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
   await page.waitForURL('**/equipment/basic-smoke-fermenter');
   await navigateSection(page, 'Equipment');
-  await page.getByRole('button', { name: 'Add from catalog' }).click();
-  const tiltPicker = page.getByRole('dialog', { name: 'Add from catalog' });
+  const tiltPicker = await openEquipmentCatalog(page, 'measuring instrument');
   await tiltPicker.getByRole('searchbox', { name: 'Search equipment models' }).fill('Tilt Hydrometer');
   const tiltOption = tiltPicker.getByRole('button', { name: /Tilt Hydrometer and Thermometer/ });
   if (!/Gravity.*Temperature/.test(await tiltOption.innerText())) throw new Error('Tilt catalog entry omits temperature');
@@ -482,8 +495,7 @@ try {
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
   await page.waitForURL('**/equipment/tilt-hydrometer-and-thermometer');
   await navigateSection(page, 'Equipment');
-  await page.getByRole('button', { name: 'Add from catalog' }).click();
-  const cboxPicker = page.getByRole('dialog', { name: 'Add from catalog' });
+  const cboxPicker = await openEquipmentCatalog(page, 'measuring instrument');
   await cboxPicker.getByRole('searchbox', { name: 'Search equipment models' }).fill('CboxQC');
   await cboxPicker.getByRole('button', { name: /Anton Paar CboxQC/ }).click();
   const cboxDialog = page.getByRole('dialog', { name: 'Add carbonation meter' });
@@ -614,14 +626,12 @@ try {
   if (!String(await page.getByRole('link', { name: 'Smoke pH meter' }).getAttribute('href')).endsWith('/equipment/smoke-ph-meter')) {
     throw new Error('Equipment list link should open the model');
   }
-  const addEquipmentActions = page.locator('.equipment-add-actions');
-  await addEquipmentActions.getByRole('button', { name: 'Add from catalog' }).waitFor();
-  await addEquipmentActions.getByRole('button', { name: 'Define equipment' }).waitFor();
-  const buttonBelowIntro = await addEquipmentActions.evaluate(actions => {
-    const intro = actions.previousElementSibling;
-    return intro?.textContent?.includes('Measurements, control settings, and transfers') || false;
-  });
-  if (!buttonBelowIntro) throw new Error('Equipment actions moved away from the intro when equipment exists');
+  const addEquipmentLinks = page.locator('.equipment-add-types');
+  await addEquipmentLinks.getByRole('link', { name: 'brewing system' }).waitFor();
+  await addEquipmentLinks.getByRole('link', { name: 'measuring instrument' }).waitFor();
+  const linksBelowTable = await addEquipmentLinks.evaluate(links =>
+    !!links.previousElementSibling?.classList.contains('equipment-table'));
+  if (!linksBelowTable) throw new Error('Equipment add links should follow the table');
   await chooseEquipmentType(page, 'Define equipment', 'Measurement', 'Refractometer');
   const refractometerDialog = page.getByRole('dialog', { name: 'Add refractometer' });
   const refractometerName = refractometerDialog.getByRole('textbox', { name: 'Name' });
@@ -675,7 +685,7 @@ try {
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
   await page.waitForURL('**/equipment/smoke-refractometer');
   await navigateSection(page, 'Equipment');
-  await page.getByRole('button', { name: 'Define equipment' }).waitFor();
+  await page.locator('.equipment-add-types').getByRole('link', { name: 'fermenter' }).waitFor();
   await navigateSection(page, 'Batches');
   await openBatch(page, batchName);
   await page.getByText('ph 5.2 pH').waitFor();
