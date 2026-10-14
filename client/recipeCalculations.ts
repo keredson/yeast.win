@@ -10,9 +10,13 @@ export interface RecipeEstimate {
   colorSrm: number | null;
   efficiencyLabel: string | null;
   missing: string[];
+  sources: { targetLiters: string[]; originalGravity: string[]; finalGravity: string[];
+    abvPct: string[]; colorSrm: string[] };
   unavailable: { targetLiters: string[]; originalGravity: string[]; finalGravity: string[];
     abvPct: string[]; colorSrm: string[] };
 }
+
+export const appMashEfficiencyPct = 75;
 
 function positive(value: unknown): number | null {
   if (value == null || value === '') return null;
@@ -36,15 +40,18 @@ export function estimatedPostBoilLoss(events: Event[], equipment: Equipment[]): 
 
 export function calculateRecipe(events: Event[], inventory: InventoryItem[], equipment: Equipment[],
   recipeInputs: Record<string, unknown>, eventInputs: Record<string, Record<string, unknown>>,
-  recentMashEfficiency: Record<string, number> = {}, recipeType = 'beer'): RecipeEstimate {
+  recentMashEfficiency: Record<string, number | { value: number; batchName: string }> = {}, recipeType = 'beer',
+  breweryMashEfficiencyPct: number | null = null): RecipeEstimate {
   const missing: string[] = [];
   const gravityMissing: string[] = [];
   const colorMissing: string[] = [];
   const targetLiters = positive(recipeInputs.target_fermenter_volume_liters);
+  const targetSources = targetLiters ? [`Batch size: ${targetLiters} L (recipe settings).`] : [];
   const targetHelp = 'Set Batch size in recipe settings.';
   if (!targetLiters) { missing.push(targetHelp); gravityMissing.push(targetHelp); colorMissing.push(targetHelp); }
   if (recipeType !== 'beer') return { targetLiters, originalGravity: null, finalGravity: null, abvPct: null, colorSrm: null,
     efficiencyLabel: null, missing: [...missing, 'Gravity and alcohol estimates for this recipe type need fermentable sugar inputs.'],
+    sources: { targetLiters: targetSources, originalGravity: [], finalGravity: [], abvPct: [], colorSrm: [] },
     unavailable: { targetLiters: targetLiters ? [] : [targetHelp],
       originalGravity: ['Gravity estimates for this recipe type need fermentable sugar inputs.'],
       finalGravity: ['Gravity estimates for this recipe type need fermentable sugar inputs.'],
@@ -56,8 +63,16 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
   const mashEquipmentId = String(drainDetails.mash_equipment_id || mash?.details.equipment_id || '');
   const mashEquipment = equipment.find(item => item.id === mashEquipmentId);
   const mashSpecs: EquipmentSpecifications = mashEquipment || {};
-  const importedBrewhouseEfficiency = positive(recipeInputs.brewhouse_efficiency_pct);
-  const mashEfficiency = positive(mashSpecs.mash_efficiency_pct) ?? positive(recentMashEfficiency[mashEquipmentId]);
+  const validEfficiency = (value: unknown) => { const parsed = positive(value); return parsed != null && parsed <= 100 ? parsed : null; };
+  const importedBrewhouseEfficiency = validEfficiency(recipeInputs.brewhouse_efficiency_pct);
+  const modelEfficiency = validEfficiency(mashSpecs.mash_efficiency_pct);
+  const recentReading = recentMashEfficiency[mashEquipmentId];
+  const recentEfficiency = validEfficiency(typeof recentReading === 'number' ? recentReading : recentReading?.value);
+  const breweryEfficiency = validEfficiency(breweryMashEfficiencyPct);
+  const mashEfficiency = modelEfficiency ?? recentEfficiency
+    ?? (importedBrewhouseEfficiency == null ? breweryEfficiency ?? appMashEfficiencyPct : null);
+  const gravitySources = [...targetSources];
+  const colorSources = [...targetSources];
   let efficiencyLabel: string | null = null;
   let efficiency: number | null = null;
   let extractVolume: number | null = targetLiters;
@@ -65,11 +80,26 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
     const wortLoss = estimatedPostBoilLoss(events, equipment);
     efficiency = mashEfficiency;
     extractVolume = targetLiters == null ? null : targetLiters + wortLoss;
-    efficiencyLabel = `${mashEfficiency}% mash efficiency${mashSpecs.mash_efficiency_pct == null ? ' (recent batch)' : ''}; ${wortLoss} L post-boil loss`;
+    const source = modelEfficiency != null ? `equipment model ${mashEquipment?.name || mashEquipmentId}`
+      : recentEfficiency != null ? `batch ${typeof recentReading === 'object' ? recentReading.batchName : 'measurement'} using ${mashEquipment?.name || mashEquipmentId}`
+        : breweryEfficiency != null ? 'brewery default' : 'app default';
+    efficiencyLabel = `${mashEfficiency}% mash efficiency (${source}); ${wortLoss} L post-boil loss`;
+    gravitySources.push(`Mash efficiency: ${mashEfficiency}% (${source}).`);
+    const usedEquipment = new Set(events.filter(event => event.event_type === 'temperature_control'
+      && ['boil', 'chill'].includes(String(event.details.phase || '')))
+      .map(event => String(event.details.equipment_id || '')).filter(Boolean));
+    for (const event of events.filter(event => event.event_type === 'transfer' && event.details.purpose === 'to_fermenter')) {
+      for (const id of event.details.transfer_equipment_ids || []) usedEquipment.add(id);
+    }
+    const lossSources = [...usedEquipment].map(id => equipment.find(item => item.id === id))
+      .filter((item): item is Equipment => !!item && (item.post_boil_loss_liters ?? 0) > 0)
+      .map(item => `${item.name}: ${item.post_boil_loss_liters} L`);
+    gravitySources.push(`Post-boil wort retained: ${wortLoss} L${lossSources.length ? ` (${lossSources.join(', ')})` : ' (no linked equipment loss set)'}.`);
   }
-  if (efficiency == null && importedBrewhouseEfficiency != null && importedBrewhouseEfficiency <= 100) {
+  if (efficiency == null && importedBrewhouseEfficiency != null) {
     efficiency = importedBrewhouseEfficiency;
     efficiencyLabel = `${efficiency}% imported brewhouse efficiency`;
+    gravitySources.push(`Brewhouse efficiency: ${efficiency}% (imported recipe).`);
   } else if (efficiency == null && mashEfficiency == null) {
     const message = 'Set mash efficiency on the mash equipment, or import a brewhouse efficiency.';
     missing.push(message); gravityMissing.push(message);
@@ -96,6 +126,12 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
     const color = rawColor == null || rawColor === '' ? null : Number(rawColor);
     if (pounds == null || pounds <= 0 || color == null || !Number.isFinite(color) || color < 0) colorReady = false;
     else maltColorUnits += pounds * color;
+    const name = String(details.item_name || item?.name || event.title);
+    const amount = `${details.quantity ?? 'unset'} ${details.unit || ''}`.trim();
+    if (details.item_category === 'Grain') {
+      gravitySources.push(`${name}: ${amount} (recipe action); extract yield ${yieldPct ?? 'unset'}% (${item ? 'brewery ingredient' : 'imported recipe'}).`);
+      colorSources.push(`${name}: ${amount} (recipe action); color ${color ?? 'unset'} °L (${item ? 'brewery ingredient' : 'imported recipe'}).`);
+    }
     if (details.item_category === 'Adjunct') continue;
     if (yieldPct == null || yieldPct > 100 || pounds == null || pounds <= 0) {
       const message = `Set an amount and extract yield for ${details.item_name || event.title}.`;
@@ -128,14 +164,24 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
     return positive(item ? item.attenuation_pct : eventInputs[event.id]?.attenuation_pct);
   });
   const attenuation = attenuations.length === 1 && attenuations[0] != null && attenuations[0] <= 100 ? attenuations[0] : null;
+  const yeast = yeasts[0];
+  const yeastItem = inventory.find(row => row.id === (yeast?.details.supply_id || yeast?.details.inventory_item_id));
+  const finalSources = [originalGravity == null ? 'Expected OG is unavailable.' : `Expected OG: ${originalGravity.toFixed(3)} (calculated above).`];
+  if (attenuation != null) finalSources.push(`Yeast attenuation: ${attenuation}% (${yeastItem ? `brewery ingredient ${yeastItem.name}` : `imported recipe ${yeast?.details.item_name || yeast?.title || 'yeast'}`}).`);
   const attenuationHelp = 'Select one yeast with an attenuation value.';
   if (!attenuation) missing.push(attenuationHelp);
   const finalGravity = originalGravity != null && attenuation != null
     ? 1 + (originalGravity - 1) * (1 - attenuation / 100) : null;
   const abvPct = finalGravity != null && originalGravity != null ? (originalGravity - finalGravity) * 131.25 : null;
+  const abvSources = originalGravity != null && finalGravity != null
+    ? [`Expected OG: ${originalGravity.toFixed(3)}.`, `Expected FG: ${finalGravity.toFixed(3)}.`,
+      'ABV = (OG − FG) × 131.25.'] : [];
+  if (colorSrm != null) colorSources.push('Color uses grain amounts, color values, batch size, and the Morey approximation.');
 
   return { targetLiters, originalGravity, finalGravity, abvPct, colorSrm,
     efficiencyLabel, missing: [...new Set(missing)],
+    sources: { targetLiters: targetSources, originalGravity: gravitySources, finalGravity: finalSources,
+      abvPct: abvSources, colorSrm: colorSources },
     unavailable: { targetLiters: targetLiters ? [] : [targetHelp], originalGravity: gravityMissing,
       finalGravity: [...gravityMissing, ...(!attenuation ? [attenuationHelp] : [])],
       abvPct: [...gravityMissing, ...(!attenuation ? [attenuationHelp] : [])], colorSrm: colorMissing } };
