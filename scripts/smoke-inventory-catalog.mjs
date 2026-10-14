@@ -60,8 +60,33 @@ try {
     throw new Error('Custom product specification was not saved');
   }
   await savedSpec.locator('.ant-modal-close').click();
+  await page.getByRole('button', { name: 'Edit links' }).click();
+  const links = page.getByRole('dialog', { name: 'Edit product links' });
+  await links.getByRole('textbox', { name: 'Product URL' }).fill('https://example.com/house-malt');
+  await links.getByRole('button', { name: 'Save links' }).click();
+  await links.waitFor({ state: 'hidden' });
+  await page.getByRole('link', { name: 'https://example.com/house-malt' }).waitFor();
+  await page.getByRole('button', { name: 'Edit image' }).click();
+  const image = page.getByRole('dialog', { name: 'Edit product image' });
+  await image.getByLabel('Product image').setInputFiles('assets/catalog/supplies/supply_briess_pale_ale.jpg');
+  await image.getByRole('button', { name: 'Save image' }).click();
+  await image.waitFor({ state: 'hidden' });
+  await page.locator('.supply-product-image img').waitFor();
+  await page.getByRole('button', { name: 'Link catalog product' }).click();
+  const linkCatalog = page.getByRole('dialog', { name: 'Link catalog product' });
+  await linkCatalog.getByRole('searchbox', { name: 'Search inventory products' }).fill('Crisp Malt Finest Maris Otter');
+  await linkCatalog.getByRole('button', { name: /Crisp Malt Finest Maris Otter/ }).click();
+  await page.getByText('Crisp Malt', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Edit links' }).click();
+  await page.getByRole('dialog', { name: 'Edit product links' }).getByRole('button', { name: 'Restore catalog links' }).click();
+  await page.getByRole('dialog', { name: 'Edit product links' }).getByRole('button', { name: 'Save links' }).click();
+  await page.getByRole('link', { name: /crispmalt.com\/malts\/finest-maris-otter-ale-malt/ }).waitFor();
+  await page.setViewportSize({ width: 320, height: 720 });
+  if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) {
+    throw new Error('Inventory product details overflow a narrow phone');
+  }
   if (errors.length) throw new Error(`Browser errors: ${errors.join('; ')}`);
-  console.log('Inventory catalog selection, type links, and custom product specs passed');
+  console.log('Inventory catalog, custom specs, product media, and catalog linking passed');
 } finally {
   await browser.close();
 }

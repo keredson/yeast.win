@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, AutoComplete, Button, Checkbox, Dropdown, Empty, Form, Input, InputNumber, Modal, Select, Table } from 'antd';
-import { MoreOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
+import { EditOutlined, MoreOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
 import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
 import { addInventoryEntry, convertInventoryUnit, createInventoryItem, inventoryBalance, inventoryLocationPath,
   listInventoryBalances, listInventoryLocations, listInventoryMovements, moveInventoryStock, saveInventoryLocation, stockAtLocation,
-  updateIngredientProperties, updateLotIngredientProperties, supplyIngredientProperties, lotIngredientProperties, ingredientProperties, type IngredientProperties, type InventoryItem, type InventoryLocation, type InventoryMovement, type LocalDb } from './db.ts';
+  updateIngredientProperties, updateLotIngredientProperties, supplyIngredientProperties, lotIngredientProperties, ingredientProperties,
+  readSupplyMedia, saveSupplyMedia, linkSupplyCatalogProduct,
+  type IngredientProperties, type InventoryItem, type InventoryLocation, type InventoryMovement, type LocalDb, type SupplyMedia } from './db.ts';
 import { formatTime } from './time.ts';
 import type { PreferredUnits } from './api.ts';
 import { compoundMassUnit, formatQuantity, quantityForStorage, quantityUnitsForCategory, storageUnit, unitOptions } from '../shared/units.ts';
@@ -96,9 +98,17 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const [newStockProduct, setNewStockProduct] = useState<InventoryItem | null>(null);
   const [newStockLotCode, setNewStockLotCode] = useState<string | null | undefined>(undefined);
   const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
+  const [catalogPickerPurpose, setCatalogPickerPurpose] = useState<'add' | 'link'>('add');
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogCategory, setCatalogCategory] = useState<string | undefined>();
   const [selectedCatalogProduct, setSelectedCatalogProduct] = useState<CatalogInventory | null>(null);
+  const [supplyMedia, setSupplyMedia] = useState<{ supplyId: string; row: SupplyMedia | null; imageUrl: string | null } | null>(null);
+  const [mediaRevision, setMediaRevision] = useState(0);
+  const [editingProductLinks, setEditingProductLinks] = useState(false);
+  const [productUrlDraft, setProductUrlDraft] = useState('');
+  const [specUrlDraft, setSpecUrlDraft] = useState('');
+  const [editingProductImage, setEditingProductImage] = useState(false);
+  const [imageEdit, setImageEdit] = useState<File | null | undefined>();
   const [creatingCustomProduct, setCreatingCustomProduct] = useState(false);
   const [ingredientSettingsOpen, setIngredientSettingsOpen] = useState(false);
   const [supplyProperties, setSupplyProperties] = useState<IngredientProperties>({});
@@ -117,6 +127,10 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const previousEntryUnit = useRef<string | undefined>(undefined);
   const item = supplies.find(row => row.id === selectedId) || null;
   const catalogProduct = catalog.find(row => row.id === item?.catalog_supply_id);
+  const activeMedia = supplyMedia?.supplyId === item?.id ? supplyMedia : null;
+  const productImageUrl = activeMedia?.imageUrl || catalogProduct?.image_src;
+  const productUrl = activeMedia?.row?.product_url || catalogProduct?.product_url;
+  const specSourceUrl = activeMedia?.row?.spec_source_url || catalogProduct?.spec_source_url;
   const productRows = items.filter(row => row.supply_id === item?.id);
   const stockTreeRows = stockTree(productRows);
   const currentIngredientProperties = ingredientProperties(item);
@@ -164,8 +178,8 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
     setNewItemCategory(category);
   }
 
-  function openCatalog(category?: string) {
-    setCatalogQuery(''); setCatalogCategory(category); setCatalogPickerOpen(true);
+  function openCatalog(category?: string, purpose: 'add' | 'link' = 'add') {
+    setCatalogQuery(''); setCatalogCategory(category); setCatalogPickerPurpose(purpose); setCatalogPickerOpen(true);
   }
 
   function createCustomProduct(category: string) {
@@ -174,8 +188,13 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
     setCreatingCustomProduct(true);
   }
 
-  function chooseCatalogProduct(product: CatalogInventory) {
+  async function chooseCatalogProduct(product: CatalogInventory) {
     setCatalogPickerOpen(false);
+    if (catalogPickerPurpose === 'link' && item) {
+      try { await linkSupplyCatalogProduct(db, item.id, product.id); await onChanged(); }
+      catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+      return;
+    }
     const existing = supplies.find(row => row.catalog_supply_id === product.id)
       || supplies.find(row => row.category === product.category && row.name.toLocaleLowerCase() === product.name.toLocaleLowerCase());
     openCreate(product.category, existing, undefined, false, product);
@@ -230,6 +249,20 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
     return () => { cancelled = true; };
   }, [db, items]);
   useEffect(() => { void listInventoryLocations(db).then(setLocations).catch(cause => setError(String(cause))); }, [db, items]);
+  useEffect(() => {
+    if (!item) { setSupplyMedia(null); return; }
+    let cancelled = false;
+    let imageUrl: string | null = null;
+    setSupplyMedia(null);
+    void readSupplyMedia(db, item.id).then(row => {
+      if (row?.image_bytes?.length && row.image_mime_type) {
+        imageUrl = URL.createObjectURL(new Blob([new Uint8Array(row.image_bytes)], { type: row.image_mime_type }));
+      }
+      if (cancelled) { if (imageUrl) URL.revokeObjectURL(imageUrl); }
+      else setSupplyMedia({ supplyId: item.id, row, imageUrl });
+    }).catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => { cancelled = true; if (imageUrl) URL.revokeObjectURL(imageUrl); };
+  }, [db, item?.id, mediaRevision]);
 
   const balance = item ? stockTotal(productRows, onHand, item.default_unit) : undefined;
 
@@ -351,14 +384,29 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
                 }).catch(cause => setError(String(cause)));
               }}>Supply properties</Button>}
             <Button type="primary" onClick={() => openCreate(item.category, item)}>Add stock</Button></div></div>
-        {catalogProduct && <div className="supply-source">
-          {catalogProduct.image_src && <img src={catalogProduct.image_src} alt={catalogProduct.name} />}
-          <div>{catalogProduct.manufacturer && <strong>{catalogProduct.manufacturer}</strong>}
-            {catalogProduct.product_url && <p><a href={catalogProduct.product_url} target="_blank" rel="noopener noreferrer">Product page</a></p>}
-            {catalogProduct.spec_source_url && catalogProduct.spec_source_url !== catalogProduct.product_url &&
-              <p><a href={catalogProduct.spec_source_url} target="_blank" rel="noopener noreferrer">Specification source</a></p>}
+        <div className="supply-product-overview">
+          <div className="supply-product-links">
+            {catalogProduct?.manufacturer && <p><strong>{catalogProduct.manufacturer}</strong></p>}
+            <div><span>Product page: </span>{productUrl
+              ? <a href={productUrl} target="_blank" rel="noopener noreferrer">{productUrl}</a> : <span>Not set</span>}</div>
+            {specSourceUrl && specSourceUrl !== productUrl && <div><span>Specification: </span>
+              <a href={specSourceUrl} target="_blank" rel="noopener noreferrer">{specSourceUrl}</a></div>}
+            <Button type="text" size="small" icon={<EditOutlined />} onClick={() => {
+              setProductUrlDraft(activeMedia?.row?.product_url || productUrl || '');
+              setSpecUrlDraft(activeMedia?.row?.spec_source_url || specSourceUrl || '');
+              setEditingProductLinks(true);
+            }}>Edit links</Button>
+            <Button type="link" className="supply-catalog-link" onClick={() => openCatalog(item.category, 'link')}>
+              {catalogProduct ? 'Change catalog product' : 'Link catalog product'}
+            </Button>
           </div>
-        </div>}
+          <div className="supply-product-image">
+            {productImageUrl ? <img src={productImageUrl} alt={item.name} /> : <span className="muted">No product image</span>}
+            <Button type="text" size="small" icon={<EditOutlined />} onClick={() => {
+              setImageEdit(undefined); setEditingProductImage(true);
+            }}>Edit image</Button>
+          </div>
+        </div>
         {Object.keys(currentIngredientProperties).length > 0 && <p className="muted">{[
           currentIngredientProperties.yield_pct != null && `Yield ${currentIngredientProperties.yield_pct}%`,
           currentIngredientProperties.color_lovibond != null && `Color ${currentIngredientProperties.color_lovibond} °L`,
@@ -406,7 +454,49 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
             { title: 'Quantity', key: 'quantity', align: 'right', render: (_, row) =>
               `${row.kind === 'Purchased' || row.kind === 'Moved in' ? '+' : row.kind === 'Used' || row.kind === 'Discarded' || row.kind === 'Moved out' ? '−' : 'Set to '}${formatStockQuantity(row.quantity, row.unit, itemDisplayUnit || row.unit)}` }]} /></>}
       </section>}
-    <Modal title="Add from catalog" open={catalogPickerOpen} onCancel={() => setCatalogPickerOpen(false)} footer={null} destroyOnHidden>
+    <Modal title="Edit product links" open={editingProductLinks} onCancel={() => setEditingProductLinks(false)} footer={null} destroyOnHidden>
+      <Form layout="vertical" onFinish={async () => {
+        if (!item) return;
+        try {
+          await saveSupplyMedia(db, item.id, {
+            productUrl: productUrlDraft.trim() === (catalogProduct?.product_url || '') ? null : productUrlDraft,
+            specSourceUrl: specUrlDraft.trim() === (catalogProduct?.spec_source_url || '') ? null : specUrlDraft
+          });
+          setEditingProductLinks(false); setMediaRevision(value => value + 1); await onChanged();
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+      }}>
+        <Form.Item label="Product URL"><Input type="url" aria-label="Product URL" value={productUrlDraft}
+          onChange={event => setProductUrlDraft(event.target.value)} placeholder="https://manufacturer.example/product" /></Form.Item>
+        <Form.Item label="Specification URL"><Input type="url" aria-label="Specification URL" value={specUrlDraft}
+          onChange={event => setSpecUrlDraft(event.target.value)} placeholder="https://manufacturer.example/specification" /></Form.Item>
+        {catalogProduct && <Button type="text" onClick={() => {
+          setProductUrlDraft(catalogProduct.product_url || ''); setSpecUrlDraft(catalogProduct.spec_source_url || '');
+        }}>Restore catalog links</Button>}
+        <Button type="primary" htmlType="submit">Save links</Button>
+      </Form>
+    </Modal>
+    <Modal title="Edit product image" open={editingProductImage} onCancel={() => setEditingProductImage(false)} footer={null} destroyOnHidden>
+      <Form layout="vertical" onFinish={async () => {
+        if (!item || imageEdit === undefined) return;
+        try {
+          const image = imageEdit === null ? null
+            : { bytes: new Uint8Array(await imageEdit.arrayBuffer()), mimeType: imageEdit.type };
+          await saveSupplyMedia(db, item.id, { image });
+          setEditingProductImage(false); setMediaRevision(value => value + 1); await onChanged();
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+      }}>
+        <Form.Item label="Product image"><input type="file" accept="image/jpeg,image/png,image/webp" aria-label="Product image"
+          onChange={event => setImageEdit(event.target.files?.[0])} /></Form.Item>
+        {imageEdit instanceof File && <p className="muted">Selected: {imageEdit.name}</p>}
+        {activeMedia?.row?.image_bytes && <Button type="text" onClick={() => setImageEdit(null)}>
+          Restore image to {catalogProduct?.image_src ? 'catalog default' : 'no image'}</Button>}
+        {imageEdit === null && <p className="muted">The saved image will be removed.</p>}
+        <Button type="primary" htmlType="submit" disabled={imageEdit === undefined}>Save image</Button>
+      </Form>
+    </Modal>
+    <Modal title={catalogPickerPurpose === 'link' ? 'Link catalog product' : 'Add from catalog'} open={catalogPickerOpen}
+      onCancel={() => setCatalogPickerOpen(false)} footer={null} destroyOnHidden>
+      {catalogPickerPurpose === 'link' && <p className="muted">Catalog specs apply where this supply has no override.</p>}
       <div className="catalog-explorer-filters">
         <Input.Search aria-label="Search inventory products" placeholder="Search inventory products" allowClear value={catalogQuery}
           onChange={event => setCatalogQuery(event.target.value)} />
@@ -424,7 +514,11 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
           </button>
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching products' : 'No catalog products available'} />}
-      {catalogCategory ? <Button type="link" className="catalog-create-custom"
+      {catalogPickerPurpose === 'link' ? catalogProduct && <Button type="link" className="catalog-create-custom"
+        onClick={() => { void linkSupplyCatalogProduct(db, item!.id, null).then(async () => {
+          setCatalogPickerOpen(false); await onChanged();
+        }).catch(cause => setError(cause instanceof Error ? cause.message : String(cause))); }}>
+        Remove catalog link</Button> : catalogCategory ? <Button type="link" className="catalog-create-custom"
         onClick={() => createCustomProduct(catalogCategory)}>Create your own product spec</Button>
         : <Dropdown trigger={['click']} menu={{ items: categories.map(category => ({ key: category, label: category })),
           onClick: ({ key }) => createCustomProduct(key) }}>

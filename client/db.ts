@@ -85,6 +85,8 @@ export interface Equipment extends EquipmentSpecifications { id: string; name: s
   measurement_channels?: EquipmentMeasurementChannel[] }
 export interface EquipmentModelMedia { id: string; product_url: string | null;
   image_bytes: Uint8Array | null; image_mime_type: string | null }
+export interface SupplyMedia { id: string; product_url: string | null; spec_source_url: string | null;
+  image_bytes: Uint8Array | null; image_mime_type: string | null }
 export interface EquipmentUse { id: string; equipment_id: string; batch_id: string; batch_name: string;
   assigned_at: number; ended_at: number | null }
 const equipmentCalibrationColumns = ['buffer_4_observed', 'buffer_7_observed', 'reference_sg', 'observed_sg',
@@ -2126,6 +2128,46 @@ export async function listSupplies(db: Pick<DB, 'execO'>): Promise<InventoryItem
     LEFT JOIN catalog.supply_hop_specs ch ON ch.supply_id = s.catalog_supply_id
     LEFT JOIN catalog.supply_yeast_specs cy ON cy.supply_id = s.catalog_supply_id
     ORDER BY s.name COLLATE NOCASE`);
+}
+
+export async function readSupplyMedia(db: DB, supplyId: string): Promise<SupplyMedia | null> {
+  return (await db.execO<SupplyMedia>(
+    'SELECT id, product_url, spec_source_url, image_bytes, image_mime_type FROM supply_media WHERE id = ?',
+    [supplyId]))[0] || null;
+}
+
+export async function saveSupplyMedia(db: DB, supplyId: string,
+  changes: { productUrl?: string | null; specSourceUrl?: string | null;
+    image?: { bytes: Uint8Array; mimeType: string } | null }): Promise<void> {
+  const supply = await db.execO<{ id: string }>('SELECT id FROM supplies WHERE id = ?', [supplyId]);
+  if (!supply.length) throw new Error('Supply not found');
+  for (const url of [changes.productUrl, changes.specSourceUrl]) if (url?.trim()) {
+    const parsed = new URL(url.trim());
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Enter an HTTP or HTTPS product URL');
+  }
+  if (changes.image && (!['image/jpeg', 'image/png', 'image/webp'].includes(changes.image.mimeType)
+    || changes.image.bytes.byteLength > 5 * 1024 * 1024)) throw new Error('Choose a JPEG, PNG, or WebP image under 5 MB');
+  await db.tx(async tx => {
+    await tx.exec('INSERT OR IGNORE INTO supply_media(id) VALUES (?)', [supplyId]);
+    if (changes.productUrl !== undefined) await tx.exec('UPDATE supply_media SET product_url = ? WHERE id = ?',
+      [changes.productUrl?.trim() || null, supplyId]);
+    if (changes.specSourceUrl !== undefined) await tx.exec('UPDATE supply_media SET spec_source_url = ? WHERE id = ?',
+      [changes.specSourceUrl?.trim() || null, supplyId]);
+    if (changes.image !== undefined) await tx.exec(
+      'UPDATE supply_media SET image_bytes = ?, image_mime_type = ? WHERE id = ?',
+      [changes.image?.bytes || null, changes.image?.mimeType || null, supplyId]);
+  });
+}
+
+export async function linkSupplyCatalogProduct(db: DB, supplyId: string, catalogSupplyId: string | null): Promise<void> {
+  const supply = (await db.execO<{ category: string }>('SELECT category FROM supplies WHERE id = ?', [supplyId]))[0];
+  if (!supply) throw new Error('Supply not found');
+  if (catalogSupplyId) {
+    const product = (await db.execO<{ category: string }>(
+      'SELECT category FROM catalog.supplies WHERE id = ?', [catalogSupplyId]))[0];
+    if (!product || product.category !== supply.category) throw new Error('Choose a catalog product of the same type');
+  }
+  await db.exec('UPDATE supplies SET catalog_supply_id = ? WHERE id = ?', [catalogSupplyId, supplyId]);
 }
 
 export async function updateIngredientProperties(db: DB, item: InventoryItem, properties: IngredientProperties): Promise<void> {

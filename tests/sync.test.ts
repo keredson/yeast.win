@@ -18,6 +18,41 @@ const selectChanges = `SELECT "table", pk, cid, val, col_version, db_version,
   WHERE db_version > ? ORDER BY db_version, seq`;
 const insertChange = `INSERT INTO crsql_changes (${changeColumns.map(name => `"${name}"`).join(',')}) VALUES (${changeColumns.map(() => '?').join(',')})`;
 
+test('supply media upgrade preserves existing supplies and partially created media', () => {
+  for (const partial of [false, true]) {
+    const id = nanoid();
+    const supplyId = nanoid();
+    const before = openWorkspaceDb(id);
+    try {
+      before.prepare('INSERT INTO supplies(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)')
+        .run(supplyId, 'Old two row', 'Grain', 'oz', 1);
+      before.prepare('INSERT INTO batches(id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+        .run(nanoid(), 'Unrelated batch', 'active', 1, 1);
+      if (partial) before.prepare(`INSERT INTO supply_media(id, product_url, image_bytes, image_mime_type)
+        VALUES (?, ?, ?, ?)`).run(supplyId, 'https://example.com/malt', Buffer.from([1, 2, 3]), 'image/png');
+      else {
+        before.prepare("SELECT crsql_as_table('supply_media')").get();
+        before.exec('DROP TABLE supply_media');
+      }
+      before.pragma('user_version = 32');
+    } finally { closeWorkspaceDb(before); }
+    const upgraded = openWorkspaceDb(id);
+    try {
+      assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+      assert.equal((upgraded.prepare('SELECT name FROM supplies WHERE id = ?').get(supplyId) as {
+        name: string }).name, 'Old two row');
+      assert.equal((upgraded.prepare('SELECT count(*) AS count FROM batches').get() as { count: number }).count, 1);
+      const media = upgraded.prepare('SELECT product_url, image_bytes FROM supply_media WHERE id = ?')
+        .get(supplyId) as { product_url: string; image_bytes: Buffer } | undefined;
+      if (partial) {
+        assert.equal(media?.product_url, 'https://example.com/malt');
+        assert.deepEqual(media?.image_bytes, Buffer.from([1, 2, 3]));
+      } else assert.equal(media, undefined);
+      assert.ok(upgraded.prepare("SELECT 1 FROM sqlite_master WHERE name = 'supply_media__crsql_clock'").get());
+    } finally { closeWorkspaceDb(upgraded); }
+  }
+});
+
 test('retiring generic catalog grains preserves brewery supplies and Crystal 60 color', () => {
   const id = nanoid();
   const db = openWorkspaceDb(id);
