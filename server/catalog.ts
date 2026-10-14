@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { catalogModelTables, catalogSupplyTables, catalogSchemaVersion,
@@ -320,6 +321,46 @@ export function openCatalogDb(dataDir: string): Database.Database {
         if (existsSync(path)) insertLogo.run(maker.name, readFileSync(path), 'image/png');
       }
       db.pragma('user_version = 18');
+    })();
+  }
+  if ((db.pragma('user_version', { simple: true }) as number) === 18) {
+    // Replace only bytes that exactly match the former bundled images. A catalog
+    // editor may have changed a photo independently of the bundled default.
+    const legacy = JSON.parse(readFileSync(join(projectRoot, 'assets/catalog/legacy-webp-sha256.json'), 'utf8')) as {
+      models: Record<string, { image: string; thumbnail: string }>;
+      logos: Record<string, string>;
+    };
+    const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+    db.transaction(() => {
+      const model = db.prepare('SELECT image_bytes, thumbnail_bytes FROM model_images WHERE model_id = ?');
+      const updateImage = db.prepare(`UPDATE model_images SET image_bytes = ?, image_mime_type = 'image/jpeg'
+        WHERE model_id = ?`);
+      const updateThumbnail = db.prepare(`UPDATE model_images SET thumbnail_bytes = ?, thumbnail_mime_type = 'image/jpeg'
+        WHERE model_id = ?`);
+      for (const [id, prior] of Object.entries(legacy.models)) {
+        const row = model.get(id) as { image_bytes: Buffer | null; thumbnail_bytes: Buffer | null } | undefined;
+        if (!row) continue;
+        const path = join(projectRoot, 'assets/catalog/models', id);
+        if (row.image_bytes && hash(row.image_bytes) === prior.image) {
+          updateImage.run(readFileSync(`${path}.jpg`), id);
+        }
+        if (row.thumbnail_bytes && hash(row.thumbnail_bytes) === prior.thumbnail) {
+          updateThumbnail.run(readFileSync(`${path}-thumb.jpg`), id);
+        }
+      }
+      const logo = db.prepare('SELECT image_bytes FROM manufacturer_logos WHERE manufacturer_name = ?');
+      const updateLogo = db.prepare(`UPDATE manufacturer_logos SET image_bytes = ?, mime_type = 'image/png'
+        WHERE manufacturer_name = ?`);
+      for (const maker of catalogManufacturers) {
+        const slug = maker.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const prior = legacy.logos[slug];
+        if (!prior) continue;
+        const row = logo.get(maker.name) as { image_bytes: Buffer | null } | undefined;
+        if (row?.image_bytes && hash(row.image_bytes) === prior) {
+          updateLogo.run(readFileSync(join(projectRoot, 'assets/catalog/manufacturers', `${slug}.png`)), maker.name);
+        }
+      }
+      db.pragma('user_version = 19');
     })();
   }
   db.prepare(`UPDATE equipment_models SET model_name = ?

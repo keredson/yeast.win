@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -269,6 +269,54 @@ test('version 17 catalog identifies existing WebP and PNG media without replacin
     assert.equal((db.prepare("SELECT name FROM supplies WHERE id = 'my_grain'")
       .get() as { name: string }).name, 'My grain');
     assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'model_images__crsql_clock'").get());
+  } finally { db.close(); }
+});
+
+test('version 18 catalog replaces bundled WebP media while retaining edited images and supplies', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
+  const old = openCatalogDb(dir);
+  const fixture = (name: string) => readFileSync(join(process.cwd(), 'tests/fixtures/catalog-version-18', name));
+  const originalImage = fixture('smartref-image.bin');
+  const originalThumbnail = fixture('smartref-thumbnail.bin');
+  const originalLogo = fixture('clawhammer-logo.bin');
+  old.prepare(`UPDATE model_images SET image_bytes = ?, image_mime_type = 'image/webp',
+    thumbnail_bytes = ?, thumbnail_mime_type = 'image/webp' WHERE model_id = ?`)
+    .run(originalImage, originalThumbnail, 'equipment_anton_paar_smartref');
+  old.prepare("UPDATE manufacturer_logos SET image_bytes = ?, mime_type = 'image/webp' WHERE manufacturer_name = ?")
+    .run(originalLogo, 'Clawhammer Supply');
+  const custom = Buffer.from('RIFF0000WEBPmy-custom-photo');
+  old.prepare("UPDATE model_images SET image_bytes = ?, image_mime_type = 'image/webp' WHERE model_id = ?")
+    .run(custom, 'equipment_tilt');
+  old.prepare("INSERT INTO supplies(id, name, category, unit) VALUES ('my_supply', 'My supply', 'Grain', 'g')").run();
+  const cursor = BigInt((old.prepare('SELECT crsql_db_version() AS version').get() as { version: number }).version);
+  old.pragma('user_version = 18');
+  old.close();
+
+  const db = openCatalogDb(dir);
+  try {
+    assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
+    const updated = db.prepare(`SELECT image_bytes, image_mime_type, thumbnail_bytes, thumbnail_mime_type
+      FROM model_images WHERE model_id = ?`).get('equipment_anton_paar_smartref') as {
+      image_bytes: Buffer; image_mime_type: string; thumbnail_bytes: Buffer; thumbnail_mime_type: string };
+    assert.equal(updated.image_mime_type, 'image/jpeg');
+    assert.equal(updated.thumbnail_mime_type, 'image/jpeg');
+    assert.deepEqual(updated.image_bytes, readFileSync(join(process.cwd(),
+      'assets/catalog/models/equipment_anton_paar_smartref.jpg')));
+    assert.deepEqual(updated.thumbnail_bytes, readFileSync(join(process.cwd(),
+      'assets/catalog/models/equipment_anton_paar_smartref-thumb.jpg')));
+    const logo = db.prepare('SELECT image_bytes, mime_type FROM manufacturer_logos WHERE manufacturer_name = ?')
+      .get('Clawhammer Supply') as { image_bytes: Buffer; mime_type: string };
+    assert.equal(logo.mime_type, 'image/png');
+    assert.deepEqual(logo.image_bytes, readFileSync(join(process.cwd(),
+      'assets/catalog/manufacturers/clawhammer-supply.png')));
+    const edited = db.prepare('SELECT image_bytes, image_mime_type FROM model_images WHERE model_id = ?')
+      .get('equipment_tilt') as { image_bytes: Buffer; image_mime_type: string };
+    assert.deepEqual(edited.image_bytes, custom);
+    assert.equal(edited.image_mime_type, 'image/webp');
+    assert.equal((db.prepare("SELECT name FROM supplies WHERE id = 'my_supply'")
+      .get() as { name: string }).name, 'My supply');
+    assert.ok(catalogChanges(db, cursor).changes.some(change => change.table === 'model_images'));
+    assert.ok(catalogChanges(db, cursor).changes.some(change => change.table === 'manufacturer_logos'));
   } finally { db.close(); }
 });
 
