@@ -5,9 +5,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { catalogChanges, openCatalogDb } from '../server/catalog.ts';
-import { catalogSchemaVersion } from '../shared/catalog.ts';
+import { catalogCategoryOptions, catalogSchemaVersion } from '../shared/catalog.ts';
 
 function directory(): string { return mkdtempSync(join(tmpdir(), 'brewlog-catalog-')); }
+
+test('cached products provide category options before new category rows sync', () => {
+  const products = [
+    { id: 'a', name: 'Malt', category: 'Grain', unit: 'g' },
+    { id: 'b', name: 'Cider', category: 'Juice & must', unit: 'L' },
+    { id: 'c', name: 'More malt', category: 'Grain', unit: 'g' }
+  ];
+  assert.deepEqual(catalogCategoryOptions([], products).map(row => row.name), ['Grain', 'Juice & must']);
+  assert.deepEqual(catalogCategoryOptions([{ name: 'Juice & must', sort_order: 5 }], products)
+    .map(row => row.name), ['Juice & must', 'Grain']);
+});
 
 test('a new catalog has the current schema and no bundled products', () => {
   const db = openCatalogDb(directory());

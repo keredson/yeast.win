@@ -22,6 +22,16 @@ export interface CatalogInventory { id: string; name: string; category: string; 
   image_src?: string | null }
 export interface CatalogSupplyCategory { name: string; sort_order: number }
 
+export function catalogCategoryOptions(rows: CatalogSupplyCategory[], products: CatalogInventory[]): CatalogSupplyCategory[] {
+  const categories = new Map(rows.map(row => [row.name, row]));
+  for (const product of products) {
+    if (product.category && !categories.has(product.category)) {
+      categories.set(product.category, { name: product.category, sort_order: 1000 });
+    }
+  }
+  return [...categories.values()].sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+}
+
 export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
 export const catalogSchemaVersion = 30;
 export const catalogModelTables = {

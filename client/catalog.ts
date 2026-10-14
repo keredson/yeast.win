@@ -1,6 +1,6 @@
 import initWasm, { type DB } from '@vlcn.io/crsqlite-wasm';
 import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
-import { catalogModelTables, catalogSupplyTables, catalogSchemaVersion, catalogTables,
+import { catalogCategoryOptions, catalogModelTables, catalogSupplyTables, catalogSchemaVersion, catalogTables,
   type CatalogEquipment, type CatalogInventory, type CatalogMeasurementChannel, type CatalogSupplyCategory } from '../shared/catalog.ts';
 import { changeColumns } from '../shared/schema.ts';
 import { maxSequence, readSequence, syncProtocolVersion, validChangeTuple, type ChangeTuple } from '../shared/cborSync.ts';
@@ -363,7 +363,9 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
     return { ...model, measurement_min: primary?.measurement_min, measurement_max: primary?.measurement_max,
       measurement_unit: primary?.measurement_scale || primary?.measurement_unit };
   });
-  return { equipment, inventory, categories };
+  // An upgraded offline device may have product rows before it receives the new
+  // category table. Derive those options from its cached catalog until sync completes.
+  return { equipment, inventory, categories: catalogCategoryOptions(categories, inventory) };
 }
 
 export function syncLocalCatalog(db: DB, onProgress?: (applied: number, total: number) => void): Promise<boolean> {

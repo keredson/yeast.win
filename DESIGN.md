@@ -171,7 +171,7 @@ Recipe gravity estimates sum fixed post-boil wort retained by distinct equipment
 
 | Table | Main fields and role |
 | --- | --- |
-| Catalog `supply_categories` | Ordered inventory categories, replicated to devices. Inventory, recipe, and batch category menus read these rows; categories of existing brewery supplies also remain available locally. The custom “other” action lets a brewer enter a category without adding it to the shared catalog. |
+| Catalog `supply_categories` | Ordered inventory categories, replicated to devices. Inventory, recipe, and batch category menus read these rows; before an upgraded device receives them, it derives the missing options from its cached catalog products. Categories of existing brewery supplies also remain available locally. The custom “other” action lets a brewer enter a category without adding it to the shared catalog. |
 | Catalog `supplies` | Shared names, categories, and units. Grain, hop, and yeast products use manufacturer-specific identities; generic packaging, chemicals, and other commodity supplies remain available. Typed specification tables hold known defaults. |
 | Catalog `supply_products`, `supply_grain_classes`, `supply_images` | Manufacturer and one product information URL per supply, grain class for estimate fallbacks, and copied product images with MIME types. Product images sync with the catalog for offline use; an absent image means no verified matching manufacturer image was bundled. |
 | Brewery `supplies` | Brewery-owned supply definitions. An optional catalog link provides inherited defaults; custom supplies need no catalog entry. Recipes link here without choosing a physical lot. |
