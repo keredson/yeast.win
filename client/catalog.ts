@@ -8,6 +8,7 @@ import { fetchApi } from './api.ts';
 
 let opened: Promise<DB> | undefined;
 let syncing: Promise<boolean> | undefined;
+let catalogMediaUrls: string[] = [];
 const catalogRefreshIntervalMs = 7 * 24 * 60 * 60_000;
 
 export function openLocalCatalog(): Promise<DB> {
@@ -85,6 +86,20 @@ export function openLocalCatalog(): Promise<DB> {
         const syncState = await tx.execO<{ name: string }>(
           "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sync_state'");
         if (syncState.length) await tx.exec("DELETE FROM sync_state WHERE key = 'lastRefreshAt'");
+        await tx.exec('PRAGMA user_version = 15');
+      });
+    }
+    if ((await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version === 15) {
+      await db.tx(async tx => {
+        for (const table of ['model_images', 'manufacturer_logos'] as const) {
+          await tx.exec(catalogModelTables[table]);
+          const clock = await tx.execO<{ name: string }>(
+            'SELECT name FROM sqlite_master WHERE name = ?', [`${table}__crsql_clock`]);
+          if (!clock.length) await tx.exec('SELECT crsql_as_crr(?)', [table]);
+        }
+        const syncState = await tx.execO<{ name: string }>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sync_state'");
+        if (syncState.length) await tx.exec("DELETE FROM sync_state WHERE key = 'lastRefreshAt'");
         await tx.exec(`PRAGMA user_version = ${catalogSchemaVersion}`);
       });
     }
@@ -94,7 +109,7 @@ export function openLocalCatalog(): Promise<DB> {
 }
 
 export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEquipment[]; inventory: CatalogInventory[] }> {
-  const [models, liquid, pressure, heating, boil, cooling, control, channels, inventory] = await Promise.all([
+  const [models, liquid, pressure, heating, boil, cooling, control, channels, modelImages, logos, inventory] = await Promise.all([
     db.execO<{ id: string; name: string; kind: string; manufacturer: string | null;
       product_url: string | null; image_url: string | null; thumbnail_url: string | null;
       manufacturer_website_url: string | null; manufacturer_logo_url: string | null }>(
@@ -110,13 +125,35 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
     db.execO<{ model_id: string; min_temperature_c: number | null; max_temperature_c: number | null }>(
       'SELECT * FROM model_temperature_control'),
     db.execO<CatalogMeasurementChannel>('SELECT * FROM model_measurement_channels'),
+    db.execO<{ model_id: string; image_webp: Uint8Array | null; thumbnail_webp: Uint8Array | null }>('SELECT * FROM model_images'),
+    db.execO<{ manufacturer_name: string; image_webp: Uint8Array | null }>('SELECT * FROM manufacturer_logos'),
     db.execO<CatalogInventory>(`SELECT s.id, s.name, s.category, s.unit,
       g.yield_pct, g.color_lovibond, h.alpha_acid_pct, h.hop_form, y.attenuation_pct
       FROM supplies s LEFT JOIN supply_grain_specs g ON g.supply_id = s.id
       LEFT JOIN supply_hop_specs h ON h.supply_id = s.id
       LEFT JOIN supply_yeast_specs y ON y.supply_id = s.id ORDER BY s.name COLLATE NOCASE`)
   ]);
+  const oldMediaUrls = catalogMediaUrls;
+  catalogMediaUrls = [];
+  const mediaUrl = (bytes: Uint8Array): string => {
+    const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'image/webp' }));
+    catalogMediaUrls.push(url);
+    return url;
+  };
   const byId = new Map(models.map(model => [model.id, { ...model, measurement_channels: [] as CatalogMeasurementChannel[] }]));
+  for (const row of modelImages) {
+    const model = byId.get(row.model_id);
+    if (model) Object.assign(model, {
+      image_src: row.image_webp && mediaUrl(row.image_webp),
+      thumbnail_src: row.thumbnail_webp && mediaUrl(row.thumbnail_webp)
+    });
+  }
+  const logosByName = new Map(logos.filter(row => row.image_webp).map(row =>
+    [row.manufacturer_name, mediaUrl(row.image_webp!)]));
+  for (const model of byId.values()) {
+    if (model.manufacturer) Object.assign(model, { manufacturer_logo_src: logosByName.get(model.manufacturer) });
+  }
+  for (const url of oldMediaUrls) URL.revokeObjectURL(url);
   for (const row of liquid) Object.assign(byId.get(row.model_id) || {},
     { has_liquid_containment: true, capacity_liters: row.capacity_liters });
   for (const row of pressure) Object.assign(byId.get(row.model_id) || {},

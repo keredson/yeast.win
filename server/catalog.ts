@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { catalogModelTables, catalogSupplyTables, catalogSchemaVersion,
   catalogTables, initialCatalogEquipment, initialCatalogInventory,
@@ -245,6 +246,30 @@ export function openCatalogDb(dataDir: string): Database.Database {
         updateModel.run({ id, manufacturer: null, product_url: null, ...images });
       }
       db.pragma('user_version = 15');
+    })();
+  }
+  if ((db.pragma('user_version', { simple: true }) as number) === 15) {
+    db.transaction(() => {
+      for (const table of ['model_images', 'manufacturer_logos'] as const) {
+        db.exec(catalogModelTables[table]);
+        if (!db.prepare('SELECT 1 FROM sqlite_master WHERE name = ?').get(`${table}__crsql_clock`)) {
+          db.prepare('SELECT crsql_as_crr(?)').get(table);
+        }
+      }
+      const insertModelImage = db.prepare(`INSERT OR IGNORE INTO model_images
+        (model_id, image_webp, thumbnail_webp) VALUES (?, ?, ?)`);
+      for (const id of Object.keys(catalogModelImages)) {
+        const path = join(projectRoot, 'assets/catalog/models', id);
+        insertModelImage.run(id, readFileSync(`${path}.webp`), readFileSync(`${path}-thumb.webp`));
+      }
+      const insertLogo = db.prepare(`INSERT OR IGNORE INTO manufacturer_logos
+        (manufacturer_name, image_webp) VALUES (?, ?)`);
+      for (const maker of catalogManufacturers) {
+        if (!('logo_url' in maker)) continue;
+        const slug = maker.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        insertLogo.run(maker.name, readFileSync(join(projectRoot, 'assets/catalog/manufacturers', `${slug}.webp`)));
+      }
+      db.pragma('user_version = 16');
     })();
   }
   db.prepare(`UPDATE equipment_models SET model_name = ?

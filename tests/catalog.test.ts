@@ -187,6 +187,28 @@ test('partially upgraded version 14 catalog preserves manufacturer metadata', ()
   } finally { db.close(); }
 });
 
+test('version 15 catalog seeds offline media and preserves partially upgraded image rows', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
+  const old = openCatalogDb(dir);
+  old.prepare("SELECT crsql_as_table('model_images')").get();
+  const replacement = Buffer.from('user-edited-image');
+  old.prepare('UPDATE model_images SET image_webp = ? WHERE model_id = ?')
+    .run(replacement, 'equipment_spike_flex_plus_7gal');
+  old.pragma('user_version = 15');
+  old.close();
+
+  const db = openCatalogDb(dir);
+  try {
+    assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
+    const stored = db.prepare('SELECT image_webp, thumbnail_webp FROM model_images WHERE model_id = ?')
+      .get('equipment_spike_flex_plus_7gal') as { image_webp: Buffer; thumbnail_webp: Buffer };
+    assert.deepEqual(stored.image_webp, replacement);
+    assert.ok(stored.thumbnail_webp.subarray(0, 4).equals(Buffer.from('RIFF')));
+    assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'model_images__crsql_clock'").get());
+    assert.ok((db.prepare('SELECT COUNT(*) AS count FROM manufacturer_logos').get() as { count: number }).count > 0);
+  } finally { db.close(); }
+});
+
 test('partially upgraded catalog preserves boil defaults when enabling replication', () => {
   const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
   const db = openCatalogDb(dir);
@@ -335,6 +357,12 @@ test('catalog sends only CR-SQLite changes after the client cursor', () => {
     assert.ok(initial.changes.length > 0);
     for (const change of initial.changes) apply.run(...decodeChange(change));
     assert.deepEqual(rows(replica), rows(db));
+    const serverImage = db.prepare('SELECT image_webp FROM model_images WHERE model_id = ?')
+      .get('equipment_spike_flex_plus_7gal') as { image_webp: Buffer };
+    const replicaImage = replica.prepare('SELECT image_webp FROM model_images WHERE model_id = ?')
+      .get('equipment_spike_flex_plus_7gal') as { image_webp: Buffer };
+    assert.deepEqual(replicaImage.image_webp, serverImage.image_webp);
+    assert.ok(replicaImage.image_webp.subarray(0, 4).equals(Buffer.from('RIFF')));
 
     // A local-only row remains when the server updates a different row.
     replica.prepare('INSERT INTO supplies(id, name, category, unit) VALUES (?, ?, ?, ?)')

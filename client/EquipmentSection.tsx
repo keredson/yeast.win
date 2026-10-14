@@ -618,7 +618,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       {matchingModels.length ? <div className="equipment-catalog-list" role="list">
         {matchingModels.map(model => <div key={model.id} role="listitem">
           <button type="button" className="equipment-catalog-option" onClick={() => chooseCatalogModel(model)}>
-            {model.thumbnail_url && <img className="equipment-catalog-thumbnail" src={model.thumbnail_url} alt="" loading="lazy" />}
+            {model.thumbnail_src && <img className="equipment-catalog-thumbnail" src={model.thumbnail_src} alt="" loading="lazy" />}
             <span className="equipment-catalog-option-name"><strong>{model.name}</strong>
               <small>{equipmentKindLabel(model.kind)}{model.measurement_channels?.length
                 ? ` · ${channelSummary(model.measurement_channels)}` : ''}</small></span>
@@ -645,9 +645,9 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       {creatingKind && <Form key={`${creatingKind}:${selectedCatalogModel?.id || 'custom'}`} form={equipmentForm} layout="vertical" onFinish={create} preserve={false}
         initialValues={initialEquipmentValues}>
         {selectedCatalogModel && <div className="equipment-catalog-source">
-          {selectedCatalogModel.image_url && <img src={selectedCatalogModel.image_url} alt={selectedCatalogModel.name} />}
+          {selectedCatalogModel.image_src && <img src={selectedCatalogModel.image_src} alt={selectedCatalogModel.name} />}
           {selectedCatalogModel.manufacturer && <div className="equipment-catalog-manufacturer">
-            {selectedCatalogModel.manufacturer_logo_url && <img src={selectedCatalogModel.manufacturer_logo_url} alt="" />}
+            {selectedCatalogModel.manufacturer_logo_src && <img src={selectedCatalogModel.manufacturer_logo_src} alt="" />}
             {selectedCatalogModel.manufacturer_website_url
               ? <a href={selectedCatalogModel.manufacturer_website_url} target="_blank" rel="noopener noreferrer">
                 {selectedCatalogModel.manufacturer}</a>
