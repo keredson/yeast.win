@@ -53,6 +53,10 @@ try {
   await weyermann.waitFor({ timeout: 60_000 });
   if (!await weyermann.locator('img').count()) throw new Error('Weyermann product has no catalog image');
   await weyermann.locator('img').evaluate(image => image.decode());
+  await explorer.getByRole('searchbox', { name: 'Search inventory products' }).fill('Lighthouse');
+  const lighthouse = explorer.getByRole('button', { name: /Briess Lighthouse™ Munich Malt/ });
+  await lighthouse.waitFor({ timeout: 60_000 });
+  await lighthouse.locator('img').evaluate(image => image.decode());
   await explorer.getByRole('searchbox', { name: 'Search inventory products' }).fill('Briess Caramel Malt 60L');
   const product = explorer.getByRole('button', { name: /Briess Caramel Malt 60L/ });
   await product.waitFor({ timeout: 60_000 });
