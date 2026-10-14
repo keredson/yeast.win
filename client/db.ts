@@ -542,7 +542,7 @@ export async function updateBatchWortLoss(db: DB, batchId: string, liters: numbe
 }
 
 export async function updateRecipeTargetVolume(db: DB, recipeId: string, liters: number | null): Promise<void> {
-  if (liters != null && (!Number.isFinite(liters) || liters <= 0)) throw new Error('Enter a positive target volume');
+  if (liters != null && (!Number.isFinite(liters) || liters <= 0)) throw new Error('Enter a positive batch size');
   await db.exec(`INSERT INTO recipe_inputs(id, target_fermenter_volume_liters) VALUES (?, ?)
     ON CONFLICT(id) DO UPDATE SET target_fermenter_volume_liters = excluded.target_fermenter_volume_liters`, [recipeId, liters]);
 }

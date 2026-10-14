@@ -83,7 +83,7 @@ try {
   const color = await details.locator('.recipe-estimate-grid > div').filter({ hasText: 'Estimated color' }).locator('strong').textContent();
   if (!og || Number(og) <= 1.04 || !color?.includes('SRM')) throw new Error('Recipe estimates did not render');
   await page.getByRole('button', { name: 'Recipe settings' }).click();
-  const target = page.getByRole('spinbutton', { name: 'Target volume into fermenter' });
+  const target = page.getByRole('spinbutton', { name: 'Batch size' });
   if (Number(await target.inputValue()) !== 19) throw new Error('Recipe target volume is missing from settings');
   await page.getByRole('dialog', { name: 'Recipe settings' }).getByRole('combobox', { name: 'Unit' }).click();
   await page.locator('.ant-select-dropdown:visible').getByText('US gal').click();

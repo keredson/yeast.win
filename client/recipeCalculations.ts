@@ -35,7 +35,7 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
   const gravityMissing: string[] = [];
   const colorMissing: string[] = [];
   const targetLiters = positive(recipeInputs.target_fermenter_volume_liters);
-  const targetHelp = 'Set a target volume into the fermenter in recipe settings.';
+  const targetHelp = 'Set Batch size in recipe settings.';
   if (!targetLiters) { missing.push(targetHelp); gravityMissing.push(targetHelp); colorMissing.push(targetHelp); }
   if (recipeType !== 'beer') return { targetLiters, originalGravity: null, finalGravity: null, abvPct: null, colorSrm: null,
     efficiencyLabel: null, missing: [...missing, 'Gravity and alcohol estimates for this recipe type need fermentable sugar inputs.'],
