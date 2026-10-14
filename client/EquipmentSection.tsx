@@ -4,6 +4,8 @@ import { CloudOutlined, ContainerOutlined, ControlOutlined, DashboardOutlined, E
   FireOutlined, MoreOutlined, PlusOutlined, SwapOutlined } from '@ant-design/icons';
 import { boilOffKinds, capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
+import { catalogModelKinds, queryCatalogModels } from './catalog.ts';
+import { WorkspaceThumbnail } from './WorkspaceThumbnail.tsx';
 import { assignEquipmentToBatch, createEquipment, createEquipmentUnit, deleteEquipment, deleteEquipmentUnits,
   listEquipmentUses, releaseEquipmentUse,
   addEquipmentModelCapability, removeEquipmentModelCapability, restoreEquipmentModelCapability,
@@ -16,7 +18,7 @@ import { assignEquipmentToBatch, createEquipment, createEquipmentUnit, deleteEqu
   updateEquipmentModelAttribute, updateEquipmentModelMeasurementRange,
   updateEquipmentUnitPostBoilLoss, clearEquipmentUnitOverrides,
   updateEquipmentTemperatureOffset, latestMeasuredMashEfficiency,
-  readEquipmentModelMedia, listEquipmentModelImages, saveEquipmentModelMedia, type EquipmentModelMedia,
+  readEquipmentModelMedia, saveEquipmentModelMedia, type EquipmentModelMedia,
   type Batch, type Equipment, type EquipmentModelOverrideField, type InventoryLocation,
   type EquipmentSpecifications, type EquipmentUse, type LocalDb } from './db.ts';
 import { capacityInLiters, capacityLabel, capacityUnits } from '../shared/capacity.ts';
@@ -179,9 +181,9 @@ function equipmentCapabilities(row: Equipment): ReactNode {
 type EquipmentIndexRow = { key: string; model: Equipment; units: Equipment[]; locationId?: string | null;
   child?: boolean; children?: EquipmentIndexRow[] };
 
-export function EquipmentSection({ db, basePath, accountId, batches, equipment, models, locations, catalog, preferredUnits, selectedId, onSelect, onSelectBatch, onChanged }: {
+export function EquipmentSection({ db, basePath, accountId, batches, equipment, models, locations, catalogRevision, preferredUnits, selectedId, onSelect, onSelectBatch, onChanged }: {
   db: LocalDb; basePath: string; accountId: string; batches: Batch[]; equipment: Equipment[]; models: Equipment[]; locations: InventoryLocation[];
-  catalog: CatalogEquipment[]; preferredUnits: PreferredUnits;
+  catalogRevision: number; preferredUnits: PreferredUnits;
   selectedId: string | null; onSelect: (id: string | null) => void; onSelectBatch: (id: string) => void;
   onChanged: () => Promise<void>;
 }) {
@@ -190,6 +192,11 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogKind, setCatalogKind] = useState<string | undefined>();
+  const [catalogLimit, setCatalogLimit] = useState(80);
+  const [catalogHasMore, setCatalogHasMore] = useState(false);
+  const [catalogForOwned, setCatalogForOwned] = useState<CatalogEquipment[]>([]);
+  const [catalogKinds, setCatalogKinds] = useState<string[]>([]);
+  const [matchingModels, setMatchingModels] = useState<CatalogEquipment[]>([]);
   const [selectedCatalogModel, setSelectedCatalogModel] = useState<CatalogEquipment | null>(null);
   const [catalogUnitModelId, setCatalogUnitModelId] = useState<string | null>(null);
   const [editCalibration, setEditCalibration] = useState(false);
@@ -202,7 +209,6 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const [productUrlDraft, setProductUrlDraft] = useState('');
   const [imageEdit, setImageEdit] = useState<File | null | undefined>();
   const [modelMedia, setModelMedia] = useState<{ modelId: string; row: EquipmentModelMedia | null; imageUrl: string | null } | null>(null);
-  const [modelThumbnails, setModelThumbnails] = useState<Record<string, string>>({});
   const [mediaRevision, setMediaRevision] = useState(0);
   const [newTemperatureCalibration, setNewTemperatureCalibration] = useState(false);
   const [editIdentity, setEditIdentity] = useState(false);
@@ -225,6 +231,27 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const [postBoilLossForm] = Form.useForm();
   const modelLossUnit = useRef(preferredUnits.volume);
   const unitLossUnit = useRef(preferredUnits.volume);
+  const catalog = [...catalogForOwned, ...matchingModels];
+  const ownedCatalogIds = models.map(row => row.catalog_model_id).filter((id): id is string => !!id).join('\u0000');
+  useEffect(() => {
+    let cancelled = false;
+    void queryCatalogModels({ ids: ownedCatalogIds ? ownedCatalogIds.split('\u0000') : [] })
+      .then(rows => { if (!cancelled) setCatalogForOwned(rows); })
+      .catch(cause => { if (!cancelled) setError(String(cause)); });
+    return () => { cancelled = true; };
+  }, [ownedCatalogIds, catalogRevision]);
+  useEffect(() => {
+    if (!catalogPickerOpen) { setMatchingModels([]); return; }
+    let cancelled = false;
+    void Promise.all([catalogModelKinds(), queryCatalogModels({ category: catalogKind, query: catalogQuery, limit: catalogLimit + 1 })])
+      .then(([kinds, rows]) => { if (!cancelled) {
+        setCatalogKinds(kinds.sort((left, right) => equipmentKindLabel(left).localeCompare(equipmentKindLabel(right))));
+        setMatchingModels(rows.slice(0, catalogLimit));
+        setCatalogHasMore(rows.length > catalogLimit);
+      } })
+      .catch(cause => { if (!cancelled) setError(String(cause)); });
+    return () => { cancelled = true; };
+  }, [catalogPickerOpen, catalogKind, catalogQuery, catalogLimit, catalogRevision]);
   const item = equipment.find(row => row.id === selectedId) || null;
   const itemModel = item ? models.find(row => row.id === item.model_id) : undefined;
   const itemCatalogModel = itemModel ? catalog.find(row => row.id === itemModel.catalog_model_id) : undefined;
@@ -282,22 +309,6 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     }).catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => { cancelled = true; if (imageUrl) URL.revokeObjectURL(imageUrl); };
   }, [db, activeModel?.id, mediaRevision]);
-  useEffect(() => {
-    let cancelled = false;
-    const urls: string[] = [];
-    void listEquipmentModelImages(db).then(rows => {
-      const thumbnails: Record<string, string> = {};
-      for (const row of rows) {
-        if (!row.image_bytes?.length || !row.image_mime_type) continue;
-        const url = URL.createObjectURL(new Blob([new Uint8Array(row.image_bytes)], { type: row.image_mime_type }));
-        urls.push(url);
-        thumbnails[row.id] = url;
-      }
-      if (cancelled) urls.forEach(URL.revokeObjectURL);
-      else setModelThumbnails(thumbnails);
-    }).catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
-    return () => { cancelled = true; urls.forEach(URL.revokeObjectURL); };
-  }, [db, models, mediaRevision]);
   const addingCatalogDefault = !!addingCapability && !!catalogParent && (addingCapability.startsWith('measurement:')
     ? !!catalogParent.measurement_channels?.some(channel => channel.measurement_kind === addingCapability.slice('measurement:'.length))
     : !!catalogParent[modelCapabilityFlags[addingCapability as keyof typeof modelCapabilityFlags]]);
@@ -670,11 +681,6 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
 
   const addMenu = { items: equipmentMenuItems, triggerSubMenuAction: 'click' as const,
     onClick: ({ key }: { key: string }) => { setSelectedCatalogModel(null); setCreatingKind(key); } };
-  const catalogKinds = [...new Set(catalog.map(model => model.kind))].sort((left, right) =>
-    equipmentKindLabel(left).localeCompare(equipmentKindLabel(right)));
-  const query = catalogQuery.trim().toLocaleLowerCase();
-  const matchingModels = catalog.filter(model => (!catalogKind || model.kind === catalogKind)
-    && (!query || `${model.name} ${equipmentKindLabel(model.kind)}`.toLocaleLowerCase().includes(query)));
   const missingCapabilities = selectedModel ? [
     ...(!selectedModel.has_liquid_containment ? [{ key: 'liquid_containment', label: 'Liquid capacity' }] : []),
     ...(!selectedModel.has_pressure_rating ? [{ key: 'pressure_rating', label: 'Pressure rating' }] : []),
@@ -707,7 +713,8 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       <p className="muted">Measurements, control settings, and transfers can reference your equipment.</p>
       <div className="equipment-add-actions">
         {models.length > 0 && <Button icon={<PlusOutlined />} onClick={() => { setCatalogUnitModelId(null); setAddingUnit(true); }}>Add unit</Button>}
-        <Button icon={<PlusOutlined />} onClick={() => { setCatalogQuery(''); setCatalogKind(undefined); setCatalogPickerOpen(true); }}>Add from catalog</Button>
+        <Button icon={<PlusOutlined />} onClick={() => { setCatalogQuery(''); setCatalogKind(undefined);
+          setCatalogLimit(80); setCatalogHasMore(false); setCatalogPickerOpen(true); }}>Add from catalog</Button>
         <Dropdown trigger={['click']} menu={addMenu} placement="bottomLeft">
           <Button icon={<PlusOutlined />}>Define equipment</Button>
         </Dropdown>
@@ -719,12 +726,11 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           { title: '', key: 'image', width: 20, className: 'equipment-thumbnail-cell', render: (_, row) => {
             if (row.child) return null;
             const catalogImage = catalog.find(model => model.id === row.model.catalog_model_id);
-            const thumbnail = modelThumbnails[row.model.id];
-            return thumbnail ? <img className="equipment-table-thumbnail" src={thumbnail} alt="" loading="lazy" />
-              : catalogImage?.has_thumbnail ? <CatalogImage kind="thumbnail" id={catalogImage.id}
-                className="equipment-table-thumbnail" />
+            return <WorkspaceThumbnail db={db} kind="model" id={row.model.id} revision={mediaRevision}
+              className="equipment-table-thumbnail" fallback={catalogImage?.has_thumbnail
+                ? <CatalogImage kind="thumbnail" id={catalogImage.id} className="equipment-table-thumbnail" />
                 : catalogImage?.has_image ? <CatalogImage kind="model" id={catalogImage.id}
-                  className="equipment-table-thumbnail" /> : null;
+                  className="equipment-table-thumbnail" /> : null} />;
           } },
           { title: 'Model', key: 'model', width: 240, render: (_, row) => {
             if (row.child) return null;
@@ -974,9 +980,9 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     <Modal title="Add from catalog" open={catalogPickerOpen} onCancel={() => setCatalogPickerOpen(false)} footer={null} destroyOnHidden>
       <div className="catalog-explorer-filters">
         <Input.Search aria-label="Search equipment models" placeholder="Search equipment models" allowClear value={catalogQuery}
-          onChange={event => setCatalogQuery(event.target.value)} />
+          onChange={event => { setCatalogQuery(event.target.value); setCatalogLimit(80); }} />
         <Select aria-label="Filter equipment type" placeholder="All equipment types" allowClear showSearch optionFilterProp="label"
-          value={catalogKind} onChange={setCatalogKind}
+          value={catalogKind} onChange={value => { setCatalogKind(value); setCatalogLimit(80); }}
           options={catalogKinds.map(kind => ({ value: kind, label: equipmentKindLabel(kind) }))} />
       </div>
       {matchingModels.length ? <div className="catalog-explorer-list" role="list">
@@ -989,6 +995,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           </button>
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching equipment' : 'No catalog equipment available'} />}
+      {catalogHasMore && <Button type="link" onClick={() => setCatalogLimit(limit => limit + 80)}>Show more models</Button>}
     </Modal>
     <Modal title="Add equipment unit" open={addingUnit}
       onCancel={() => { setAddingUnit(false); setCatalogUnitModelId(null); }} footer={null} destroyOnHidden>

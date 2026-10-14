@@ -338,70 +338,68 @@ export function openLocalCatalog(): Promise<DB> {
   return opened;
 }
 
-export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEquipment[]; inventory: CatalogInventory[] }> {
-  const [models, liquid, pressure, heating, boil, cooling, control, channels, modelImages, logos, inventory, supplyImages] = await Promise.all([
-    db.execO<{ id: string; name: string; kind: string; manufacturer: string | null;
-      product_url: string | null; manufacturer_website_url: string | null }>(
-      `SELECT m.id, m.model_name AS name, m.kind, m.manufacturer, m.product_url,
-        maker.website_url AS manufacturer_website_url
-        FROM equipment_models m LEFT JOIN manufacturers maker ON maker.name = m.manufacturer
-        ORDER BY m.model_name COLLATE NOCASE`),
-    db.execO<{ model_id: string; capacity_liters: number | null }>('SELECT * FROM model_liquid_containment'),
-    db.execO<{ model_id: string; max_pressure_kpa: number | null }>('SELECT * FROM model_pressure_rating'),
-    db.execO<{ model_id: string; rated_power_watts: number | null }>('SELECT * FROM model_heating'),
-    db.execO<{ model_id: string; heat_loss_watts: number | null }>('SELECT * FROM model_boil_characterization'),
-    db.execO<{ model_id: string; rated_heat_removal_watts: number | null }>('SELECT * FROM model_cooling'),
-    db.execO<{ model_id: string; min_temperature_c: number | null; max_temperature_c: number | null }>(
-      'SELECT * FROM model_temperature_control'),
-    db.execO<CatalogMeasurementChannel>('SELECT * FROM model_measurement_channels'),
-    db.execO<{ model_id: string; has_image: number; has_thumbnail: number }>(
-      'SELECT model_id, image_bytes IS NOT NULL AS has_image, thumbnail_bytes IS NOT NULL AS has_thumbnail FROM model_images'),
-    db.execO<{ manufacturer_name: string; has_image: number }>(
-      'SELECT manufacturer_name, image_bytes IS NOT NULL AS has_image FROM manufacturer_logos'),
-    db.execO<CatalogInventory>(`SELECT s.id, s.name, s.category, s.unit,
-      g.yield_pct, g.color_lovibond, h.alpha_acid_pct, h.hop_form, y.attenuation_pct,
-      other.typical_brix, other.extract_color_value, other.extract_color_scale,
-      other.extract_color_reference_value, other.extract_color_reference_unit,
-      gc.grain_class, p.manufacturer, p.product_url
-      FROM supplies s LEFT JOIN supply_grain_specs g ON g.supply_id = s.id
-      LEFT JOIN supply_other_fermentable_specs other ON other.supply_id = s.id
-      LEFT JOIN supply_hop_specs h ON h.supply_id = s.id
-      LEFT JOIN supply_yeast_specs y ON y.supply_id = s.id
-      LEFT JOIN supply_grain_classes gc ON gc.supply_id = s.id
-      LEFT JOIN supply_products p ON p.supply_id = s.id ORDER BY s.name COLLATE NOCASE`),
-    db.execO<{ supply_id: string; has_image: number }>(
-      'SELECT supply_id, image_bytes IS NOT NULL AS has_image FROM supply_images')
-  ]);
-  const byId = new Map(models.map(model => [model.id, { ...model, measurement_channels: [] as CatalogMeasurementChannel[] }]));
-  for (const row of modelImages) {
-    const model = byId.get(row.model_id);
-    if (model) Object.assign(model, { has_image: !!row.has_image, has_thumbnail: !!row.has_thumbnail });
+export interface CatalogSearch {
+  ids?: string[];
+  category?: string;
+  query?: string;
+  limit?: number;
+}
+
+function catalogWhere(search: CatalogSearch, idColumn: string, categoryColumn: string | null,
+  nameExpression: string): { clause: string; args: (string | number)[] } {
+  const conditions: string[] = [];
+  const args: (string | number)[] = [];
+  if (search.ids) {
+    if (!search.ids.length) return { clause: 'WHERE 0', args };
+    conditions.push(`${idColumn} IN (${search.ids.map(() => '?').join(', ')})`);
+    args.push(...search.ids);
   }
-  const logosByName = new Set(logos.filter(row => row.has_image).map(row => row.manufacturer_name));
-  for (const model of byId.values()) {
-    if (model.manufacturer) Object.assign(model, { has_manufacturer_logo: logosByName.has(model.manufacturer) });
+  if (categoryColumn && search.category) {
+    conditions.push(`${categoryColumn} = ?`);
+    args.push(search.category);
   }
-  const suppliesById = new Map(inventory.map(item => [item.id, item]));
-  for (const row of supplyImages) {
-    const item = suppliesById.get(row.supply_id);
-    if (item) item.has_image = !!row.has_image;
+  if (search.query?.trim()) {
+    conditions.push(`instr(lower(${nameExpression}), lower(?)) > 0`);
+    args.push(search.query.trim());
   }
-  for (const row of liquid) Object.assign(byId.get(row.model_id) || {},
-    { has_liquid_containment: true, capacity_liters: row.capacity_liters });
-  for (const row of pressure) Object.assign(byId.get(row.model_id) || {},
-    { has_pressure_rating: true, max_pressure_kpa: row.max_pressure_kpa });
-  for (const row of heating) Object.assign(byId.get(row.model_id) || {},
-    { has_heating: true, rated_power_watts: row.rated_power_watts });
-  for (const row of boil) Object.assign(byId.get(row.model_id) || {},
-    { boil_heat_loss_watts: row.heat_loss_watts });
-  for (const row of cooling) Object.assign(byId.get(row.model_id) || {},
-    { has_cooling: true, rated_heat_removal_watts: row.rated_heat_removal_watts });
-  for (const row of control) Object.assign(byId.get(row.model_id) || {}, {
-    min_temperature_c: row.min_temperature_c, max_temperature_c: row.max_temperature_c,
-    built_in_temperature_control: true, has_temperature_control: true
-  });
+  return { clause: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', args };
+}
+
+/** Return only the model rows a screen needs; image bytes remain in SQLite. */
+export async function queryCatalogModels(search: CatalogSearch = {}): Promise<CatalogEquipment[]> {
+  const db = await openLocalCatalog();
+  const where = catalogWhere(search, 'm.id', 'm.kind',
+    "m.model_name || ' ' || coalesce(m.manufacturer, '') || ' ' || m.kind");
+  const limit = search.ids ? '' : ' LIMIT ?';
+  const args = search.ids ? where.args : [...where.args, Math.min(5000, Math.max(1, search.limit ?? 80))];
+  const rows = await db.execO<CatalogEquipment>(`SELECT m.id, m.model_name AS name, m.kind, m.manufacturer, m.product_url,
+    maker.website_url AS manufacturer_website_url,
+    liquid.model_id IS NOT NULL AS has_liquid_containment, liquid.capacity_liters,
+    pressure.model_id IS NOT NULL AS has_pressure_rating, pressure.max_pressure_kpa,
+    heating.model_id IS NOT NULL AS has_heating, heating.rated_power_watts,
+    boil.heat_loss_watts AS boil_heat_loss_watts,
+    cooling.model_id IS NOT NULL AS has_cooling, cooling.rated_heat_removal_watts,
+    control.model_id IS NOT NULL AS has_temperature_control,
+    control.model_id IS NOT NULL AS built_in_temperature_control,
+    control.min_temperature_c, control.max_temperature_c,
+    image.image_bytes IS NOT NULL AS has_image, image.thumbnail_bytes IS NOT NULL AS has_thumbnail,
+    logo.image_bytes IS NOT NULL AS has_manufacturer_logo
+    FROM equipment_models m LEFT JOIN manufacturers maker ON maker.name = m.manufacturer
+    LEFT JOIN model_liquid_containment liquid ON liquid.model_id = m.id
+    LEFT JOIN model_pressure_rating pressure ON pressure.model_id = m.id
+    LEFT JOIN model_heating heating ON heating.model_id = m.id
+    LEFT JOIN model_boil_characterization boil ON boil.model_id = m.id
+    LEFT JOIN model_cooling cooling ON cooling.model_id = m.id
+    LEFT JOIN model_temperature_control control ON control.model_id = m.id
+    LEFT JOIN model_images image ON image.model_id = m.id
+    LEFT JOIN manufacturer_logos logo ON logo.manufacturer_name = m.manufacturer
+    ${where.clause} ORDER BY m.model_name COLLATE NOCASE${limit}`, args);
+  if (!rows.length) return [];
+  const byId = new Map(rows.map(row => [row.id, { ...row, measurement_channels: [] as CatalogMeasurementChannel[] }]));
+  const channels = await db.execO<CatalogMeasurementChannel>(`SELECT * FROM model_measurement_channels
+    WHERE model_id IN (${rows.map(() => '?').join(', ')})`, rows.map(row => row.id));
   for (const channel of channels) byId.get(channel.model_id)?.measurement_channels.push(channel);
-  const equipment: CatalogEquipment[] = [...byId.values()].map(model => {
+  return [...byId.values()].map(model => {
     const primary = model.measurement_channels.find(channel => channel.measurement_kind ===
       (model.kind === 'hydrometer' || model.kind === 'refractometer' ? 'gravity' :
         model.kind === 'ph_meter' ? 'ph' : model.kind === 'scale' ? 'mass' :
@@ -410,7 +408,56 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
     return { ...model, measurement_min: primary?.measurement_min, measurement_max: primary?.measurement_max,
       measurement_unit: primary?.measurement_scale || primary?.measurement_unit };
   });
-  return { equipment, inventory };
+}
+
+/** Search local supply rows in SQLite rather than caching the catalog in React. */
+export async function queryCatalogSupplies(search: CatalogSearch = {}): Promise<CatalogInventory[]> {
+  const db = await openLocalCatalog();
+  const where = catalogWhere(search, 's.id', 's.category',
+    "s.name || ' ' || coalesce(p.manufacturer, '') || ' ' || s.category");
+  const limit = search.ids ? '' : ' LIMIT ?';
+  const args = search.ids ? where.args : [...where.args, Math.min(5000, Math.max(1, search.limit ?? 80))];
+  return db.execO<CatalogInventory>(`SELECT s.id, s.name, s.category, s.unit,
+      g.yield_pct, g.color_lovibond, h.alpha_acid_pct, h.hop_form, y.attenuation_pct,
+      other.typical_brix, other.extract_color_value, other.extract_color_scale,
+      other.extract_color_reference_value, other.extract_color_reference_unit,
+      gc.grain_class, p.manufacturer, p.product_url,
+      image.image_bytes IS NOT NULL AS has_image
+      FROM supplies s LEFT JOIN supply_grain_specs g ON g.supply_id = s.id
+      LEFT JOIN supply_other_fermentable_specs other ON other.supply_id = s.id
+      LEFT JOIN supply_hop_specs h ON h.supply_id = s.id
+      LEFT JOIN supply_yeast_specs y ON y.supply_id = s.id
+      LEFT JOIN supply_grain_classes gc ON gc.supply_id = s.id
+      LEFT JOIN supply_products p ON p.supply_id = s.id
+      LEFT JOIN supply_images image ON image.supply_id = s.id
+      ${where.clause} ORDER BY s.name COLLATE NOCASE${limit}`, args);
+}
+
+export async function catalogModelKinds(): Promise<string[]> {
+  const db = await openLocalCatalog();
+  return (await db.execO<{ kind: string }>('SELECT DISTINCT kind FROM equipment_models WHERE kind IS NOT NULL ORDER BY kind'))
+    .map(row => row.kind);
+}
+
+export async function findCatalogSupply(category: string, name: string): Promise<CatalogInventory | null> {
+  const db = await openLocalCatalog();
+  const match = await db.execO<{ id: string }>(`SELECT id FROM supplies WHERE category = ? AND name = ? COLLATE NOCASE LIMIT 1`,
+    [category, name]);
+  return match.length ? (await queryCatalogSupplies({ ids: [match[0].id] }))[0] || null : null;
+}
+
+export function referencedCatalogSupplyIds(events: { details: {
+  catalog_item_id?: string; inventory_item_id?: string; supply_id?: string } }[],
+  inventory: { id: string; supply_id?: string | null; catalog_supply_id?: string | null }[]): string[] {
+  const ids = new Set<string>();
+  for (const event of events) {
+    const details = event.details;
+    const item = (details.inventory_item_id ? inventory.find(row => row.id === details.inventory_item_id) : undefined)
+      || (details.supply_id ? inventory.find(row => row.id === details.supply_id || row.supply_id === details.supply_id) : undefined);
+    const id = details.catalog_item_id || item?.catalog_supply_id;
+    if (id) ids.add(id);
+  }
+  return [...ids];
 }
 
 export async function syncLocalCatalog(db: DB, onProgress?: (applied: number, total: number) => void,

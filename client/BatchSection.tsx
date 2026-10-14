@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Select } from 'antd';
 import { PlusOutlined, SettingOutlined } from '@ant-design/icons';
-import { addBatchPlan, createBatch, eventDetails, eventFormData, listEvents, listPhotos, listSupplies, releaseEquipmentUse,
+import { addBatchPlan, createBatch, eventDetails, eventFormData, listEvents, listPhotos, releaseEquipmentUse,
   startBatchFromRecipe, startBatchFromTemplate, startBatchFromPrevious, updateBatchPlan,
   batchTargetVolume, breweryBatchSize, breweryMashEfficiency, latestMeasuredMashEfficiencySource, updateBatchSettings,
   type ActualEvent, type Batch, type Equipment, type InventoryItem,
@@ -13,7 +13,7 @@ import { EventForm } from './EventForm.tsx';
 import { EventTimeline } from './EventTimeline.tsx';
 import { RecipeEquipmentFields } from './RecipeEquipmentFields.tsx';
 import type { PreferredUnits } from './api.ts';
-import type { CatalogInventory } from '../shared/catalog.ts';
+import { queryCatalogSupplies, referencedCatalogSupplyIds } from './catalog.ts';
 import { calculateRecipe, type RecipeEstimate } from './recipeCalculations.ts';
 import { CalculationsCard } from './CalculationsCard.tsx';
 import { convertUnit, unitGroups, unitOptions } from '../shared/units.ts';
@@ -21,9 +21,9 @@ import { changeNumberUnit } from './unitFields.ts';
 import { batchGravityReadings } from './batchGravity.ts';
 import { appBatchSizeLiters } from '../shared/batchSize.ts';
 
-export function BatchSection({ db, basePath, accountId, batches, recipes, equipment, equipmentModels, inventory, catalogInventory, preferredUnits, selectedId, onSelect, onChanged }: {
+export function BatchSection({ db, basePath, accountId, batches, recipes, equipment, equipmentModels, inventory, catalogRevision, preferredUnits, selectedId, onSelect, onChanged }: {
   db: LocalDb; basePath: string; accountId: string; batches: Batch[]; recipes: Recipe[]; equipment: Equipment[]; equipmentModels: Equipment[]; inventory: InventoryItem[];
-  catalogInventory: CatalogInventory[]; preferredUnits: PreferredUnits; selectedId: string | null;
+  catalogRevision: number; preferredUnits: PreferredUnits; selectedId: string | null;
   onSelect: (id: string | null) => void; onChanged: () => Promise<void>;
 }) {
   const [events, setEvents] = useState<ActualEvent[]>([]);
@@ -73,6 +73,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
     let cancelled = false;
     setEstimate(null);
     void (async () => {
+      const supplyIds = [...new Set(events.map(event => event.details.supply_id).filter((id): id is string => !!id))];
       const [batchRows, eventRows, typeRows, breweryEfficiency, supplies, gravityRows, defaultBatchSize] = await Promise.all([
         db.execO<{ target_fermenter_volume_liters: number | null; brewhouse_efficiency_pct: number | null;
           wort_loss_liters: number | null }>(
@@ -83,7 +84,8 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
           JOIN recipe_events re ON re.id = e.recipe_event_id
           JOIN recipe_types rt ON rt.id = re.recipe_id WHERE e.batch_id = ? LIMIT 1`, [selectedId]),
         breweryMashEfficiency(db),
-        listSupplies(db),
+        supplyIds.length ? db.execO<InventoryItem>(`SELECT * FROM effective_supplies
+          WHERE id IN (${supplyIds.map(() => '?').join(', ')})`, supplyIds) : Promise.resolve([]),
         db.execO<{ title: string; value: number; unit: string }>(`SELECT e.title, g.value, g.unit
           FROM gravity_measurements g JOIN batch_events e ON e.id = g.event_id
           WHERE e.batch_id = ? AND e.actual_at IS NOT NULL AND e.skipped_at IS NULL
@@ -104,6 +106,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
       const batchInputs = batchRows[0]?.target_fermenter_volume_liters != null ? batchRows[0]
         : { ...batchRows[0], target_fermenter_volume_liters: defaultBatchSize ?? appBatchSizeLiters,
           batch_size_source: defaultBatchSize == null ? 'assumed_app' : 'assumed_brewery' };
+      const catalogInventory = await queryCatalogSupplies({ ids: referencedCatalogSupplyIds(events, [...inventory, ...supplies]) });
       if (!cancelled) {
         setEstimateType(recipeType);
         setEstimate(calculateRecipe(events.filter(event => event.skipped_at == null), [...inventory, ...supplies], equipment, batchInputs,
@@ -112,7 +115,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
       }
     })().catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => { cancelled = true; };
-  }, [db, selectedId, events, inventory, equipment, catalogInventory]);
+  }, [db, selectedId, events, inventory, equipment, catalogRevision]);
 
   async function changed() { await refreshDetail(); await onChanged(); }
 
@@ -269,7 +272,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
       open={!!(editingPlan || creatingKind)} onCancel={() => { setCreatingKind(null); setEditingPlan(null); }} footer={null} destroyOnHidden>
       {(editingPlan || creatingKind) && <PlanForm key={editingPlan?.id || creatingKind || 'new'}
         eventType={editingPlan?.event_type || creatingKind || 'addition'} anchors={events.filter(item => item.id !== editingPlan?.id)}
-        initialPlan={editingPlan || undefined} equipment={equipment} inventory={inventory} catalog={catalogInventory}
+        initialPlan={editingPlan || undefined} equipment={equipment} inventory={inventory} catalogRevision={catalogRevision}
         preferredUnits={preferredUnits} preset={editingPlan ? undefined : preset} allowRecordNow submit={saveAction} />}
     </Modal>
     <Modal title={recordingEvent?.actual_at != null ? `Edit: ${recordingEvent.title}` : `Record: ${recordingEvent?.title || ''}`}

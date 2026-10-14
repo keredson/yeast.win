@@ -20,8 +20,7 @@ import { recipeForPath, recipePathSegment } from './recipeRoutes.ts';
 import { breadcrumbNodes, type BreadcrumbRecords, type BreadcrumbSection } from './breadcrumbs.ts';
 import { routeFromPath, routePath, workspaceBase, type Route, type Section } from './appRoutes.ts';
 import { AccountSection } from './AccountSection.tsx';
-import { openLocalCatalog, readLocalCatalog, syncLocalCatalog } from './catalog.ts';
-import type { CatalogEquipment, CatalogInventory } from '../shared/catalog.ts';
+import { openLocalCatalog, syncLocalCatalog } from './catalog.ts';
 
 function recordPath(section: BreadcrumbSection, id: string | null, base: string, records: BreadcrumbRecords): string {
   if (!id) return routePath(section, null, base);
@@ -189,6 +188,8 @@ export function App() {
   const lastAutomaticSyncAttempt = useRef(new Map<string, number>());
   const [route, setRoute] = useState<Route>(() => routeFromPath(location.pathname));
   const section = route.section;
+  const activeSection = useRef(section);
+  activeSection.current = section;
   const [autoSync, setAutoSync] = useState(() => localStorage.getItem(autoSyncKey) !== '0');
   const [batches, setBatches] = useState<Batch[]>([]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
@@ -199,10 +200,12 @@ export function App() {
   const [equipmentWorkspaceId, setEquipmentWorkspaceId] = useState<string | null>(null);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [equipmentModels, setEquipmentModels] = useState<Equipment[]>([]);
+  const [sectionData, setSectionData] = useState<{ workspaceId: string; section: Section; catalogRevision: number } | null>(null);
   const [recent, setRecent] = useState<RecentItems>(emptyRecents);
-  const [catalogEquipment, setCatalogEquipment] = useState<CatalogEquipment[]>([]);
+  const [recentRecords, setRecentRecords] = useState<{ batches: NavRecord[]; recipes: NavRecord[] }>({ batches: [], recipes: [] });
   const [catalogRevision, setCatalogRevision] = useState(0);
-  const [catalogInventory, setCatalogInventory] = useState<CatalogInventory[]>([]);
+  const currentCatalogRevision = useRef(catalogRevision);
+  currentCatalogRevision.current = catalogRevision;
   const [error, setError] = useState('');
   const [serverDisconnected, setServerDisconnected] = useState(false);
   const [syncPhase, setSyncPhase] = useState<'idle' | 'syncing' | 'synced' | 'failed'>('idle');
@@ -255,19 +258,12 @@ export function App() {
   useEffect(() => {
     if (!session || !appActive || !db) return;
     let cancelled = false;
-    let catalogLoaded = false;
     let running = false;
     const load = async () => {
       if (running) return;
       running = true;
       try {
         const catalogDb = await openLocalCatalog();
-        if (!catalogLoaded) {
-          const cached = await readLocalCatalog(catalogDb);
-          if (profileOpen) console.info(`[open catalog] Read ${cached.equipment.length} models and ${cached.inventory.length} supplies`);
-          if (!cancelled) { setCatalogEquipment(cached.equipment); setCatalogInventory(cached.inventory); }
-          catalogLoaded = true;
-        }
         let catalogChecked = false;
         const refreshed = await syncLocalCatalog(catalogDb, (applied, total) => {
           catalogChecked = true;
@@ -278,10 +274,6 @@ export function App() {
         if (cancelled) return;
         if (catalogChecked) setServerDisconnected(false);
         if (!refreshed) return;
-        const updated = await readLocalCatalog(catalogDb);
-        if (cancelled) return;
-        setCatalogEquipment(updated.equipment);
-        setCatalogInventory(updated.inventory);
         setCatalogRevision(revision => revision + 1);
       } catch (cause) {
         if (profileOpen) console.info(`[open catalog] Sync failed: ${cause instanceof Error ? cause.message : String(cause)}`);
@@ -298,18 +290,6 @@ export function App() {
     window.addEventListener('online', refreshCatalog);
     return () => { cancelled = true; window.clearInterval(timer); window.removeEventListener('online', refreshCatalog); };
   }, [session?.account.id, appActive, db]);
-
-  useEffect(() => {
-    if (!db || !workspaceId || !catalogRevision) return;
-    let cancelled = false;
-    void Promise.all([listEquipment(db), listEquipmentModels(db), listInventory(db), listSupplies(db)])
-      .then(([items, models, stock, supplyRows]) => {
-      if (!cancelled && activeWorkspaceId.current === workspaceId) {
-        setEquipment(items); setEquipmentModels(models); setInventory(stock); setSupplies(supplyRows);
-      }
-    }).catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
-    return () => { cancelled = true; };
-  }, [db, workspaceId, catalogRevision]);
 
   useEffect(() => {
     const onBackOrForward = () => {
@@ -414,11 +394,24 @@ export function App() {
     location.replace('/');
   }
 
-  const refresh = useCallback(async (activeDb: LocalDb, targetWorkspaceId: string) => {
+  const refresh = useCallback(async (activeDb: LocalDb, targetWorkspaceId: string,
+    targetSection: Section = activeSection.current, targetCatalogRevision = currentCatalogRevision.current) => {
+    const needsBatches = targetSection === 'batches' || targetSection === 'equipment';
+    const needsRecipes = targetSection === 'recipes' || targetSection === 'batches';
+    const needsInventory = ['inventory', 'recipes', 'batches', 'locations'].includes(targetSection);
+    const needsSupplies = ['inventory', 'recipes', 'locations'].includes(targetSection);
+    const needsEquipment = ['equipment', 'recipes', 'batches', 'locations'].includes(targetSection);
+    const needsLocations = ['locations', 'equipment'].includes(targetSection);
     const [nextBatches, nextRecipes, nextInventory, nextSupplies, nextEquipment, nextModels, nextLocations] = await Promise.all([
-      listBatches(activeDb), listRecipes(activeDb), listInventory(activeDb), listSupplies(activeDb), listEquipment(activeDb), listEquipmentModels(activeDb), listInventoryLocations(activeDb)
+      needsBatches ? listBatches(activeDb) : Promise.resolve([]),
+      needsRecipes ? listRecipes(activeDb) : Promise.resolve([]),
+      needsInventory ? listInventory(activeDb) : Promise.resolve([]),
+      needsSupplies ? listSupplies(activeDb) : Promise.resolve([]),
+      needsEquipment ? listEquipment(activeDb) : Promise.resolve([]),
+      needsEquipment ? listEquipmentModels(activeDb) : Promise.resolve([]),
+      needsLocations ? listInventoryLocations(activeDb) : Promise.resolve([])
     ]);
-    if (activeWorkspaceId.current !== targetWorkspaceId) return;
+    if (activeWorkspaceId.current !== targetWorkspaceId || activeSection.current !== targetSection) return;
     setBatches(nextBatches);
     setRecipes(nextRecipes);
     setInventory(nextInventory);
@@ -428,7 +421,32 @@ export function App() {
     setEquipment(nextEquipment);
     setEquipmentModels(nextModels);
     setEquipmentWorkspaceId(targetWorkspaceId);
+    setSectionData({ workspaceId: targetWorkspaceId, section: targetSection, catalogRevision: targetCatalogRevision });
   }, []);
+
+  useEffect(() => {
+    if (!db || !workspaceId) return;
+    if (sectionData?.workspaceId === workspaceId && sectionData.section === section
+      && sectionData.catalogRevision === catalogRevision) return;
+    void refresh(db, workspaceId, section).catch(cause => setError(cause instanceof Error ? cause.message : String(cause)));
+  }, [db, workspaceId, section, catalogRevision, sectionData, refresh]);
+
+  useEffect(() => {
+    if (!db) { setRecentRecords({ batches: [], recipes: [] }); return; }
+    let cancelled = false;
+    const batchesSql = recent.batches.length ? `SELECT id, name FROM batches WHERE id IN (${recent.batches.map(() => '?').join(',')})` : null;
+    const recipesSql = recent.recipes.length ? `SELECT r.id, r.name, t.recipe_type FROM recipes r
+      LEFT JOIN recipe_types t ON t.id = r.id WHERE r.id IN (${recent.recipes.map(() => '?').join(',')})` : null;
+    void Promise.all([
+      batchesSql ? db.execO<NavRecord>(batchesSql, recent.batches) : Promise.resolve([]),
+      recipesSql ? db.execO<NavRecord>(recipesSql!, recent.recipes) : Promise.resolve([])
+    ]).then(([batchRows, recipeRows]) => {
+      if (cancelled) return;
+      setRecentRecords({ batches: recent.batches.flatMap(id => batchRows.filter(row => row.id === id)),
+        recipes: recent.recipes.flatMap(id => recipeRows.filter(row => row.id === id)) });
+    }).catch(cause => { if (!cancelled) setError(String(cause)); });
+    return () => { cancelled = true; };
+  }, [db, recent, sectionData]);
 
   const runSync = useCallback(async (activeDb: LocalDb, targetWorkspaceId: string, includeCatalog = false) => {
     if (activeWorkspaceId.current !== targetWorkspaceId) return;
@@ -449,10 +467,6 @@ export function App() {
       if (activeWorkspaceId.current !== targetWorkspaceId) return;
       setCatalogSyncProgress(null);
       if (catalogResult.status === 'fulfilled' && catalogResult.value) {
-        const updated = await readLocalCatalog(await openLocalCatalog());
-        if (activeWorkspaceId.current !== targetWorkspaceId) return;
-        setCatalogEquipment(updated.equipment);
-        setCatalogInventory(updated.inventory);
         setCatalogRevision(revision => revision + 1);
       }
       if (breweryResult.status === 'fulfilled' || catalogResult.status === 'fulfilled' && catalogResult.value) {
@@ -621,11 +635,13 @@ export function App() {
 
     <div className="app-body">
       <Layout.Sider className="app-nav" width={220} theme="light" aria-label="Sections">
-        <SectionNavigation route={route} recent={recent} records={{ batches, recipes, inventory, equipment, locations }}
+        <SectionNavigation route={route} recent={recent} records={{ batches: recentRecords.batches, recipes: recentRecords.recipes,
+          inventory: [], equipment: [], locations: [] }}
           onNavigate={(name, id) => name !== 'home' && id ? showItem(name, id) : showSection(name)} />
       </Layout.Sider>
       <Drawer className="mobile-nav-drawer" title="Sections" placement="left" width={250} open={menuOpen} onClose={() => setMenuOpen(false)}>
-        <div className="drawer-nav"><SectionNavigation route={route} recent={recent} records={{ batches, recipes, inventory, equipment, locations }}
+        <div className="drawer-nav"><SectionNavigation route={route} recent={recent} records={{ batches: recentRecords.batches, recipes: recentRecords.recipes,
+          inventory: [], equipment: [], locations: [] }}
           onNavigate={(name, id) => { if (name !== 'home' && id) showItem(name, id);
             else showSection(name); setMenuOpen(false); }} /></div>
       </Drawer>
@@ -654,19 +670,21 @@ export function App() {
           autoSync={autoSync} onAutoSyncChange={enabled => { localStorage.setItem(autoSyncKey, enabled ? '1' : '0'); setAutoSync(enabled); }}
           onSignOut={signOut} /> : !workspaceId ? <Empty description="Add a brewery in Settings to begin">
             <Button type="primary" onClick={() => showSection('me')}>Open Settings</Button></Empty> :
-          !db ? <div className="loading-screen"><Spin description="Opening data on this device" /></div> : <>
+          !db ? <div className="loading-screen"><Spin description="Opening data on this device" /></div>
+            : section !== 'home' && (sectionData?.workspaceId !== workspaceId || sectionData.section !== section)
+              ? <div className="loading-screen"><Spin description="Loading section" /></div> : <>
             {section === 'home' && <DashboardSection />}
             {section === 'batches' && <BatchSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} batches={batches} recipes={recipes}
-              equipment={equipment} equipmentModels={equipmentModels} inventory={inventory} catalogInventory={catalogInventory} preferredUnits={preferredUnits}
+              equipment={equipment} equipmentModels={equipmentModels} inventory={inventory} catalogRevision={catalogRevision} preferredUnits={preferredUnits}
               selectedId={route.selectedId} onSelect={id => showItem('batches', id)} onChanged={changed} />}
             {section === 'recipes' && <RecipeSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} recipes={recipes}
-              equipment={equipment} equipmentModels={equipmentModels} inventory={inventory} supplies={supplies} catalogInventory={catalogInventory} preferredUnits={preferredUnits}
+              equipment={equipment} equipmentModels={equipmentModels} inventory={inventory} supplies={supplies} catalogRevision={catalogRevision} preferredUnits={preferredUnits}
               selectedId={route.selectedId ? recipeForPath(route.selectedId, recipes)?.id || route.selectedId : null}
               onSelect={id => showItem('recipes', id)}
               onChanged={changed} onBatchStarted={id => showItem('batches', id)} />}
             {section === 'inventory' && (inventoryWorkspaceId !== workspaceId ? <div className="loading-screen"><Spin description="Loading inventory" /></div>
               : <InventorySection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} items={inventory}
-                supplies={supplies} catalog={catalogInventory} preferredUnits={preferredUnits} selectedId={route.selectedId
+                supplies={supplies} catalogRevision={catalogRevision} preferredUnits={preferredUnits} selectedId={route.selectedId
                   ? inventorySupplyForPath(route.selectedId, supplies, inventory)?.id || route.selectedId : null}
                 onSelect={id => showItem('inventory', id)} onChanged={changed} />)}
             {section === 'locations' && (inventoryWorkspaceId !== workspaceId ? <div className="loading-screen"><Spin description="Loading locations" /></div>
@@ -677,7 +695,7 @@ export function App() {
             {section === 'equipment' && (equipmentWorkspaceId !== workspaceId ? <div className="loading-screen"><Spin description="Loading equipment" /></div>
               : <EquipmentSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} batches={batches} equipment={equipment} models={equipmentModels}
                 locations={locations}
-                catalog={catalogEquipment} preferredUnits={preferredUnits} selectedId={route.selectedId
+                catalogRevision={catalogRevision} preferredUnits={preferredUnits} selectedId={route.selectedId
                   ? equipmentModelForPath(route.selectedId, equipmentModels)?.id
                     || equipmentUnitForPath(route.selectedId, equipment, equipmentModels)?.id || route.selectedId : null}
                 onSelect={id => showItem('equipment', id)} onSelectBatch={id => showItem('batches', id)} onChanged={changed} />)}

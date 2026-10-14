@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Alert, AutoComplete, Button, Checkbox, Form, Input, InputNumber, Select } from 'antd';
 import { kindLabel, measurementKinds } from './constants.ts';
@@ -10,6 +10,7 @@ import { inventoryCategories, unitForCategory, type CatalogInventory } from '../
 import { QuantityFields } from './QuantityFields.tsx';
 import type { PreferredUnits } from './api.ts';
 import { changeNumberUnit, changeQuantityUnit } from './unitFields.ts';
+import { findCatalogSupply, queryCatalogSupplies } from './catalog.ts';
 
 interface Anchor { id: string; title: string; event_type: string; details?: PlanDetails }
 export interface PlanPreset { phase?: 'mash' | 'boil' | 'chill'; measurementKind?: string; itemCategory?: string; title?: string;
@@ -49,11 +50,11 @@ interface Values {
   duration_value?: number; duration_unit?: typeof timeUnits[number]['value'];
 }
 
-export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory, catalog, preferredUnits, preset, recipeMode = false, allowRecordNow = false, extraAction, submit }: {
+export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory, catalogRevision, preferredUnits, preset, recipeMode = false, allowRecordNow = false, extraAction, submit }: {
   anchors: Anchor[];
   eventType: string;
   initialPlan?: PlanInput & { id: string };
-  equipment: Equipment[]; inventory: InventoryItem[]; catalog: CatalogInventory[]; preferredUnits: PreferredUnits;
+  equipment: Equipment[]; inventory: InventoryItem[]; catalogRevision: number; preferredUnits: PreferredUnits;
   preset?: PlanPreset;
   recipeMode?: boolean;
   allowRecordNow?: boolean;
@@ -73,8 +74,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
     && !initialDetails.item_name && !initialDetails.inventory_item_id && !initialDetails.supply_id && !initialDetails.catalog_item_id;
   const initialItem = genericPitch || unspecifiedAddition ? '' : String(initialDetails.item_name || initialPlan?.title || preset?.title || '');
   const initialCategory = String(initialDetails.item_category || inventory.find(item => item.id === (recipeMode
-    ? initialDetails.supply_id : initialDetails.inventory_item_id))?.category
-    || catalog.find(item => item.id === initialDetails.catalog_item_id || item.name === initialItem)?.category || preset?.itemCategory || '');
+    ? initialDetails.supply_id : initialDetails.inventory_item_id))?.category || preset?.itemCategory || '');
   const categoryNames = [...new Set([...inventoryCategories,
     ...inventory.map(row => row.category), ...(initialCategory ? [initialCategory] : [])])];
   const initialUnit = String(initialDetails.display_unit || initialDetails.container_unit || initialDetails.unit ||
@@ -89,8 +89,30 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
   const timedControl = supportsDuration(kind, phase);
   const duration = initialPlan ? planDuration(initialPlan) : preset?.phase === 'boil' ? 3600 : preset?.phase === 'mash' ? 1800 : 0;
   const [itemCategory, setItemCategory] = useState(initialCategory);
+  const [catalogQuery, setCatalogQuery] = useState('');
+  const [catalogCandidates, setCatalogCandidates] = useState<CatalogInventory[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  useEffect(() => {
+    if (kind !== 'addition' || !itemCategory) { setCatalogCandidates([]); return; }
+    let cancelled = false;
+    void queryCatalogSupplies({ category: itemCategory, query: catalogQuery, limit: 80 })
+      .then(rows => { if (!cancelled) setCatalogCandidates(rows); })
+      .catch(cause => { if (!cancelled) setError(String(cause)); });
+    return () => { cancelled = true; };
+  }, [kind, itemCategory, catalogQuery, catalogRevision]);
+  useEffect(() => {
+    if (!initialDetails.catalog_item_id || initialCategory) return;
+    let cancelled = false;
+    void queryCatalogSupplies({ ids: [initialDetails.catalog_item_id] }).then(rows => {
+      if (!cancelled && rows[0]) {
+        setItemCategory(rows[0].category);
+        form.setFieldsValue({ item_category: rows[0].category,
+          unit: unitForCategory(rows[0].category, preferredUnits.mass) });
+      }
+    });
+    return () => { cancelled = true; };
+  }, [initialDetails.catalog_item_id]);
   const recordNow = Form.useWatch('record_now', form) as boolean | undefined;
   const selectedUnit = Form.useWatch('unit', form) as string | undefined;
   const selectedTargetUnit = Form.useWatch('target_unit', form) as string | undefined;
@@ -175,7 +197,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
           if (values.unit === compoundMassUnit) details.display_unit = compoundMassUnit;
         }
         const owned = inventory.find(item => item.category === values.item_category && item.name.toLowerCase() === itemName.toLowerCase());
-        const known = catalog.find(item => item.category === values.item_category && item.name.toLowerCase() === itemName.toLowerCase());
+        const known = itemName ? await findCatalogSupply(values.item_category || '', itemName) : null;
         if (owned) {
           if (recipeMode) details.supply_id = owned.id;
           else { details.inventory_item_id = owned.id; details.supply_id = owned.supply_id || undefined; }
@@ -227,14 +249,15 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
       <Form.Item name="title" label="What will be added?">
         <AutoComplete placeholder="Search inventory or enter an item" maxLength={120} options={[
           ...inventory.filter((item, index) => item.category === itemCategory &&
+            item.name.toLowerCase().includes(catalogQuery.toLowerCase()) &&
             inventory.findIndex(other => other.category === item.category && other.name.toLowerCase() === item.name.toLowerCase()) === index)
             .map(item => ({ value: item.name, label: `${item.name} · Your inventory` })),
-          ...catalog.filter(item => item.category === itemCategory && !inventory.some(owned => owned.category === itemCategory && owned.name.toLowerCase() === item.name.toLowerCase()))
+          ...catalogCandidates.filter(item => !inventory.some(owned => owned.category === itemCategory && owned.name.toLowerCase() === item.name.toLowerCase()))
             .map(item => ({ value: item.name, label: `${item.name} · Shared catalog` }))
-        ]} filterOption={(input, option) => String(option?.value || '').toLowerCase().includes(input.toLowerCase())}
+        ]} filterOption={false} onSearch={setCatalogQuery}
           onSelect={(value: string) => {
             const owned = inventory.find(item => item.category === itemCategory && item.name === value);
-            const known = catalog.find(item => item.category === itemCategory && item.name === value);
+            const known = catalogCandidates.find(item => item.category === itemCategory && item.name === value);
             const knownUnit = known?.unit && unitGroups.mass.includes(known.unit as typeof unitGroups.mass[number])
               ? unitForCategory(itemCategory, preferredUnits.mass) : known?.unit;
             const nextUnit = owned?.display_unit || knownUnit || unitForCategory(itemCategory, preferredUnits.mass);

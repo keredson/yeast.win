@@ -5,7 +5,7 @@ import { inventoryCategories, unitForCategory, type CatalogInventory } from '../
 import { addInventoryEntry, convertInventoryUnit, createInventoryItem, inventoryBalance, inventoryLocationPath,
   listInventoryBalances, listInventoryLocations, listInventoryMovements, moveInventoryStock, saveInventoryLocation, stockAtLocation,
   updateIngredientProperties, updateLotIngredientProperties, supplyIngredientProperties, lotIngredientProperties, ingredientProperties,
-  readSupplyMedia, listSupplyImages, saveSupplyMedia, linkSupplyCatalogProduct,
+  readSupplyMedia, saveSupplyMedia, linkSupplyCatalogProduct,
   type IngredientProperties, type InventoryItem, type InventoryLocation, type InventoryMovement, type LocalDb, type SupplyMedia } from './db.ts';
 import { formatTime } from './time.ts';
 import type { PreferredUnits } from './api.ts';
@@ -17,6 +17,8 @@ import { LocationFields } from './LocationFields.tsx';
 import { LocationTreeSelect, newLocationOption } from './LocationTreeSelect.tsx';
 import { locationDescendantIds } from './locationRoutes.ts';
 import { CatalogImage, useCatalogMedia } from './CatalogImage.tsx';
+import { findCatalogSupply, queryCatalogSupplies } from './catalog.ts';
+import { WorkspaceThumbnail } from './WorkspaceThumbnail.tsx';
 
 function stockTotal(rows: InventoryItem[], balances: Record<string, number | null>, unit: string): number | null | undefined {
   let total = 0;
@@ -115,8 +117,8 @@ function PropertyFields({ category, includeClass = false }: { category: string; 
   </>;
 }
 
-export function InventorySection({ db, basePath, accountId, items, supplies, catalog, preferredUnits, selectedId, onSelect, onChanged }: {
-  db: LocalDb; basePath: string; accountId: string; items: InventoryItem[]; supplies: InventoryItem[]; catalog: CatalogInventory[]; preferredUnits: PreferredUnits;
+export function InventorySection({ db, basePath, accountId, items, supplies, catalogRevision, preferredUnits, selectedId, onSelect, onChanged }: {
+  db: LocalDb; basePath: string; accountId: string; items: InventoryItem[]; supplies: InventoryItem[]; catalogRevision: number; preferredUnits: PreferredUnits;
   selectedId: string | null; onSelect: (id: string | null) => void; onChanged: () => Promise<void>;
 }) {
   const [movements, setMovements] = useState<StockMovement[]>([]);
@@ -133,6 +135,11 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const [catalogPickerPurpose, setCatalogPickerPurpose] = useState<'add' | 'link'>('add');
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogCategory, setCatalogCategory] = useState<string | undefined>();
+  const [catalogLimit, setCatalogLimit] = useState(80);
+  const [catalogHasMore, setCatalogHasMore] = useState(false);
+  const [catalogForOwned, setCatalogForOwned] = useState<CatalogInventory[]>([]);
+  const [matchingCatalog, setMatchingCatalog] = useState<CatalogInventory[]>([]);
+  const [catalogSuggestions, setCatalogSuggestions] = useState<CatalogInventory[]>([]);
   const [selectedCatalogProduct, setSelectedCatalogProduct] = useState<CatalogInventory | null>(null);
   const [catalogProductChosen, setCatalogProductChosen] = useState(false);
   const [supplyMedia, setSupplyMedia] = useState<{ supplyId: string; row: SupplyMedia | null; imageUrl: string | null } | null>(null);
@@ -142,7 +149,6 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const [editingProductImage, setEditingProductImage] = useState(false);
   const [imageEdit, setImageEdit] = useState<File | null | undefined>();
   const [creatingCustomProduct, setCreatingCustomProduct] = useState(false);
-  const [supplyThumbnails, setSupplyThumbnails] = useState<Record<string, string>>({});
   const [ingredientSettingsOpen, setIngredientSettingsOpen] = useState(false);
   const [supplyProperties, setSupplyProperties] = useState<IngredientProperties>({});
   const [lotSettingsOpen, setLotSettingsOpen] = useState(false);
@@ -158,6 +164,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const [moveForm] = Form.useForm();
   const previousItemUnit = useRef<string | undefined>(undefined);
   const previousEntryUnit = useRef<string | undefined>(undefined);
+  const catalog = [...catalogForOwned, ...matchingCatalog, ...catalogSuggestions];
   const item = supplies.find(row => row.id === selectedId) || null;
   const catalogProduct = catalog.find(row => row.id === item?.catalog_supply_id);
   const activeMedia = supplyMedia?.supplyId === item?.id ? supplyMedia : null;
@@ -172,6 +179,30 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const draftCategory = Form.useWatch('category', itemForm) as string | undefined;
   const activeNewCategory = draftCategory || newItemCategory || 'Other';
   const newItemName = Form.useWatch('name', itemForm) as string | undefined;
+  const ownedCatalogIds = supplies.map(row => row.catalog_supply_id).filter((id): id is string => !!id).join('\u0000');
+  useEffect(() => {
+    let cancelled = false;
+    const ids = ownedCatalogIds ? ownedCatalogIds.split('\u0000') : [];
+    void queryCatalogSupplies({ ids }).then(rows => { if (!cancelled) setCatalogForOwned(rows); })
+      .catch(cause => { if (!cancelled) setError(String(cause)); });
+    return () => { cancelled = true; };
+  }, [ownedCatalogIds, catalogRevision]);
+  useEffect(() => {
+    if (!catalogPickerOpen) { setMatchingCatalog([]); return; }
+    let cancelled = false;
+    void queryCatalogSupplies({ category: catalogCategory, query: catalogQuery, limit: catalogLimit + 1 })
+      .then(rows => { if (!cancelled) { setMatchingCatalog(rows.slice(0, catalogLimit)); setCatalogHasMore(rows.length > catalogLimit); } })
+      .catch(cause => { if (!cancelled) setError(String(cause)); });
+    return () => { cancelled = true; };
+  }, [catalogPickerOpen, catalogCategory, catalogQuery, catalogLimit, catalogRevision]);
+  useEffect(() => {
+    if (!newItemCategory) { setCatalogSuggestions([]); return; }
+    let cancelled = false;
+    void queryCatalogSupplies({ category: activeNewCategory, query: newItemName || '', limit: 80 })
+      .then(rows => { if (!cancelled) setCatalogSuggestions(rows); })
+      .catch(cause => { if (!cancelled) setError(String(cause)); });
+    return () => { cancelled = true; };
+  }, [newItemCategory, activeNewCategory, newItemName, catalogRevision]);
   const newLotCode = Form.useWatch('lot_code', itemForm) as string | undefined;
   const entryUnit = Form.useWatch('unit', entryForm) as string | undefined;
   const discardAll = Form.useWatch('all', entryForm) as boolean | undefined;
@@ -191,10 +222,6 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const visibleItems = visibleLocationIds ? items.filter(row => row.location_id && visibleLocationIds.has(row.location_id)) : items;
   const visibleSupplies = supplies.filter(row => visibleItems.some(stock => stock.supply_id === row.id));
   const indexRows = inventoryIndexRows(visibleSupplies, visibleItems, locations);
-  const normalizedCatalogQuery = catalogQuery.trim().toLocaleLowerCase();
-  const matchingCatalog = catalog.filter(row => (!catalogCategory || row.category === catalogCategory)
-    && (!normalizedCatalogQuery || `${row.name} ${row.manufacturer || ''} ${row.category}`
-      .toLocaleLowerCase().includes(normalizedCatalogQuery)));
   const existingItem = items.find(row => row.category === activeNewCategory && row.name.trim().toLocaleLowerCase() === newItemName?.trim().toLocaleLowerCase());
   const existingAtLocation = existingItem
     ? stockAtLocation(items, existingItem.name, existingItem.category, newLocationId || null, newLotCode?.trim() || null) : undefined;
@@ -217,7 +244,8 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   }
 
   function openCatalog(category?: string, purpose: 'add' | 'link' = 'add') {
-    setCatalogQuery(''); setCatalogCategory(category); setCatalogPickerPurpose(purpose); setCatalogPickerOpen(true);
+    setCatalogQuery(''); setCatalogCategory(category); setCatalogLimit(80); setCatalogHasMore(false);
+    setCatalogPickerPurpose(purpose); setCatalogPickerOpen(true);
   }
 
   function createCustomProduct(category: string) {
@@ -312,23 +340,6 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
     }).catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => { cancelled = true; if (imageUrl) URL.revokeObjectURL(imageUrl); };
   }, [db, item?.id, mediaRevision]);
-  useEffect(() => {
-    let cancelled = false;
-    const urls: string[] = [];
-    void listSupplyImages(db).then(rows => {
-      const thumbnails: Record<string, string> = {};
-      for (const row of rows) {
-        if (!row.image_bytes?.length || !row.image_mime_type) continue;
-        const url = URL.createObjectURL(new Blob([new Uint8Array(row.image_bytes)], { type: row.image_mime_type }));
-        urls.push(url);
-        thumbnails[row.id] = url;
-      }
-      if (cancelled) urls.forEach(URL.revokeObjectURL);
-      else setSupplyThumbnails(thumbnails);
-    }).catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
-    return () => { cancelled = true; urls.forEach(URL.revokeObjectURL); };
-  }, [db, supplies, mediaRevision]);
-
   const balance = item ? stockTotal(productRows, onHand, item.default_unit) : undefined;
 
   async function create(values: { name: string; category: string; default_unit: string;
@@ -353,10 +364,11 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
         if (convertInventoryUnit(starting.quantity, starting.unit, match.default_unit) == null) throw new Error('Choose a unit compatible with the existing item');
         await addInventoryEntry(db, match.id, 'purchase', starting.quantity, starting.unit, accountId);
       } else {
+        const catalogMatch = creatingCustomProduct ? null : selectedCatalogProduct?.name === values.name
+          ? selectedCatalogProduct : await findCatalogSupply(values.category, values.name);
         await createInventoryItem(db, values.name.trim(), values.category.trim(), storageUnit(values.default_unit),
           starting?.quantity ?? null, accountId, values.default_unit, locationId,
-          creatingCustomProduct ? null : selectedCatalogProduct?.name === values.name ? selectedCatalogProduct.id
-            : catalog.find(row => row.category === values.category && row.name === values.name)?.id || null,
+          catalogMatch?.id || null,
           values.lot_code || null, creatingCustomProduct ? {
             grain_class: values.grain_class, yield_pct: values.yield_pct, color_lovibond: values.color_lovibond,
             alpha_acid_pct: values.alpha_acid_pct, hop_form: values.hop_form, attenuation_pct: values.attenuation_pct,
@@ -432,11 +444,10 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
             expandable={{ defaultExpandAllRows: true, expandIconColumnIndex: 1 }} scroll={{ x: 660 }}
             columns={[{ title: '', key: 'image', width: 20, className: 'inventory-thumbnail-cell', render: (_, row) => {
               if (row.child) return null;
-              const thumbnail = supplyThumbnails[row.supply.id];
               const catalogProduct = catalog.find(product => product.id === row.supply.catalog_supply_id);
-              return thumbnail ? <img className="inventory-table-thumbnail" src={thumbnail} alt="" loading="lazy" />
-                : catalogProduct?.has_image ? <CatalogImage kind="supply" id={catalogProduct.id}
-                  className="inventory-table-thumbnail" /> : null;
+              return <WorkspaceThumbnail db={db} kind="supply" id={row.supply.id} revision={mediaRevision}
+                className="inventory-table-thumbnail" fallback={catalogProduct?.has_image
+                  ? <CatalogImage kind="supply" id={catalogProduct.id} className="inventory-table-thumbnail" /> : null} />;
             } },
             { title: 'Item', key: 'name', render: (_, row) => row.child ? null
               : <a href={`${basePath}/inventory/${inventoryPathSegment(row.supply, supplies)}`}
@@ -576,9 +587,9 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
       {catalogPickerPurpose === 'link' && <p className="muted">Catalog specs apply where this supply has no override.</p>}
       <div className="catalog-explorer-filters">
         <Input.Search aria-label="Search inventory products" placeholder="Search inventory products" allowClear value={catalogQuery}
-          onChange={event => setCatalogQuery(event.target.value)} />
+          onChange={event => { setCatalogQuery(event.target.value); setCatalogLimit(80); }} />
         <Select aria-label="Filter inventory type" placeholder="All inventory types" allowClear
-          value={catalogCategory} onChange={setCatalogCategory}
+          value={catalogCategory} onChange={value => { setCatalogCategory(value); setCatalogLimit(80); }}
           options={categories.map(category => ({ value: category, label: category }))} />
       </div>
       {matchingCatalog.length ? <div className="catalog-explorer-list" role="list">
@@ -593,6 +604,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
           </button>
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching products' : 'No catalog products available'} />}
+      {catalogHasMore && <Button type="link" onClick={() => setCatalogLimit(limit => limit + 80)}>Show more products</Button>}
       {catalogPickerPurpose === 'link' ? null : catalogCategory ? <Button type="link" className="catalog-create-custom"
         onClick={() => createCustomProduct(catalogCategory)}>Specify {catalogCategory.toLowerCase()} not in catalog</Button>
         : <Dropdown trigger={['click']} menu={{ items: categories.map(category => ({ key: category, label: category })),
@@ -631,12 +643,12 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
             onChange={value => { if (value !== selectedCatalogProduct?.name) setSelectedCatalogProduct(null); }}
             options={creatingCustomProduct ? [] : [
               ...supplies.filter(row => row.category === activeNewCategory).map(row => ({ value: row.name, label: `${row.name} · Your supplies` })),
-              ...catalog.filter(row => row.category === activeNewCategory && !supplies.some(owned =>
+              ...catalogSuggestions.filter(row => row.category === activeNewCategory && !supplies.some(owned =>
                 owned.category === row.category && owned.name.toLowerCase() === row.name.toLowerCase()))
                 .map(row => ({ value: row.name, label: `${row.name} · Catalog` }))
             ]}
             filterOption={(input, option) => String(option?.value || '').toLowerCase().includes(input.toLowerCase())}
-            onSelect={value => { const catalogEntry = catalog.find(row => row.category === activeNewCategory && row.name === value);
+            onSelect={value => { const catalogEntry = catalogSuggestions.find(row => row.category === activeNewCategory && row.name === value);
               setSelectedCatalogProduct(catalogEntry || null);
               const entry = supplies.find(row => row.category === activeNewCategory && row.name === value) || catalogEntry;
               if (entry) { const storedUnit = 'unit' in entry ? entry.unit : entry.default_unit;
