@@ -64,6 +64,8 @@ button, input, textarea { font: inherit; }
 .equipment-capabilities { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .equipment-capability { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
   border-radius: 7px; background: var(--ant-color-fill-tertiary); color: var(--ant-color-text-secondary); }
+.equipment-modal-title { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.equipment-form-capability-heading { display: flex; align-items: center; gap: 8px; margin: 18px 0 12px; font-weight: 600; }
 .equipment-current-batches { display: flex; flex-direction: column; gap: 3px; }
 .equipment-assignments { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .equipment-assignment { display: flex; align-items: center; gap: 10px; }

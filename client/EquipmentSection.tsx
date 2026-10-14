@@ -70,6 +70,41 @@ const modelCapabilityFlags = {
   liquid_containment: 'has_liquid_containment', pressure_rating: 'has_pressure_rating',
   heating: 'has_heating', cooling: 'has_cooling', temperature_control: 'has_temperature_control'
 } as const;
+const capabilityIcons = {
+  liquid_containment: <ContainerOutlined />, pressure_rating: <DashboardOutlined />,
+  heating: <FireOutlined />, cooling: <CloudOutlined />,
+  temperature_control: <ControlOutlined />, measurement: <ExperimentOutlined />
+};
+const capabilityLabels: Record<keyof typeof capabilityIcons, string> = {
+  liquid_containment: 'liquid capacity', pressure_rating: 'pressure rating',
+  heating: 'heating', cooling: 'cooling', temperature_control: 'temperature control',
+  measurement: 'measurement'
+};
+
+function capabilityModalTitle(title: string, capabilities: (keyof typeof capabilityIcons)[]): ReactNode {
+  return <span className="equipment-modal-title">
+    {capabilities.map(capability => <span key={capability} className="equipment-capability" aria-hidden="true">
+      {capabilityIcons[capability]}</span>)}
+    <span>{title}</span>
+  </span>;
+}
+
+function capabilitySectionHeading(title: string, capability: keyof typeof capabilityIcons): ReactNode {
+  return <div className="equipment-form-capability-heading">
+    <span className="equipment-capability" aria-hidden="true">{capabilityIcons[capability]}</span>
+    <span>{title}</span>
+  </div>;
+}
+
+function capabilityForModelField(field: EquipmentModelOverrideField | null): (keyof typeof capabilityIcons) | null {
+  const capability = field ? modelAttributeCapabilities[field] : null;
+  return capability && capability in capabilityIcons ? capability as keyof typeof capabilityIcons : null;
+}
+
+function capabilityForKey(capability: string | null): keyof typeof capabilityIcons | null {
+  if (capability?.startsWith('measurement:')) return 'measurement';
+  return capability && capability in capabilityIcons ? capability as keyof typeof capabilityIcons : null;
+}
 
 const calibrationProfiles: Record<string, { fields: { key: string; label: string }[] }> = {
   ph_meter: { fields: [
@@ -117,17 +152,17 @@ function pressureLabel(kpa: number | null | undefined, unit: PreferredUnits['pre
 
 function equipmentCapabilities(row: Equipment): ReactNode {
   const capabilities: { label: string; icon: ReactNode }[] = [];
-  if (row.has_liquid_containment) capabilities.push({ label: 'Holds liquid', icon: <ContainerOutlined /> });
-  if (row.has_heating) capabilities.push({ label: 'Heating', icon: <FireOutlined /> });
+  if (row.has_liquid_containment) capabilities.push({ label: 'Holds liquid', icon: capabilityIcons.liquid_containment });
+  if (row.has_heating) capabilities.push({ label: 'Heating', icon: capabilityIcons.heating });
   if (row.has_cooling) {
-    capabilities.push({ label: 'Cooling', icon: <CloudOutlined /> });
+    capabilities.push({ label: 'Cooling', icon: capabilityIcons.cooling });
   }
-  if (row.has_temperature_control) capabilities.push({ label: 'Temperature control', icon: <ControlOutlined /> });
-  if (row.has_pressure_rating) capabilities.push({ label: 'Pressure rated', icon: <DashboardOutlined /> });
+  if (row.has_temperature_control) capabilities.push({ label: 'Temperature control', icon: capabilityIcons.temperature_control });
+  if (row.has_pressure_rating) capabilities.push({ label: 'Pressure rated', icon: capabilityIcons.pressure_rating });
   if (row.kind === 'pump') capabilities.push({ label: 'Moves liquid', icon: <SwapOutlined /> });
   const measured = [...new Set(row.measurement_channels?.map(channel => channel.measurement_kind) || [])];
   if (measured.length) {
-    capabilities.push({ label: measured.length ? `Measures ${measured.join(', ')}` : 'Measures', icon: <ExperimentOutlined /> });
+    capabilities.push({ label: measured.length ? `Measures ${measured.join(', ')}` : 'Measures', icon: capabilityIcons.measurement });
   }
   return capabilities.length ? <div className="equipment-capabilities">{capabilities.map(({ label, icon }) =>
     <Tooltip key={label} title={label}><span role="img" aria-label={label} className="equipment-capability">{icon}</span></Tooltip>)}</div> : '—';
@@ -823,45 +858,52 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <Form.Item name="stock_id" label="Stock ID (optional)"><Input maxLength={80} /></Form.Item>
         {selectedCatalogModel && (selectedCatalogModel.measurement_channels?.length || 0) > 1 &&
           <p className="muted">Measures {channelSummary(selectedCatalogModel.measurement_channels)}.</p>}
-        {createCapacity && <div className="capacity-fields"><Form.Item name="capacity" label="Capacity (optional)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
+        {createCapacity && <>{capabilitySectionHeading('Liquid capacity', 'liquid_containment')}
+          <div className="capacity-fields"><Form.Item name="capacity" label="Capacity (optional)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
           <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]}
-            onChange={unit => changeNumberUnit(equipmentForm, ['capacity'], newCapacityUnit || 'L', unit)} /></Form.Item></div>}
+            onChange={unit => changeNumberUnit(equipmentForm, ['capacity'], newCapacityUnit || 'L', unit)} /></Form.Item></div></>}
         {creatingKind === 'fermenter' && (!selectedCatalogModel || selectedCatalogModel.has_temperature_control) && <>
           <Form.Item name="built_in_temperature_control" valuePropName="checked"><Checkbox
             disabled={!!selectedCatalogModel?.has_temperature_control}>Built-in temperature control</Checkbox></Form.Item>
         </>}
         {(!selectedCatalogModel && creatingKind === 'fermenter' || selectedCatalogModel?.has_pressure_rating) &&
+          <>{capabilitySectionHeading('Pressure rating', 'pressure_rating')}
           <div className="form-pair"><Form.Item name="max_pressure" label="Maximum working pressure (optional)">
             <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
             <Form.Item name="pressure_unit" label="Unit"><Select options={unitOptions(unitGroups.pressure)}
-              onChange={unit => changeNumberUnit(equipmentForm, ['max_pressure'], newPressureUnit || preferredUnits.pressure, unit)} /></Form.Item></div>
+              onChange={unit => changeNumberUnit(equipmentForm, ['max_pressure'], newPressureUnit || preferredUnits.pressure, unit)} /></Form.Item></div></>
         }
-        {boilOffKinds.has(creatingKind) && createHeating && <Form.Item name="rated_power_watts" label="Rated power (W, optional)">
-          <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
+        {boilOffKinds.has(creatingKind) && createHeating && <>{capabilitySectionHeading('Heating', 'heating')}
+          <Form.Item name="rated_power_watts" label="Rated power (W, optional)">
+            <InputNumber className="full-width" min={0.001} step="any" /></Form.Item></>}
         {createHeating && !boilOffKinds.has(creatingKind) && <>
+          {capabilitySectionHeading('Heating', 'heating')}
           <Form.Item name="has_heating" valuePropName="checked"><Checkbox disabled={!!selectedCatalogModel?.has_heating}>Heating</Checkbox></Form.Item>
           {newHeating && <Form.Item name="rated_power_watts" label="Rated heating power (W, optional)">
             <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
         </>}
         {newThermal && <>
+          {createCooling && capabilitySectionHeading('Cooling', 'cooling')}
           {createCooling && <Form.Item name="has_cooling" valuePropName="checked"><Checkbox disabled={!!selectedCatalogModel?.has_cooling}>Cooling</Checkbox></Form.Item>}
           {createCooling && newCooling && <Form.Item name="rated_heat_removal_watts" label="Rated heat removal (W, optional)">
             <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
-          {(newTemperatureControl || creatingKind === 'fermenter' && newFermenterControl) && <div className="form-pair">
+          {(newTemperatureControl || creatingKind === 'fermenter' && newFermenterControl) && <>
+            {capabilitySectionHeading('Temperature control', 'temperature_control')}
+            <div className="form-pair">
             <Form.Item name="min_temperature_c" label="Minimum temperature (°C)"><InputNumber className="full-width" step="any" /></Form.Item>
             <Form.Item name="max_temperature_c" label="Maximum temperature (°C)"><InputNumber className="full-width" step="any" /></Form.Item>
-          </div>}
+            </div></>}
         </>}
-        {createPrimaryMeasurement && <div className="form-triple">
+        {createPrimaryMeasurement && <>{capabilitySectionHeading('Measurement', 'measurement')}<div className="form-triple">
           <Form.Item name="measurement_min" label="Range minimum"><InputNumber className="full-width" step="any" /></Form.Item>
           <Form.Item name="measurement_max" label="Range maximum"><InputNumber className="full-width" step="any" /></Form.Item>
           <Form.Item name="measurement_unit" label="Scale">
             <Select options={unitOptions(measurementRangeUnits[creatingKind])}
               onChange={unit => changeNumberUnit(equipmentForm, ['measurement_min', 'measurement_max'],
                 newRangeUnit || measurementRangeUnits[creatingKind][0], unit)} /></Form.Item>
-        </div>}
+        </div></>}
         {catalogCreationChannels.map(channel => <div key={channel.measurement_kind}>
-          <p className="muted">{measurementLabel(channel.measurement_kind)}</p>
+          {capabilitySectionHeading(measurementLabel(channel.measurement_kind), 'measurement')}
           <div className="form-triple">
             <Form.Item name={['channel_ranges', channel.measurement_kind, 'min']}
               label={`${measurementLabel(channel.measurement_kind)} range minimum`}>
@@ -891,9 +933,10 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <Button type="primary" htmlType="submit">Create equipment</Button>
       </Form>}
     </Modal>
-    <Modal title={addingCapability?.startsWith('measurement:')
+    <Modal title={capabilityModalTitle(addingCapability?.startsWith('measurement:')
       ? `Add ${measurementSentenceLabel(addingCapability.slice('measurement:'.length))} measurement`
-      : `Add ${missingCapabilities.find(capability => capability.key === addingCapability)?.label || 'capability'}`}
+      : `Add ${missingCapabilities.find(capability => capability.key === addingCapability)?.label || 'capability'}`,
+    capabilityForKey(addingCapability) ? [capabilityForKey(addingCapability)!] : [])}
       open={!!addingCapability} onCancel={() => setAddingCapability(null)} footer={null} destroyOnHidden>
       <Form key={`${selectedModel?.id}:${addingCapability}`} form={capabilityForm} layout="vertical" onFinish={saveAddedCapability}
         initialValues={{ measurement_unit: addingCapability?.startsWith('measurement:')
@@ -925,7 +968,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           Restore to default</Button>}
       </Form>
     </Modal>
-    <Modal title="Unit capacity override" open={editCapacity} onCancel={() => setEditCapacity(false)} footer={null} destroyOnHidden>
+    <Modal title={capabilityModalTitle('Unit capacity override', ['liquid_containment'])} open={editCapacity} onCancel={() => setEditCapacity(false)} footer={null} destroyOnHidden>
       <Form key={item?.id} form={capacityForm} layout="vertical" onFinish={saveCapacity} initialValues={{ capacity: specs.capacity_liters, capacity_unit: 'L' }}>
         <div className="capacity-fields"><Form.Item name="capacity" label="Capacity"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
           <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]}
@@ -934,7 +977,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         {item?.unit_capacity_liters != null && <Button type="text" onClick={() => void resetUnitOverride(['capacity_liters'])}>Restore to default</Button>}
       </Form>
     </Modal>
-    <Modal title="Unit pressure rating override" open={editPressure} onCancel={() => setEditPressure(false)} footer={null} destroyOnHidden>
+    <Modal title={capabilityModalTitle('Unit pressure rating override', ['pressure_rating'])} open={editPressure} onCancel={() => setEditPressure(false)} footer={null} destroyOnHidden>
       <Form key={item?.id} form={pressureForm} layout="vertical" onFinish={savePressure}
         initialValues={{ max_pressure: specs.max_pressure_kpa == null ? undefined
           : convertUnit(specs.max_pressure_kpa, 'kPa', preferredUnits.pressure), pressure_unit: preferredUnits.pressure }}>
@@ -947,7 +990,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         {item?.unit_max_pressure_kpa != null && <Button type="text" onClick={() => void resetUnitOverride(['max_pressure_kpa'])}>Restore to default</Button>}
       </Form>
     </Modal>
-    <Modal title="Unit rated power override" open={editPower} onCancel={() => setEditPower(false)} footer={null} destroyOnHidden>
+    <Modal title={capabilityModalTitle('Unit rated power override', ['heating'])} open={editPower} onCancel={() => setEditPower(false)} footer={null} destroyOnHidden>
       <Form key={item?.id} form={powerForm} layout="vertical" onFinish={savePower}
         initialValues={{ rated_power_watts: specs.rated_power_watts }}>
         <Form.Item name="rated_power_watts" label="Rated power (W)">
@@ -956,7 +999,10 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         {item?.unit_rated_power_watts != null && <Button type="text" onClick={() => void resetUnitOverride(['rated_power_watts'])}>Restore to default</Button>}
       </Form>
     </Modal>
-    <Modal title="Unit thermal overrides" open={editThermal} onCancel={() => setEditThermal(false)} footer={null} destroyOnHidden>
+    <Modal title={capabilityModalTitle('Unit thermal overrides', [
+      ...(showCooling ? ['cooling' as const] : []),
+      ...(specs.has_temperature_control ? ['temperature_control' as const] : [])
+    ])} open={editThermal} onCancel={() => setEditThermal(false)} footer={null} destroyOnHidden>
       <Form key={item?.id} form={thermalForm} layout="vertical" onFinish={saveThermal}
         initialValues={{ has_heating: !!specs.has_heating, rated_power_watts: specs.rated_power_watts,
           has_cooling: !!specs.has_cooling, rated_heat_removal_watts: specs.rated_heat_removal_watts,
@@ -993,7 +1039,8 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <Button type="primary" htmlType="submit">Save unit</Button>
       </Form>
     </Modal>
-    <Modal title={editRange ? `Unit ${measurementSentenceLabel(editRange)} range override` : 'Unit measurement range override'}
+    <Modal title={capabilityModalTitle(editRange ? `Unit ${measurementSentenceLabel(editRange)} range override`
+      : 'Unit measurement range override', ['measurement'])}
       open={!!editRange} onCancel={() => setEditRange(null)} footer={null} destroyOnHidden>
       <Form key={`${item?.id}:${editRange}`} form={rangeForm} layout="vertical" onFinish={saveRange}
         initialValues={{ measurement_min: editingChannel?.measurement_min, measurement_max: editingChannel?.measurement_max,
@@ -1016,7 +1063,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <Button type="primary" htmlType="submit">Save calibration</Button>
       </Form>
     </Modal>
-    <Modal title="Calibrate this unit's boil-off" open={newBoilCalibration} onCancel={() => setNewBoilCalibration(false)} footer={null} destroyOnHidden>
+    <Modal title={capabilityModalTitle("Calibrate this unit's boil-off", ['heating'])} open={newBoilCalibration} onCancel={() => setNewBoilCalibration(false)} footer={null} destroyOnHidden>
       <Form key={item?.id} layout="vertical" onFinish={saveBoilCalibration}
         initialValues={{ power_watts: specs.rated_power_watts }}>
         <p className="muted">Measure volume loss during a steady boil. Only the derived heat loss is saved for this unit{item?.stock_id ? ` (stock ${item.stock_id})` : ''}.</p>
@@ -1028,7 +1075,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         {specs.unit_boil_heat_loss_watts != null && <Button type="text" onClick={() => void clearBoilCalibration()}>Restore to default</Button>}
       </Form>
     </Modal>
-    <Modal title="Edit brewery model heat loss" open={editModelBoilHeatLoss}
+    <Modal title={capabilityModalTitle('Edit brewery model heat loss', ['heating'])} open={editModelBoilHeatLoss}
       onCancel={() => setEditModelBoilHeatLoss(false)} footer={null} destroyOnHidden>
       <Form key={`${selectedModel?.id}:${editModelBoilHeatLoss}`} layout="vertical" onFinish={saveModelBoilHeatLoss}
         initialValues={{ heat_loss_watts: selectedModel?.workspace_model_boil_heat_loss_watts ?? undefined }}>
@@ -1041,7 +1088,8 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         {selectedModel?.workspace_model_boil_heat_loss_watts != null && <Button type="text" onClick={() => void clearModelBoilHeatLoss()}>Restore to default</Button>}
       </Form>
     </Modal>
-    <Modal title={editModelField ? `Edit model ${modelAttributeLabels[editModelField]}` : 'Edit model attribute'}
+    <Modal title={capabilityModalTitle(editModelField ? `Edit model ${modelAttributeLabels[editModelField]}`
+      : 'Edit model attribute', capabilityForModelField(editModelField) ? [capabilityForModelField(editModelField)!] : [])}
       open={!!editModelField} onCancel={() => setEditModelField(null)} footer={null} destroyOnHidden>
       <Form key={`${selectedModel?.id}:${editModelField}`} layout="vertical" onFinish={saveModelAttribute}
         initialValues={{ value: editModelField ? selectedModel?.[editModelField] : undefined }}>
@@ -1051,7 +1099,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         {editModelField && (selectedModel as EquipmentSpecifications | null)?.[`workspace_model_${editModelField}`] != null
           && <Button type="text" onClick={() => void resetModelOverride()}>Restore to default</Button>}
         {editModelField && modelAttributeCapabilities[editModelField] && <Popconfirm
-          title="Remove this capability from the model?"
+          title={`Remove ${capabilityLabels[capabilityForModelField(editModelField)!]} from this model?`}
           description="It will also disappear from every unit of this model."
           okText="Remove" okButtonProps={{ danger: true }}
           onConfirm={() => void removeModelCapability(modelAttributeCapabilities[editModelField] as string)}>
@@ -1059,7 +1107,8 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         </Popconfirm>}
       </Form>
     </Modal>
-    <Modal title={editModelRange ? `Edit model ${measurementSentenceLabel(editModelRange)} range` : 'Edit model measurement range'}
+    <Modal title={capabilityModalTitle(editModelRange ? `Edit model ${measurementSentenceLabel(editModelRange)} range`
+      : 'Edit model measurement range', ['measurement'])}
       open={!!editModelRange} onCancel={() => setEditModelRange(null)} footer={null} destroyOnHidden>
       <Form key={`${selectedModel?.id}:${editModelRange}`} form={modelRangeForm} layout="vertical" onFinish={saveModelRange}
         initialValues={{ measurement_min: modelRangeChannel?.measurement_min,
@@ -1079,7 +1128,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           || modelRangeChannel?.workspace_model_measurement_unit != null
           || modelRangeChannel?.workspace_model_measurement_scale != null)
           && <Button type="text" onClick={() => void resetModelMeasurementOverride()}>Restore to default</Button>}
-        {editModelRange && <Popconfirm title="Remove this measurement from the model?"
+        {editModelRange && <Popconfirm title={`Remove ${measurementSentenceLabel(editModelRange)} measurement from this model?`}
           description="It will also disappear from every unit of this model."
           okText="Remove" okButtonProps={{ danger: true }}
           onConfirm={() => void removeModelCapability(`measurement:${editModelRange}`)}>
