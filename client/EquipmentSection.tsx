@@ -671,7 +671,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         ]} />}
     </section> : selectedModel ? <section className="record-detail">
       <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(selectedModel.kind)}</span>
-        <h2>{selectedModel.name}</h2><p className="muted">Specifications shared by all units of this model.</p></div>
+        <h2>{selectedModel.name}</h2></div>
         <Button icon={<PlusOutlined />} onClick={() => setAddingUnit(true)}>Add unit</Button></div>
       <div className="equipment-model-overview">
         <div className="equipment-model-product-image">
