@@ -211,7 +211,7 @@ The shared catalog uses unprefixed `equipment_models`, capability child tables, 
 
 While the app is active, it checks for catalog changes at most once per day. Settings' manual Sync now checks both the active brewery and the catalog immediately, bypassing the catalog's automatic refresh interval. A current catalog cursor returns an empty sync response without opening a second SQLite reader. Catalog and workspace transfers share the header progress indicator, including a combined count when they overlap. Catalog startup reads product metadata and image availability only; screens fetch image bytes from the local catalog when the image is visible or a product detail is opened. This preserves offline images without loading every catalog image into memory on each refresh.
 
-Use SQLite `PRAGMA user_version` for numbered schema migrations in the auth, catalog, and workspace databases. Browser and server copies of a workspace use the same schema version. Sync checkpoints remain in the browser's `sync_state` table and are updated transactionally with received changes.
+Use SQLite `PRAGMA user_version` for numbered schema migrations in the auth, catalog, and workspace databases. Browser and server copies of a workspace use the same schema version. A normal open reads this integer and skips schema reconciliation and historical data repairs when it is current. An upgrade sets the new version only after its schema and data work finishes, so an interrupted upgrade remains eligible to resume. Sync checkpoints remain in the browser's `sync_state` table and are updated transactionally with received changes.
 
 ### Later: sharing and filtered sync
 

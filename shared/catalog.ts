@@ -24,7 +24,7 @@ export interface CatalogInventory { id: string; name: string; category: string; 
   manufacturer?: string | null; product_url?: string | null;
   image_src?: string | null; has_image?: boolean }
 export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
-export const catalogSchemaVersion = 32;
+export const catalogSchemaVersion = 33;
 export const inventoryCategories = ['Grain', 'Other fermentables', 'Hops', 'Yeast', 'Nutrient', 'Adjunct', 'Chemical', 'Packaging', 'Other'] as const;
 export const catalogModelTables = {
   manufacturers: `CREATE TABLE IF NOT EXISTS manufacturers (

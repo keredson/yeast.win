@@ -36,6 +36,7 @@ export function openAuthDb(): Database.Database {
   const db = new Database(join(dataDir, 'auth.sqlite'));
   db.pragma('journal_mode = WAL');
   const version = db.pragma('user_version', { simple: true }) as number;
+  if (version === authSchemaVersion) return db;
   if (version > authSchemaVersion) {
     db.close();
     throw new Error(`This server cannot open auth schema ${version}; update Brewlog first.`);
@@ -150,6 +151,11 @@ export function openWorkspaceDb(id: string): Database.Database {
   db.pragma('synchronous = NORMAL');
   db.loadExtension(extensionPath);
   const storedVersion = db.pragma('user_version', { simple: true }) as number;
+  if (storedVersion === workspaceSchemaVersion) {
+    const catalogPath = join(dataDir, 'catalog.sqlite');
+    if (existsSync(catalogPath)) db.prepare('ATTACH DATABASE ? AS catalog').run(realpathSync(catalogPath));
+    return db;
+  }
   const hasLegacyMeta = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_meta'").get();
   const legacyVersion = hasLegacyMeta
     ? (db.prepare('SELECT version FROM schema_meta LIMIT 1').get() as { version: number } | undefined)?.version : undefined;
@@ -188,7 +194,6 @@ export function openWorkspaceDb(id: string): Database.Database {
       for (const table of replicatedTables) db.prepare('SELECT crsql_as_crr(?)').get(table);
       for (const statement of indexStatements) db.exec(statement);
       if (hasLegacyMeta) db.exec('DROP TABLE schema_meta');
-      db.pragma(`user_version = ${workspaceSchemaVersion}`);
       db.exec('COMMIT');
     } catch (error) {
       if (db.inTransaction) db.exec('ROLLBACK');
@@ -239,7 +244,6 @@ export function openWorkspaceDb(id: string): Database.Database {
       }
       for (const statement of indexStatements) db.exec(statement);
       if (hasLegacyMeta) db.exec('DROP TABLE schema_meta');
-      db.pragma(`user_version = ${workspaceSchemaVersion}`);
       db.exec('COMMIT');
     } catch (error) {
       if (db.inTransaction) db.exec('ROLLBACK');
@@ -309,6 +313,7 @@ export function openWorkspaceDb(id: string): Database.Database {
     UPDATE equipment SET removed_at =
       (SELECT archived_at FROM equipment_archives WHERE equipment_id = equipment.id ORDER BY archived_at LIMIT 1)
       WHERE removed_at IS NULL AND id IN (SELECT equipment_id FROM equipment_archives)`);
+  db.pragma(`user_version = ${workspaceSchemaVersion}`);
   const catalogPath = join(dataDir, 'catalog.sqlite');
   if (existsSync(catalogPath)) db.prepare('ATTACH DATABASE ? AS catalog').run(realpathSync(catalogPath));
   return db;

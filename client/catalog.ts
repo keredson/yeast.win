@@ -86,6 +86,10 @@ export function openLocalCatalog(): Promise<DB> {
     const db = await sqlite.open('brewlog-catalog');
     profile('Catalog file open');
     const version = (await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version;
+    if (version === catalogSchemaVersion) {
+      profile('Catalog schema ready');
+      return db;
+    }
     if (version === 11) {
       await db.exec('PRAGMA user_version = 12');
     } else if (version < 12) {
@@ -380,6 +384,7 @@ export function openLocalCatalog(): Promise<DB> {
         if (clock.length) await tx.exec("SELECT crsql_as_table('supply_categories')");
         await tx.exec('DROP TABLE supply_categories');
       }
+      await tx.exec(`PRAGMA user_version = ${catalogSchemaVersion}`);
     });
     profile('Catalog schema ready');
     return db;

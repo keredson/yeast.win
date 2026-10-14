@@ -103,12 +103,13 @@ test('previous category rows retire without disturbing products and specificatio
   } finally { after.close(); }
 });
 
-test('a catalog marked current repairs a partially created fermentable specification table', () => {
+test('a previous-version catalog repairs a partially created fermentable specification table', () => {
   const dir = directory();
   const before = openCatalogDb(dir);
   before.prepare("INSERT INTO supplies(id,name,category,unit) VALUES ('syrup','My syrup','Other fermentables','mL')").run();
   before.prepare("INSERT INTO equipment_models(id,model_name,kind) VALUES ('mill','My mill','mill')").run();
   before.exec('DROP TABLE supply_other_fermentable_specs');
+  before.pragma('user_version = 32');
   before.close();
 
   const after = openCatalogDb(dir);

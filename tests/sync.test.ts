@@ -448,7 +448,7 @@ test('current schema data survives the move from schema_meta to user_version', (
   } finally { closeWorkspaceDb(reopened); }
 });
 
-test('current workspace repairs a missing capability table without losing existing rows', () => {
+test('a previous-version workspace repairs a missing capability table without losing existing rows', () => {
   const id = nanoid();
   const batchId = nanoid();
   const first = openWorkspaceDb(id);
@@ -457,6 +457,7 @@ test('current workspace repairs a missing capability table without losing existi
       .run(batchId, 'Keep this batch', 'active', 1, 1);
     first.prepare('SELECT crsql_as_table(?)').get('equipment_liquid_containment');
     first.exec('DROP TABLE equipment_liquid_containment');
+    first.pragma('user_version = 36');
   } finally { closeWorkspaceDb(first); }
   const reopened = openWorkspaceDb(id);
   try {
@@ -906,6 +907,26 @@ test('partially upgraded recipe sizes retain their assumptions and app fallback 
       { id: 'missing', liters: appBatchSizeLiters, source: 'assumed_app' }
     ]);
     assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
+test('version 36 finishes pending recipe repair before advancing user_version', () => {
+  const id = nanoid();
+  const before = openWorkspaceDb(id);
+  try {
+    before.prepare('INSERT INTO recipes(id, name, created_at, updated_at) VALUES (?, ?, 1, 1)')
+      .run('pending-size', 'Existing recipe');
+    before.pragma('user_version = 36');
+  } finally { closeWorkspaceDb(before); }
+
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.deepEqual(upgraded.prepare(`SELECT target_fermenter_volume_liters AS liters, batch_size_source AS source
+      FROM recipe_inputs WHERE id = 'pending-size'`).get(),
+    { liters: appBatchSizeLiters, source: 'assumed_app' });
+    assert.equal((upgraded.prepare("SELECT name FROM recipes WHERE id = 'pending-size'").get() as { name: string }).name,
+      'Existing recipe');
   } finally { closeWorkspaceDb(upgraded); }
 });
 
