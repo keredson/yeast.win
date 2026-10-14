@@ -91,6 +91,7 @@ const equipmentCalibrationColumns = ['buffer_4_observed', 'buffer_7_observed', '
   'reference_volumes', 'observed_volumes', 'reference_mg_l', 'observed_mg_l'] as const;
 export interface InventoryItem { id: string; name: string; category: string; default_unit: string; display_unit: string;
   supply_id?: string | null; lot_id?: string | null; lot_code?: string | null; catalog_supply_id?: string | null;
+  grain_class?: string | null;
   location_id: string | null; location_name?: string | null;
   yield_pct?: number | null; color_lovibond?: number | null; alpha_acid_pct?: number | null;
   hop_form?: IngredientProperties['hop_form'] | null; attenuation_pct?: number | null }
