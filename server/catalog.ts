@@ -17,16 +17,17 @@ const selectChanges = `SELECT "table", pk, cid, val, col_version, db_version,
 
 function bundledModelIds(): string[] {
   return readdirSync(join(projectRoot, 'assets/catalog/models'))
-    .filter(name => name.endsWith('.webp') && !name.endsWith('-thumb.webp'))
-    .map(name => name.slice(0, -'.webp'.length));
+    .filter(name => name.endsWith('.jpg') && !name.endsWith('-thumb.jpg'))
+    .map(name => name.slice(0, -'.jpg'.length));
 }
 
 function seedModelImages(db: Database.Database): void {
   const insert = db.prepare(`INSERT OR IGNORE INTO model_images
-    (model_id, image_webp, thumbnail_webp) VALUES (?, ?, ?)`);
+    (model_id, image_bytes, image_mime_type, thumbnail_bytes, thumbnail_mime_type)
+    VALUES (?, ?, ?, ?, ?)`);
   for (const id of bundledModelIds()) {
     const path = join(projectRoot, 'assets/catalog/models', id);
-    insert.run(id, readFileSync(`${path}.webp`), readFileSync(`${path}-thumb.webp`));
+    insert.run(id, readFileSync(`${path}.jpg`), 'image/jpeg', readFileSync(`${path}-thumb.jpg`), 'image/jpeg');
   }
 }
 
@@ -262,14 +263,6 @@ export function openCatalogDb(dataDir: string): Database.Database {
           db.prepare('SELECT crsql_as_crr(?)').get(table);
         }
       }
-      seedModelImages(db);
-      const insertLogo = db.prepare(`INSERT OR IGNORE INTO manufacturer_logos
-        (manufacturer_name, image_webp) VALUES (?, ?)`);
-      for (const maker of catalogManufacturers) {
-        const slug = maker.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-        const path = join(projectRoot, 'assets/catalog/manufacturers', `${slug}.webp`);
-        if (existsSync(path)) insertLogo.run(maker.name, readFileSync(path));
-      }
       db.pragma('user_version = 16');
     })();
   }
@@ -287,8 +280,46 @@ export function openCatalogDb(dataDir: string): Database.Database {
       })();
     }
     db.transaction(() => {
-      seedModelImages(db);
       db.pragma('user_version = 17');
+    })();
+  }
+  if ((db.pragma('user_version', { simple: true }) as number) === 17) {
+    for (const [table, renamed, added] of [
+      ['model_images', [['image_webp', 'image_bytes'], ['thumbnail_webp', 'thumbnail_bytes']],
+        ['image_mime_type', 'thumbnail_mime_type']],
+      ['manufacturer_logos', [['image_webp', 'image_bytes']], ['mime_type']]
+    ] as const) {
+      db.transaction(() => {
+        const present = new Set((db.pragma(`table_info(${table})`) as { name: string }[]).map(row => row.name));
+        if (!renamed.some(([old]) => present.has(old)) && !added.some(column => !present.has(column))) return;
+        db.prepare('SELECT crsql_begin_alter(?)').get(table);
+        for (const [old, current] of renamed) if (present.has(old)) db.exec(`ALTER TABLE ${table} RENAME COLUMN ${old} TO ${current}`);
+        for (const column of added) if (!present.has(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+        db.prepare('SELECT crsql_commit_alter(?)').get(table);
+      })();
+    }
+    db.transaction(() => {
+      const mime = (column: string) => `CASE
+        WHEN substr(${column}, 1, 3) = x'FFD8FF' THEN 'image/jpeg'
+        WHEN substr(${column}, 1, 4) = x'89504E47' THEN 'image/png'
+        WHEN substr(${column}, 1, 4) = x'52494646' AND substr(${column}, 9, 4) = x'57454250' THEN 'image/webp'
+        ELSE 'application/octet-stream' END`;
+      db.exec(`UPDATE model_images SET
+        image_mime_type = ${mime('image_bytes')} WHERE image_bytes IS NOT NULL AND image_mime_type IS NULL`);
+      db.exec(`UPDATE model_images SET
+        thumbnail_mime_type = ${mime('thumbnail_bytes')}
+        WHERE thumbnail_bytes IS NOT NULL AND thumbnail_mime_type IS NULL`);
+      db.exec(`UPDATE manufacturer_logos SET mime_type = ${mime('image_bytes')}
+        WHERE image_bytes IS NOT NULL AND mime_type IS NULL`);
+      seedModelImages(db);
+      const insertLogo = db.prepare(`INSERT OR IGNORE INTO manufacturer_logos
+        (manufacturer_name, image_bytes, mime_type) VALUES (?, ?, ?)`);
+      for (const maker of catalogManufacturers) {
+        const slug = maker.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const path = join(projectRoot, 'assets/catalog/manufacturers', `${slug}.png`);
+        if (existsSync(path)) insertLogo.run(maker.name, readFileSync(path), 'image/png');
+      }
+      db.pragma('user_version = 18');
     })();
   }
   db.prepare(`UPDATE equipment_models SET model_name = ?

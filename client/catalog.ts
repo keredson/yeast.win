@@ -100,7 +100,7 @@ export function openLocalCatalog(): Promise<DB> {
         const syncState = await tx.execO<{ name: string }>(
           "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sync_state'");
         if (syncState.length) await tx.exec("DELETE FROM sync_state WHERE key = 'lastRefreshAt'");
-        await tx.exec(`PRAGMA user_version = ${catalogSchemaVersion}`);
+        await tx.exec('PRAGMA user_version = 16');
       });
     }
     if ((await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version === 16) {
@@ -118,6 +118,42 @@ export function openLocalCatalog(): Promise<DB> {
         });
       }
       await db.tx(async tx => {
+        const syncState = await tx.execO<{ name: string }>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sync_state'");
+        if (syncState.length) await tx.exec("DELETE FROM sync_state WHERE key = 'lastRefreshAt'");
+        await tx.exec('PRAGMA user_version = 17');
+      });
+    }
+    if ((await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version === 17) {
+      for (const [table, renamed, added] of [
+        ['model_images', [['image_webp', 'image_bytes'], ['thumbnail_webp', 'thumbnail_bytes']],
+          ['image_mime_type', 'thumbnail_mime_type']],
+        ['manufacturer_logos', [['image_webp', 'image_bytes']], ['mime_type']]
+      ] as const) {
+        await db.tx(async tx => {
+          const present = new Set((await tx.execO<{ name: string }>(`PRAGMA table_info(${table})`))
+            .map(row => row.name));
+          if (!renamed.some(([old]) => present.has(old)) && !added.some(column => !present.has(column))) return;
+          await tx.exec('SELECT crsql_begin_alter(?)', [table]);
+          for (const [old, current] of renamed) if (present.has(old))
+            await tx.exec(`ALTER TABLE ${table} RENAME COLUMN ${old} TO ${current}`);
+          for (const column of added) if (!present.has(column))
+            await tx.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+          await tx.exec('SELECT crsql_commit_alter(?)', [table]);
+        });
+      }
+      await db.tx(async tx => {
+        const mime = (column: string) => `CASE
+          WHEN substr(${column}, 1, 3) = x'FFD8FF' THEN 'image/jpeg'
+          WHEN substr(${column}, 1, 4) = x'89504E47' THEN 'image/png'
+          WHEN substr(${column}, 1, 4) = x'52494646' AND substr(${column}, 9, 4) = x'57454250' THEN 'image/webp'
+          ELSE 'application/octet-stream' END`;
+        await tx.exec(`UPDATE model_images SET image_mime_type = ${mime('image_bytes')}
+          WHERE image_bytes IS NOT NULL AND image_mime_type IS NULL`);
+        await tx.exec(`UPDATE model_images SET thumbnail_mime_type = ${mime('thumbnail_bytes')}
+          WHERE thumbnail_bytes IS NOT NULL AND thumbnail_mime_type IS NULL`);
+        await tx.exec(`UPDATE manufacturer_logos SET mime_type = ${mime('image_bytes')}
+          WHERE image_bytes IS NOT NULL AND mime_type IS NULL`);
         const syncState = await tx.execO<{ name: string }>(
           "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sync_state'");
         if (syncState.length) await tx.exec("DELETE FROM sync_state WHERE key = 'lastRefreshAt'");
@@ -145,8 +181,10 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
     db.execO<{ model_id: string; min_temperature_c: number | null; max_temperature_c: number | null }>(
       'SELECT * FROM model_temperature_control'),
     db.execO<CatalogMeasurementChannel>('SELECT * FROM model_measurement_channels'),
-    db.execO<{ model_id: string; image_webp: Uint8Array | null; thumbnail_webp: Uint8Array | null }>('SELECT * FROM model_images'),
-    db.execO<{ manufacturer_name: string; image_webp: Uint8Array | null }>('SELECT * FROM manufacturer_logos'),
+    db.execO<{ model_id: string; image_bytes: Uint8Array | null; image_mime_type: string | null;
+      thumbnail_bytes: Uint8Array | null; thumbnail_mime_type: string | null }>('SELECT * FROM model_images'),
+    db.execO<{ manufacturer_name: string; image_bytes: Uint8Array | null;
+      mime_type: string | null }>('SELECT * FROM manufacturer_logos'),
     db.execO<CatalogInventory>(`SELECT s.id, s.name, s.category, s.unit,
       g.yield_pct, g.color_lovibond, h.alpha_acid_pct, h.hop_form, y.attenuation_pct
       FROM supplies s LEFT JOIN supply_grain_specs g ON g.supply_id = s.id
@@ -155,8 +193,8 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
   ]);
   const oldMediaUrls = catalogMediaUrls;
   catalogMediaUrls = [];
-  const mediaUrl = (bytes: Uint8Array): string => {
-    const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'image/webp' }));
+  const mediaUrl = (bytes: Uint8Array, mimeType: string): string => {
+    const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: mimeType }));
     catalogMediaUrls.push(url);
     return url;
   };
@@ -164,12 +202,13 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
   for (const row of modelImages) {
     const model = byId.get(row.model_id);
     if (model) Object.assign(model, {
-      image_src: row.image_webp && mediaUrl(row.image_webp),
-      thumbnail_src: row.thumbnail_webp && mediaUrl(row.thumbnail_webp)
+      image_src: row.image_bytes && mediaUrl(row.image_bytes, row.image_mime_type || 'application/octet-stream'),
+      thumbnail_src: row.thumbnail_bytes && mediaUrl(row.thumbnail_bytes,
+        row.thumbnail_mime_type || 'application/octet-stream')
     });
   }
-  const logosByName = new Map(logos.filter(row => row.image_webp).map(row =>
-    [row.manufacturer_name, mediaUrl(row.image_webp!)]));
+  const logosByName = new Map(logos.filter(row => row.image_bytes).map(row =>
+    [row.manufacturer_name, mediaUrl(row.image_bytes!, row.mime_type || 'application/octet-stream')]));
   for (const model of byId.values()) {
     if (model.manufacturer) Object.assign(model, { manufacturer_logo_src: logosByName.get(model.manufacturer) });
   }

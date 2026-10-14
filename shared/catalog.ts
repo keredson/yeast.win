@@ -20,7 +20,7 @@ export interface CatalogInventory { id: string; name: string; category: string; 
   hop_form?: string | null; attenuation_pct?: number | null }
 
 export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
-export const catalogSchemaVersion = 17;
+export const catalogSchemaVersion = 18;
 export const vevorModelName = 'VEVOR Electric Brewing System 9.2 Gal/35 L';
 export const catalogModelTables = {
   manufacturers: `CREATE TABLE IF NOT EXISTS manufacturers (
@@ -29,9 +29,10 @@ export const catalogModelTables = {
     id TEXT PRIMARY KEY NOT NULL, manufacturer TEXT, model_name TEXT, kind TEXT,
     product_url TEXT)`,
   model_images: `CREATE TABLE IF NOT EXISTS model_images (
-    model_id TEXT PRIMARY KEY NOT NULL, image_webp BLOB, thumbnail_webp BLOB)`,
+    model_id TEXT PRIMARY KEY NOT NULL, image_bytes BLOB, image_mime_type TEXT,
+    thumbnail_bytes BLOB, thumbnail_mime_type TEXT)`,
   manufacturer_logos: `CREATE TABLE IF NOT EXISTS manufacturer_logos (
-    manufacturer_name TEXT PRIMARY KEY NOT NULL, image_webp BLOB)`,
+    manufacturer_name TEXT PRIMARY KEY NOT NULL, image_bytes BLOB, mime_type TEXT)`,
   model_liquid_containment: `CREATE TABLE IF NOT EXISTS model_liquid_containment (
     model_id TEXT PRIMARY KEY NOT NULL, capacity_liters REAL)`,
   model_pressure_rating: `CREATE TABLE IF NOT EXISTS model_pressure_rating (

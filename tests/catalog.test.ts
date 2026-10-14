@@ -159,7 +159,8 @@ test('version 14 catalog gains manufacturers, product media, and models without 
     assert.equal(vevor.model_name, 'My renamed VEVOR');
     assert.equal(vevor.manufacturer, 'VEVOR');
     assert.match(vevor.product_url, /vevor\.com/);
-    assert.ok(db.prepare("SELECT image_webp FROM model_images WHERE model_id = 'equipment_vevor_35l'").get());
+    assert.equal((db.prepare("SELECT image_mime_type FROM model_images WHERE model_id = 'equipment_vevor_35l'")
+      .get() as { image_mime_type: string }).image_mime_type, 'image/jpeg');
     assert.equal((db.prepare("SELECT rated_power_watts FROM model_heating WHERE model_id = 'equipment_vevor_35l'")
       .get() as { rated_power_watts: number }).rated_power_watts, 2100);
     assert.equal((db.prepare("SELECT name FROM supplies WHERE id = 'my_hop'").get() as { name: string }).name, 'My hop');
@@ -193,7 +194,8 @@ test('version 16 catalog removes obsolete media URLs and preserves stored media 
       .get() as { website_url: string }).website_url, 'https://spikebrewing.com/');
     assert.equal((db.prepare("SELECT name FROM supplies WHERE id = 'my_supply'")
       .get() as { name: string }).name, 'My supply');
-    assert.ok(db.prepare("SELECT image_webp FROM model_images WHERE model_id = 'equipment_tilt'").get());
+    assert.equal((db.prepare("SELECT image_mime_type FROM model_images WHERE model_id = 'equipment_tilt'")
+      .get() as { image_mime_type: string }).image_mime_type, 'image/jpeg');
     assert.equal((db.pragma('table_info(equipment_models)') as { name: string }[])
       .some(column => column.name === 'image_url' || column.name === 'thumbnail_url'), false);
     assert.equal((db.pragma('table_info(manufacturers)') as { name: string }[])
@@ -206,8 +208,8 @@ test('version 15 catalog seeds offline media and preserves partially upgraded im
   const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
   const old = openCatalogDb(dir);
   old.prepare("SELECT crsql_as_table('model_images')").get();
-  const replacement = Buffer.from('user-edited-image');
-  old.prepare('UPDATE model_images SET image_webp = ? WHERE model_id = ?')
+  const replacement = Buffer.from([0xff, 0xd8, 0xff, 0x00]);
+  old.prepare('UPDATE model_images SET image_bytes = ?, image_mime_type = NULL WHERE model_id = ?')
     .run(replacement, 'equipment_spike_flex_plus_7gal');
   old.pragma('user_version = 15');
   old.close();
@@ -215,12 +217,58 @@ test('version 15 catalog seeds offline media and preserves partially upgraded im
   const db = openCatalogDb(dir);
   try {
     assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
-    const stored = db.prepare('SELECT image_webp, thumbnail_webp FROM model_images WHERE model_id = ?')
-      .get('equipment_spike_flex_plus_7gal') as { image_webp: Buffer; thumbnail_webp: Buffer };
-    assert.deepEqual(stored.image_webp, replacement);
-    assert.ok(stored.thumbnail_webp.subarray(0, 4).equals(Buffer.from('RIFF')));
+    const stored = db.prepare('SELECT image_bytes, image_mime_type, thumbnail_bytes, thumbnail_mime_type FROM model_images WHERE model_id = ?')
+      .get('equipment_spike_flex_plus_7gal') as {
+      image_bytes: Buffer; image_mime_type: string; thumbnail_bytes: Buffer; thumbnail_mime_type: string };
+    assert.deepEqual(stored.image_bytes, replacement);
+    assert.equal(stored.image_mime_type, 'image/jpeg');
+    assert.ok(stored.thumbnail_bytes.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff])));
+    assert.equal(stored.thumbnail_mime_type, 'image/jpeg');
     assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'model_images__crsql_clock'").get());
     assert.ok((db.prepare('SELECT COUNT(*) AS count FROM manufacturer_logos').get() as { count: number }).count > 0);
+  } finally { db.close(); }
+});
+
+test('version 17 catalog identifies existing WebP and PNG media without replacing edits', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
+  const old = openCatalogDb(dir);
+  for (const [table, renamed, removed] of [
+    ['model_images', [['image_bytes', 'image_webp'], ['thumbnail_bytes', 'thumbnail_webp']],
+      ['image_mime_type', 'thumbnail_mime_type']],
+    ['manufacturer_logos', [['image_bytes', 'image_webp']], ['mime_type']]
+  ] as const) {
+    old.prepare('SELECT crsql_begin_alter(?)').get(table);
+    for (const [current, prior] of renamed) old.exec(`ALTER TABLE ${table} RENAME COLUMN ${current} TO ${prior}`);
+    for (const column of removed) old.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+    old.prepare('SELECT crsql_commit_alter(?)').get(table);
+  }
+  const webp = Buffer.from('RIFF0000WEBPcustom-image');
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00]);
+  old.prepare('UPDATE model_images SET image_webp = ?, thumbnail_webp = ? WHERE model_id = ?')
+    .run(webp, png, 'equipment_tilt');
+  old.prepare('UPDATE manufacturer_logos SET image_webp = ? WHERE manufacturer_name = ?')
+    .run(png, 'KegLand');
+  old.prepare("INSERT INTO supplies(id, name, category, unit) VALUES ('my_grain', 'My grain', 'Grain', 'g')").run();
+  old.pragma('user_version = 17');
+  old.close();
+
+  const db = openCatalogDb(dir);
+  try {
+    assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
+    const model = db.prepare('SELECT image_bytes, image_mime_type, thumbnail_bytes, thumbnail_mime_type FROM model_images WHERE model_id = ?')
+      .get('equipment_tilt') as { image_bytes: Buffer; image_mime_type: string;
+        thumbnail_bytes: Buffer; thumbnail_mime_type: string };
+    assert.deepEqual(model.image_bytes, webp);
+    assert.equal(model.image_mime_type, 'image/webp');
+    assert.deepEqual(model.thumbnail_bytes, png);
+    assert.equal(model.thumbnail_mime_type, 'image/png');
+    const logo = db.prepare('SELECT image_bytes, mime_type FROM manufacturer_logos WHERE manufacturer_name = ?')
+      .get('KegLand') as { image_bytes: Buffer; mime_type: string };
+    assert.deepEqual(logo.image_bytes, png);
+    assert.equal(logo.mime_type, 'image/png');
+    assert.equal((db.prepare("SELECT name FROM supplies WHERE id = 'my_grain'")
+      .get() as { name: string }).name, 'My grain');
+    assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'model_images__crsql_clock'").get());
   } finally { db.close(); }
 });
 
@@ -372,12 +420,13 @@ test('catalog sends only CR-SQLite changes after the client cursor', () => {
     assert.ok(initial.changes.length > 0);
     for (const change of initial.changes) apply.run(...decodeChange(change));
     assert.deepEqual(rows(replica), rows(db));
-    const serverImage = db.prepare('SELECT image_webp FROM model_images WHERE model_id = ?')
-      .get('equipment_spike_flex_plus_7gal') as { image_webp: Buffer };
-    const replicaImage = replica.prepare('SELECT image_webp FROM model_images WHERE model_id = ?')
-      .get('equipment_spike_flex_plus_7gal') as { image_webp: Buffer };
-    assert.deepEqual(replicaImage.image_webp, serverImage.image_webp);
-    assert.ok(replicaImage.image_webp.subarray(0, 4).equals(Buffer.from('RIFF')));
+    const serverImage = db.prepare('SELECT image_bytes, image_mime_type FROM model_images WHERE model_id = ?')
+      .get('equipment_spike_flex_plus_7gal') as { image_bytes: Buffer; image_mime_type: string };
+    const replicaImage = replica.prepare('SELECT image_bytes, image_mime_type FROM model_images WHERE model_id = ?')
+      .get('equipment_spike_flex_plus_7gal') as { image_bytes: Buffer; image_mime_type: string };
+    assert.deepEqual(replicaImage.image_bytes, serverImage.image_bytes);
+    assert.equal(replicaImage.image_mime_type, 'image/jpeg');
+    assert.ok(replicaImage.image_bytes.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff])));
 
     // A local-only row remains when the server updates a different row.
     replica.prepare('INSERT INTO supplies(id, name, category, unit) VALUES (?, ?, ?, ?)')
