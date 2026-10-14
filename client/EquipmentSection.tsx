@@ -679,15 +679,13 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit model image"
             onClick={() => { setImageEdit(undefined); setEditModelImage(true); }}>Edit image</Button>
         </div>
-        <div className="equipment-model-product-details">
-          <div className="equipment-parameter"><span>{modelProductUrl
-            ? <a href={modelProductUrl} target="_blank" rel="noopener noreferrer">Product details</a>
-            : 'Product URL: Not set'}</span>
-            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit model product URL"
-              onClick={() => { setProductUrlDraft(activeMedia?.row?.product_url || modelProductUrl || '');
-                setEditModelUrl(true); }} /></div>
-        </div>
       <div className="equipment-parameters equipment-model-parameters">
+        <div className="equipment-parameter equipment-model-url-row"><span>Url:</span>
+          {modelProductUrl ? <a className="equipment-model-url" href={modelProductUrl} title={modelProductUrl}
+            target="_blank" rel="noopener noreferrer">{modelProductUrl}</a> : <span>Not set</span>}
+          <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit model product URL"
+            onClick={() => { setProductUrlDraft(activeMedia?.row?.product_url || modelProductUrl || '');
+              setEditModelUrl(true); }} /></div>
         <div className="equipment-parameter"><span>Capabilities:</span> {equipmentCapabilities(selectedModel)}</div>
         {selectedModel.has_liquid_containment && <div className="equipment-parameter"><span>
           Capacity: {capacityLabel(selectedModel.capacity_liters ?? undefined) || 'Not set'}</span>

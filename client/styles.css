@@ -77,14 +77,14 @@ button, input, textarea { font: inherit; }
 .equipment-model-facts dt { color: #728079; font-size: 12px; }
 .equipment-model-facts dd { margin: 2px 0 0; color: #263c36; }
 .equipment-model-overview { display: grid; grid-template-columns: minmax(0, 1fr) 160px;
-  grid-template-areas: "details image" "parameters image"; align-items: start; column-gap: 24px; }
+  grid-template-areas: "parameters image"; align-items: start; column-gap: 24px; }
 .equipment-model-product-image { grid-area: image; width: 160px; display: flex; align-items: flex-end; flex-direction: column; }
 .equipment-model-product-image > img { width: 160px; height: 160px; object-fit: contain; }
 .equipment-model-product-image > .muted { min-height: 130px; }
-.equipment-model-product-details { grid-area: details; display: flex; align-items: flex-start; flex-direction: column; gap: 6px;
-  margin-bottom: 12px; }
-.equipment-model-product-details .ant-btn { padding-left: 0; }
 .equipment-model-parameters { grid-area: parameters; }
+.equipment-parameter.equipment-model-url-row { flex-wrap: nowrap; min-width: 0; width: 100%; }
+.equipment-model-url-row > span, .equipment-model-url-row > .ant-btn { flex: none; }
+.equipment-model-url { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .equipment-unit-section > h3 { margin: 0 0 8px; }
 .equipment-batches { margin-bottom: 24px; }
 .equipment-batches h3 { margin: 0; }
