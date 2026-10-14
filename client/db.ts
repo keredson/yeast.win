@@ -282,6 +282,13 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
       const version = storedVersion || legacyVersion || 0;
       const existingTables = new Set((await db.execO<{ name: string }>(
         "SELECT name FROM sqlite_master WHERE type = 'table'")).map(row => row.name));
+      // The version is advanced before the data repairs below finish. A separate
+      // marker lets an interrupted upgrade resume, while avoiding a full schema
+      // walk and legacy data scans on every ordinary open.
+      const alreadyRepaired = version === workspaceSchemaVersion && !legacyMeta.length
+        && existingTables.has('sync_state')
+        && (await db.execO<{ value: string }>(
+          "SELECT value FROM sync_state WHERE key = 'workspaceRepairVersion'"))[0]?.value === String(workspaceSchemaVersion);
       const hasWorkspaceTables = [...existingTables].some(name => replicatedTables.includes(name));
       const legacyLossValues: number[] = [];
       const legacyBatchLosses: { batch_id: string; wort_loss_liters: number }[] = [];
@@ -320,7 +327,7 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
         });
       } else if (version > workspaceSchemaVersion) {
         throw new Error(`This app cannot open workspace schema ${version}; update Brewlog first.`);
-      } else {
+      } else if (!alreadyRepaired) {
         await db.tx(async tx => {
           const existing = new Set((await tx.execO<{ name: string }>(
             "SELECT name FROM sqlite_master WHERE type = 'table'")).map(row => row.name));
@@ -377,51 +384,55 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
         });
       }
       profile('Workspace schema reconciled');
-      if (version > 0 && version < 32) await db.tx(async tx => {
-        await tx.exec(`INSERT OR IGNORE INTO supply_grain_specs(supply_id, color_lovibond)
-          SELECT id, 60 FROM supplies WHERE catalog_supply_id = 'inventory_crystal_60'`);
-        await tx.exec(`UPDATE supply_grain_specs SET color_lovibond = 60
-          WHERE color_lovibond IS NULL AND supply_id IN
-          (SELECT id FROM supplies WHERE catalog_supply_id = 'inventory_crystal_60')`);
-        for (const id of retiredGenericSupplies) {
-          await tx.exec('UPDATE supplies SET catalog_supply_id = NULL WHERE catalog_supply_id = ?', [id]);
-        }
-      });
-      await db.tx(async tx => { for (const statement of fillMissingRecipeBatchSizes) await tx.exec(statement); });
-      const legacyEquipment = await db.execO<{ name: string }>(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'equipment_legacy_migration'");
-      if (legacyEquipment.length) await db.tx(async tx => {
-        const columns = (await tx.execO<{ name: string }>('PRAGMA table_info(equipment_legacy_migration)'))
-          .map(row => row.name);
-        for (const statement of legacyEquipmentCopyStatements(columns)) await tx.exec(statement);
-        for (const statement of legacyEquipmentModelStatements(columns)) await tx.exec(statement);
-        await tx.exec('DROP TABLE equipment_legacy_migration');
-      });
-      await db.tx(async tx => { for (const statement of supplyMigrationStatements) await tx.exec(statement); });
-      profile('Legacy data repairs complete');
-      const uniqueLegacyLosses = [...new Set(legacyLossValues)];
-      if (uniqueLegacyLosses.length === 1 || legacyBatchLosses.length) await db.tx(async tx => {
-        if (uniqueLegacyLosses.length === 1) await tx.exec(`INSERT INTO brewery_process_defaults(id, wort_loss_liters)
-          VALUES ('brewery', ?) ON CONFLICT(id) DO UPDATE SET
-            wort_loss_liters = COALESCE(brewery_process_defaults.wort_loss_liters, excluded.wort_loss_liters)`,
-        [uniqueLegacyLosses[0]]);
-        for (const row of legacyBatchLosses) await tx.exec(`INSERT INTO batch_recipe_inputs(id, wort_loss_liters)
-          VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET
-            wort_loss_liters = COALESCE(batch_recipe_inputs.wort_loss_liters, excluded.wort_loss_liters)`,
-        [row.batch_id, row.wort_loss_liters]);
-      });
-      if (legacyModelLosses.size || legacyUnitLosses.size) await db.tx(async tx => {
-        for (const [id, liters] of legacyModelLosses) await tx.exec(`UPDATE equipment_models
-          SET post_boil_loss_liters = COALESCE(post_boil_loss_liters, ?) WHERE id = ?`, [liters, id]);
-        for (const [id, liters] of legacyUnitLosses) await tx.exec(`INSERT INTO equipment_post_boil_losses
-          (equipment_id, post_boil_loss_liters) VALUES (?, ?)
-          ON CONFLICT(equipment_id) DO UPDATE SET post_boil_loss_liters =
-            COALESCE(equipment_post_boil_losses.post_boil_loss_liters, excluded.post_boil_loss_liters)`, [id, liters]);
-      });
-      await db.exec('UPDATE equipment SET added_at = COALESCE(added_at, created_at) WHERE added_at IS NULL');
-      await db.exec(`UPDATE equipment SET removed_at =
-        (SELECT archived_at FROM equipment_archives WHERE equipment_id = equipment.id ORDER BY archived_at LIMIT 1)
-        WHERE removed_at IS NULL AND id IN (SELECT equipment_id FROM equipment_archives)`);
+      if (!alreadyRepaired) {
+        if (version > 0 && version < 32) await db.tx(async tx => {
+          await tx.exec(`INSERT OR IGNORE INTO supply_grain_specs(supply_id, color_lovibond)
+            SELECT id, 60 FROM supplies WHERE catalog_supply_id = 'inventory_crystal_60'`);
+          await tx.exec(`UPDATE supply_grain_specs SET color_lovibond = 60
+            WHERE color_lovibond IS NULL AND supply_id IN
+            (SELECT id FROM supplies WHERE catalog_supply_id = 'inventory_crystal_60')`);
+          for (const id of retiredGenericSupplies) {
+            await tx.exec('UPDATE supplies SET catalog_supply_id = NULL WHERE catalog_supply_id = ?', [id]);
+          }
+        });
+        await db.tx(async tx => { for (const statement of fillMissingRecipeBatchSizes) await tx.exec(statement); });
+        const legacyEquipment = await db.execO<{ name: string }>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'equipment_legacy_migration'");
+        if (legacyEquipment.length) await db.tx(async tx => {
+          const columns = (await tx.execO<{ name: string }>('PRAGMA table_info(equipment_legacy_migration)'))
+            .map(row => row.name);
+          for (const statement of legacyEquipmentCopyStatements(columns)) await tx.exec(statement);
+          for (const statement of legacyEquipmentModelStatements(columns)) await tx.exec(statement);
+          await tx.exec('DROP TABLE equipment_legacy_migration');
+        });
+        await db.tx(async tx => { for (const statement of supplyMigrationStatements) await tx.exec(statement); });
+        profile('Legacy data repairs complete');
+        const uniqueLegacyLosses = [...new Set(legacyLossValues)];
+        if (uniqueLegacyLosses.length === 1 || legacyBatchLosses.length) await db.tx(async tx => {
+          if (uniqueLegacyLosses.length === 1) await tx.exec(`INSERT INTO brewery_process_defaults(id, wort_loss_liters)
+            VALUES ('brewery', ?) ON CONFLICT(id) DO UPDATE SET
+              wort_loss_liters = COALESCE(brewery_process_defaults.wort_loss_liters, excluded.wort_loss_liters)`,
+          [uniqueLegacyLosses[0]]);
+          for (const row of legacyBatchLosses) await tx.exec(`INSERT INTO batch_recipe_inputs(id, wort_loss_liters)
+            VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET
+              wort_loss_liters = COALESCE(batch_recipe_inputs.wort_loss_liters, excluded.wort_loss_liters)`,
+          [row.batch_id, row.wort_loss_liters]);
+        });
+        if (legacyModelLosses.size || legacyUnitLosses.size) await db.tx(async tx => {
+          for (const [id, liters] of legacyModelLosses) await tx.exec(`UPDATE equipment_models
+            SET post_boil_loss_liters = COALESCE(post_boil_loss_liters, ?) WHERE id = ?`, [liters, id]);
+          for (const [id, liters] of legacyUnitLosses) await tx.exec(`INSERT INTO equipment_post_boil_losses
+            (equipment_id, post_boil_loss_liters) VALUES (?, ?)
+            ON CONFLICT(equipment_id) DO UPDATE SET post_boil_loss_liters =
+              COALESCE(equipment_post_boil_losses.post_boil_loss_liters, excluded.post_boil_loss_liters)`, [id, liters]);
+        });
+        await db.exec('UPDATE equipment SET added_at = COALESCE(added_at, created_at) WHERE added_at IS NULL');
+        await db.exec(`UPDATE equipment SET removed_at =
+          (SELECT archived_at FROM equipment_archives WHERE equipment_id = equipment.id ORDER BY archived_at LIMIT 1)
+          WHERE removed_at IS NULL AND id IN (SELECT equipment_id FROM equipment_archives)`);
+        await db.exec(`INSERT INTO sync_state(key, value) VALUES ('workspaceRepairVersion', ?)
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [String(workspaceSchemaVersion)]);
+      }
       await openLocalCatalog();
       profile('Catalog file ready');
       await db.exec("ATTACH DATABASE 'brewlog-catalog' AS catalog");
