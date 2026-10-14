@@ -87,8 +87,9 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
         breweryMashEfficiency(db),
         supplyIds.length ? db.execO<InventoryItem>(`SELECT * FROM effective_supplies
           WHERE id IN (${supplyIds.map(() => '?').join(', ')})`, supplyIds) : Promise.resolve([]),
-        db.execO<{ title: string; value: number; unit: string }>(`SELECT e.title, g.value, g.unit
+        db.execO<{ role: 'og' | 'fg' | null; value: number; unit: string }>(`SELECT r.role, g.value, g.unit
           FROM gravity_measurements g JOIN batch_events e ON e.id = g.event_id
+          JOIN batch_gravity_roles r ON r.event_id = e.id AND r.batch_id = e.batch_id
           WHERE e.batch_id = ? AND e.actual_at IS NOT NULL AND e.skipped_at IS NULL
           ORDER BY e.actual_at, e.id`, [selectedId]),
         breweryBatchSize(db),

@@ -97,6 +97,8 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
             {isBatch && item.event_type !== 'equipment_use' && <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${item.title || kindLabel(item.event_type)}`}
               onClick={() => onEdit(item)} />}
             <strong>{item.title || planKindLabel(item)}</strong>
+            {item.details.gravity_role && <Tag color={item.details.gravity_role === 'og' ? 'blue' : 'purple'}
+              className="gravity-role-tag">{item.details.gravity_role.toUpperCase()}</Tag>}
             {!isBatch && detail && <span className="recipe-event-detail">{detail}</span>}</div>
             {metadata && <div className="plan-meta">{metadata}</div>}</div>
             <div className="timeline-status-actions">

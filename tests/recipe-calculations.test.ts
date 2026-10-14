@@ -178,9 +178,9 @@ test('batch grain linked directly to a catalog product contributes its color', (
 
 test('batch gravity readings replace estimates as OG and FG are recorded', () => {
   const readings = batchGravityReadings([
-    { title: 'Measure pre-boil gravity', value: 1.063, unit: 'SG' },
-    { title: 'Measure original specific gravity', value: 1.052, unit: 'SG' },
-    { title: 'Measure final specific gravity', value: 1.012, unit: 'SG' }
+    { role: null, value: 1.063, unit: 'SG' },
+    { role: 'og', value: 1.052, unit: 'SG' },
+    { role: 'fg', value: 1.012, unit: 'SG' }
   ]);
   assert.deepEqual(readings, { original: 1.052, final: 1.012 });
   const ogOnly = calculateRecipe(events, [grain, yeast], equipment,

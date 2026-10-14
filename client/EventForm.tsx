@@ -35,6 +35,7 @@ function eventUnit(kind: string, units: PreferredUnits): string | undefined {
 
 interface Values {
   event_type: string; measurement_kind?: MeasurementKind; actual_at: string;
+  gravity_role?: 'og' | 'fg' | '';
   duration_value?: number; duration_unit?: typeof timeUnits[number]['value'];
   note?: string; value?: number; unit?: string; uncertainty?: number; equipment_id?: string;
   source?: string; item_name?: string; inventory_item_id?: string;
@@ -133,6 +134,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
       if (kind === 'measurement') {
         if (values.value == null) throw new Error('Enter the measured value');
         input.measurementKind = values.measurement_kind || measurement;
+        input.gravityRole = input.measurementKind === 'gravity' ? values.gravity_role || null : null;
         payload = { value: values.value, unit: values.unit || '', uncertainty: values.uncertainty ?? null,
           equipment_id: values.equipment_id || null,
           source: values.source || 'manual' };
@@ -190,6 +192,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
     duration_unit: initialDurationUnit.value,
     note: initialEvent?.note || undefined,
     measurement_kind: initialData?.measurementKind || plannedString('measurement_kind') || measurement,
+    gravity_role: plannedString('gravity_role') || '',
     mode: initialData?.payload.mode || plannedString('mode') || 'hold', source: initialData?.payload.source || 'manual',
     item_name: plannedString('item_name'), item_category: initialCategory,
     inventory_item_id: plannedString('inventory_item_id'),
@@ -225,9 +228,14 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
         <Select disabled={!!initialEvent} options={measurementKinds.map(item => ({ value: item.value, label: item.label }))}
           onChange={(value: MeasurementKind) => {
             setMeasurement(value);
-            form.setFieldsValue({ unit: measurementUnit(value, preferredUnits), value: undefined, uncertainty: undefined });
+            form.setFieldsValue({ unit: measurementUnit(value, preferredUnits), value: undefined,
+              uncertainty: undefined, gravity_role: '' });
           }} />
       </Form.Item>
+      {measurement === 'gravity' && <Form.Item name="gravity_role" label="Gravity role"><Select options={[
+        { value: '', label: 'Other reading' }, { value: 'og', label: 'Original gravity (OG)' },
+        { value: 'fg', label: 'Final gravity (FG)' }
+      ]} /></Form.Item>}
       <div className="form-pair">
         <Form.Item name="value" label="Corrected value" rules={[{ required: true }]}><InputNumber className="full-width" step="any" /></Form.Item>
         <Form.Item name="unit" label={measurement === 'gravity' ? 'Scale' : 'Unit'} rules={[{ required: true }]}><Select options={unitOptions(measurementUnits(measurement))}

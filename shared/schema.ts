@@ -11,6 +11,7 @@ const definitions: Record<string, string> = {
   recipe_temperature_control_events: `event_id TEXT PRIMARY KEY NOT NULL, phase TEXT, mode TEXT, target_value REAL, target_unit TEXT, equipment_id TEXT`,
   recipe_pressure_control_events: `event_id TEXT PRIMARY KEY NOT NULL, target_value REAL, target_unit TEXT, equipment_id TEXT`,
   recipe_measurement_targets: `event_id TEXT PRIMARY KEY NOT NULL, measurement_kind TEXT, target_value REAL, target_unit TEXT`,
+  recipe_gravity_roles: `id TEXT PRIMARY KEY NOT NULL, recipe_id TEXT NOT NULL, role TEXT NOT NULL, event_id TEXT NOT NULL`,
   recipe_transfers: `event_id TEXT PRIMARY KEY NOT NULL, purpose TEXT, mash_equipment_id TEXT, to_vessel_id TEXT, to_vessel_name TEXT, quantity REAL, unit TEXT`,
   recipe_transfer_equipment: `id TEXT PRIMARY KEY NOT NULL, event_id TEXT NOT NULL, equipment_id TEXT NOT NULL`,
   recipe_packaging: `event_id TEXT PRIMARY KEY NOT NULL, container_name TEXT, container_size REAL, container_count INTEGER, container_unit TEXT`,
@@ -27,6 +28,7 @@ const definitions: Record<string, string> = {
   temperature_measurements: measurementColumns(),
   ph_measurements: measurementColumns(),
   gravity_measurements: measurementColumns(),
+  batch_gravity_roles: `id TEXT PRIMARY KEY NOT NULL, batch_id TEXT NOT NULL, role TEXT NOT NULL, event_id TEXT NOT NULL`,
   volume_measurements: measurementColumns('location TEXT'),
   pressure_measurements: measurementColumns(),
   carbonation_measurements: measurementColumns(),
@@ -292,6 +294,10 @@ export const indexStatements = [
   `CREATE INDEX IF NOT EXISTS batch_events_type_time ON batch_events(batch_id, event_type, actual_at, id)`,
   `CREATE INDEX IF NOT EXISTS batch_events_by_batch ON batch_events(batch_id, created_at, id)`,
   `CREATE INDEX IF NOT EXISTS recipe_events_by_recipe ON recipe_events(recipe_id, sort_order, id)`,
+  `CREATE INDEX IF NOT EXISTS recipe_gravity_roles_by_event ON recipe_gravity_roles(event_id)`,
+  `CREATE INDEX IF NOT EXISTS batch_gravity_roles_by_event ON batch_gravity_roles(event_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS recipe_gravity_role_once ON recipe_gravity_roles(recipe_id, role)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS batch_gravity_role_once ON batch_gravity_roles(batch_id, role)`,
   `CREATE INDEX IF NOT EXISTS recipe_import_links_by_source ON recipe_import_links(source_id, source_index)`,
   `CREATE INDEX IF NOT EXISTS pill_bindings_by_pill ON pill_bindings(pill_id, valid_from)`,
   `CREATE INDEX IF NOT EXISTS equipment_use_events_by_equipment ON equipment_use_events(equipment_id, event_id)`,
@@ -335,7 +341,27 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 37;
+export const workspaceSchemaVersion = 38;
+// Earlier builds identified OG and FG by title. Assign the matching gravity
+// steps once during upgrade so titles can subsequently change without changing
+// the meaning of a measurement. Existing explicit assignments always win.
+export const gravityRoleMigrationStatements = (['recipe', 'batch'] as const).flatMap(scope =>
+  (['og', 'fg'] as const).map(role => {
+    const owner = `${scope}_id`;
+    const eventTable = `${scope}_events`;
+    const targetTable = `${scope}_measurement_targets`;
+    const roleTable = `${scope}_gravity_roles`;
+    const name = role === 'og' ? 'original' : 'final';
+    return `INSERT OR IGNORE INTO ${roleTable}(id, ${owner}, role, event_id)
+      SELECT ${owner} || ':${role}', ${owner}, '${role}', id FROM (
+        SELECT e.id, e.${owner}, ROW_NUMBER() OVER (PARTITION BY e.${owner}
+          ORDER BY e.${scope === 'recipe' ? 'sort_order' : 'created_at'} ${role === 'fg' ? 'DESC' : 'ASC'}, e.id) AS position
+        FROM ${eventTable} e JOIN ${targetTable} t ON t.event_id = e.id
+        WHERE e.event_type = 'measurement' AND t.measurement_kind = 'gravity'
+          AND (lower(e.title) LIKE '%${name}%gravity%'
+            OR lower(trim(e.title)) IN ('${role}', 'measure ${role}', '${role} reading'))
+      ) WHERE position = 1`;
+  }));
 export const primingSugarCategoryMigrationStatements = [
   `UPDATE inventory_items SET category = 'Adjunct' WHERE category = 'Other' AND supply_id IN
     (SELECT id FROM supplies WHERE catalog_supply_id = 'inventory_priming_sugar')`,
