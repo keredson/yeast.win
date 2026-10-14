@@ -18,6 +18,48 @@ const selectChanges = `SELECT "table", pk, cid, val, col_version, db_version,
   WHERE db_version > ? ORDER BY db_version, seq`;
 const insertChange = `INSERT INTO crsql_changes (${changeColumns.map(name => `"${name}"`).join(',')}) VALUES (${changeColumns.map(() => '?').join(',')})`;
 
+test('version 35 event inputs gain grain class and preserve existing snapshots', () => {
+  for (const partiallyUpgraded of [false, true]) {
+    const id = nanoid();
+    const recipeInputId = nanoid();
+    const batchInputId = nanoid();
+    const unrelatedBatchId = nanoid();
+    const before = openWorkspaceDb(id);
+    try {
+      for (const table of partiallyUpgraded ? ['batch_event_inputs'] : ['recipe_event_inputs', 'batch_event_inputs']) {
+        before.prepare('SELECT crsql_as_table(?)').get(table);
+        before.exec(`DROP TABLE ${table}`);
+        before.exec(`CREATE TABLE ${table} (id TEXT PRIMARY KEY NOT NULL, yield_pct REAL,
+          color_lovibond REAL, alpha_acid_pct REAL, hop_form TEXT, attenuation_pct REAL${table === 'batch_event_inputs'
+            ? ', mash_efficiency_pct REAL, grain_absorption_l_per_kg REAL' : ''})`);
+        before.prepare('SELECT crsql_as_crr(?)').get(table);
+      }
+      before.prepare('INSERT INTO recipe_event_inputs(id, yield_pct, color_lovibond) VALUES (?, ?, ?)')
+        .run(recipeInputId, 78, 10);
+      before.prepare('INSERT INTO batch_event_inputs(id, yield_pct, mash_efficiency_pct) VALUES (?, ?, ?)')
+        .run(batchInputId, 76, 72);
+      before.prepare('INSERT INTO batches(id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+        .run(unrelatedBatchId, 'Existing brew', 'active', 1, 1);
+      before.pragma('user_version = 35');
+    } finally { closeWorkspaceDb(before); }
+
+    const upgraded = openWorkspaceDb(id);
+    try {
+      assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+      assert.deepEqual(upgraded.prepare('SELECT yield_pct, color_lovibond, grain_class FROM recipe_event_inputs WHERE id = ?')
+        .get(recipeInputId), { yield_pct: 78, color_lovibond: 10, grain_class: null });
+      assert.deepEqual(upgraded.prepare('SELECT yield_pct, mash_efficiency_pct, grain_class FROM batch_event_inputs WHERE id = ?')
+        .get(batchInputId), { yield_pct: 76, mash_efficiency_pct: 72, grain_class: null });
+      assert.equal((upgraded.prepare('SELECT name FROM batches WHERE id = ?').get(unrelatedBatchId) as {
+        name: string }).name, 'Existing brew');
+      upgraded.prepare('UPDATE recipe_event_inputs SET grain_class = ? WHERE id = ?').run('kilned', recipeInputId);
+      upgraded.prepare('UPDATE batch_event_inputs SET grain_class = ? WHERE id = ?').run('kilned', batchInputId);
+      assert.equal((upgraded.prepare('SELECT grain_class FROM batch_event_inputs WHERE id = ?')
+        .get(batchInputId) as { grain_class: string }).grain_class, 'kilned');
+    } finally { closeWorkspaceDb(upgraded); }
+  }
+});
+
 test('supply media upgrade keeps product URLs, former spec-only URLs, images, and other rows', () => {
   const id = nanoid();
   const before = openWorkspaceDb(id);

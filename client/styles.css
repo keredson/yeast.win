@@ -262,6 +262,7 @@ button, input, textarea { font: inherit; }
 .timeline-card strong { display: block; font-size: 14px; line-height: 1.35; }
 .timeline-card .muted { margin-top: 4px; }
 .timeline-card .ant-tag { margin-right: 0; flex: none; }
+.timeline-status-actions { display: flex; align-items: center; gap: 8px; flex: none; margin-left: auto; }
 .plan-meta { color: #89958e; font-size: 12px; }
 .plan-card .plan-meta { margin-top: 10px; }
 .card-actions { display: flex; gap: 4px; margin: 7px -8px -4px; }
