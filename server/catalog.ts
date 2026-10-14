@@ -421,6 +421,46 @@ export function openCatalogDb(dataDir: string): Database.Database {
       db.pragma('user_version = 20');
     })();
   }
+  if ((db.pragma('user_version', { simple: true }) as number) === 20) {
+    db.transaction(() => {
+      const us = existingModelSources.equipment_vevor_35l;
+      const eu = expandedCatalogEquipment.find(item => item.id === 'equipment_vevor_35l_220v')!;
+      db.prepare(`UPDATE equipment_models SET product_url = ?
+        WHERE id = 'equipment_vevor_35l' AND (product_url IS NULL OR product_url = ?)`)
+        .run(us.product_url, eu.product_url);
+      db.prepare(`UPDATE model_heating SET rated_power_watts = ?
+        WHERE model_id = 'equipment_vevor_35l' AND (rated_power_watts IS NULL OR rated_power_watts = ?)`)
+        .run(us.rated_power_watts, eu.rated_power_watts);
+      db.prepare(`INSERT OR IGNORE INTO equipment_models(id, manufacturer, model_name, kind, product_url)
+        VALUES (?, ?, ?, ?, ?)`).run(eu.id, eu.manufacturer, eu.name, eu.kind, eu.product_url);
+      db.prepare('INSERT OR IGNORE INTO model_liquid_containment(model_id, capacity_liters) VALUES (?, ?)')
+        .run(eu.id, eu.capacity_liters);
+      db.prepare('INSERT OR IGNORE INTO model_heating(model_id, rated_power_watts) VALUES (?, ?)')
+        .run(eu.id, eu.rated_power_watts);
+      db.prepare(`INSERT OR IGNORE INTO model_temperature_control(model_id, min_temperature_c, max_temperature_c)
+        VALUES (?, ?, ?)`).run(eu.id, eu.min_temperature_c, eu.max_temperature_c);
+      seedModelImages(db);
+      // The old bundled photo was taken from the EU listing. Replace only
+      // untouched bundled bytes; catalog editors may have supplied their own.
+      const oldHashes = {
+        image_bytes: 'f2a043acef6bcd78a8567482bcf834eb093aa08efce59f2ea0ecb039a22b2de7',
+        thumbnail_bytes: 'c3df4c692e86e84e48860db69f1d4c5ea0d460b096109cf2cb940795dd5f69e6'
+      };
+      const image = db.prepare(`SELECT image_bytes, thumbnail_bytes FROM model_images
+        WHERE model_id = 'equipment_vevor_35l'`).get() as {
+          image_bytes: Buffer | null; thumbnail_bytes: Buffer | null } | undefined;
+      const path = join(projectRoot, 'assets/catalog/models/equipment_vevor_35l');
+      for (const [column, priorHash] of Object.entries(oldHashes)) {
+        const bytes = image?.[column as keyof typeof oldHashes];
+        if (!bytes || createHash('sha256').update(bytes).digest('hex') !== priorHash) continue;
+        const file = column === 'image_bytes' ? `${path}.jpg` : `${path}-thumb.jpg`;
+        const mime = column === 'image_bytes' ? 'image_mime_type' : 'thumbnail_mime_type';
+        db.prepare(`UPDATE model_images SET ${column} = ?, ${mime} = 'image/jpeg'
+          WHERE model_id = 'equipment_vevor_35l'`).run(readFileSync(file));
+      }
+      db.pragma('user_version = 21');
+    })();
+  }
   db.prepare(`UPDATE equipment_models SET model_name = ?
     WHERE id = ? AND model_name IN (?, ?)`).run(vevorModelName, 'equipment_vevor_35l',
     'VEVOR Electric Brewing System 9.2 Gal/35 L Brewing Pot', 'VEVOR 35 L');

@@ -27,6 +27,10 @@ export const catalogManufacturers = [
 ] as const;
 
 export const expandedCatalogEquipment: CatalogEquipment[] = [
+  { id: 'equipment_vevor_35l_220v', name: 'VEVOR Electric Brewing System 9.2 Gal/35 L (EU 220 V)',
+    manufacturer: 'VEVOR', kind: 'all_in_one', capacity_liters: 35, rated_power_watts: 2500,
+    built_in_temperature_control: true, min_temperature_c: 25, max_temperature_c: 100,
+    product_url: 'https://eur.vevor.com/beer-brewing-system-c_11816/vevor-all-in-one-grain-brewing-system-home-beer-brewer-w-circulating-pump-30-l-p_010108577563' },
   { id: 'equipment_brewtools_b40pro_230v', name: 'Brewtools B40pro 230 V', manufacturer: 'Brewtools', kind: 'all_in_one',
     capacity_liters: 46, rated_power_watts: 3200, built_in_temperature_control: true,
     product_url: 'https://docs.brewtools.com/brewing/pro-series-brewing-system/pro-series-brewing-system' },
@@ -124,8 +128,8 @@ export const existingModelSources: Record<string, Pick<CatalogEquipment,
     product_url: 'https://www.anton-paar.com/corp-en/products/details/o2-meter-oxyqc-oxyqc-wide-range/' },
   equipment_anton_paar_oxyqc_wide_range: { manufacturer: 'Anton Paar',
     product_url: 'https://www.anton-paar.com/corp-en/products/details/o2-meter-oxyqc-oxyqc-wide-range/' },
-  equipment_vevor_35l: { manufacturer: 'VEVOR', product_url: 'https://eur.vevor.com/beer-brewing-system-c_11816/vevor-all-in-one-grain-brewing-system-home-beer-brewer-w-circulating-pump-30-l-p_010108577563',
-    rated_power_watts: 2500, min_temperature_c: 25, max_temperature_c: 100 },
+  equipment_vevor_35l: { manufacturer: 'VEVOR', product_url: 'https://www.vevor.com/beer-brewing-system-c_11816/vevor-home-beer-brewing-machine-grain-brewing-system-w-circulating-pump-8-gal-p_010556912690',
+    rated_power_watts: 1800, min_temperature_c: 25, max_temperature_c: 100 },
   equipment_grainfather_gc4: { manufacturer: 'Grainfather',
     product_url: 'https://us.grainfather.com/products/gc4-glycol-chiller', rated_heat_removal_watts: 196 },
   equipment_rapt_glycol: { manufacturer: 'KegLand',

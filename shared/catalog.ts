@@ -20,7 +20,7 @@ export interface CatalogInventory { id: string; name: string; category: string; 
   hop_form?: string | null; attenuation_pct?: number | null }
 
 export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
-export const catalogSchemaVersion = 20;
+export const catalogSchemaVersion = 21;
 export const vevorModelName = 'VEVOR Electric Brewing System 9.2 Gal/35 L';
 export const catalogModelTables = {
   manufacturers: `CREATE TABLE IF NOT EXISTS manufacturers (

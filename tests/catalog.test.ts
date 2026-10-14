@@ -66,6 +66,56 @@ test('existing catalog gains new equipment and inventory without item capacity',
   } finally { db.close(); }
 });
 
+test('version 21 separates US and EU VEVOR systems without replacing catalog edits', () => {
+  for (const edited of [false, true]) {
+    const dir = mkdtempSync(join(tmpdir(), 'brewlog-vevor-region-'));
+    const db = openCatalogDb(dir);
+    const customImage = Buffer.from([255, 216, 255, 1, 2]);
+    db.prepare('UPDATE equipment_models SET product_url = ? WHERE id = ?').run(
+      edited ? 'https://example.com/my-vevor' :
+        'https://eur.vevor.com/beer-brewing-system-c_11816/vevor-all-in-one-grain-brewing-system-home-beer-brewer-w-circulating-pump-30-l-p_010108577563',
+      'equipment_vevor_35l');
+    db.prepare('UPDATE model_heating SET rated_power_watts = ? WHERE model_id = ?')
+      .run(edited ? 2100 : 2500, 'equipment_vevor_35l');
+    db.prepare('UPDATE model_images SET image_bytes = ?, thumbnail_bytes = ? WHERE model_id = ?')
+      .run(edited ? customImage : readFileSync('assets/catalog/models/equipment_vevor_35l_220v.jpg'),
+        edited ? customImage : readFileSync('assets/catalog/models/equipment_vevor_35l_220v-thumb.jpg'),
+        'equipment_vevor_35l');
+    if (!edited) {
+      for (const table of ['model_images', 'model_temperature_control', 'model_heating', 'model_liquid_containment']) {
+        db.prepare(`DELETE FROM ${table} WHERE model_id = ?`)
+          .run('equipment_vevor_35l_220v');
+      }
+      db.prepare('DELETE FROM equipment_models WHERE id = ?').run('equipment_vevor_35l_220v');
+    }
+    db.prepare('INSERT INTO supplies(id, name, category, unit) VALUES (?, ?, ?, ?)')
+      .run('my_grain', 'My grain', 'Grain', 'g');
+    db.pragma('user_version = 20');
+    db.close();
+
+    const upgraded = openCatalogDb(dir);
+    try {
+      assert.equal(upgraded.pragma('user_version', { simple: true }), catalogSchemaVersion);
+      const us = upgraded.prepare('SELECT product_url FROM equipment_models WHERE id = ?')
+        .get('equipment_vevor_35l') as { product_url: string };
+      assert.equal(us.product_url, edited ? 'https://example.com/my-vevor'
+        : 'https://www.vevor.com/beer-brewing-system-c_11816/vevor-home-beer-brewing-machine-grain-brewing-system-w-circulating-pump-8-gal-p_010556912690');
+      assert.equal((upgraded.prepare('SELECT rated_power_watts FROM model_heating WHERE model_id = ?')
+        .get('equipment_vevor_35l') as { rated_power_watts: number }).rated_power_watts, edited ? 2100 : 1800);
+      const usImage = upgraded.prepare('SELECT image_bytes FROM model_images WHERE model_id = ?')
+        .get('equipment_vevor_35l') as { image_bytes: Buffer };
+      assert.deepEqual(usImage.image_bytes, edited ? customImage : readFileSync('assets/catalog/models/equipment_vevor_35l.jpg'));
+      assert.equal((upgraded.prepare('SELECT name FROM supplies WHERE id = ?').get('my_grain') as { name: string }).name,
+        'My grain');
+      assert.equal((upgraded.prepare('SELECT rated_power_watts FROM model_heating WHERE model_id = ?')
+        .get('equipment_vevor_35l_220v') as { rated_power_watts: number }).rated_power_watts, 2500);
+      assert.deepEqual((upgraded.prepare('SELECT image_bytes FROM model_images WHERE model_id = ?')
+        .get('equipment_vevor_35l_220v') as { image_bytes: Buffer }).image_bytes,
+      readFileSync('assets/catalog/models/equipment_vevor_35l_220v.jpg'));
+    } finally { upgraded.close(); }
+  }
+});
+
 test('version 11 catalog adds Anton Paar instruments without replacing existing rows', () => {
   const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
   const old = new Database(join(dir, 'catalog.sqlite'));
