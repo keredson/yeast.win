@@ -1,23 +1,19 @@
 import type { Equipment } from './db.ts';
 import { recordSlug } from './recordSlug.ts';
+import { uniqueRouteSegments } from './uniqueRouteSegments.ts';
 
 // A workspace model describes a product; a unit is one physical piece of stock.
 export function equipmentModelPathSegment(model: Equipment, models: Equipment[]): string {
-  const slug = recordSlug(model.name);
-  return models.filter(row => recordSlug(row.name) === slug).length === 1
-    ? slug : `${slug}-${model.id.toLowerCase()}`;
+  return uniqueRouteSegments(models, row => recordSlug(row.name), true).get(model.id) || model.id;
 }
 
 export function equipmentUnitPathSegment(item: Equipment, items: Equipment[], models: Equipment[]): string {
   const model = models.find(row => row.id === item.model_id);
   if (!model) return item.id;
   const modelSegment = equipmentModelPathSegment(model, models);
-  const stockId = item.stock_id?.trim();
-  const unitSlug = stockId ? recordSlug(stockId) : `unit-${item.id.toLowerCase()}`;
   const siblings = items.filter(row => row.model_id === item.model_id);
-  const unitSegment = siblings.filter(row => (row.stock_id?.trim()
-    ? recordSlug(row.stock_id.trim()) : `unit-${row.id.toLowerCase()}`) === unitSlug).length === 1
-    ? unitSlug : `${unitSlug}-${item.id.toLowerCase()}`;
+  const unitSegment = uniqueRouteSegments(siblings, row => row.stock_id?.trim()
+    ? recordSlug(row.stock_id.trim()) : `unit-${row.id}`).get(item.id) || item.id;
   return `${modelSegment}/${unitSegment}`;
 }
 

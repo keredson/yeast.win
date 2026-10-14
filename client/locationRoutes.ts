@@ -1,7 +1,13 @@
 import type { InventoryLocation } from './db.ts';
+import { uniqueRouteSegments } from './uniqueRouteSegments.ts';
+
+export function locationPathSegment(location: InventoryLocation, locations: InventoryLocation[]): string {
+  return uniqueRouteSegments(locations, row => row.slug, true).get(location.id) || location.id;
+}
 
 export function locationForPath(segment: string, locations: InventoryLocation[]): InventoryLocation | undefined {
-  return locations.find(location => location.slug === segment || location.id === segment);
+  return locations.find(location => location.id === segment)
+    || locations.find(location => locationPathSegment(location, locations) === segment);
 }
 
 export function locationAncestors(location: InventoryLocation, locations: InventoryLocation[]): InventoryLocation[] {

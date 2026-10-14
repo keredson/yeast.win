@@ -32,6 +32,8 @@ The UI calls each operation a **brewery**; APIs and database tables retain `work
 
 At most one brewery per account can have a null slug and use root routes such as `/batches`. A brewery with a slug uses `/brewery/:slug/batches`, regardless of creation order. Item routes follow the same prefix. Slugs live in the auth DB and can be changed in Settings independently of display names. Deleting the root brewery does not promote another brewery to root URLs.
 
+Within a brewery, equipment, inventory, recipe, and location URL segments are derived from the visible records. Names, Stock IDs, and stored slugs provide the readable base. If two resulting segments collide, both gain their full, case-sensitive internal IDs; the check repeats if a suffixed segment matches another readable base. The same merged rows therefore produce distinct routes on every replica, even if two offline edits chose the same Stock ID or slug. These URLs may change after sync or edits; internal IDs remain the record identity. The auth DB separately enforces brewery-slug uniqueness on the server.
+
 ### Implementation phases
 
 1. **Initial:** Open account registration, one or more private workspace DBs per account, full local copies on that account's devices, authenticated whole-workspace sync, batches and plans, and the first useful event types. Add RAPT ingestion and reminders as the batch workflow matures.

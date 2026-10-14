@@ -1,13 +1,16 @@
 import type { InventoryItem } from './db.ts';
 import { recordSlug as slug } from './recordSlug.ts';
+import { uniqueRouteSegments } from './uniqueRouteSegments.ts';
 
 export function inventoryPathSegment(item: InventoryItem, items: InventoryItem[]): string {
-  const name = slug(item.name);
-  const sameName = items.filter(row => slug(row.name) === name);
-  if (sameName.length === 1) return name;
-  const categoryName = `${name}-${slug(item.category)}`;
-  if (sameName.filter(row => slug(row.category) === slug(item.category)).length === 1) return categoryName;
-  return `${categoryName}-${item.id.slice(0, 8).toLowerCase()}`;
+  return uniqueRouteSegments(items, row => {
+    const name = slug(row.name);
+    const sameName = items.filter(other => slug(other.name) === name);
+    if (sameName.length === 1) return name;
+    const categoryName = `${name}-${slug(row.category)}`;
+    if (sameName.filter(other => slug(other.category) === slug(row.category)).length === 1) return categoryName;
+    return `${categoryName}-${row.id.slice(0, 8).toLowerCase()}`;
+  }, true).get(item.id) || item.id;
 }
 
 export function inventorySupplyForPath(segment: string, supplies: InventoryItem[], stock: InventoryItem[]): InventoryItem | undefined {

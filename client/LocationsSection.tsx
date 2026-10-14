@@ -4,7 +4,7 @@ import { DeleteOutlined, EnvironmentOutlined, PlusOutlined, SettingOutlined } fr
 import { convertInventoryUnit, deleteInventoryLocation, listInventoryBalances, saveInventoryLocation,
   type InventoryItem, type InventoryLocation, type LocalDb } from './db.ts';
 import { LocationFields } from './LocationFields.tsx';
-import { locationDescendantIds } from './locationRoutes.ts';
+import { locationDescendantIds, locationPathSegment } from './locationRoutes.ts';
 import { inventoryPathSegment } from './inventoryRoutes.ts';
 import { compoundMassUnit, formatQuantity } from '../shared/units.ts';
 
@@ -21,7 +21,7 @@ function LocationCards({ parentId, locations, items, basePath, onSelect, visited
     const directCount = items.filter(item => item.location_id === location.id).length;
     const totalCount = items.filter(item => item.location_id && descendantIds.has(item.location_id)).length;
     return <article className="location-card" key={location.id}>
-      <a className="location-card-heading" href={`${basePath}/location/${location.slug}`}
+      <a className="location-card-heading" href={`${basePath}/location/${locationPathSegment(location, locations)}`}
         onClick={event => { event.preventDefault(); onSelect(location.id); }}>
         <span className="location-card-text"><strong>{location.name}</strong><small>{directCount} here · {totalCount} including sublocations</small></span>
       </a>

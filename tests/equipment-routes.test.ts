@@ -48,6 +48,31 @@ test('matching model names get distinct parent routes', () => {
   assert.equal(equipmentModelForPath('brewzilla-35l-model_b', models)?.id, second.id);
 });
 
+test('model slugs remain unique when a name matches a disambiguated slug or another model ID', () => {
+  const first = item('model_a', 'BrewZilla');
+  const second = item('model_b', 'BrewZilla');
+  const third = item('model_c', 'BrewZilla model_a');
+  const fourth = item('reserved', 'model_b');
+  const fifth = item('model-b', 'Other');
+  const models = [first, second, third, fourth, fifth];
+  const segments = models.map(model => equipmentModelPathSegment(model, models));
+  assert.equal(new Set(segments).size, models.length);
+  for (const model of models) assert.equal(equipmentModelForPath(equipmentModelPathSegment(model, models), models)?.id, model.id);
+});
+
+test('unit slugs remain unique after conflicting stock IDs replicate', () => {
+  const model = item('brewzilla', 'BrewZilla');
+  const first = { ...item('Ab', 'BrewZilla'), model_id: model.id, stock_id: 'Unit 1' };
+  const second = { ...item('ab', 'BrewZilla'), model_id: model.id, stock_id: 'unit-1' };
+  const third = { ...item('third', 'BrewZilla'), model_id: model.id, stock_id: 'unit-1-Ab' };
+  const fourth = { ...item('fourth', 'BrewZilla'), model_id: model.id, stock_id: 'unit-ab' };
+  const units = [first, second, third, fourth];
+  const segments = units.map(unit => equipmentUnitPathSegment(unit, units, [model]));
+  assert.equal(new Set(segments).size, units.length);
+  for (const unit of units) assert.equal(equipmentUnitForPath(equipmentUnitPathSegment(unit, units, [model]), units, [model])?.id, unit.id);
+  assert.deepEqual(segments, units.map(unit => equipmentUnitPathSegment(unit, [...units].reverse(), [model])));
+});
+
 test('the path follows changed stock ID while old saved slugs remain aliases', () => {
   const model = item('equipment_vevor_35l', 'VEVOR Electric Brewing System');
   const vevor = { ...item('27I0Kppqfmadgy4Ymv-Ze', 'My VEVOR'), model_id: model.id,

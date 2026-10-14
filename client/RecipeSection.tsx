@@ -6,6 +6,7 @@ import { addRecipePlan, createRecipe, deleteRecipe, deleteRecipePlan, hasRecipeI
   type Equipment, type InventoryItem, type LocalDb, type PlanInput, type Recipe, type RecipeType } from './db.ts';
 import { RecipeImportModal } from './RecipeImportModal.tsx';
 import { PlanForm, repeatPreset, type PlanPreset } from './PlanForm.tsx';
+import { recipePathSegment } from './recipeRoutes.ts';
 import { kindLabel } from './constants.ts';
 import { EventTimeline } from './EventTimeline.tsx';
 import { RecipeTypeIcon } from './RecipeTypeIcon.tsx';
@@ -181,7 +182,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
       <div className="section-heading"><div><span className="eyebrow">Planning</span><h1>Recipes</h1></div></div>
       <p className="muted">Reusable event plans for your batches.</p>
       {recipes.length > 0 && <div className="record-list">{recipes.map(item =>
-        <a key={item.id} className="record-link recipe-link" href={`${basePath}/recipe/${item.slug}`}
+        <a key={item.id} className="record-link recipe-link" href={`${basePath}/recipe/${recipePathSegment(item, recipes)}`}
           onClick={event => { event.preventDefault(); onSelect(item.id); }}>
           <RecipeTypeIcon type={item.recipe_type} />
           <span className="recipe-link-copy"><strong>{item.name}</strong><small>{item.description || 'No description'}</small></span>

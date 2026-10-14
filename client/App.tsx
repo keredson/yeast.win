@@ -15,8 +15,8 @@ import { equipmentModelForPath, equipmentModelPathSegment, equipmentUnitForPath,
   equipmentUnitPathSegment } from './equipmentRoutes.ts';
 import { EquipmentSection } from './EquipmentSection.tsx';
 import { LocationsSection } from './LocationsSection.tsx';
-import { locationForPath } from './locationRoutes.ts';
-import { recipeForPath } from './recipeRoutes.ts';
+import { locationForPath, locationPathSegment } from './locationRoutes.ts';
+import { recipeForPath, recipePathSegment } from './recipeRoutes.ts';
 import { breadcrumbNodes, type BreadcrumbRecords, type BreadcrumbSection } from './breadcrumbs.ts';
 import { routeFromPath, routePath, workspaceBase, type Route, type Section } from './appRoutes.ts';
 import { AccountSection } from './AccountSection.tsx';
@@ -34,7 +34,8 @@ function recordPath(section: BreadcrumbSection, id: string | null, base: string,
   const segment = supply ? inventoryPathSegment(supply, records.supplies)
     : unit ? equipmentUnitPathSegment(unit, records.equipment, records.equipmentModels)
       : model ? equipmentModelPathSegment(model, records.equipmentModels)
-        : location ? location.slug : recipe ? recipe.slug : id;
+        : location ? locationPathSegment(location, records.locations)
+          : recipe ? recipePathSegment(recipe, records.recipes) : id;
   return routePath(section, segment, base);
 }
 const navItems = [
@@ -352,7 +353,7 @@ export function App() {
     if (route.section !== 'locations' || !route.selectedId || inventoryWorkspaceId !== workspaceId) return;
     const found = locationForPath(route.selectedId, locations);
     if (!found) return;
-    const path = routePath('locations', found.slug, workspaceBase(workspaceId, session?.workspaces || []));
+    const path = routePath('locations', locationPathSegment(found, locations), workspaceBase(workspaceId, session?.workspaces || []));
     if (location.pathname !== path) history.replaceState(null, '', path);
     if (route.selectedId !== found.id) setRoute(current => ({ ...current, selectedId: found.id }));
   }, [route.section, route.selectedId, locations, inventoryWorkspaceId, workspaceId, session?.workspaces]);
@@ -361,7 +362,7 @@ export function App() {
     if (route.section !== 'recipes' || !route.selectedId || !db) return;
     const found = recipeForPath(route.selectedId, recipes);
     if (!found) return;
-    const path = routePath('recipes', found.slug, workspaceBase(workspaceId, session?.workspaces || []));
+    const path = routePath('recipes', recipePathSegment(found, recipes), workspaceBase(workspaceId, session?.workspaces || []));
     if (location.pathname !== path) history.replaceState(null, '', path);
     if (route.selectedId !== found.id) setRoute(current => ({ ...current, selectedId: found.id }));
   }, [route.section, route.selectedId, recipes, db, workspaceId, session?.workspaces]);

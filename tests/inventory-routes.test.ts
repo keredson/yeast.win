@@ -34,3 +34,13 @@ test('old stock slugs resolve to the shared supply page', () => {
   assert.equal(inventorySupplyForPath(oldSlug, [supply], [pantry, garage])?.id, supply.id);
   assert.equal(inventoryPathSegment(supply, [supply]), '2-row-pale-malt');
 });
+
+test('inventory slugs stay unique when a name matches a generated category slug', () => {
+  const first = item('first', 'Mosaic');
+  const second = item('second', 'Mosaic', 'Grain');
+  const third = item('third', 'Mosaic Hops');
+  const supplies = [first, second, third];
+  const segments = supplies.map(supply => inventoryPathSegment(supply, supplies));
+  assert.equal(new Set(segments).size, supplies.length);
+  for (const supply of supplies) assert.equal(inventorySupplyForPath(inventoryPathSegment(supply, supplies), supplies, [])?.id, supply.id);
+});
