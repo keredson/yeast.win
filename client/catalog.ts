@@ -396,7 +396,7 @@ export interface CatalogSearch {
   ids?: string[];
   category?: string;
   query?: string;
-  limit?: number;
+  limit?: number | null;
 }
 
 function catalogWhere(search: CatalogSearch, idColumn: string, categoryColumn: string | null,
@@ -424,8 +424,9 @@ export async function queryCatalogModels(search: CatalogSearch = {}): Promise<Ca
   const db = await openLocalCatalog();
   const where = catalogWhere(search, 'm.id', 'm.kind',
     "m.model_name || ' ' || coalesce(m.manufacturer, '') || ' ' || m.kind");
-  const limit = search.ids ? '' : ' LIMIT ?';
-  const args = search.ids ? where.args : [...where.args, Math.min(5000, Math.max(1, search.limit ?? 80))];
+  const unlimited = !!search.ids || search.limit === null;
+  const limit = unlimited ? '' : ' LIMIT ?';
+  const args = unlimited ? where.args : [...where.args, Math.min(5000, Math.max(1, search.limit ?? 80))];
   const rows = await db.execO<CatalogEquipment>(`SELECT m.id, m.model_name AS name, m.kind, m.manufacturer, m.product_url,
     maker.website_url AS manufacturer_website_url,
     liquid.model_id IS NOT NULL AS has_liquid_containment, liquid.capacity_liters,
@@ -474,8 +475,9 @@ export async function queryCatalogSupplies(search: CatalogSearch = {}): Promise<
   const db = await openLocalCatalog();
   const where = catalogWhere(search, 's.id', 's.category',
     "s.name || ' ' || coalesce(p.manufacturer, '') || ' ' || s.category");
-  const limit = search.ids ? '' : ' LIMIT ?';
-  const args = search.ids ? where.args : [...where.args, Math.min(5000, Math.max(1, search.limit ?? 80))];
+  const unlimited = !!search.ids || search.limit === null;
+  const limit = unlimited ? '' : ' LIMIT ?';
+  const args = unlimited ? where.args : [...where.args, Math.min(5000, Math.max(1, search.limit ?? 80))];
   const rows = await db.execO<CatalogInventory>(`SELECT s.id, s.name, s.category, s.unit,
       g.yield_pct, g.color_lovibond, h.alpha_acid_pct, h.hop_form, y.attenuation_pct,
       other.typical_brix, other.extract_color_value, other.extract_color_scale,

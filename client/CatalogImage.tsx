@@ -3,6 +3,21 @@ import { catalogMediaGeneration, catalogMediaUrl } from './catalog.ts';
 
 export type CatalogMediaKind = 'supply' | 'model' | 'thumbnail' | 'logo';
 
+const visibleCallbacks = new WeakMap<Element, () => void>();
+let imageObserver: IntersectionObserver | undefined;
+
+function catalogImageObserver(): IntersectionObserver {
+  imageObserver ||= new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      visibleCallbacks.get(entry.target)?.();
+      imageObserver?.unobserve(entry.target);
+      visibleCallbacks.delete(entry.target);
+    }
+  });
+  return imageObserver;
+}
+
 export function useCatalogMedia(kind: CatalogMediaKind, id: string | null | undefined,
   enabled = true): string | null {
   const [src, setSrc] = useState<string | null>(null);
@@ -29,14 +44,11 @@ export function CatalogImage({ kind, id, className, alt = '', immediate = false 
       return;
     }
     setVisible(false);
-    const observer = new IntersectionObserver(entries => {
-      if (entries.some(entry => entry.isIntersecting)) {
-        setVisible(true);
-        observer.disconnect();
-      }
-    }, { rootMargin: '100px' });
-    observer.observe(ref.current);
-    return () => observer.disconnect();
+    const element = ref.current;
+    const observer = catalogImageObserver();
+    visibleCallbacks.set(element, () => setVisible(true));
+    observer.observe(element);
+    return () => { observer.unobserve(element); visibleCallbacks.delete(element); };
   }, [id, immediate]);
   const src = useCatalogMedia(kind, id, visible);
   return <img ref={ref} className={className} src={src || undefined} alt={alt} loading="lazy" />;

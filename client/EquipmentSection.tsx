@@ -192,8 +192,6 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogKind, setCatalogKind] = useState<string | undefined>();
-  const [catalogLimit, setCatalogLimit] = useState(80);
-  const [catalogHasMore, setCatalogHasMore] = useState(false);
   const [catalogForOwned, setCatalogForOwned] = useState<CatalogEquipment[]>([]);
   const [catalogKinds, setCatalogKinds] = useState<string[]>([]);
   const [matchingModels, setMatchingModels] = useState<CatalogEquipment[]>([]);
@@ -243,15 +241,14 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   useEffect(() => {
     if (!catalogPickerOpen) { setMatchingModels([]); return; }
     let cancelled = false;
-    void Promise.all([catalogModelKinds(), queryCatalogModels({ category: catalogKind, query: catalogQuery, limit: catalogLimit + 1 })])
+    void Promise.all([catalogModelKinds(), queryCatalogModels({ category: catalogKind, query: catalogQuery, limit: null })])
       .then(([kinds, rows]) => { if (!cancelled) {
         setCatalogKinds(kinds.sort((left, right) => equipmentKindLabel(left).localeCompare(equipmentKindLabel(right))));
-        setMatchingModels(rows.slice(0, catalogLimit));
-        setCatalogHasMore(rows.length > catalogLimit);
+        setMatchingModels(rows);
       } })
       .catch(cause => { if (!cancelled) setError(String(cause)); });
     return () => { cancelled = true; };
-  }, [catalogPickerOpen, catalogKind, catalogQuery, catalogLimit, catalogRevision]);
+  }, [catalogPickerOpen, catalogKind, catalogQuery, catalogRevision]);
   const item = equipment.find(row => row.id === selectedId) || null;
   const itemModel = item ? models.find(row => row.id === item.model_id) : undefined;
   const itemCatalogModel = itemModel ? catalog.find(row => row.id === itemModel.catalog_model_id) : undefined;
@@ -714,7 +711,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       <div className="equipment-add-actions">
         {models.length > 0 && <Button icon={<PlusOutlined />} onClick={() => { setCatalogUnitModelId(null); setAddingUnit(true); }}>Add unit</Button>}
         <Button icon={<PlusOutlined />} onClick={() => { setCatalogQuery(''); setCatalogKind(undefined);
-          setCatalogLimit(80); setCatalogHasMore(false); setCatalogPickerOpen(true); }}>Add from catalog</Button>
+          setCatalogPickerOpen(true); }}>Add from catalog</Button>
         <Dropdown trigger={['click']} menu={addMenu} placement="bottomLeft">
           <Button icon={<PlusOutlined />}>Define equipment</Button>
         </Dropdown>
@@ -980,9 +977,9 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     <Modal title="Add from catalog" open={catalogPickerOpen} onCancel={() => setCatalogPickerOpen(false)} footer={null} destroyOnHidden>
       <div className="catalog-explorer-filters">
         <Input.Search aria-label="Search equipment models" placeholder="Search equipment models" allowClear value={catalogQuery}
-          onChange={event => { setCatalogQuery(event.target.value); setCatalogLimit(80); }} />
+          onChange={event => setCatalogQuery(event.target.value)} />
         <Select aria-label="Filter equipment type" placeholder="All equipment types" allowClear showSearch optionFilterProp="label"
-          value={catalogKind} onChange={value => { setCatalogKind(value); setCatalogLimit(80); }}
+          value={catalogKind} onChange={setCatalogKind}
           options={catalogKinds.map(kind => ({ value: kind, label: equipmentKindLabel(kind) }))} />
       </div>
       {matchingModels.length ? <div className="catalog-explorer-list" role="list">
@@ -995,7 +992,6 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           </button>
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching equipment' : 'No catalog equipment available'} />}
-      {catalogHasMore && <Button type="link" onClick={() => setCatalogLimit(limit => limit + 80)}>Show more models</Button>}
     </Modal>
     <Modal title="Add equipment unit" open={addingUnit}
       onCancel={() => { setAddingUnit(false); setCatalogUnitModelId(null); }} footer={null} destroyOnHidden>
