@@ -118,7 +118,8 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
         const itemId = values.inventory_item_id || plannedString('inventory_item_id');
         const amount = quantityForStorage(values.unit || '', values.quantity, values.pounds, values.ounces);
         if (!itemName || !amount) throw new Error('Enter an item and quantity');
-        payload = { item_name: itemName, inventory_item_id: itemId || null,
+        payload = { item_name: itemName, item_category: values.item_category || initialCategory,
+          inventory_item_id: itemId || null,
           supply_id: inventory.find(item => item.id === itemId)?.supply_id || plannedString('supply_id') || null,
           quantity: amount.quantity, unit: amount.unit };
       } else if (kind === 'temperature_control') {

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { appYeastAttenuationPct, calculateRecipe } from '../client/recipeCalculations.ts';
+import { batchGravityReadings } from '../client/batchGravity.ts';
 import type { Equipment, InventoryItem, PlanInput } from '../client/db.ts';
 
 const grain = { id: 'grain', name: 'Pale malt', category: 'Grain', default_unit: 'kg', display_unit: 'kg',
@@ -145,6 +146,40 @@ test('missing grain yields use named app class estimates without filling missing
   assert.ok(result.originalGravity != null);
   assert.ok(result.sources.originalGravity.some(line => line.includes('75% (app estimate for kilned malt)')));
   assert.equal(result.colorSrm, null);
+});
+
+test('batch grain linked directly to a catalog product contributes its color', () => {
+  const catalogGrain = { id: 'briess-bonlander', name: 'Briess Bonlander Munich Malt 10L', category: 'Grain',
+    unit: 'kg', yield_pct: 78, color_lovibond: 10 };
+  const batchEvents = events.map(event => event.id === 'grain-add' ? { ...event, details: {
+    ...event.details, inventory_item_id: undefined, catalog_item_id: catalogGrain.id,
+    item_name: catalogGrain.name } } : event);
+  const result = calculateRecipe(batchEvents, [yeast], equipment,
+    { target_fermenter_volume_liters: 20 }, {}, {}, 'beer', null, 'batch', [catalogGrain]);
+  assert.ok(result.colorSrm != null && result.colorSrm > 0);
+  assert.ok(result.sources.colorSrm.some(line => line.includes('Briess Bonlander Munich Malt 10L')));
+  assert.ok(result.sources.colorSrm.some(line => line.includes('10 °L (brewery or catalog ingredient)')));
+});
+
+test('batch gravity readings replace estimates as OG and FG are recorded', () => {
+  const readings = batchGravityReadings([
+    { title: 'Measure pre-boil gravity', value: 1.063, unit: 'SG' },
+    { title: 'Measure original specific gravity', value: 1.052, unit: 'SG' },
+    { title: 'Measure final specific gravity', value: 1.012, unit: 'SG' }
+  ]);
+  assert.deepEqual(readings, { original: 1.052, final: 1.012 });
+  const ogOnly = calculateRecipe(events, [grain, yeast], equipment,
+    { target_fermenter_volume_liters: 20 }, {}, {}, 'beer', null, 'batch', [], { original: readings.original });
+  assert.equal(ogOnly.originalGravity, 1.052);
+  assert.ok(Math.abs(ogOnly.finalGravity! - 1.013) < .000001);
+  assert.equal(ogOnly.measuredOriginalGravity, true);
+  assert.equal(ogOnly.measuredFinalGravity, false);
+  const complete = calculateRecipe(events.filter(event => event.id !== 'pitch'), [grain], equipment,
+    { target_fermenter_volume_liters: 20 }, {}, {}, 'beer', null, 'batch', [], readings);
+  assert.equal(complete.finalGravity, 1.012);
+  assert.equal(complete.measuredFinalGravity, true);
+  assert.ok(Math.abs(complete.abvPct! - (1.052 - 1.012) * 131.25) < .000001);
+  assert.deepEqual(complete.unavailable.finalGravity, []);
 });
 
 test('repeated use of one unit contributes its loss only once', () => {

@@ -96,10 +96,10 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
       const recipeInputs = recipeRows[0] || {};
       const eventInputs = Object.fromEntries(eventRows.map(row => [row.id, row]));
       if (!cancelled) setEstimate(calculateRecipe(plans, supplies, equipmentModels, recipeInputs, eventInputs, recent,
-        recipe?.recipe_type || 'beer', breweryEfficiency));
+        recipe?.recipe_type || 'beer', breweryEfficiency, 'recipe', catalogInventory));
     })();
     return () => { cancelled = true; };
-  }, [db, selectedId, plans, supplies, equipment, equipmentModels, settingsOpen, recipe?.recipe_type]);
+  }, [db, selectedId, plans, supplies, equipment, equipmentModels, catalogInventory, settingsOpen, recipe?.recipe_type]);
 
   async function openNewRecipe() {
     try {

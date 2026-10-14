@@ -3,7 +3,7 @@ import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Select } from 'a
 import { PlusOutlined, SettingOutlined } from '@ant-design/icons';
 import { addBatchPlan, createBatch, eventDetails, eventFormData, listEvents, listPhotos, listSupplies, releaseEquipmentUse,
   startBatchFromRecipe, startBatchFromTemplate, startBatchFromPrevious, updateBatchPlan,
-  batchTargetVolume, breweryMashEfficiency, latestMeasuredMashEfficiencySource, updateBatchTargetVolume,
+  batchTargetVolume, breweryBatchSize, breweryMashEfficiency, latestMeasuredMashEfficiencySource, updateBatchSettings,
   type ActualEvent, type Batch, type Equipment, type InventoryItem,
   type LocalDb, type MeasurementKind, type PlanInput, type Recipe, type RecipeType } from './db.ts';
 import { kindLabel } from './constants.ts';
@@ -18,6 +18,8 @@ import { calculateRecipe, type RecipeEstimate } from './recipeCalculations.ts';
 import { CalculationsCard } from './CalculationsCard.tsx';
 import { convertUnit, unitGroups, unitOptions } from '../shared/units.ts';
 import { changeNumberUnit } from './unitFields.ts';
+import { batchGravityReadings } from './batchGravity.ts';
+import { appBatchSizeLiters } from '../shared/batchSize.ts';
 
 export function BatchSection({ db, basePath, accountId, batches, recipes, equipment, equipmentModels, inventory, catalogInventory, preferredUnits, selectedId, onSelect, onChanged }: {
   db: LocalDb; basePath: string; accountId: string; batches: Batch[]; recipes: Recipe[]; equipment: Equipment[]; equipmentModels: Equipment[]; inventory: InventoryItem[];
@@ -32,7 +34,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   const [batchSizeOpen, setBatchSizeOpen] = useState(false);
   const [batchSizeBusy, setBatchSizeBusy] = useState(false);
   const [batchSizeError, setBatchSizeError] = useState('');
-  const [batchSizeForm] = Form.useForm<{ batch_size: number; unit: string }>();
+  const [batchSizeForm] = Form.useForm<{ name: string; description?: string; batch_size: number; unit: string }>();
   const batchSizeUnit = useRef<string>(preferredUnits.volume);
   const originalBatchSize = useRef<{ liters: number; display: number; unit: string } | null>(null);
   const [newBatch, setNewBatch] = useState(false);
@@ -71,7 +73,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
     let cancelled = false;
     setEstimate(null);
     void (async () => {
-      const [batchRows, eventRows, typeRows, breweryEfficiency, supplies] = await Promise.all([
+      const [batchRows, eventRows, typeRows, breweryEfficiency, supplies, gravityRows, defaultBatchSize] = await Promise.all([
         db.execO<{ target_fermenter_volume_liters: number | null; brewhouse_efficiency_pct: number | null;
           wort_loss_liters: number | null }>(
           'SELECT target_fermenter_volume_liters, brewhouse_efficiency_pct, wort_loss_liters FROM batch_recipe_inputs WHERE id = ?', [selectedId]),
@@ -81,7 +83,12 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
           JOIN recipe_events re ON re.id = e.recipe_event_id
           JOIN recipe_types rt ON rt.id = re.recipe_id WHERE e.batch_id = ? LIMIT 1`, [selectedId]),
         breweryMashEfficiency(db),
-        listSupplies(db)
+        listSupplies(db),
+        db.execO<{ title: string; value: number; unit: string }>(`SELECT e.title, g.value, g.unit
+          FROM gravity_measurements g JOIN batch_events e ON e.id = g.event_id
+          WHERE e.batch_id = ? AND e.actual_at IS NOT NULL AND e.skipped_at IS NULL
+          ORDER BY e.actual_at, e.id`, [selectedId]),
+        breweryBatchSize(db)
       ]);
       const recent: Record<string, { value: number; batchName: string }> = {};
       const equipmentIds = new Set(events.filter(event => event.event_type === 'transfer'
@@ -94,10 +101,14 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
         }
       }
       const recipeType = typeRows[0]?.recipe_type || 'beer';
+      const batchInputs = batchRows[0]?.target_fermenter_volume_liters != null ? batchRows[0]
+        : { ...batchRows[0], target_fermenter_volume_liters: defaultBatchSize ?? appBatchSizeLiters,
+          batch_size_source: defaultBatchSize == null ? 'assumed_app' : 'assumed_brewery' };
       if (!cancelled) {
         setEstimateType(recipeType);
-        setEstimate(calculateRecipe(events.filter(event => event.skipped_at == null), [...inventory, ...supplies], equipment, batchRows[0] || {},
-          Object.fromEntries(eventRows.map(row => [row.id, row])), recent, recipeType, breweryEfficiency, 'batch'));
+        setEstimate(calculateRecipe(events.filter(event => event.skipped_at == null), [...inventory, ...supplies], equipment, batchInputs,
+          Object.fromEntries(eventRows.map(row => [row.id, row])), recent, recipeType, breweryEfficiency, 'batch',
+          catalogInventory, batchGravityReadings(gravityRows)));
       }
     })().catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => { cancelled = true; };
@@ -108,18 +119,19 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   async function openBatchSize() {
     if (!batch) return;
     try {
-      const liters = await batchTargetVolume(db, batch.id);
+      const liters = await batchTargetVolume(db, batch.id) ?? await breweryBatchSize(db) ?? appBatchSizeLiters;
       const unit = preferredUnits.volume;
       const display = liters == null ? null : Number((convertUnit(liters, 'L', unit) ?? liters).toFixed(2));
       batchSizeUnit.current = unit;
       originalBatchSize.current = liters == null || display == null ? null : { liters, display, unit };
-      batchSizeForm.setFieldsValue({ batch_size: display ?? undefined, unit });
+      batchSizeForm.setFieldsValue({ name: batch.name, description: batch.description || '',
+        batch_size: display ?? undefined, unit });
       setBatchSizeError('');
       setBatchSizeOpen(true);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  async function saveBatchSize(values: { batch_size: number; unit: string }) {
+  async function saveBatchSize(values: { name: string; description?: string; batch_size: number; unit: string }) {
     if (!batch) return;
     setBatchSizeBusy(true); setBatchSizeError('');
     try {
@@ -127,7 +139,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
       const liters = original && values.batch_size === original.display && values.unit === original.unit
         ? original.liters : convertUnit(values.batch_size, values.unit, 'L');
       if (liters == null) throw new Error('Choose a batch size unit');
-      await updateBatchTargetVolume(db, batch.id, liters);
+      await updateBatchSettings(db, batch.id, values.name, values.description || '', liters);
       setBatchSizeOpen(false);
       await changed();
     } catch (cause) { setBatchSizeError(cause instanceof Error ? cause.message : String(cause)); }
@@ -212,6 +224,9 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
       footer={null} destroyOnHidden>
       {batchSizeError && <Alert type="error" message={batchSizeError} className="form-alert" />}
       <Form form={batchSizeForm} layout="vertical" onFinish={saveBatchSize}>
+        <Form.Item name="name" label="Batch name" rules={[{ required: true, whitespace: true,
+          message: 'Enter a batch name' }]}><Input maxLength={100} /></Form.Item>
+        <Form.Item name="description" label="Description"><Input.TextArea rows={2} /></Form.Item>
         <div className="form-pair recipe-volume-fields"><Form.Item name="batch_size" label="Batch size"
           rules={[{ required: true, message: 'Enter a batch size' }]}>
           <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
