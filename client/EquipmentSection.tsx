@@ -673,7 +673,12 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(selectedModel.kind)}</span>
         <h2>{selectedModel.name}</h2><p className="muted">Specifications shared by all units of this model.</p></div>
         <Button icon={<PlusOutlined />} onClick={() => setAddingUnit(true)}>Add unit</Button></div>
-      <div className="equipment-model-product">
+      <div className="equipment-model-overview">
+        <div className="equipment-model-product-image">
+          {modelImageSrc ? <img src={modelImageSrc} alt={selectedModel.name} /> : <span className="muted">No product image</span>}
+          <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit model image"
+            onClick={() => { setImageEdit(undefined); setEditModelImage(true); }}>Edit image</Button>
+        </div>
         <div className="equipment-model-product-details">
           {catalogParent?.manufacturer && <p className="muted">{catalogParent.manufacturer}</p>}
           <div className="equipment-parameter"><span>{modelProductUrl
@@ -683,13 +688,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
               onClick={() => { setProductUrlDraft(activeMedia?.row?.product_url || modelProductUrl || '');
                 setEditModelUrl(true); }} /></div>
         </div>
-        <div className="equipment-model-product-image">
-          {modelImageSrc ? <img src={modelImageSrc} alt={selectedModel.name} /> : <span className="muted">No product image</span>}
-          <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit model image"
-            onClick={() => { setImageEdit(undefined); setEditModelImage(true); }}>Edit image</Button>
-        </div>
-      </div>
-      <div className="equipment-parameters">
+      <div className="equipment-parameters equipment-model-parameters">
         <div className="equipment-parameter"><span>Capabilities:</span> {equipmentCapabilities(selectedModel)}</div>
         {selectedModel.has_liquid_containment && <div className="equipment-parameter"><span>
           Capacity: {capacityLabel(selectedModel.capacity_liters ?? undefined) || 'Not set'}</span>
@@ -744,6 +743,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
               ? 'brewery model' : 'catalog model'})`}</span>
           <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit model heat loss"
             onClick={() => setEditModelBoilHeatLoss(true)} /></div>}
+      </div>
       </div>
       {missingCapabilities.length > 0 && <Dropdown trigger={['click']} placement="bottomLeft"
         menu={{ items: missingCapabilities, triggerSubMenuAction: 'click', onClick: ({ key }) => setAddingCapability(key) }}>
@@ -907,12 +907,13 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       <Form key={selectedModel?.id || 'all'} form={unitForm} layout="vertical" preserve={false} initialValues={{ model_id: selectedModel?.id }}
         onFinish={async (values: { model_id: string; stock_id?: string; location_id?: string }) => {
         try {
-          const id = await createEquipmentUnit(db, values.model_id, values.stock_id, values.location_id);
+          const id = await createEquipmentUnit(db, selectedModel?.id || values.model_id, values.stock_id, values.location_id);
           setAddingUnit(false); await onChanged(); onSelect(id);
         } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
       }}>
-        <Form.Item name="model_id" label="Model" rules={[{ required: true }]}><Select showSearch optionFilterProp="label"
-          options={models.map(model => ({ value: model.id, label: model.name }))} /></Form.Item>
+        {!selectedModel && <Form.Item name="model_id" label="Model" rules={[{ required: true }]}>
+          <Select showSearch optionFilterProp="label" options={models.map(model => ({ value: model.id, label: model.name }))} />
+        </Form.Item>}
         <Form.Item name="stock_id" label="Stock ID"><Input maxLength={80} /></Form.Item>
         <Form.Item name="location_id" label="Location" normalize={(value, previousValue) => {
           if (value === newLocationOption) { openLocationCreate('unit'); return previousValue; }
