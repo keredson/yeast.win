@@ -22,9 +22,11 @@ export interface CatalogInventory { id: string; name: string; category: string; 
   extract_color_reference_value?: number | null; extract_color_reference_unit?: string | null;
   hop_form?: string | null; attenuation_pct?: number | null; grain_class?: string | null;
   manufacturer?: string | null; product_url?: string | null;
+  container_kind?: string | null; capacity_liters?: number | null; material?: string | null;
+  wood_species?: string | null; wood_origin?: string | null; connector_type?: string | null;
   image_src?: string | null; has_image?: boolean }
 export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
-export const catalogSchemaVersion = 33;
+export const catalogSchemaVersion = 34;
 export const inventoryCategories = ['Grain', 'Other fermentables', 'Hops', 'Yeast', 'Nutrient', 'Adjunct', 'Chemical', 'Packaging', 'Other'] as const;
 export const catalogModelTables = {
   manufacturers: `CREATE TABLE IF NOT EXISTS manufacturers (
@@ -66,6 +68,9 @@ export const catalogSupplyTables = {
     supply_id TEXT PRIMARY KEY NOT NULL, attenuation_pct REAL)`,
   supply_grain_classes: `CREATE TABLE IF NOT EXISTS supply_grain_classes (
     supply_id TEXT PRIMARY KEY NOT NULL, grain_class TEXT)`,
+  supply_container_specs: `CREATE TABLE IF NOT EXISTS supply_container_specs (
+    supply_id TEXT PRIMARY KEY NOT NULL, container_kind TEXT, capacity_liters REAL,
+    material TEXT, wood_species TEXT, wood_origin TEXT, connector_type TEXT)`,
   supply_products: `CREATE TABLE IF NOT EXISTS supply_products (
     supply_id TEXT PRIMARY KEY NOT NULL, manufacturer TEXT, product_url TEXT)`,
   supply_images: `CREATE TABLE IF NOT EXISTS supply_images (

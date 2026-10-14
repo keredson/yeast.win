@@ -147,7 +147,7 @@ export function openCatalogDb(dataDir: string): Database.Database {
   db.pragma('journal_mode = WAL');
   db.loadExtension(resolve(projectRoot, 'vendor/crsqlite.so'));
   const version = db.pragma('user_version', { simple: true }) as number;
-  if (version === catalogSchemaVersion) return db;
+  if (version === catalogSchemaVersion && hasTable(db, 'supply_container_specs__crsql_clock')) return db;
   if (version > catalogSchemaVersion) {
     db.close();
     throw new Error(`This server cannot open catalog version ${version}; update Brewlog first.`);

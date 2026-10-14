@@ -56,6 +56,35 @@ test('version 38 packaging links upgrade without losing containers or unrelated 
   }
 });
 
+test('version 38 workspaces gain container specs and preserve partial rows and unrelated data', () => {
+  for (const partial of [false, true]) {
+    const id = nanoid();
+    const before = openWorkspaceDb(id);
+    before.prepare("INSERT INTO supplies(id,name,category,default_unit,created_at) VALUES ('barrel','My barrel','Packaging','each',1)").run();
+    before.prepare("INSERT INTO supplies(id,name,category,default_unit,created_at) VALUES ('malt','My malt','Grain','g',1)").run();
+    if (partial) before.prepare(`INSERT INTO supply_container_specs
+      (supply_id,container_kind,material,wood_species,wood_origin)
+      VALUES ('barrel','barrel','wood','oak','French')`).run();
+    else {
+      before.prepare("SELECT crsql_as_table('supply_container_specs')").get();
+      before.exec('DROP TABLE supply_container_specs');
+    }
+    before.pragma('user_version = 38');
+    closeWorkspaceDb(before);
+
+    const after = openWorkspaceDb(id);
+    try {
+      assert.equal(after.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+      assert.ok(after.prepare("SELECT 1 FROM sqlite_master WHERE name = 'supply_container_specs__crsql_clock'").get());
+      assert.ok(after.prepare("SELECT id FROM supplies WHERE id='malt'").get());
+      assert.ok(after.prepare("SELECT id FROM supplies WHERE id='barrel'").get());
+      if (partial) assert.deepEqual(after.prepare("SELECT container_kind,material,wood_species,wood_origin FROM supply_container_specs WHERE supply_id='barrel'").get(),
+        { container_kind: 'barrel', material: 'wood', wood_species: 'oak', wood_origin: 'French' });
+      assert.equal(after.pragma('integrity_check', { simple: true }), 'ok');
+    } finally { closeWorkspaceDb(after); }
+  }
+});
+
 test('version 37 assigns legacy gravity roles and preserves partial assignments and unrelated rows', () => {
   for (const partial of [false, true]) {
     const workspaceId = nanoid();

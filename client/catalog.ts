@@ -87,8 +87,9 @@ export function openLocalCatalog(): Promise<DB> {
     profile('Catalog file open');
     const version = (await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version;
     if (version === catalogSchemaVersion) {
-      profile('Catalog schema ready');
-      return db;
+      const containerClock = await db.execO<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE name = 'supply_container_specs__crsql_clock'");
+      if (containerClock.length) { profile('Catalog schema ready'); return db; }
     }
     if (version === 11) {
       await db.exec('PRAGMA user_version = 12');
@@ -376,6 +377,11 @@ export function openLocalCatalog(): Promise<DB> {
       const specsClock = await tx.execO<{ name: string }>(
         "SELECT name FROM sqlite_master WHERE name = 'supply_other_fermentable_specs__crsql_clock'");
       if (!specsClock.length) await tx.exec("SELECT crsql_as_crr('supply_other_fermentable_specs')");
+      await tx.exec(catalogSupplyTables.supply_container_specs);
+      const containerClock = await tx.execO<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE name = 'supply_container_specs__crsql_clock'");
+      if (!containerClock.length) await tx.exec("SELECT crsql_as_crr('supply_container_specs')");
+      if (version < 34) await tx.exec("DELETE FROM sync_state WHERE key = 'lastRefreshAt'");
       const table = await tx.execO<{ name: string }>(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'supply_categories'");
       if (table.length) {
@@ -483,12 +489,15 @@ export async function queryCatalogSupplies(search: CatalogSearch = {}): Promise<
       other.typical_brix, other.extract_color_value, other.extract_color_scale,
       other.extract_color_reference_value, other.extract_color_reference_unit,
       gc.grain_class, p.manufacturer, p.product_url,
+      container.container_kind, container.capacity_liters, container.material,
+      container.wood_species, container.wood_origin, container.connector_type,
       image.image_url IS NOT NULL AS has_image
       FROM supplies s LEFT JOIN supply_grain_specs g ON g.supply_id = s.id
       LEFT JOIN supply_other_fermentable_specs other ON other.supply_id = s.id
       LEFT JOIN supply_hop_specs h ON h.supply_id = s.id
       LEFT JOIN supply_yeast_specs y ON y.supply_id = s.id
       LEFT JOIN supply_grain_classes gc ON gc.supply_id = s.id
+      LEFT JOIN supply_container_specs container ON container.supply_id = s.id
       LEFT JOIN supply_products p ON p.supply_id = s.id
       LEFT JOIN supply_images image ON image.supply_id = s.id
       ${where.clause} ORDER BY s.name COLLATE NOCASE${limit}`, args);

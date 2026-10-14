@@ -25,6 +25,33 @@ test('a new catalog has the current schema and no bundled products', () => {
   } finally { db.close(); }
 });
 
+test('a version 33 catalog gains container specs without losing existing products', () => {
+  for (const partial of [false, true]) {
+    const dir = directory();
+    const before = openCatalogDb(dir);
+    before.prepare("INSERT INTO supplies(id,name,category,unit) VALUES ('keg','5 gallon keg','Packaging','each')").run();
+    before.prepare("INSERT INTO supplies(id,name,category,unit) VALUES ('malt','Pale malt','Grain','g')").run();
+    if (partial) before.prepare("INSERT INTO supply_container_specs(supply_id,container_kind,capacity_liters) VALUES ('keg','keg',18.9271)").run();
+    else {
+      before.prepare("SELECT crsql_as_table('supply_container_specs')").get();
+      before.exec('DROP TABLE supply_container_specs');
+    }
+    before.pragma('user_version = 33');
+    before.close();
+
+    const after = openCatalogDb(dir);
+    try {
+      assert.equal(after.pragma('user_version', { simple: true }), catalogSchemaVersion);
+      assert.ok(after.prepare("SELECT 1 FROM sqlite_master WHERE name = 'supply_container_specs__crsql_clock'").get());
+      assert.ok(after.prepare("SELECT id FROM supplies WHERE id='malt'").get());
+      assert.ok(after.prepare("SELECT id FROM supplies WHERE id='keg'").get());
+      if (partial) assert.deepEqual(after.prepare("SELECT container_kind,capacity_liters FROM supply_container_specs WHERE supply_id='keg'").get(),
+        { container_kind: 'keg', capacity_liters: 18.9271 });
+      assert.equal(after.pragma('integrity_check', { simple: true }), 'ok');
+    } finally { after.close(); }
+  }
+});
+
 test('catalog URLs and unrelated content persist when legacy image bytes are removed', () => {
   const dir = directory();
   const before = openCatalogDb(dir);

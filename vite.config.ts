@@ -1,7 +1,8 @@
-import { defineConfig, loadEnv, type Plugin } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 
 const projectRoot = fileURLToPath(new URL('.', import.meta.url));
 
@@ -19,10 +20,11 @@ function appAssetManifest(): Plugin {
   };
 }
 
-export default defineConfig(({ mode, command }) => {
-  const apiPort = loadEnv(mode, projectRoot, 'BREWLOG_PORT').BREWLOG_PORT;
-  if (command === 'serve' && (process.env.BREWLOG_DEV_ROOT !== projectRoot || !apiPort)) {
-    throw new Error('Start the development app with yarn dev so Vite and the API use the same checkout and port.');
+export default defineConfig(({ command }) => {
+  const socketPath = resolve(projectRoot, '.brewlog-api.sock');
+  if (command === 'serve' && (process.env.BREWLOG_DEV_ROOT !== projectRoot
+    || process.env.BREWLOG_DEV_SOCKET !== socketPath)) {
+    throw new Error('Start the development app with yarn dev so Vite and the API use this checkout socket.');
   }
   return ({
   root: projectRoot,
@@ -59,7 +61,7 @@ export default defineConfig(({ mode, command }) => {
       }
     })
   ],
-  server: { proxy: { '/api': `http://127.0.0.1:${apiPort || 3001}` } },
+  server: { proxy: { '/api': { target: { host: 'localhost', port: 80, socketPath } } } },
   build: { outDir: 'dist' }
   });
 });
