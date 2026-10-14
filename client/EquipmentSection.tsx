@@ -907,12 +907,13 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       <Form key={selectedModel?.id || 'all'} form={unitForm} layout="vertical" preserve={false} initialValues={{ model_id: selectedModel?.id }}
         onFinish={async (values: { model_id: string; stock_id?: string; location_id?: string }) => {
         try {
-          const id = await createEquipmentUnit(db, values.model_id, values.stock_id, values.location_id);
+          const id = await createEquipmentUnit(db, selectedModel?.id || values.model_id, values.stock_id, values.location_id);
           setAddingUnit(false); await onChanged(); onSelect(id);
         } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
       }}>
-        <Form.Item name="model_id" label="Model" rules={[{ required: true }]}><Select showSearch optionFilterProp="label"
-          options={models.map(model => ({ value: model.id, label: model.name }))} /></Form.Item>
+        {!selectedModel && <Form.Item name="model_id" label="Model" rules={[{ required: true }]}>
+          <Select showSearch optionFilterProp="label" options={models.map(model => ({ value: model.id, label: model.name }))} />
+        </Form.Item>}
         <Form.Item name="stock_id" label="Stock ID"><Input maxLength={80} /></Form.Item>
         <Form.Item name="location_id" label="Location" normalize={(value, previousValue) => {
           if (value === newLocationOption) { openLocationCreate('unit'); return previousValue; }
