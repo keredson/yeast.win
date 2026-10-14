@@ -419,7 +419,7 @@ function catalogWhere(search: CatalogSearch, idColumn: string, categoryColumn: s
   return { clause: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', args };
 }
 
-/** Return only the model rows a screen needs; image bytes remain in SQLite. */
+/** Return only the model rows a screen needs, with image availability as booleans. */
 export async function queryCatalogModels(search: CatalogSearch = {}): Promise<CatalogEquipment[]> {
   const db = await openLocalCatalog();
   const where = catalogWhere(search, 'm.id', 'm.kind',
@@ -449,7 +449,12 @@ export async function queryCatalogModels(search: CatalogSearch = {}): Promise<Ca
     LEFT JOIN manufacturer_logos logo ON logo.manufacturer_name = m.manufacturer
     ${where.clause} ORDER BY m.model_name COLLATE NOCASE${limit}`, args);
   if (!rows.length) return [];
-  const byId = new Map(rows.map(row => [row.id, { ...row, measurement_channels: [] as CatalogMeasurementChannel[] }]));
+  const byId = new Map(rows.map(row => [row.id, {
+    ...row,
+    has_image: Boolean(row.has_image), has_thumbnail: Boolean(row.has_thumbnail),
+    has_manufacturer_logo: Boolean(row.has_manufacturer_logo),
+    measurement_channels: [] as CatalogMeasurementChannel[]
+  }]));
   const channels = await db.execO<CatalogMeasurementChannel>(`SELECT * FROM model_measurement_channels
     WHERE model_id IN (${rows.map(() => '?').join(', ')})`, rows.map(row => row.id));
   for (const channel of channels) byId.get(channel.model_id)?.measurement_channels.push(channel);
@@ -471,7 +476,7 @@ export async function queryCatalogSupplies(search: CatalogSearch = {}): Promise<
     "s.name || ' ' || coalesce(p.manufacturer, '') || ' ' || s.category");
   const limit = search.ids ? '' : ' LIMIT ?';
   const args = search.ids ? where.args : [...where.args, Math.min(5000, Math.max(1, search.limit ?? 80))];
-  return db.execO<CatalogInventory>(`SELECT s.id, s.name, s.category, s.unit,
+  const rows = await db.execO<CatalogInventory>(`SELECT s.id, s.name, s.category, s.unit,
       g.yield_pct, g.color_lovibond, h.alpha_acid_pct, h.hop_form, y.attenuation_pct,
       other.typical_brix, other.extract_color_value, other.extract_color_scale,
       other.extract_color_reference_value, other.extract_color_reference_unit,
@@ -485,6 +490,7 @@ export async function queryCatalogSupplies(search: CatalogSearch = {}): Promise<
       LEFT JOIN supply_products p ON p.supply_id = s.id
       LEFT JOIN supply_images image ON image.supply_id = s.id
       ${where.clause} ORDER BY s.name COLLATE NOCASE${limit}`, args);
+  return rows.map(row => ({ ...row, has_image: Boolean(row.has_image) }));
 }
 
 export async function catalogModelKinds(): Promise<string[]> {
