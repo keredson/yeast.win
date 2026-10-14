@@ -61,6 +61,7 @@ button, input, textarea { font: inherit; }
 .equipment-index { max-width: none; }
 .equipment-table { margin-top: 24px; }
 .equipment-table .ant-table-cell { overflow-wrap: anywhere; }
+.equipment-index .equipment-table .equipment-thumbnail-cell { padding: 0 !important; }
 .equipment-table-thumbnail { display: block; width: 20px; height: 20px; object-fit: contain; }
 .equipment-model-table-name { display: inline-flex; align-items: center; min-width: 0; }
 .equipment-capabilities { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
