@@ -127,7 +127,7 @@ The recipe Details section computes batch size, expected OG, FG, ABV, and estima
 | `pressure_measurements` | Corrected value, unit, uncertainty, instrument, and calibration. |
 | `carbonation_measurements` | Corrected value, unit, uncertainty, instrument or method. Planned carbonation targets can be represented separately as planned measurements/settings. |
 | `dissolved_oxygen_measurements` | Corrected value, unit, uncertainty, instrument, and calibration. Adding oxygen remains an `addition`. |
-| `temperature_control_events` | Controlled equipment, mode/context, target temperature and/or power setting, and optional `ended_at`. The same kind covers mashing, boiling, chilling, fermentation, and serving. |
+| `temperature_control_events` | Optional controlled equipment, mode/context, target temperature and/or power setting, and optional `ended_at`. The same kind covers mashing, boiling, chilling, fermentation, and serving. A recipe can leave equipment unassigned, so recording its batch action must not require a unit. |
 | `pressure_control_events` | Equipment and pressure setpoint. A setpoint is distinct from a pressure measurement. |
 | `transfers` | Optional destination vessel equipment ID and transferred quantity with unit. Transfer is a batch action, not a bare milestone. Recipe and pending batch actions can select the destination before recording; recording can confirm or change it. Referenced vessel equipment is archived when removed from the active equipment list. The old source-vessel column remains unused for existing databases. |
 | `packaging` | Container type/size, count, packaged quantity, and optional inventory item consumed. |

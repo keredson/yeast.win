@@ -123,10 +123,9 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
           supply_id: inventory.find(item => item.id === itemId)?.supply_id || plannedString('supply_id') || null,
           quantity: amount.quantity, unit: amount.unit };
       } else if (kind === 'temperature_control') {
-        if (!values.equipment_id) throw new Error('Choose controlled equipment');
         if (chillToTarget && values.target_value == null) throw new Error('Enter a target temperature');
         if (values.target_value == null && values.power_watts == null) throw new Error('Enter a target or power');
-        payload = { equipment_id: values.equipment_id, mode: values.mode || 'hold',
+        payload = { equipment_id: values.equipment_id || null, mode: values.mode || 'hold',
           target_value: values.target_value ?? null, target_unit: values.target_unit || null,
           power_watts: values.power_watts ?? null, ended_at: values.ended_at ? fromDatetimeLocal(values.ended_at) : null };
       } else if (kind === 'pressure_control') {
@@ -234,7 +233,8 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
       <QuantityFields unit={selectedUnit || initialUnit} />
     </>}
     {(kind === 'temperature_control' || kind === 'pressure_control') && <>
-      <Form.Item name="equipment_id" label="Controlled equipment" rules={[{ required: true }]}><Select
+      <Form.Item name="equipment_id" label="Equipment"
+        rules={kind === 'pressure_control' ? [{ required: true }] : []}><Select allowClear
         options={equipment.map(item => ({ value: item.id, label: item.name }))} placeholder="Choose equipment" /></Form.Item>
       {kind === 'temperature_control' && <Form.Item name="mode" label="Mode"><Select options={[
         { value: 'heat', label: 'Heat' }, { value: 'chill', label: 'Chill' }, { value: 'hold', label: 'Hold' }
