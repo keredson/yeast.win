@@ -13,6 +13,7 @@ import { assignEquipmentToBatch, createEquipment, createEquipmentUnit, deleteEqu
   updateEquipmentModelAttribute, updateEquipmentModelMeasurementRange,
   updateEquipmentUnitPostBoilLoss, clearEquipmentUnitOverrides,
   updateEquipmentTemperatureOffset, latestMeasuredMashEfficiency,
+  readEquipmentModelMedia, saveEquipmentModelMedia, type EquipmentModelMedia,
   type Batch, type Equipment, type EquipmentModelOverrideField,
   type EquipmentSpecifications, type EquipmentUse, type LocalDb } from './db.ts';
 import { capacityInLiters, capacityLabel, capacityUnits } from '../shared/capacity.ts';
@@ -184,6 +185,12 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const [editModelBoilHeatLoss, setEditModelBoilHeatLoss] = useState(false);
   const [editModelField, setEditModelField] = useState<EquipmentModelOverrideField | null>(null);
   const [editModelRange, setEditModelRange] = useState<string | null>(null);
+  const [editModelUrl, setEditModelUrl] = useState(false);
+  const [editModelImage, setEditModelImage] = useState(false);
+  const [productUrlDraft, setProductUrlDraft] = useState('');
+  const [imageEdit, setImageEdit] = useState<File | null | undefined>();
+  const [modelMedia, setModelMedia] = useState<{ modelId: string; row: EquipmentModelMedia | null; imageUrl: string | null } | null>(null);
+  const [mediaRevision, setMediaRevision] = useState(0);
   const [newTemperatureCalibration, setNewTemperatureCalibration] = useState(false);
   const [editIdentity, setEditIdentity] = useState(false);
   const [editPostBoilLoss, setEditPostBoilLoss] = useState(false);
@@ -200,8 +207,46 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const modelLossUnit = useRef(preferredUnits.volume);
   const unitLossUnit = useRef(preferredUnits.volume);
   const item = equipment.find(row => row.id === selectedId) || null;
+  const itemModel = item ? models.find(row => row.id === item.model_id) : undefined;
+  const itemCatalogModel = itemModel ? catalog.find(row => row.id === itemModel.catalog_model_id) : undefined;
+  const modelFacts: { label: string; value: string }[] = itemModel ? [
+    ...(itemModel.capacity_liters != null ? [{ label: 'Capacity', value: capacityLabel(itemModel.capacity_liters)! }] : []),
+    ...(itemModel.rated_power_watts != null ? [{ label: 'Rated heating power', value: `${itemModel.rated_power_watts} W` }] : []),
+    ...(itemModel.rated_heat_removal_watts != null
+      ? [{ label: 'Rated heat removal', value: `${itemModel.rated_heat_removal_watts} W` }] : []),
+    ...(itemModel.max_pressure_kpa != null
+      ? [{ label: 'Pressure rating', value: pressureLabel(itemModel.max_pressure_kpa, preferredUnits.pressure) }] : []),
+    ...(itemModel.has_temperature_control && (itemModel.min_temperature_c != null || itemModel.max_temperature_c != null)
+      ? [{ label: 'Temperature range', value: `${itemModel.min_temperature_c ?? '—'}–${itemModel.max_temperature_c ?? '—'} °C` }] : []),
+    ...(itemModel.boil_heat_loss_watts != null
+      ? [{ label: 'Heat loss at boil', value: `${Math.round(itemModel.boil_heat_loss_watts)} W` }] : []),
+    ...(itemModel.measurement_channels || []).map(channel => ({ label: measurementLabel(channel.measurement_kind),
+      value: channel.measurement_min != null && channel.measurement_max != null
+        ? rangeLabel(channel.measurement_min, channel.measurement_max,
+          channel.measurement_scale || channel.measurement_unit || undefined) : 'Available' }))
+  ] : [];
   const selectedModel = models.find(row => row.id === selectedId) || null;
   const catalogParent = selectedModel ? catalog.find(row => row.id === selectedModel.catalog_model_id) : undefined;
+  const activeModel = selectedModel || itemModel;
+  const activeCatalogModel = selectedModel ? catalogParent : itemCatalogModel;
+  const activeMedia = modelMedia?.modelId === activeModel?.id ? modelMedia : null;
+  const modelImageSrc = activeMedia?.imageUrl || activeCatalogModel?.image_src;
+  const modelProductUrl = activeMedia?.row?.product_url || activeCatalogModel?.product_url;
+  useEffect(() => {
+    if (!activeModel) return;
+    let cancelled = false;
+    let imageUrl: string | null = null;
+    setModelMedia(null);
+    void readEquipmentModelMedia(db, activeModel.id).then(row => {
+      if (row?.image_bytes?.length && row.image_mime_type) {
+        imageUrl = URL.createObjectURL(new Blob([new Uint8Array(row.image_bytes)], { type: row.image_mime_type }));
+      }
+      if (cancelled) {
+        if (imageUrl) URL.revokeObjectURL(imageUrl);
+      } else setModelMedia({ modelId: activeModel.id, row, imageUrl });
+    }).catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => { cancelled = true; if (imageUrl) URL.revokeObjectURL(imageUrl); };
+  }, [db, activeModel?.id, mediaRevision]);
   const addingCatalogDefault = !!addingCapability && !!catalogParent && (addingCapability.startsWith('measurement:')
     ? !!catalogParent.measurement_channels?.some(channel => channel.measurement_kind === addingCapability.slice('measurement:'.length))
     : !!catalogParent[modelCapabilityFlags[addingCapability as keyof typeof modelCapabilityFlags]]);
@@ -225,12 +270,8 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     || !!item.has_temperature_control);
   const createPrimaryMeasurement = !!creatingKind && !selectedCatalogModel && !!measurementRangeUnits[creatingKind];
   const catalogCreationChannels = selectedCatalogModel?.measurement_channels || [];
-  const ratedEstimate = !item?.has_heating || specs.rated_power_watts == null || specs.boil_heat_loss_watts == null
-    ? null : predictedBoilOff(specs.rated_power_watts, specs.boil_heat_loss_watts);
-  const boilHeatLossSource = specs.unit_boil_heat_loss_watts != null ? 'this unit'
-    : specs.workspace_model_boil_heat_loss_watts != null ? 'brewery model'
-      : specs.catalog_model_boil_heat_loss_watts != null ? 'catalog model' : null;
-  const thermalKind = !!item && (!!item.has_cooling || !!item.has_temperature_control);
+  const ratedEstimate = !item?.has_heating || specs.rated_power_watts == null || specs.unit_boil_heat_loss_watts == null
+    ? null : predictedBoilOff(specs.rated_power_watts, specs.unit_boil_heat_loss_watts);
   const createCapacity = !!creatingKind && (selectedCatalogModel
     ? !!selectedCatalogModel.has_liquid_containment : capacityKinds.has(creatingKind));
   const createHeating = !!creatingKind && (selectedCatalogModel
@@ -596,6 +637,22 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(selectedModel.kind)}</span>
         <h2>{selectedModel.name}</h2><p className="muted">Specifications shared by all units of this model.</p></div>
         <Button icon={<PlusOutlined />} onClick={() => setAddingUnit(true)}>Add unit</Button></div>
+      <div className="equipment-model-product">
+        <div className="equipment-model-product-details">
+          {catalogParent?.manufacturer && <p className="muted">{catalogParent.manufacturer}</p>}
+          <div className="equipment-parameter"><span>{modelProductUrl
+            ? <a href={modelProductUrl} target="_blank" rel="noopener noreferrer">Product details</a>
+            : 'Product URL: Not set'}</span>
+            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit model product URL"
+              onClick={() => { setProductUrlDraft(activeMedia?.row?.product_url || modelProductUrl || '');
+                setEditModelUrl(true); }} /></div>
+        </div>
+        <div className="equipment-model-product-image">
+          {modelImageSrc ? <img src={modelImageSrc} alt={selectedModel.name} /> : <span className="muted">No product image</span>}
+          <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit model image"
+            onClick={() => { setImageEdit(undefined); setEditModelImage(true); }}>Edit image</Button>
+        </div>
+      </div>
       <div className="equipment-parameters">
         <div className="equipment-parameter"><span>Capabilities:</span> {equipmentCapabilities(selectedModel)}</div>
         {selectedModel.has_liquid_containment && <div className="equipment-parameter"><span>
@@ -671,26 +728,27 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     </section> : !item ? <Empty description="Equipment not found" /> : <section className="record-detail">
         <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(item.kind)}</span>
           <div className="equipment-title"><h2>{item.stock_id || `Unit ${item.id.slice(0, 6)}`}</h2></div></div></div>
+        {itemModel && <article className="equipment-model-card" aria-label="Equipment model">
+          {modelImageSrc && <img className="equipment-model-image" src={modelImageSrc} alt="" />}
+          <div className="equipment-model-card-body">
+            <span className="eyebrow">Model</span>
+            <h3><a href={`${basePath}/equipment/${equipmentModelPathSegment(itemModel, models)}`}
+              onClick={event => { event.preventDefault(); onSelect(itemModel.id); }}>{itemModel.name}</a></h3>
+            <p className="muted">{itemCatalogModel?.manufacturer && `${itemCatalogModel.manufacturer} · `}{equipmentKindLabel(itemModel.kind)}</p>
+            {modelFacts.length > 0 && <dl className="equipment-model-facts">{modelFacts.map(fact =>
+              <div key={fact.label}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}</dl>}
+          </div>
+        </article>}
+        <section className="equipment-unit-section" aria-label="This unit">
+        <h3>This unit</h3>
         <div className="equipment-parameters">
           <div className="equipment-parameter"><span>Stock ID: {item.stock_id || 'Not set'}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit Stock ID" onClick={() => setEditIdentity(true)} /></div>
-          {item.has_liquid_containment && <div className="equipment-parameter">Capacity: {capacityLabel(specs.capacity_liters ?? undefined) || 'Not set'}</div>}
-          {item.has_pressure_rating && <div className="equipment-parameter">
-            Pressure rating: {pressureLabel(specs.max_pressure_kpa, preferredUnits.pressure)}</div>}
-          {item.has_heating && <div className="equipment-parameter">Rated power: {specs.rated_power_watts != null
-            ? `${specs.rated_power_watts} W` : 'Not set'}</div>}
-          {thermalKind && <div className="equipment-parameter"><span>
-            {specs.has_temperature_control && <>Temperature range: {
-              specs.min_temperature_c == null && specs.max_temperature_c == null ? 'Not set'
-                : `${specs.min_temperature_c ?? '—'}–${specs.max_temperature_c ?? '—'} °C`}<br /></>}
-            {item.has_cooling &&
-              <>Rated heat removal: {specs.rated_heat_removal_watts == null
-                ? 'Not set' : `${specs.rated_heat_removal_watts} W`}</>}</span></div>}
           {hasTemperatureReading && <div className="equipment-parameter"><span>Temperature offset: {specs.temperature_offset_c == null
             ? 'Not calibrated' : `${specs.temperature_offset_c > 0 ? '+' : ''}${Number(specs.temperature_offset_c.toFixed(2))} °C`}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit temperature offset" onClick={() => setNewTemperatureCalibration(true)} /></div>}
-          {item.has_heating && boilOffKinds.has(item.kind) && <div className="equipment-parameter"><span>Heat loss at boil: {specs.boil_heat_loss_watts == null
-            ? 'Not calibrated' : `${Math.round(specs.boil_heat_loss_watts)} W (${boilHeatLossSource})`}</span>
+          {item.has_heating && boilOffKinds.has(item.kind) && <div className="equipment-parameter"><span>Heat loss at boil: {specs.unit_boil_heat_loss_watts == null
+            ? 'Not calibrated' : `${Math.round(specs.unit_boil_heat_loss_watts)} W`}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit heat loss at boil"
               onClick={() => setNewBoilCalibration(true)} /></div>}
           {ratedEstimate != null && <div className="equipment-parameter">Estimated boil-off at rated power: {Number(ratedEstimate.toFixed(2))} L/h</div>}
@@ -699,18 +757,12 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
               : `${item.post_boil_loss_liters} L (${item.unit_post_boil_loss_liters != null ? 'this unit' : 'model'})`}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Override post-boil wort retained for this unit"
               onClick={() => { unitLossUnit.current = preferredUnits.volume; setEditPostBoilLoss(true); }} /></div>}
-          {['all_in_one', 'mash_tun', 'kettle', 'electric_kettle'].includes(item.kind) &&
-            <div className="equipment-parameter">Mash efficiency: {specs.mash_efficiency_pct != null
-              ? `${specs.mash_efficiency_pct}% (set)` : recentMashEfficiency != null ? `${recentMashEfficiency}% (recent batch)` : 'Not set'}<br />
-              Grain absorption: {specs.grain_absorption_l_per_kg == null ? 'Not set' : `${specs.grain_absorption_l_per_kg} L/kg`}</div>}
-          {item.measurement_channels?.map(channel => <div key={channel.id} className="equipment-parameter"><span>
-              {measurementLabel(channel.measurement_kind)}: {channel.measurement_min != null && channel.measurement_max != null
-                ? rangeLabel(channel.measurement_min, channel.measurement_max,
-                  channel.measurement_scale || channel.measurement_unit || undefined) : 'Available'}</span>
-            </div>)}
+          {recentMashEfficiency != null && <div className="equipment-parameter">
+            Recent measured mash efficiency: {recentMashEfficiency}%</div>}
           {profile?.fields.map(field => <div key={field.key} className="equipment-parameter"><span>{field.label}: {calibrationValues[field.key] == null ? 'Not calibrated' : String(calibrationValues[field.key])}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${field.label}`} onClick={() => setEditCalibration(true)} /></div>)}
         </div>
+        </section>
         {(batchUses.length > 0 || availableBatches.length > 0) && <div className="equipment-batches">
           <h3>Batches</h3>
           {batchUses.length > 0 && <Table<EquipmentUse> className="equipment-table" dataSource={batchUses}
@@ -736,6 +788,49 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           <Button type="text" danger>Delete</Button>
         </Popconfirm></div>
       </section>}
+    <Modal title="Edit model product URL" open={editModelUrl} onCancel={() => setEditModelUrl(false)} footer={null} destroyOnHidden>
+      <Form layout="vertical" onFinish={async () => {
+        if (!selectedModel) return;
+        try {
+          await saveEquipmentModelMedia(db, selectedModel.id,
+            productUrlDraft.trim() === (catalogParent?.product_url || '') ? null : productUrlDraft, undefined);
+          setEditModelUrl(false);
+          setMediaRevision(value => value + 1);
+          await onChanged();
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+      }}>
+        <Form.Item label="Product URL">
+          <Input type="url" aria-label="Product URL" value={productUrlDraft} onChange={event => setProductUrlDraft(event.target.value)}
+            placeholder="https://manufacturer.example/product" />
+        </Form.Item>
+        {activeMedia?.row?.product_url && catalogParent?.product_url &&
+          <Button type="text" onClick={() => setProductUrlDraft(catalogParent.product_url || '')}>Restore product URL to catalog default</Button>}
+        <Button type="primary" htmlType="submit">Save product URL</Button>
+      </Form>
+    </Modal>
+    <Modal title="Edit model image" open={editModelImage} onCancel={() => setEditModelImage(false)} footer={null} destroyOnHidden>
+      <Form layout="vertical" onFinish={async () => {
+        if (!selectedModel || imageEdit === undefined) return;
+        try {
+          const image = imageEdit === null ? null
+            : { bytes: new Uint8Array(await imageEdit.arrayBuffer()), mimeType: imageEdit.type };
+          await saveEquipmentModelMedia(db, selectedModel.id, undefined, image);
+          setEditModelImage(false);
+          setMediaRevision(value => value + 1);
+          await onChanged();
+        } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+      }}>
+        <Form.Item label="Product image">
+          <input type="file" accept="image/jpeg,image/png,image/webp" aria-label="Product image"
+            onChange={event => setImageEdit(event.target.files?.[0])} />
+        </Form.Item>
+        {imageEdit instanceof File && <p className="muted">Selected: {imageEdit.name}</p>}
+        {activeMedia?.row?.image_bytes && <Button type="text" onClick={() => setImageEdit(null)}>
+          Restore image to {catalogParent?.image_src ? 'catalog default' : 'no image'}</Button>}
+        {imageEdit === null && <p className="muted">The saved image will be removed.</p>}
+        <Button type="primary" htmlType="submit" disabled={imageEdit === undefined}>Save image</Button>
+      </Form>
+    </Modal>
     <Modal title="Add from catalog" open={catalogPickerOpen} onCancel={() => setCatalogPickerOpen(false)} footer={null} destroyOnHidden>
       <div className="equipment-catalog-filters">
         <Input.Search aria-label="Search equipment models" placeholder="Search equipment models" allowClear value={catalogQuery}
@@ -934,6 +1029,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       <Form key={item?.id} layout="vertical" onFinish={saveBoilCalibration}
         initialValues={{ power_watts: specs.rated_power_watts }}>
         <p className="muted">Measure volume loss during a steady boil. Only the derived heat loss is saved for this unit{item?.stock_id ? ` (stock ${item.stock_id})` : ''}.</p>
+        {itemModel?.boil_heat_loss_watts != null && <p className="muted">Until this unit is calibrated, calculations use the model's {Math.round(itemModel.boil_heat_loss_watts)} W heat loss.</p>}
         <Form.Item name="power_watts" label="Power used (W)" rules={[{ required: true }]}><InputNumber className="full-width" min={1} /></Form.Item>
         <div className="form-pair"><Form.Item name="start_liters" label="Start volume (L)" rules={[{ required: true }]}><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
           <Form.Item name="end_liters" label="End volume (L)" rules={[{ required: true }]}><InputNumber className="full-width" min={0} step="any" /></Form.Item></div>
