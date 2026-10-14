@@ -426,16 +426,37 @@ export function App() {
     setEquipmentWorkspaceId(targetWorkspaceId);
   }, []);
 
-  const runSync = useCallback(async (activeDb: LocalDb, targetWorkspaceId: string) => {
+  const runSync = useCallback(async (activeDb: LocalDb, targetWorkspaceId: string, includeCatalog = false) => {
     if (activeWorkspaceId.current !== targetWorkspaceId) return;
     setSyncPhase('syncing');
     setSyncProgress(null);
     try {
-      await syncNow(activeDb, targetWorkspaceId, progress => {
-        if (activeWorkspaceId.current === targetWorkspaceId) setSyncProgress(progress);
-      });
+      const [breweryResult, catalogResult] = await Promise.allSettled([
+        syncNow(activeDb, targetWorkspaceId, progress => {
+          if (activeWorkspaceId.current === targetWorkspaceId) setSyncProgress(progress);
+        }),
+        includeCatalog ? (async () => {
+          const catalogDb = await openLocalCatalog();
+          return syncLocalCatalog(catalogDb, (applied, total) => {
+            if (activeWorkspaceId.current === targetWorkspaceId) setCatalogSyncProgress({ applied, total });
+          }, true);
+        })() : Promise.resolve(false)
+      ]);
       if (activeWorkspaceId.current !== targetWorkspaceId) return;
-      await refresh(activeDb, targetWorkspaceId);
+      setCatalogSyncProgress(null);
+      if (catalogResult.status === 'fulfilled' && catalogResult.value) {
+        const updated = await readLocalCatalog(await openLocalCatalog());
+        if (activeWorkspaceId.current !== targetWorkspaceId) return;
+        setCatalogEquipment(updated.equipment);
+        setCatalogInventory(updated.inventory);
+        setCatalogRevision(revision => revision + 1);
+      }
+      if (breweryResult.status === 'fulfilled' || catalogResult.status === 'fulfilled' && catalogResult.value) {
+        await refresh(activeDb, targetWorkspaceId);
+      }
+      if (breweryResult.status === 'rejected') throw breweryResult.reason;
+      if (catalogResult.status === 'rejected') throw new Error(`Catalog sync failed: ${
+        catalogResult.reason instanceof Error ? catalogResult.reason.message : String(catalogResult.reason)}`);
       const syncedAt = Date.now();
       localStorage.setItem(lastSyncKey(targetWorkspaceId), String(syncedAt));
       setLastSyncedAt(syncedAt);
@@ -448,6 +469,7 @@ export function App() {
       if (activeWorkspaceId.current !== targetWorkspaceId) return;
       setSyncPhase('failed');
       setSyncProgress(null);
+      setCatalogSyncProgress(null);
       if (cause instanceof ApiUnavailableError) setServerDisconnected(true);
       else if (navigator.onLine) setError(cause instanceof Error ? cause.message : 'Sync failed');
     }
@@ -619,7 +641,7 @@ export function App() {
             rememberSession(updated); setSession(updated); setAvatarVersion(Date.now()); }}
           preferredUnits={preferredUnits} onPreferredUnitsChange={updatePreferredUnits}
           syncPhase={syncPhase} syncStatus={timeSinceSync(lastSyncedAt, now)} canSync={!!db && !!workspaceId}
-          onManualSync={() => { if (db && workspaceId) void runSync(db, workspaceId); }}
+          onManualSync={() => { if (db && workspaceId) void runSync(db, workspaceId, true); }}
           autoSync={autoSync} onAutoSyncChange={enabled => { localStorage.setItem(autoSyncKey, enabled ? '1' : '0'); setAutoSync(enabled); }}
           onSignOut={signOut} /> : !workspaceId ? <Empty description="Add a brewery in Settings to begin">
             <Button type="primary" onClick={() => showSection('me')}>Open Settings</Button></Empty> :

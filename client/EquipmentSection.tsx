@@ -28,6 +28,7 @@ import { LocationFields } from './LocationFields.tsx';
 import { heatLossFromBoil, predictedBoilOff } from './boilOff.ts';
 import { convertUnit, unitOptions, unitGroups, type PreferredUnits } from '../shared/units.ts';
 import { measurementKinds } from './constants.ts';
+import { CatalogImage, useCatalogMedia } from './CatalogImage.tsx';
 
 function rangeLabel(min: number, max: number, scale: string | undefined): string {
   return `${min}–${max}${scale === 'SG' ? ' (specific gravity)' : ` ${scale || ''}`}`;
@@ -263,7 +264,8 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const activeModel = selectedModel || itemModel;
   const activeCatalogModel = selectedModel ? catalogParent : itemCatalogModel;
   const activeMedia = modelMedia?.modelId === activeModel?.id ? modelMedia : null;
-  const modelImageSrc = activeMedia?.imageUrl || activeCatalogModel?.image_src;
+  const catalogModelImageUrl = useCatalogMedia('model', activeCatalogModel?.has_image ? activeCatalogModel.id : null);
+  const modelImageSrc = activeMedia?.imageUrl || catalogModelImageUrl;
   const modelProductUrl = activeMedia?.row?.product_url || activeCatalogModel?.product_url;
   useEffect(() => {
     if (!activeModel) return;
@@ -717,8 +719,12 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           { title: '', key: 'image', width: 20, className: 'equipment-thumbnail-cell', render: (_, row) => {
             if (row.child) return null;
             const catalogImage = catalog.find(model => model.id === row.model.catalog_model_id);
-            const thumbnail = modelThumbnails[row.model.id] || catalogImage?.thumbnail_src || catalogImage?.image_src;
-            return thumbnail ? <img className="equipment-table-thumbnail" src={thumbnail} alt="" loading="lazy" /> : null;
+            const thumbnail = modelThumbnails[row.model.id];
+            return thumbnail ? <img className="equipment-table-thumbnail" src={thumbnail} alt="" loading="lazy" />
+              : catalogImage?.has_thumbnail ? <CatalogImage kind="thumbnail" id={catalogImage.id}
+                className="equipment-table-thumbnail" />
+                : catalogImage?.has_image ? <CatalogImage kind="model" id={catalogImage.id}
+                  className="equipment-table-thumbnail" /> : null;
           } },
           { title: 'Model', key: 'model', width: 240, render: (_, row) => {
             if (row.child) return null;
@@ -960,7 +966,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         </Form.Item>
         {imageEdit instanceof File && <p className="muted">Selected: {imageEdit.name}</p>}
         {activeMedia?.row?.image_bytes && <Button type="text" onClick={() => setImageEdit(null)}>
-          Restore image to {catalogParent?.image_src ? 'catalog default' : 'no image'}</Button>}
+          Restore image to {catalogParent?.has_image ? 'catalog default' : 'no image'}</Button>}
         {imageEdit === null && <p className="muted">The saved image will be removed.</p>}
         <Button type="primary" htmlType="submit" disabled={imageEdit === undefined}>Save image</Button>
       </Form>
@@ -979,7 +985,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
             <span className="catalog-explorer-option-name"><strong>{model.name}</strong>
               <small>{equipmentKindLabel(model.kind)}{model.measurement_channels?.length
                 ? ` · ${channelSummary(model.measurement_channels)}` : ''}</small></span>
-            {model.thumbnail_src && <img className="catalog-explorer-thumbnail" src={model.thumbnail_src} alt="" loading="lazy" />}
+            {model.has_thumbnail && <CatalogImage kind="thumbnail" id={model.id} className="catalog-explorer-thumbnail" />}
           </button>
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching equipment' : 'No catalog equipment available'} />}
@@ -1012,9 +1018,11 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       {creatingKind && <Form key={`${creatingKind}:${selectedCatalogModel?.id || 'custom'}`} form={equipmentForm} layout="vertical" onFinish={create} preserve={false}
         initialValues={initialEquipmentValues}>
         {selectedCatalogModel && <div className="equipment-catalog-source">
-          {selectedCatalogModel.image_src && <img src={selectedCatalogModel.image_src} alt={selectedCatalogModel.name} />}
+          {selectedCatalogModel.has_image && <CatalogImage kind="model" id={selectedCatalogModel.id}
+            alt={selectedCatalogModel.name} immediate />}
           {selectedCatalogModel.manufacturer && <div className="equipment-catalog-manufacturer">
-            {selectedCatalogModel.manufacturer_logo_src && <img src={selectedCatalogModel.manufacturer_logo_src} alt="" />}
+            {selectedCatalogModel.has_manufacturer_logo && <CatalogImage kind="logo"
+              id={selectedCatalogModel.manufacturer} immediate />}
             {selectedCatalogModel.manufacturer_website_url
               ? <a href={selectedCatalogModel.manufacturer_website_url} target="_blank" rel="noopener noreferrer">
                 {selectedCatalogModel.manufacturer}</a>

@@ -16,6 +16,7 @@ import { inventoryPathSegment } from './inventoryRoutes.ts';
 import { LocationFields } from './LocationFields.tsx';
 import { LocationTreeSelect, newLocationOption } from './LocationTreeSelect.tsx';
 import { locationDescendantIds } from './locationRoutes.ts';
+import { CatalogImage, useCatalogMedia } from './CatalogImage.tsx';
 
 function stockTotal(rows: InventoryItem[], balances: Record<string, number | null>, unit: string): number | null | undefined {
   let total = 0;
@@ -160,7 +161,8 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const item = supplies.find(row => row.id === selectedId) || null;
   const catalogProduct = catalog.find(row => row.id === item?.catalog_supply_id);
   const activeMedia = supplyMedia?.supplyId === item?.id ? supplyMedia : null;
-  const productImageUrl = activeMedia?.imageUrl || catalogProduct?.image_src;
+  const catalogProductImageUrl = useCatalogMedia('supply', catalogProduct?.has_image ? catalogProduct.id : null);
+  const productImageUrl = activeMedia?.imageUrl || catalogProductImageUrl;
   const productUrl = activeMedia?.row?.product_url || catalogProduct?.product_url;
   const productRows = items.filter(row => row.supply_id === item?.id);
   const stockTreeRows = stockTree(productRows);
@@ -430,9 +432,11 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
             expandable={{ defaultExpandAllRows: true, expandIconColumnIndex: 1 }} scroll={{ x: 660 }}
             columns={[{ title: '', key: 'image', width: 20, className: 'inventory-thumbnail-cell', render: (_, row) => {
               if (row.child) return null;
-              const catalogImage = catalog.find(product => product.id === row.supply.catalog_supply_id)?.image_src;
-              const thumbnail = supplyThumbnails[row.supply.id] || catalogImage;
-              return thumbnail ? <img className="inventory-table-thumbnail" src={thumbnail} alt="" loading="lazy" /> : null;
+              const thumbnail = supplyThumbnails[row.supply.id];
+              const catalogProduct = catalog.find(product => product.id === row.supply.catalog_supply_id);
+              return thumbnail ? <img className="inventory-table-thumbnail" src={thumbnail} alt="" loading="lazy" />
+                : catalogProduct?.has_image ? <CatalogImage kind="supply" id={catalogProduct.id}
+                  className="inventory-table-thumbnail" /> : null;
             } },
             { title: 'Item', key: 'name', render: (_, row) => row.child ? null
               : <a href={`${basePath}/inventory/${inventoryPathSegment(row.supply, supplies)}`}
@@ -562,7 +566,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
           onChange={event => setImageEdit(event.target.files?.[0])} /></Form.Item>
         {imageEdit instanceof File && <p className="muted">Selected: {imageEdit.name}</p>}
         {activeMedia?.row?.image_bytes && <Button type="text" onClick={() => setImageEdit(null)}>
-          Restore image to {catalogProduct?.image_src ? 'catalog default' : 'no image'}</Button>}
+          Restore image to {catalogProduct?.has_image ? 'catalog default' : 'no image'}</Button>}
         {imageEdit === null && <p className="muted">The saved image will be removed.</p>}
         <Button type="primary" htmlType="submit" disabled={imageEdit === undefined}>Save image</Button>
       </Form>
@@ -585,7 +589,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
                 {product.color_lovibond != null ? ` · ${product.color_lovibond} °L` : ''}
                 {product.typical_brix != null ? ` · ${product.typical_brix} °Brix` : ''}
                 {product.extract_color_value != null ? ` · ${product.extract_color_value} ${product.extract_color_scale || ''}` : ''}</small></span>
-            {product.image_src && <img className="catalog-explorer-thumbnail" src={product.image_src} alt="" loading="lazy" />}
+            {product.has_image && <CatalogImage kind="supply" id={product.id} className="catalog-explorer-thumbnail" />}
           </button>
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching products' : 'No catalog products available'} />}
@@ -644,7 +648,8 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
         </Form.Item>}
         {selectedCatalogProduct && (newStockProduct || catalogProductChosen || newItemName === selectedCatalogProduct.name) &&
           <div className="inventory-catalog-source">
-            {selectedCatalogProduct.image_src && <img src={selectedCatalogProduct.image_src} alt={selectedCatalogProduct.name} />}
+            {selectedCatalogProduct.has_image && <CatalogImage kind="supply" id={selectedCatalogProduct.id}
+              alt={selectedCatalogProduct.name} immediate />}
             <div><strong>{selectedCatalogProduct.name}</strong>
               {selectedCatalogProduct.manufacturer && <p>{selectedCatalogProduct.manufacturer}</p>}
               {selectedCatalogProduct.product_url && <p><a href={selectedCatalogProduct.product_url}
