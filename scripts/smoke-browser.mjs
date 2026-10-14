@@ -306,7 +306,11 @@ try {
     throw new Error('VEVOR import offered cooling without a model cooling capability');
   }
   await catalogEquipmentDialog.getByRole('button', { name: 'Create equipment' }).click();
-  await page.getByText('Capacity: 35 L').waitFor();
+  const unitModelCard = page.locator('.equipment-model-card');
+  await unitModelCard.getByText('35 L', { exact: true }).waitFor();
+  if (await page.locator('.equipment-unit-section').getByText(/^Capacity:/).count()) {
+    throw new Error('Unit section repeats model capacity');
+  }
   if (await page.getByText(/^Cooling:/).count()) throw new Error('VEVOR detail invented a cooling capability');
   if (await page.getByRole('button', { name: /Override .* for this unit/ }).count()) {
     throw new Error('Model specifications are editable from the stock unit page');
@@ -344,7 +348,7 @@ try {
   const vevorRow = page.locator('.equipment-table').getByRole('row').filter({ has: page.getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }) });
   await vevorRow.getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   await page.waitForURL(url => /^\/equipment\/vevor-electric-brewing-system-9-2-gal-35-l\/unit-[a-z0-9_-]+$/.test(new URL(url).pathname));
-  await page.getByText('Capacity: 35 L').waitFor();
+  await unitModelCard.getByText('35 L', { exact: true }).waitFor();
   if (await page.getByRole('button', { name: /Override .* for this unit/ }).count()) {
     throw new Error('A stock unit can override model specifications');
   }
@@ -352,7 +356,7 @@ try {
   await unitBatches.getByRole('row').filter({ hasText: batchName }).getByText('In use').waitFor();
   await page.getByRole('button', { name: 'Release' }).click();
   await unitBatches.getByRole('row').filter({ hasText: batchName }).getByText('Previous').waitFor();
-  await page.getByRole('link', { name: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
+  await unitModelCard.getByRole('link', { name: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
   await vevorRow.getByRole('cell', { name: '—' }).last().waitFor();
   await vevorRow.getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
@@ -379,7 +383,7 @@ try {
   if (await page.getByRole('button', { name: 'Add capability' }).count()) {
     throw new Error('Stock units should not offer model capability changes');
   }
-  await page.getByRole('link', { name: 'Basic smoke fermenter' }).click();
+  await unitModelCard.getByRole('link', { name: 'Basic smoke fermenter' }).click();
   await page.getByRole('button', { name: 'Add capability' }).click();
   await page.getByRole('menuitem', { name: 'Temperature control' }).click();
   const addedControlDialog = page.getByRole('dialog', { name: 'Add Temperature control' });
@@ -387,17 +391,17 @@ try {
   await addedControlDialog.getByRole('spinbutton', { name: 'Maximum temperature (°C)' }).fill('30');
   await addedControlDialog.getByRole('button', { name: 'Add capability' }).click();
   await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
-  await page.getByText('Temperature range: 0–30 °C').waitFor();
+  await unitModelCard.getByText('0–30 °C').waitFor();
   if (await page.getByRole('button', { name: /Override .* for this unit/ }).count()) {
     throw new Error('Stock unit can edit model temperature limits');
   }
-  await page.getByRole('link', { name: 'Basic smoke fermenter' }).click();
+  await unitModelCard.getByRole('link', { name: 'Basic smoke fermenter' }).click();
   await page.getByRole('button', { name: 'Edit model maximum temperature' }).click();
   const addedControlEditDialog = page.getByRole('dialog', { name: 'Edit model Maximum temperature (°C)' });
   await addedControlEditDialog.getByRole('spinbutton', { name: 'Maximum temperature (°C)' }).fill('32');
   await addedControlEditDialog.getByRole('button', { name: 'Save model value' }).click();
   await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
-  await page.getByText('Temperature range: 0–32 °C').waitFor();
+  await unitModelCard.getByText('0–32 °C').waitFor();
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
   await page.waitForURL('**/equipment/basic-smoke-fermenter');
@@ -416,9 +420,9 @@ try {
     throw new Error('Tilt temperature unit is missing from the add form');
   }
   await tiltDialog.getByRole('button', { name: 'Create equipment' }).click();
-  await page.getByText('Gravity: Available').waitFor();
-  await page.getByText('Temperature: 0–60 °C').waitFor();
-  await page.getByRole('link', { name: 'Tilt Hydrometer and Thermometer' }).click();
+  await unitModelCard.getByText('Gravity').waitFor();
+  await unitModelCard.getByText('0–60 °C').waitFor();
+  await unitModelCard.getByRole('link', { name: 'Tilt Hydrometer and Thermometer' }).click();
   await page.getByRole('button', { name: 'Edit model temperature range' }).click();
   const modelTemperatureDialog = page.getByRole('dialog', { name: 'Edit model temperature range' });
   await modelTemperatureDialog.getByRole('button', { name: 'Remove capability' }).click();
@@ -428,22 +432,22 @@ try {
   if (await page.getByText(/^Temperature:/).count()) throw new Error('Removed catalog channel is still on the model');
   await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   if (await page.getByText(/^Temperature:/).count()) throw new Error('Removed model channel is still on the unit');
-  await page.getByRole('link', { name: 'Tilt Hydrometer and Thermometer' }).click();
+  await unitModelCard.getByRole('link', { name: 'Tilt Hydrometer and Thermometer' }).click();
   await page.getByRole('button', { name: 'Add capability' }).click();
   await page.getByRole('menuitem', { name: 'Measurement channel' }).click();
   await page.getByRole('menuitem', { name: 'Temperature', exact: true }).click();
   const restoreTemperatureDialog = page.getByRole('dialog', { name: 'Add temperature measurement' });
   await restoreTemperatureDialog.getByRole('button', { name: 'Restore to default' }).click();
   await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
-  await page.getByText('Temperature: Available').waitFor();
-  await page.getByRole('link', { name: 'Tilt Hydrometer and Thermometer' }).click();
+  await unitModelCard.getByText('Temperature').waitFor();
+  await unitModelCard.getByRole('link', { name: 'Tilt Hydrometer and Thermometer' }).click();
   await page.getByRole('button', { name: 'Edit model temperature range' }).click();
   const tiltTemperatureDialog = page.getByRole('dialog', { name: 'Edit model temperature range' });
   await tiltTemperatureDialog.getByRole('spinbutton', { name: 'Range minimum' }).fill('0');
   await tiltTemperatureDialog.getByRole('spinbutton', { name: 'Range maximum' }).fill('65');
   await tiltTemperatureDialog.getByRole('button', { name: 'Save model range' }).click();
   await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
-  await page.getByText('Temperature: 0–65 °C').waitFor();
+  await unitModelCard.getByText('0–65 °C').waitFor();
   await page.getByText('Temperature offset: Not calibrated').waitFor();
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
@@ -457,7 +461,7 @@ try {
   await cboxDialog.getByRole('spinbutton', { name: 'Dissolved oxygen range minimum' }).fill('0');
   await cboxDialog.getByRole('spinbutton', { name: 'Dissolved oxygen range maximum' }).fill('10');
   await cboxDialog.getByRole('button', { name: 'Create equipment' }).click();
-  await page.getByText('Dissolved oxygen: 0–10 mg/L').waitFor();
+  await unitModelCard.getByText('0–10 mg/L').waitFor();
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
   await page.waitForURL('**/equipment/anton-paar-cboxqc');
@@ -474,14 +478,14 @@ try {
   await kettleDialog.getByRole('spinbutton', { name: 'Rated power (W)' }).fill('1800');
   await kettleDialog.getByRole('button', { name: 'Create equipment' }).click();
   await page.getByRole('heading', { name: 'Smoke electric kettle' }).waitFor();
-  await page.getByText('Rated power: 1800 W').waitFor();
+  await unitModelCard.getByText('1800 W').waitFor();
   if (await page.getByRole('button', { name: /Override .* for this unit/ }).count()) {
     throw new Error('Stock unit can edit model capacity or rated power');
   }
   if (await page.getByRole('button', { name: 'Edit model heat loss' }).count()) {
     throw new Error('Stock unit should not edit model heat loss');
   }
-  await page.getByRole('link', { name: 'Smoke electric kettle' }).click();
+  await unitModelCard.getByRole('link', { name: 'Smoke electric kettle' }).click();
   await page.getByRole('button', { name: 'Edit model capacity' }).click();
   const kettleCapacityDialog = page.getByRole('dialog', { name: 'Edit model Capacity (L)' });
   await kettleCapacityDialog.getByRole('spinbutton', { name: 'Capacity (L)' }).fill('36');
@@ -492,7 +496,7 @@ try {
   await modelBoilDialog.getByRole('button', { name: 'Save model default' }).click();
   await page.getByText('Heat loss at boil: 100 W (brewery model)').waitFor();
   await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
-  await page.getByText('Capacity: 36 L').waitFor();
+  await unitModelCard.getByText('36 L').waitFor();
   await page.getByRole('button', { name: 'Edit heat loss at boil' }).click();
   const boilDialog = page.getByRole('dialog', { name: "Calibrate this unit's boil-off" });
   await boilDialog.getByRole('spinbutton', { name: 'Start volume (L)' }).fill('30');
@@ -500,7 +504,7 @@ try {
   await boilDialog.getByRole('spinbutton', { name: 'Boil duration (minutes)' }).fill('60');
   await boilDialog.getByRole('button', { name: 'Save calibration' }).click();
   await page.getByText('Estimated boil-off at rated power: 3 L/h').waitFor();
-  await page.getByText('Heat loss at boil: 198 W (this unit)').waitFor();
+  await page.locator('.equipment-unit-section').getByText('Heat loss at boil: 198 W').waitFor();
   await page.getByRole('button', { name: 'Edit heat loss at boil' }).click();
   const recalibrationDialog = page.getByRole('dialog', { name: "Calibrate this unit's boil-off" });
   await recalibrationDialog.getByRole('spinbutton', { name: 'Start volume (L)' }).fill('30');
@@ -511,7 +515,8 @@ try {
   await page.getByRole('button', { name: 'Edit heat loss at boil' }).click();
   await page.getByRole('dialog', { name: "Calibrate this unit's boil-off" })
     .getByRole('button', { name: 'Restore to default' }).click();
-  await page.getByText('Heat loss at boil: 100 W (brewery model)').waitFor();
+  await page.locator('.equipment-unit-section').getByText('Heat loss at boil: Not calibrated').waitFor();
+  await unitModelCard.getByText('100 W').waitFor();
   await page.getByRole('button', { name: 'Edit temperature offset' }).click();
   const temperatureDialog = page.getByRole('dialog', { name: 'Calibrate temperature' });
   await temperatureDialog.getByRole('spinbutton', { name: 'Reference temperature (°C)' }).fill('65');
@@ -556,14 +561,14 @@ try {
     throw new Error(`pH meter creation stayed open: ${await page.locator('.form-alert').allInnerTexts()} / ${await phDialog.locator('.ant-form-item-explain-error').allInnerTexts()} / ${await phDialog.locator('.ant-select-selection-item').allInnerTexts()}`);
   }
   await page.getByRole('heading', { name: 'Smoke pH meter' }).waitFor();
-  await page.getByText('pH: 0–14 pH').waitFor();
-  await page.getByRole('link', { name: 'Smoke pH meter' }).click();
+  await unitModelCard.getByText('0–14 pH').waitFor();
+  await unitModelCard.getByRole('link', { name: 'Smoke pH meter' }).click();
   await page.getByRole('button', { name: 'Edit model pH range' }).click();
   const phRangeDialog = page.getByRole('dialog', { name: 'Edit model pH range' });
   await phRangeDialog.getByRole('spinbutton', { name: 'Range maximum' }).fill('15');
   await phRangeDialog.getByRole('button', { name: 'Save model range' }).click();
   await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
-  await page.getByText('pH: 0–15 pH').waitFor();
+  await unitModelCard.getByText('0–15 pH').waitFor();
   if (!/^\/equipment\/smoke-ph-meter\/unit-[a-z0-9_-]+$/.test(new URL(page.url()).pathname)) {
     throw new Error('Equipment unit URL should sit beneath its model');
   }
@@ -593,7 +598,7 @@ try {
   await refractometerDialog.getByRole('spinbutton', { name: 'Range maximum' }).fill('32');
   await page.getByRole('button', { name: 'Create equipment' }).click();
   await page.getByRole('heading', { name: 'Smoke refractometer', exact: true }).waitFor();
-  await page.getByText('Gravity: 0–32 °Brix').waitFor();
+  await unitModelCard.getByText('0–32 °Brix').waitFor();
   await navigateSection(page, 'Equipment');
   if (await page.locator('.equipment-table').count() !== 1) throw new Error('Equipment should use one table');
   for (const heading of ['Model', 'Units', 'Capabilities']) {

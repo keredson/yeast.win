@@ -35,6 +35,8 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
     const equipmentUseId = nanoid();
     first.prepare('INSERT INTO equipment_models(id, name, kind, created_at) VALUES (?, ?, ?, ?)')
       .run(modelId, 'Shared kettle model', 'electric_kettle', timestamp);
+    first.prepare('INSERT INTO equipment_model_media(id, product_url, image_bytes, image_mime_type) VALUES (?, ?, ?, ?)')
+      .run(modelId, 'https://example.com/kettle', Buffer.from([255, 216, 255]), 'image/jpeg');
     first.prepare('INSERT INTO equipment(id, name, model_id, added_at, created_at) VALUES (?, ?, ?, ?, ?)')
       .run(equipmentId, 'Shared kettle', modelId, timestamp, timestamp);
     first.prepare('INSERT INTO batch_events(id, batch_id, event_type, title, actual_at, created_at) VALUES (?, ?, ?, ?, ?, ?)')
@@ -77,6 +79,9 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
     assert.equal((second.prepare('SELECT value FROM temperature_measurements WHERE event_id = ?').get(event) as { value: number }).value, 20);
     assert.equal((second.prepare('SELECT equipment_id FROM equipment_use_events WHERE event_id = ?').get(equipmentUseId) as { equipment_id: string }).equipment_id, equipmentId);
     assert.equal((second.prepare('SELECT model_id FROM equipment WHERE id = ?').get(equipmentId) as { model_id: string }).model_id, modelId);
+    assert.deepEqual(second.prepare('SELECT product_url, image_bytes, image_mime_type FROM equipment_model_media WHERE id = ?')
+      .get(modelId), { product_url: 'https://example.com/kettle', image_bytes: Buffer.from([255, 216, 255]),
+      image_mime_type: 'image/jpeg' });
     assert.equal((second.prepare('SELECT quantity FROM inventory_discards WHERE inventory_item_id = ?').get(discardedItem) as { quantity: number }).quantity, 5);
     assert.equal((second.prepare('SELECT parent_id FROM inventory_locations WHERE id = ?').get(shelfId) as { parent_id: string }).parent_id, roomId);
     assert.equal((second.prepare('SELECT address FROM inventory_location_addresses WHERE id = ?').get(roomId) as { address: string }).address, '123 Brew Street');
@@ -515,6 +520,46 @@ test('version 27 adds model measurement removal markers while preserving channel
     assert.equal((upgraded.prepare('SELECT model_id FROM equipment WHERE id = ?').get(equipmentId) as { model_id: string }).model_id,
       modelId);
   } finally { closeWorkspaceDb(upgraded); }
+});
+
+test('version 29 adds model media without disturbing models, units, or existing partial media', () => {
+  for (const partiallyUpgraded of [false, true]) {
+    const id = nanoid();
+    const modelId = nanoid();
+    const unitId = nanoid();
+    const recipeId = nanoid();
+    const db = openWorkspaceDb(id);
+    db.prepare('INSERT INTO equipment_models(id, name, kind, created_at) VALUES (?, ?, ?, ?)')
+      .run(modelId, 'Existing model', 'electric_kettle', 1);
+    db.prepare('INSERT INTO equipment(id, name, model_id, created_at) VALUES (?, ?, ?, ?)')
+      .run(unitId, 'Existing unit', modelId, 1);
+    db.prepare('INSERT INTO recipes(id, name, created_at, updated_at) VALUES (?, ?, ?, ?)')
+      .run(recipeId, 'Existing recipe', 1, 1);
+    if (partiallyUpgraded) db.prepare('INSERT INTO equipment_model_media(id, product_url, image_bytes, image_mime_type) VALUES (?, ?, ?, ?)')
+      .run(modelId, 'https://example.com/kettle', Buffer.from([1, 2, 3]), 'image/jpeg');
+    else {
+      db.prepare("SELECT crsql_as_table('equipment_model_media')").get();
+      db.exec('DROP TABLE equipment_model_media');
+    }
+    db.pragma('user_version = 28');
+    closeWorkspaceDb(db);
+    const upgraded = openWorkspaceDb(id);
+    try {
+      assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+      assert.equal((upgraded.prepare('SELECT name FROM equipment_models WHERE id = ?').get(modelId) as { name: string }).name,
+        'Existing model');
+      assert.equal((upgraded.prepare('SELECT model_id FROM equipment WHERE id = ?').get(unitId) as { model_id: string }).model_id,
+        modelId);
+      assert.equal((upgraded.prepare('SELECT name FROM recipes WHERE id = ?').get(recipeId) as { name: string }).name,
+        'Existing recipe');
+      const media = upgraded.prepare('SELECT product_url, image_bytes, image_mime_type FROM equipment_model_media WHERE id = ?')
+        .get(modelId) as { product_url: string; image_bytes: Buffer; image_mime_type: string } | undefined;
+      if (partiallyUpgraded) assert.deepEqual(media, {
+        product_url: 'https://example.com/kettle', image_bytes: Buffer.from([1, 2, 3]), image_mime_type: 'image/jpeg'
+      });
+      else assert.equal(media, undefined);
+    } finally { closeWorkspaceDb(upgraded); }
+  }
 });
 
 test('version 28 adds equipment post-boil loss without discarding older data', () => {

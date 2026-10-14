@@ -81,6 +81,8 @@ export interface Equipment extends EquipmentSpecifications { id: string; name: s
   location_id?: string | null; location_name?: string | null;
   catalog_model_id?: string | null; catalog_model?: CatalogEquipment;
   measurement_channels?: EquipmentMeasurementChannel[] }
+export interface EquipmentModelMedia { id: string; product_url: string | null;
+  image_bytes: Uint8Array | null; image_mime_type: string | null }
 export interface EquipmentUse { id: string; equipment_id: string; batch_id: string; batch_name: string;
   assigned_at: number; ended_at: number | null }
 const equipmentCalibrationColumns = ['buffer_4_observed', 'buffer_7_observed', 'reference_sg', 'observed_sg',
@@ -1476,6 +1478,27 @@ export async function listEquipmentModels(db: DB): Promise<Equipment[]> {
     if (model) (model.measurement_channels ||= []).push(channel);
   }
   return models;
+}
+
+export async function readEquipmentModelMedia(db: DB, modelId: string): Promise<EquipmentModelMedia | null> {
+  return (await db.execO<EquipmentModelMedia>(
+    'SELECT id, product_url, image_bytes, image_mime_type FROM equipment_model_media WHERE id = ?', [modelId]))[0] || null;
+}
+
+export async function saveEquipmentModelMedia(db: DB, modelId: string, productUrl: string | null | undefined,
+  image: { bytes: Uint8Array; mimeType: string } | null | undefined): Promise<void> {
+  const url = productUrl?.trim() || null;
+  if (url) {
+    const parsed = new URL(url);
+    if (!['https:', 'http:'].includes(parsed.protocol)) throw new Error('Enter an HTTP or HTTPS product URL');
+  }
+  if (image && (!['image/jpeg', 'image/png', 'image/webp'].includes(image.mimeType)
+    || image.bytes.byteLength > 5 * 1024 * 1024)) throw new Error('Choose a JPEG, PNG, or WebP image under 5 MB');
+  await db.exec(`INSERT OR IGNORE INTO equipment_model_media(id) VALUES (?)`, [modelId]);
+  if (productUrl !== undefined) await db.exec('UPDATE equipment_model_media SET product_url = ? WHERE id = ?', [url, modelId]);
+  if (image !== undefined) await db.exec(
+    'UPDATE equipment_model_media SET image_bytes = ?, image_mime_type = ? WHERE id = ?',
+    [image?.bytes || null, image?.mimeType || null, modelId]);
 }
 
 export async function createEquipmentUnit(db: DB, modelId: string, stockId?: string, locationId?: string | null): Promise<string> {

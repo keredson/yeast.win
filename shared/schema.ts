@@ -43,6 +43,8 @@ const definitions: Record<string, string> = {
     min_temperature_c REAL, max_temperature_c REAL,
     mash_efficiency_pct REAL, grain_absorption_l_per_kg REAL, post_boil_loss_liters REAL,
     created_at INTEGER NOT NULL`,
+  equipment_model_media: `id TEXT PRIMARY KEY NOT NULL, product_url TEXT,
+    image_bytes BLOB, image_mime_type TEXT`,
   brewery_process_defaults: `id TEXT PRIMARY KEY NOT NULL, wort_loss_liters REAL`,
   equipment: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, model_id TEXT NOT NULL,
     slug TEXT, stock_id TEXT, added_at INTEGER, removed_at INTEGER, created_at INTEGER NOT NULL`,
