@@ -113,8 +113,11 @@ function serveStatic(req: IncomingMessage, res: ServerResponse, pathname: string
     '.svg': 'image/svg+xml', '.json': 'application/json', '.wasm': 'application/wasm',
     '.png': 'image/png', '.webmanifest': 'application/manifest+json'
   };
-  res.writeHead(200, { 'Content-Type': mime[extname(path)] || 'application/octet-stream' });
-  res.end(readFileSync(path));
+  const body = readFileSync(path);
+  res.writeHead(200, { 'Content-Type': mime[extname(path)] || 'application/octet-stream',
+    'Content-Length': body.length,
+    'Cache-Control': pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache' });
+  res.end(body);
 }
 
 const server = createServer(async (req, res) => {

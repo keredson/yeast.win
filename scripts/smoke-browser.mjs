@@ -13,7 +13,7 @@ async function signIn(page, createAccount = false) {
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(baseUrl);
   if (createAccount) {
-    await page.getByRole('button', { name: 'Create account' }).click();
+    await page.getByRole('link', { name: 'Create account' }).click();
     const shortPasswordStatus = await page.evaluate(async name => (await fetch('/api/register', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: name, password: 'short12' })
@@ -25,11 +25,11 @@ async function signIn(page, createAccount = false) {
     }
     await page.screenshot({ path: '/tmp/brewlog-signup-mobile.png', fullPage: true });
     await page.setViewportSize({ width: 1280, height: 900 });
-  }
+  } else await page.getByRole('link', { name: 'Sign in' }).click();
   await page.getByLabel('Username').fill(username);
   await page.getByLabel('Password', { exact: true }).fill(password);
   if (createAccount) await page.getByLabel('Confirm password').fill(password);
-  await page.locator('.login-card form button[type="submit"]').click();
+  await page.locator('.public-card form button[type="submit"]').click();
   await page.getByRole('button', { name: 'Account settings' }).waitFor({ timeout: 30_000 });
   await navigateSection(page, 'Batches');
   await page.getByRole('button', { name: 'New batch' }).waitFor();
@@ -1299,7 +1299,7 @@ try {
   const third = await thirdContext.newPage();
   third.on('pageerror', error => errors.push(error.message));
   await third.goto(baseUrl);
-  await third.getByRole('button', { name: 'Create account' }).click();
+  await third.getByRole('link', { name: 'Create account' }).click();
   await third.getByLabel('Username').fill(username.toUpperCase());
   await third.getByLabel('Password', { exact: true }).fill(password);
   await third.getByLabel('Confirm password').fill(password);
@@ -1413,14 +1413,15 @@ try {
     throw new Error('Password change did not revoke other sessions');
   }
   await page.getByRole('button', { name: 'Sign out' }).click();
-  await page.locator('.login-card form button[type="submit"]').waitFor();
+  await page.getByRole('link', { name: 'Sign in' }).click();
+  await page.locator('.public-card form button[type="submit"]').waitFor();
   const oldPasswordStatus = await page.evaluate(async credentials => (await fetch('/api/login', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(credentials)
   })).status, { username, password });
   if (oldPasswordStatus !== 401) throw new Error('Old password still works');
   await page.getByLabel('Username').fill(username);
   await page.getByLabel('Password', { exact: true }).fill(`${password}-new`);
-  await page.locator('.login-card form button[type="submit"]').click();
+  await page.locator('.public-card form button[type="submit"]').click();
   await page.getByRole('heading', { name: 'Batches' }).waitFor();
   console.log('Changed password, revoked other sessions, and signed back in');
 
