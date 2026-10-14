@@ -4,7 +4,6 @@ import type { CatalogInventory } from './catalog.ts';
 // a lot analysis. Leave variable hop alpha and yeast attenuation unset.
 const briess = 'https://brewingwithbriess.com/products/';
 const briessPdf = 'https://brewingwithbriess.com/wp-content/uploads/documents/Briess-PISB-';
-const weyermann = 'https://www.weyermann.de/en-gb/products/brewing-malting/';
 const ych = 'https://www.yakimachief.com/varieties';
 const fermentis = 'https://fermentis.com/en/products/';
 const briessSheets: Record<string, string> = {
@@ -69,17 +68,26 @@ export const expandedCatalogSupplies: Product[] = [
   grain('briess_flaked_oats', 'Brewers Oat Flakes', 'Briess', 'flaked', briess, 2.5, 70),
   grain('weyermann_pilsner', 'Pilsner Malt', 'Weyermann', 'base',
     'https://www.weyermann.de/en-gb/product/weyermann-pilsner-malt/', 1.8),
-  grain('weyermann_munich_type_1', 'Munich Malt Type 1', 'Weyermann', 'kilned', weyermann),
+  grain('weyermann_munich_type_1', 'Munich Malt Type 1', 'Weyermann', 'kilned',
+    'https://www.weyermann.de/en-gb/product/weyermann-munich-malt-type-1/'),
   grain('weyermann_munich_type_2', 'Munich Malt Type 2', 'Weyermann', 'kilned',
     'https://www.weyermann.de/en-gb/product/weyermann-munich-malt-type-2/', 9),
-  grain('weyermann_vienna', 'Vienna Malt', 'Weyermann', 'kilned', weyermann),
-  grain('weyermann_wheat', 'Pale Wheat Malt', 'Weyermann', 'base', weyermann),
-  grain('weyermann_carapils', 'CARAPILS Malt', 'Weyermann', 'base', weyermann),
-  grain('weyermann_carahell', 'CARAHELL Malt', 'Weyermann', 'caramel', weyermann),
-  grain('weyermann_caramunich_1', 'CARAMUNICH Type 1', 'Weyermann', 'caramel', weyermann),
-  grain('weyermann_caramunich_2', 'CARAMUNICH Type 2', 'Weyermann', 'caramel', weyermann),
-  grain('weyermann_carafa_2', 'CARAFA Type 2', 'Weyermann', 'roasted', weyermann),
-  grain('weyermann_melanoidin', 'Melanoidin Malt', 'Weyermann', 'kilned', weyermann),
+  grain('weyermann_vienna', 'Vienna Malt', 'Weyermann', 'kilned',
+    'https://www.weyermann.de/en-gb/product/weyermann-vienna-malt/'),
+  grain('weyermann_wheat', 'Pale Wheat Malt', 'Weyermann', 'base',
+    'https://www.weyermann.de/en-gb/product/weyermann-wheat-malt-pale/'),
+  grain('weyermann_carapils', 'CARAPILS Malt', 'Weyermann', 'base',
+    'https://www.weyermann.de/en-gb/product/weyermann-carapils-2/'),
+  grain('weyermann_carahell', 'CARAHELL Malt', 'Weyermann', 'caramel',
+    'https://www.weyermann.de/en-gb/product/weyermann-carahell-3/'),
+  grain('weyermann_caramunich_1', 'CARAMUNICH Type 1', 'Weyermann', 'caramel',
+    'https://www.weyermann.de/en-gb/product/weyermann-caramunich-type-1/'),
+  grain('weyermann_caramunich_2', 'CARAMUNICH Type 2', 'Weyermann', 'caramel',
+    'https://www.weyermann.de/en-gb/product/weyermann-caramunich-type-2/'),
+  grain('weyermann_carafa_2', 'CARAFA Type 2', 'Weyermann', 'roasted',
+    'https://www.weyermann.de/en-gb/product/weyermann-carafa-type-2/'),
+  grain('weyermann_melanoidin', 'Melanoidin Malt', 'Weyermann', 'kilned',
+    'https://www.weyermann.de/en-gb/product/weyermann-melanoidin-malt-5/'),
   grain('crisp_maris_otter', 'Finest Maris Otter Ale Malt', 'Crisp Malt', 'base',
     'https://crispmalt.com/malts/finest-maris-otter-ale-malt/', undefined, 80.6),
   grain('crisp_best_ale', 'Best Ale Malt', 'Crisp Malt', 'base',

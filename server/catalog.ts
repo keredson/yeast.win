@@ -56,6 +56,39 @@ function seedSupplyImages(db: Database.Database): void {
   }
 }
 
+// The first Briess bundle used 1000x80 product-page banners. Replace those
+// exact bundled bytes with square crops while preserving catalog image edits.
+const briessBannerHashes: Record<string, string> = {
+  aromatic_munich_20: 'b705705876238314b464149c933047d675d5a0b32961efbacaa1ab1a146f4949',
+  black: '740c4a3ffb5f20aef2da18265d46af3151623d05ee081293de61477a7a75e4e9',
+  bonlander_munich_10: '9d90180b24b4bc912d12db151e3f0aba15e1a1f9de6e5fc3b0fce811e9dc6a28',
+  brewers_2_row: 'b57551a69fda305e614512c3ab01ea27bdee383fe2efd7e0a9923544122b7ae4',
+  caramel_120: 'b0b1d2fc3407276ef09fcadccae275c039fa11473dfee732b1fe70abe85b42c2',
+  caramel_20: '1e0b1a6be20c53e67d88658d096c883bf71df7cec45d21fb177d4ce2ec46fd55',
+  caramel_40: 'e254ff744acd51165c1a92b7c3361334420954bd8d992a10163c3683ddd80089',
+  caramel_60: '4f3c25ba42d61c95016381d044f9897e79d62838d512402308baad893eca218f',
+  caramel_80: 'd9533e272281a664ec83f6fbf24ac80006e2b0ac77be7efe6178997f6d14461e',
+  carapils: '02c8842f33154ff14e4e4a61c01b0e1fcf049b33dc106e889e716faab972f2be',
+  chocolate: 'f84ae26bbb61b07f486678d5b371a00fb4d5a940b69e7fd78c7cf030348b9669',
+  flaked_oats: 'b81c08b75993f01b34dc2f746d1a932faf8b8dcf8302c8d4f748e5aa3da2e715',
+  pale_ale: '336bbb6842a11e81b1a0a0d9026a5051929fb3a74f5805e30cf95f58b03a1537',
+  pilsen: 'de805a47ff1ed8dae59ea06c9dced900b50afc6a175690c14bf4b86c70e4212d',
+  roasted_barley: 'c5d5991169b4aa69aac6a0c88ad053122b73dde63c4d978289622f743ea14fdc',
+  vienna: 'c99e1410c74a4630736eb0b08c35f7dde5f50a2fe2934c4d5cdc3e9067949424',
+  white_wheat: '52b9e8628cc84a53ed65d0566ce8bfea8987c378da52d0660104ef9cbe111046'
+};
+
+function replaceBundledBriessBanners(db: Database.Database): void {
+  const getImage = db.prepare('SELECT image_bytes FROM supply_images WHERE supply_id = ?');
+  const updateImage = db.prepare("UPDATE supply_images SET image_bytes = ?, image_mime_type = 'image/jpeg' WHERE supply_id = ?");
+  for (const [name, oldHash] of Object.entries(briessBannerHashes)) {
+    const id = `supply_briess_${name}`;
+    const image = getImage.get(id) as { image_bytes: Buffer | null } | undefined;
+    if (!image?.image_bytes || createHash('sha256').update(image.image_bytes).digest('hex') !== oldHash) continue;
+    updateImage.run(readFileSync(join(projectRoot, 'assets/catalog/supplies', `${id}.jpg`)), id);
+  }
+}
+
 export function openCatalogDb(dataDir: string): Database.Database {
   const db = new Database(join(dataDir, 'catalog.sqlite'));
   db.pragma('journal_mode = WAL');
@@ -589,6 +622,18 @@ export function openCatalogDb(dataDir: string): Database.Database {
         updateBriess.run(product.product_url, product.id);
       }
       db.pragma('user_version = 27');
+    })();
+  }
+  if ((db.pragma('user_version', { simple: true }) as number) === 27) {
+    db.transaction(() => {
+      const updateWeyermann = db.prepare(`UPDATE supply_products SET product_url = ?
+        WHERE supply_id = ? AND product_url = 'https://www.weyermann.de/en-gb/products/brewing-malting/'`);
+      for (const product of expandedCatalogSupplies.filter(item => item.manufacturer === 'Weyermann')) {
+        updateWeyermann.run(product.product_url, product.id);
+      }
+      seedSupplyImages(db);
+      replaceBundledBriessBanners(db);
+      db.pragma('user_version = 28');
     })();
   }
   db.prepare(`UPDATE equipment_models SET model_name = ?
