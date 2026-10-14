@@ -127,7 +127,7 @@ The recipe Details section computes batch size, expected OG, FG, ABV, and estima
 | `pressure_measurements` | Corrected value, unit, uncertainty, instrument, and calibration. |
 | `carbonation_measurements` | Corrected value, unit, uncertainty, instrument or method. Planned carbonation targets can be represented separately as planned measurements/settings. |
 | `dissolved_oxygen_measurements` | Corrected value, unit, uncertainty, instrument, and calibration. Adding oxygen remains an `addition`. |
-| `temperature_control_events` | Controlled equipment, mode/context, target temperature and/or power setting, and optional `ended_at`. The same kind covers mashing, boiling, chilling, fermentation, and serving. |
+| `temperature_control_events` | Optional controlled equipment, mode/context, target temperature and/or power setting, and optional `ended_at`. The same kind covers mashing, boiling, chilling, fermentation, and serving. A recipe can leave equipment unassigned, so recording its batch action must not require a unit. |
 | `pressure_control_events` | Equipment and pressure setpoint. A setpoint is distinct from a pressure measurement. |
 | `transfers` | Optional destination vessel equipment ID and transferred quantity with unit. Transfer is a batch action, not a bare milestone. Recipe and pending batch actions can select the destination before recording; recording can confirm or change it. Referenced vessel equipment is archived when removed from the active equipment list. The old source-vessel column remains unused for existing databases. |
 | `packaging` | Container type/size, count, packaged quantity, and optional inventory item consumed. |
@@ -138,7 +138,7 @@ Action details are a single editable set of values. Recipe actions have type-spe
 
 #### Temperature control intervals
 
-The next temperature-control event for the **same batch**, of any mode and on any equipment, implicitly ends the preceding setting. We do not model simultaneous heater and chiller settings for one batch. An explicit end is stored in `event_ends` and the temperature-control payload. Query the next setting by `(batch_id, actual_at, id)` for an implicit end. A late or concurrent setting then changes the derived interval without rewriting a prior event. Since those keys live on `batch_events`, index that table on `(batch_id, event_type, actual_at, id)`.
+The next temperature-control event for the **same batch**, of any mode and on any equipment, implicitly ends the preceding setting. We do not model simultaneous heater and chiller settings for one batch. The batch record form shows Started and Length for timed actions, initially using the plan's duration; an entered length derives the explicit end stored in `event_ends` and the temperature-control payload. An empty length leaves the end implicit. Query the next setting by `(batch_id, actual_at, id)` for an implicit end. A late or concurrent setting then changes the derived interval without rewriting a prior event. Since those keys live on `batch_events`, index that table on `(batch_id, event_type, actual_at, id)`.
 
 If one fridge serves several batches, record the relevant temperature-control event in **each batch**. These are duplicate batch observations of one physical setting, not a new shared control-session entity. Joining a batch to an already running fridge records when that batch began experiencing its setting.
 
