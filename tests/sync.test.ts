@@ -20,6 +20,47 @@ const selectChanges = `SELECT "table", pk, cid, val, col_version, db_version,
   WHERE db_version > ? ORDER BY db_version, seq`;
 const insertChange = `INSERT INTO crsql_changes (${changeColumns.map(name => `"${name}"`).join(',')}) VALUES (${changeColumns.map(() => '?').join(',')})`;
 
+test('version 39 and partially upgraded current workspaces reconcile both packaging changes', () => {
+  for (const state of ['version39-missing-container', 'version39-missing-links',
+    'current-missing-container', 'current-missing-links', 'current-unreplicated-container']) {
+    const id = nanoid();
+    const before = openWorkspaceDb(id);
+    before.prepare("INSERT INTO supplies(id,name,category,default_unit,created_at) VALUES ('barrel','My barrel','Packaging','each',1)").run();
+    before.prepare("INSERT INTO supplies(id,name,category,default_unit,created_at) VALUES ('malt','My malt','Grain','g',1)").run();
+    before.prepare("INSERT INTO supply_container_specs(supply_id,container_kind,material) VALUES ('barrel','barrel','wood')").run();
+    before.prepare("INSERT INTO recipes(id,name,created_at,updated_at) VALUES ('recipe','Old recipe',1,1)").run();
+    before.prepare("INSERT INTO recipe_events(id,recipe_id,event_type,title,sort_order) VALUES ('package','recipe','packaging','Package',1)").run();
+    before.prepare("INSERT INTO recipe_packaging(event_id,container_name,container_count,catalog_item_id) VALUES ('package','Bottle',24,'catalog-bottle')").run();
+    if (state.endsWith('missing-container')) {
+      before.prepare("SELECT crsql_as_table('supply_container_specs')").get();
+      before.exec('DROP TABLE supply_container_specs');
+    } else if (state.endsWith('missing-links')) {
+      before.prepare("SELECT crsql_as_table('recipe_packaging')").get();
+      before.exec('ALTER TABLE recipe_packaging DROP COLUMN supply_id');
+      before.prepare("SELECT crsql_as_crr('recipe_packaging')").get();
+    } else {
+      before.prepare("SELECT crsql_as_table('supply_container_specs')").get();
+    }
+    before.pragma(`user_version = ${state.startsWith('version39') ? 39 : workspaceSchemaVersion}`);
+    closeWorkspaceDb(before);
+
+    const after = openWorkspaceDb(id);
+    try {
+      assert.equal(after.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+      assert.ok(after.prepare("SELECT 1 FROM sqlite_master WHERE name='supply_container_specs__crsql_clock'").get());
+      assert.ok(after.prepare("SELECT id FROM supplies WHERE id='malt'").get());
+      assert.ok(after.prepare("SELECT id FROM supplies WHERE id='barrel'").get());
+      if (!state.endsWith('missing-container')) assert.deepEqual(after.prepare(
+        "SELECT container_kind,material FROM supply_container_specs WHERE supply_id='barrel'").get(),
+      { container_kind: 'barrel', material: 'wood' });
+      assert.deepEqual(after.prepare(
+        "SELECT container_name,container_count,catalog_item_id,supply_id FROM recipe_packaging WHERE event_id='package'").get(),
+      { container_name: 'Bottle', container_count: 24, catalog_item_id: 'catalog-bottle', supply_id: null });
+      assert.equal(after.pragma('integrity_check', { simple: true }), 'ok');
+    } finally { closeWorkspaceDb(after); }
+  }
+});
+
 test('version 38 packaging links upgrade without losing containers or unrelated rows', () => {
   for (const partial of [false, true]) {
     const id = nanoid();

@@ -343,7 +343,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 39;
+export const workspaceSchemaVersion = 40;
 // Earlier builds identified OG and FG by title. Assign the matching gravity
 // steps once during upgrade so titles can subsequently change without changing
 // the meaning of a measurement. Existing explicit assignments always win.

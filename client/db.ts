@@ -282,7 +282,14 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
       const db = await sqlite.open(`brewlog-${workspaceId}`);
       profile('Workspace file open');
       const storedVersion = (await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version;
-      if (storedVersion === workspaceSchemaVersion) {
+      const containerTable = storedVersion === workspaceSchemaVersion ? await db.execO<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE name IN ('supply_container_specs', 'supply_container_specs__crsql_clock')") : [];
+      const packageColumns = containerTable.length === 2 ? await db.execO<{ name: string }>('PRAGMA table_info(packaging)') : [];
+      const recipePackageColumns = containerTable.length === 2
+        ? await db.execO<{ name: string }>('PRAGMA table_info(recipe_packaging)') : [];
+      const packagingReady = [packageColumns, recipePackageColumns].every(columns =>
+        ['catalog_item_id', 'supply_id'].every(name => columns.some(column => column.name === name)));
+      if (storedVersion === workspaceSchemaVersion && containerTable.length === 2 && packagingReady) {
         await openLocalCatalog();
         profile('Catalog file ready');
         await db.exec("ATTACH DATABASE 'brewlog-catalog' AS catalog");

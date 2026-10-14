@@ -152,7 +152,13 @@ export function openWorkspaceDb(id: string): Database.Database {
   db.pragma('synchronous = NORMAL');
   db.loadExtension(extensionPath);
   const storedVersion = db.pragma('user_version', { simple: true }) as number;
-  if (storedVersion === workspaceSchemaVersion) {
+  const containerTable = storedVersion === workspaceSchemaVersion ? db.prepare(
+    "SELECT name FROM sqlite_master WHERE name IN ('supply_container_specs', 'supply_container_specs__crsql_clock')").all() : [];
+  const packagingReady = containerTable.length === 2 && ['packaging', 'recipe_packaging'].every(table => {
+    const columns = (db.pragma(`table_info(${table})`) as { name: string }[]).map(column => column.name);
+    return ['catalog_item_id', 'supply_id'].every(name => columns.includes(name));
+  });
+  if (storedVersion === workspaceSchemaVersion && packagingReady) {
     const catalogPath = join(dataDir, 'catalog.sqlite');
     if (existsSync(catalogPath)) db.prepare('ATTACH DATABASE ? AS catalog').run(realpathSync(catalogPath));
     return db;
