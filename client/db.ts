@@ -78,6 +78,7 @@ export interface EquipmentMeasurementChannel extends MeasurementChannel {
 }
 export interface Equipment extends EquipmentSpecifications { id: string; name: string; kind: string;
   model_id?: string; model_name?: string; stock_id?: string | null; added_at?: number | null; removed_at?: number | null;
+  location_id?: string | null; location_name?: string | null;
   catalog_model_id?: string | null; catalog_model?: CatalogEquipment;
   measurement_channels?: EquipmentMeasurementChannel[] }
 export interface EquipmentUse { id: string; equipment_id: string; batch_id: string; batch_name: string;
@@ -146,7 +147,8 @@ const opened = new Map<string, Promise<DB>>();
 // TEMP views can refer to the attached catalog without becoming replicated
 // workspace schema. SQLite reevaluates inherited values after catalog sync.
 const effectiveEquipmentView = `CREATE TEMP VIEW effective_equipment AS
-  SELECT e.*, workspace_model.kind, workspace_model.catalog_model_id, workspace_model.name AS model_name,
+  SELECT e.*, equipment_location.location_id, equipment_place.name AS location_name,
+    workspace_model.kind, workspace_model.catalog_model_id, workspace_model.name AS model_name,
     liquid.capacity_liters AS unit_capacity_liters,
     pressure.max_pressure_kpa AS unit_max_pressure_kpa,
     heat.rated_power_watts AS unit_rated_power_watts,
@@ -194,6 +196,8 @@ const effectiveEquipmentView = `CREATE TEMP VIEW effective_equipment AS
     COALESCE(workspace_model.min_temperature_c, model_control.min_temperature_c) AS model_min_temperature_c,
     COALESCE(workspace_model.max_temperature_c, model_control.max_temperature_c) AS model_max_temperature_c
   FROM main.equipment e
+  LEFT JOIN main.equipment_locations equipment_location ON equipment_location.id = e.id
+  LEFT JOIN main.inventory_locations equipment_place ON equipment_place.id = equipment_location.location_id
   JOIN main.equipment_models workspace_model ON workspace_model.id = e.model_id
   LEFT JOIN main.equipment_liquid_containment liquid ON liquid.equipment_id = e.id
   LEFT JOIN main.equipment_pressure_rating pressure ON pressure.equipment_id = e.id
@@ -1474,18 +1478,30 @@ export async function listEquipmentModels(db: DB): Promise<Equipment[]> {
   return models;
 }
 
-export async function createEquipmentUnit(db: DB, modelId: string, stockId?: string): Promise<string> {
+export async function createEquipmentUnit(db: DB, modelId: string, stockId?: string, locationId?: string | null): Promise<string> {
   const models = await db.execO<{ id: string; name: string }>('SELECT id, name FROM equipment_models WHERE id = ?', [modelId]);
   if (!models.length) throw new Error('Choose an equipment model');
   if (stockId?.trim()) {
     const used = await db.execO<{ id: string }>('SELECT id FROM equipment WHERE stock_id = ? AND removed_at IS NULL', [stockId.trim()]);
     if (used.length) throw new Error('Stock ID is already in use');
   }
+  if (locationId && !(await listInventoryLocations(db)).some(location => location.id === locationId)) throw new Error('Location not found');
   const id = nanoid();
   const now = nowSeconds();
-  await db.exec('INSERT INTO equipment(id, name, model_id, stock_id, added_at, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    [id, models[0].name, modelId, stockId?.trim() || null, now, now]);
+  await db.tx(async tx => {
+    await tx.exec('INSERT INTO equipment(id, name, model_id, stock_id, added_at, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [id, models[0].name, modelId, stockId?.trim() || null, now, now]);
+    if (locationId) await tx.exec('INSERT INTO equipment_locations(id, location_id) VALUES (?, ?)', [id, locationId]);
+  });
   return id;
+}
+
+export async function updateEquipmentLocation(db: DB, equipmentId: string, locationId: string | null): Promise<void> {
+  const unit = await db.execO<{ id: string }>('SELECT id FROM equipment WHERE id = ? AND removed_at IS NULL', [equipmentId]);
+  if (!unit.length) throw new Error('Equipment unit not found');
+  if (locationId && !(await listInventoryLocations(db)).some(location => location.id === locationId)) throw new Error('Location not found');
+  await db.exec(`INSERT INTO equipment_locations(id, location_id) VALUES (?, ?)
+    ON CONFLICT(id) DO UPDATE SET location_id = excluded.location_id`, [equipmentId, locationId]);
 }
 
 export async function updateBrewingLosses(db: DB, item: Equipment, values: Pick<EquipmentSpecifications,
@@ -1557,7 +1573,8 @@ async function putEquipmentCapability(db: Pick<DB, 'exec'>, table: string, id: s
 
 export async function createEquipment(db: DB, name: string, kind: string, catalogModel?: CatalogEquipment,
   overrides: EquipmentSpecifications = {},
-  channelRanges: Record<string, { min: number; max: number; unit: string }> = {}, stockId?: string): Promise<string> {
+  channelRanges: Record<string, { min: number; max: number; unit: string }> = {}, stockId?: string,
+  locationId?: string | null): Promise<string> {
   if (!equipmentKinds.some(item => item.value === kind)) throw new Error('Choose a valid equipment kind');
   if (catalogModel && catalogModel.kind !== kind) throw new Error('Catalog kind does not match equipment kind');
   const id = nanoid();
@@ -1566,6 +1583,7 @@ export async function createEquipment(db: DB, name: string, kind: string, catalo
     'SELECT id FROM equipment WHERE stock_id = ? AND removed_at IS NULL', [stockId.trim()])).length) {
     throw new Error('Stock ID is already in use');
   }
+  if (locationId && !(await listInventoryLocations(db)).some(location => location.id === locationId)) throw new Error('Location not found');
   const changed = (column: keyof EquipmentSpecifications) => overrides[column] != null
     && (!catalogModel || overrides[column] !== catalogModel[column as keyof CatalogEquipment]);
   await db.tx(async tx => {
@@ -1591,6 +1609,7 @@ export async function createEquipment(db: DB, name: string, kind: string, catalo
       catalogModel && !changed('max_temperature_c') ? null : overrides.max_temperature_c ?? null, now]);
     await tx.exec(`INSERT INTO equipment(id, name, model_id, stock_id, added_at, created_at)
       VALUES (?, ?, ?, ?, ?, ?)`, [id, name.trim(), modelId, stockId?.trim() || null, now, now]);
+    if (locationId) await tx.exec('INSERT INTO equipment_locations(id, location_id) VALUES (?, ?)', [id, locationId]);
     const measurementKind = measurementKindForEquipment(kind);
     if (measurementKind && (!catalogModel || changed('measurement_min') || changed('measurement_max')
       || changed('measurement_unit'))) {
@@ -1972,7 +1991,10 @@ export async function updateEquipmentModelMeasurementRange(db: DB, model: Equipm
 }
 
 export async function deleteEquipment(db: DB, id: string): Promise<void> {
-  await db.exec('UPDATE equipment SET removed_at = ? WHERE id = ? AND removed_at IS NULL', [nowSeconds(), id]);
+  await db.tx(async tx => {
+    await tx.exec('UPDATE equipment SET removed_at = ? WHERE id = ? AND removed_at IS NULL', [nowSeconds(), id]);
+    await tx.exec('DELETE FROM equipment_locations WHERE id = ?', [id]);
+  });
 }
 
 export async function listInventory(db: Pick<DB, 'execO'>): Promise<InventoryItem[]> {
@@ -2146,11 +2168,12 @@ export async function saveInventoryLocation(db: DB, name: string, parentId: stri
 }
 
 export async function deleteInventoryLocation(db: DB, id: string): Promise<void> {
-  const [children, stock] = await Promise.all([
+  const [children, stock, equipment] = await Promise.all([
     db.execO('SELECT id FROM inventory_locations WHERE parent_id = ? LIMIT 1', [id]),
-    db.execO('SELECT id FROM inventory_item_locations WHERE location_id = ? LIMIT 1', [id])
+    db.execO('SELECT id FROM inventory_item_locations WHERE location_id = ? LIMIT 1', [id]),
+    db.execO('SELECT id FROM equipment_locations WHERE location_id = ? LIMIT 1', [id])
   ]);
-  if (children.length || stock.length) throw new Error('Move stock and child locations before deleting this location');
+  if (children.length || stock.length || equipment.length) throw new Error('Move stock, equipment, and child locations before deleting this location');
   await db.tx(async tx => {
     await tx.exec('DELETE FROM inventory_location_addresses WHERE id = ?', [id]);
     await tx.exec('DELETE FROM inventory_location_slugs WHERE id = ?', [id]);

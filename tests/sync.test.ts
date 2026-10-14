@@ -56,6 +56,7 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
       .run(roomId, '123 Brew Street');
     first.prepare('INSERT INTO inventory_locations(id, name, parent_id, created_at) VALUES (?, ?, ?, ?)')
       .run(shelfId, 'Shelf A', roomId, timestamp);
+    first.prepare('INSERT INTO equipment_locations(id, location_id) VALUES (?, ?)').run(equipmentId, roomId);
     for (const itemId of [sourceId, targetId]) first.prepare(
       'INSERT INTO inventory_items(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)')
       .run(itemId, 'Mosaic hops', 'Hops', 'g', timestamp);
@@ -80,6 +81,7 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
     assert.equal((second.prepare('SELECT parent_id FROM inventory_locations WHERE id = ?').get(shelfId) as { parent_id: string }).parent_id, roomId);
     assert.equal((second.prepare('SELECT address FROM inventory_location_addresses WHERE id = ?').get(roomId) as { address: string }).address, '123 Brew Street');
     assert.equal((second.prepare('SELECT location_id FROM inventory_item_locations WHERE id = ?').get(targetId) as { location_id: string }).location_id, shelfId);
+    assert.equal((second.prepare('SELECT location_id FROM equipment_locations WHERE id = ?').get(equipmentId) as { location_id: string }).location_id, roomId);
     assert.equal((second.prepare('SELECT quantity FROM inventory_moves WHERE to_item_id = ?').get(targetId) as { quantity: number }).quantity, 25);
     assert.deepEqual((second.prepare('SELECT image FROM photos WHERE id = ?').get(photoId) as { image: Buffer }).image, pixels);
 
@@ -580,6 +582,51 @@ test('partially upgraded post-boil loss rows survive reopening', () => {
       .get(modelId) as { post_boil_loss_liters: number }).post_boil_loss_liters, 0);
     assert.equal((upgraded.prepare('SELECT post_boil_loss_liters FROM equipment_post_boil_losses WHERE equipment_id = ?')
       .get(unitId) as { post_boil_loss_liters: number }).post_boil_loss_liters, 0.4);
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
+test('version 29 adds equipment locations while preserving units, locations, and unrelated rows', () => {
+  const id = nanoid();
+  const modelId = nanoid();
+  const unitId = nanoid();
+  const placeId = nanoid();
+  const recipeId = nanoid();
+  const db = openWorkspaceDb(id);
+  db.prepare('INSERT INTO equipment_models(id, name, kind, created_at) VALUES (?, ?, ?, ?)')
+    .run(modelId, 'Fermenter model', 'fermenter', 1);
+  db.prepare('INSERT INTO equipment(id, name, model_id, stock_id, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(unitId, 'Fermenter', modelId, 'F-01', 1);
+  db.prepare('INSERT INTO inventory_locations(id, name, created_at) VALUES (?, ?, ?)')
+    .run(placeId, 'Cellar', 1);
+  db.prepare('INSERT INTO recipes(id, name, created_at, updated_at) VALUES (?, ?, ?, ?)')
+    .run(recipeId, 'Preserved recipe', 1, 1);
+  db.prepare("SELECT crsql_as_table('equipment_locations')").get();
+  db.exec('DROP TABLE equipment_locations');
+  db.pragma('user_version = 28');
+  closeWorkspaceDb(db);
+
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.equal((upgraded.prepare('SELECT stock_id FROM equipment WHERE id = ?').get(unitId) as { stock_id: string }).stock_id, 'F-01');
+    assert.equal((upgraded.prepare('SELECT name FROM inventory_locations WHERE id = ?').get(placeId) as { name: string }).name, 'Cellar');
+    assert.equal((upgraded.prepare('SELECT name FROM recipes WHERE id = ?').get(recipeId) as { name: string }).name, 'Preserved recipe');
+    upgraded.prepare('INSERT INTO equipment_locations(id, location_id) VALUES (?, ?)').run(unitId, placeId);
+    assert.equal((upgraded.prepare('SELECT location_id FROM equipment_locations WHERE id = ?').get(unitId) as { location_id: string }).location_id, placeId);
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
+test('a partially upgraded equipment location association survives reopening', () => {
+  const id = nanoid();
+  const unitId = nanoid();
+  const placeId = nanoid();
+  const db = openWorkspaceDb(id);
+  db.prepare('INSERT INTO equipment_locations(id, location_id) VALUES (?, ?)').run(unitId, placeId);
+  db.pragma('user_version = 28');
+  closeWorkspaceDb(db);
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal((upgraded.prepare('SELECT location_id FROM equipment_locations WHERE id = ?').get(unitId) as { location_id: string }).location_id, placeId);
   } finally { closeWorkspaceDb(upgraded); }
 });
 

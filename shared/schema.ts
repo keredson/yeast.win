@@ -46,6 +46,7 @@ const definitions: Record<string, string> = {
   brewery_process_defaults: `id TEXT PRIMARY KEY NOT NULL, wort_loss_liters REAL`,
   equipment: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, model_id TEXT NOT NULL,
     slug TEXT, stock_id TEXT, added_at INTEGER, removed_at INTEGER, created_at INTEGER NOT NULL`,
+  equipment_locations: `id TEXT PRIMARY KEY NOT NULL, location_id TEXT`,
   equipment_model_measurement_channels: `id TEXT PRIMARY KEY NOT NULL, model_id TEXT NOT NULL,
     measurement_kind TEXT NOT NULL, measurement_min REAL, measurement_max REAL,
     measurement_unit TEXT, measurement_scale TEXT, is_removed INTEGER NOT NULL DEFAULT 0`,
@@ -286,6 +287,7 @@ export const indexStatements = [
   `CREATE INDEX IF NOT EXISTS equipment_use_events_by_equipment ON equipment_use_events(equipment_id, event_id)`,
   `CREATE INDEX IF NOT EXISTS equipment_by_model ON equipment(model_id, removed_at, id)`,
   `CREATE INDEX IF NOT EXISTS equipment_by_stock_id ON equipment(stock_id)`,
+  `CREATE INDEX IF NOT EXISTS equipment_locations_by_location ON equipment_locations(location_id, id)`,
   `CREATE INDEX IF NOT EXISTS inventory_items_by_supply ON inventory_items(supply_id, lot_id)`,
   `CREATE INDEX IF NOT EXISTS supply_lots_by_supply ON supply_lots(supply_id, lot_code)`
 ];
@@ -323,7 +325,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 28;
+export const workspaceSchemaVersion = 29;
 export const retiredReplicatedTables = ['equipment_calibrations', 'equipment_characterization_observations'] as const;
 
 export function isValidId(value: unknown): value is string {
