@@ -9,13 +9,10 @@ import { assignEquipmentToBatch, createEquipment, createEquipmentUnit, deleteEqu
   updateEquipmentBoilHeatLoss, clearEquipmentBoilHeatLoss,
   updateEquipmentModelBoilHeatLoss, clearEquipmentModelBoilHeatLoss,
   updateEquipmentCalibration, updateEquipmentStockId,
-  clearEquipmentUnitOverrides, clearEquipmentUnitMeasurementOverrides,
   clearEquipmentModelOverride, clearEquipmentModelMeasurementOverrides,
   updateEquipmentModelAttribute, updateEquipmentModelMeasurementRange,
-  updateEquipmentRatedPower, updateEquipmentCapacity, updateEquipmentPressureRating,
-  updateEquipmentTemperatureOffset, updateEquipmentThermalCapabilities, updateBrewingLosses, latestMeasuredMashEfficiency,
-  updateEquipmentMeasurementRange,
-  type Batch, type Equipment, type EquipmentModelOverrideField, type EquipmentOverrideField,
+  updateEquipmentTemperatureOffset, latestMeasuredMashEfficiency,
+  type Batch, type Equipment, type EquipmentModelOverrideField,
   type EquipmentSpecifications, type EquipmentUse, type LocalDb } from './db.ts';
 import { capacityInLiters, capacityLabel, capacityUnits } from '../shared/capacity.ts';
 import { changeNumberUnit } from './unitFields.ts';
@@ -186,27 +183,15 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const [editModelRange, setEditModelRange] = useState<string | null>(null);
   const [newTemperatureCalibration, setNewTemperatureCalibration] = useState(false);
   const [editIdentity, setEditIdentity] = useState(false);
-  const [editCapacity, setEditCapacity] = useState(false);
-  const [editPressure, setEditPressure] = useState(false);
-  const [editPower, setEditPower] = useState(false);
-  const [editThermal, setEditThermal] = useState(false);
-  const [editBrewingLosses, setEditBrewingLosses] = useState(false);
   const [recentMashEfficiency, setRecentMashEfficiency] = useState<number | null>(null);
-  const [editRange, setEditRange] = useState<string | null>(null);
   const [addingCapability, setAddingCapability] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [uses, setUses] = useState<EquipmentUse[]>([]);
   const [assignBatchId, setAssignBatchId] = useState<string | undefined>();
   const [equipmentForm] = Form.useForm();
-  const [capacityForm] = Form.useForm();
-  const [pressureForm] = Form.useForm();
-  const [powerForm] = Form.useForm();
-  const [thermalForm] = Form.useForm();
-  const [rangeForm] = Form.useForm();
   const [modelRangeForm] = Form.useForm();
   const [capabilityForm] = Form.useForm();
   const item = equipment.find(row => row.id === selectedId) || null;
-  const itemModel = item ? models.find(row => row.id === item.model_id) : undefined;
   const selectedModel = models.find(row => row.id === selectedId) || null;
   const catalogParent = selectedModel ? catalog.find(row => row.id === selectedModel.catalog_model_id) : undefined;
   const addingCatalogDefault = !!addingCapability && !!catalogParent && (addingCapability.startsWith('measurement:')
@@ -217,9 +202,6 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const sortedModelUnits = [...modelUnits].sort((a, b) => (a.stock_id || '').localeCompare(b.stock_id || '') || a.id.localeCompare(b.id));
   const newCapacityUnit = Form.useWatch('capacity_unit', equipmentForm) as string | undefined;
   const newRangeUnit = Form.useWatch('measurement_unit', equipmentForm) as string | undefined;
-  const editCapacityUnit = Form.useWatch('capacity_unit', capacityForm) as string | undefined;
-  const editPressureRatingUnit = Form.useWatch('pressure_unit', pressureForm) as string | undefined;
-  const editRangeUnit = Form.useWatch('measurement_unit', rangeForm) as string | undefined;
   const editModelRangeUnit = Form.useWatch('measurement_unit', modelRangeForm) as string | undefined;
   const addChannelUnit = Form.useWatch('measurement_unit', capabilityForm) as string | undefined;
   const newPressureUnit = Form.useWatch('pressure_unit', equipmentForm) as string | undefined;
@@ -235,14 +217,12 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     || !!item.has_temperature_control);
   const createPrimaryMeasurement = !!creatingKind && !selectedCatalogModel && !!measurementRangeUnits[creatingKind];
   const catalogCreationChannels = selectedCatalogModel?.measurement_channels || [];
-  const editingChannel = item?.measurement_channels?.find(channel => channel.measurement_kind === editRange);
   const ratedEstimate = !item?.has_heating || specs.rated_power_watts == null || specs.boil_heat_loss_watts == null
     ? null : predictedBoilOff(specs.rated_power_watts, specs.boil_heat_loss_watts);
   const boilHeatLossSource = specs.unit_boil_heat_loss_watts != null ? 'this unit'
     : specs.workspace_model_boil_heat_loss_watts != null ? 'brewery model'
       : specs.catalog_model_boil_heat_loss_watts != null ? 'catalog model' : null;
   const thermalKind = !!item && (!!item.has_cooling || !!item.has_temperature_control);
-  const showCooling = !!item?.has_cooling;
   const createCapacity = !!creatingKind && (selectedCatalogModel
     ? !!selectedCatalogModel.has_liquid_containment : capacityKinds.has(creatingKind));
   const createHeating = !!creatingKind && (selectedCatalogModel
@@ -311,32 +291,12 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   }, [creatingKind, selectedCatalogModel?.id, preferredUnits.pressure, equipmentForm]);
 
   useEffect(() => {
-    if (!editRange || !editingChannel) return;
-    rangeForm.resetFields();
-    rangeForm.setFieldsValue({
-      measurement_min: editingChannel.measurement_min,
-      measurement_max: editingChannel.measurement_max,
-      measurement_unit: editingChannel.measurement_scale || editingChannel.measurement_unit || channelUnits(editRange)[0]
-    });
-  }, [editRange, item?.id, rangeForm]);
-
-  useEffect(() => {
     if (!addingCapability) return;
     capabilityForm.resetFields();
     if (addingCapability.startsWith('measurement:')) {
       capabilityForm.setFieldValue('measurement_unit', channelUnits(addingCapability.slice('measurement:'.length))[0]);
     }
   }, [addingCapability, selectedModel?.id, capabilityForm]);
-
-  useEffect(() => {
-    if (!editThermal || !item) return;
-    thermalForm.resetFields();
-    thermalForm.setFieldsValue({
-      rated_heat_removal_watts: item.rated_heat_removal_watts,
-      min_temperature_c: item.min_temperature_c,
-      max_temperature_c: item.max_temperature_c
-    });
-  }, [editThermal, item?.id, thermalForm]);
 
   useEffect(() => {
     if (!item || !['all_in_one', 'mash_tun', 'kettle', 'electric_kettle'].includes(item.kind)) return;
@@ -415,50 +375,6 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  async function saveCapacity(values: { capacity?: number; capacity_unit?: string }) {
-    if (!item) return;
-    try { await updateEquipmentCapacity(db, item, capacityInLiters(values.capacity, values.capacity_unit), itemModel); setEditCapacity(false); await onChanged(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-  }
-
-  async function savePressure(values: { max_pressure?: number; pressure_unit?: string }) {
-    if (!item) return;
-    try {
-      await updateEquipmentPressureRating(db, item, pressureInKpa(values.max_pressure, values.pressure_unit) ?? null, itemModel);
-      setEditPressure(false); await onChanged();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-  }
-
-  async function savePower(values: { rated_power_watts?: number }) {
-    if (!item) return;
-    try {
-      await updateEquipmentRatedPower(db, item, values.rated_power_watts ?? null, itemModel);
-      setEditPower(false); await onChanged();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-  }
-
-  async function saveThermal(values: { has_heating?: boolean; rated_power_watts?: number;
-    has_cooling?: boolean; rated_heat_removal_watts?: number;
-    min_temperature_c?: number; max_temperature_c?: number }) {
-    if (!item) return;
-    try {
-      await updateEquipmentThermalCapabilities(db, item, {
-        has_heating: !!item.has_heating, rated_power_watts: item.rated_power_watts ?? null,
-        has_cooling: !!item.has_cooling,
-        rated_heat_removal_watts: item.has_cooling ? values.rated_heat_removal_watts ?? null : null,
-        has_temperature_control: !!item.has_temperature_control,
-        min_temperature_c: values.min_temperature_c ?? null, max_temperature_c: values.max_temperature_c ?? null
-      }, itemModel);
-      setEditThermal(false); await onChanged();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-  }
-
-  async function saveBrewingLosses(values: { mash_efficiency_pct?: number; grain_absorption_l_per_kg?: number }) {
-    if (!item) return;
-    try { await updateBrewingLosses(db, item, values, itemModel); setEditBrewingLosses(false); await onChanged(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-  }
-
   async function saveIdentity(values: { stock_id?: string }) {
     if (!item) return;
     try {
@@ -502,34 +418,6 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       if (!Number.isFinite(values.reference_c) || !Number.isFinite(values.observed_c)) throw new Error('Enter valid temperatures');
       await updateEquipmentTemperatureOffset(db, item, values.reference_c - values.observed_c);
       setNewTemperatureCalibration(false); await onChanged();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-  }
-
-  async function saveRange(values: { measurement_min?: number; measurement_max?: number; measurement_unit?: string }) {
-    if (!item || !editRange) return;
-    try {
-      const range = validRange(values.measurement_min, values.measurement_max, values.measurement_unit,
-        channelEquipmentKinds[editRange]);
-      await updateEquipmentMeasurementRange(db, item, range, editRange, itemModel);
-      setEditRange(null); await onChanged();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-  }
-
-  async function resetUnitOverride(fields: EquipmentOverrideField[]) {
-    if (!item) return;
-    try {
-      await clearEquipmentUnitOverrides(db, item, fields);
-      setEditCapacity(false); setEditPressure(false); setEditPower(false);
-      setEditThermal(false); setEditBrewingLosses(false);
-      await onChanged();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-  }
-
-  async function resetMeasurementOverride() {
-    if (!item || !editRange) return;
-    try {
-      await clearEquipmentUnitMeasurementOverrides(db, item, editRange);
-      setEditRange(null); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
@@ -643,6 +531,12 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   ].filter(entry => entry.key !== 'measurement' || entry.children?.length) : [];
   function chooseCatalogModel(model: CatalogEquipment) {
     setCatalogPickerOpen(false);
+    const existing = models.find(row => row.catalog_model_id === model.id);
+    if (existing) {
+      onSelect(existing.id);
+      setAddingUnit(true);
+      return;
+    }
     setSelectedCatalogModel(model);
     setCreatingKind(model.kind);
   }
@@ -673,7 +567,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         ]} />}
     </section> : selectedModel ? <section className="record-detail">
       <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(selectedModel.kind)}</span>
-        <h2>{selectedModel.name}</h2><p className="muted">Model defaults shared by all its units. Individual units can override them.</p></div>
+        <h2>{selectedModel.name}</h2><p className="muted">Specifications shared by all units of this model.</p></div>
         <Button icon={<PlusOutlined />} onClick={() => setAddingUnit(true)}>Add unit</Button></div>
       <div className="equipment-parameters">
         <div className="equipment-parameter"><span>Capabilities:</span> {equipmentCapabilities(selectedModel)}</div>
@@ -748,24 +642,18 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <div className="equipment-parameters">
           <div className="equipment-parameter"><span>Stock ID: {item.stock_id || 'Not set'}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit Stock ID" onClick={() => setEditIdentity(true)} /></div>
-          {item.has_liquid_containment && <div className="equipment-parameter"><span>Capacity: {capacityLabel(specs.capacity_liters ?? undefined) || 'Not set'}
-            {specs.capacity_liters != null && (item.unit_capacity_liters != null ? ' (this unit)' : ' (model)')}</span>
-            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Override capacity for this unit" onClick={() => setEditCapacity(true)} /></div>}
-          {item.has_pressure_rating && <div className="equipment-parameter"><span>
-            Pressure rating: {pressureLabel(specs.max_pressure_kpa, preferredUnits.pressure)}
-            {specs.max_pressure_kpa != null && (item.unit_max_pressure_kpa != null ? ' (this unit)' : ' (model)')}</span>
-            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Override pressure rating for this unit" onClick={() => setEditPressure(true)} /></div>}
-          {item.has_heating && <div className="equipment-parameter"><span>Rated power: {specs.rated_power_watts != null
-            ? `${specs.rated_power_watts} W (${item.unit_rated_power_watts != null ? 'this unit' : 'model'})` : 'Not set'}</span>
-            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Override rated power for this unit" onClick={() => setEditPower(true)} /></div>}
+          {item.has_liquid_containment && <div className="equipment-parameter">Capacity: {capacityLabel(specs.capacity_liters ?? undefined) || 'Not set'}</div>}
+          {item.has_pressure_rating && <div className="equipment-parameter">
+            Pressure rating: {pressureLabel(specs.max_pressure_kpa, preferredUnits.pressure)}</div>}
+          {item.has_heating && <div className="equipment-parameter">Rated power: {specs.rated_power_watts != null
+            ? `${specs.rated_power_watts} W` : 'Not set'}</div>}
           {thermalKind && <div className="equipment-parameter"><span>
             {specs.has_temperature_control && <>Temperature range: {
               specs.min_temperature_c == null && specs.max_temperature_c == null ? 'Not set'
                 : `${specs.min_temperature_c ?? '—'}–${specs.max_temperature_c ?? '—'} °C`}<br /></>}
-            {showCooling &&
+            {item.has_cooling &&
               <>Rated heat removal: {specs.rated_heat_removal_watts == null
-                ? 'Not set' : `${specs.rated_heat_removal_watts} W`}</>}</span>
-            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Override thermal settings for this unit" onClick={() => setEditThermal(true)} /></div>}
+                ? 'Not set' : `${specs.rated_heat_removal_watts} W`}</>}</span></div>}
           {hasTemperatureReading && <div className="equipment-parameter"><span>Temperature offset: {specs.temperature_offset_c == null
             ? 'Not calibrated' : `${specs.temperature_offset_c > 0 ? '+' : ''}${Number(specs.temperature_offset_c.toFixed(2))} °C`}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit temperature offset" onClick={() => setNewTemperatureCalibration(true)} /></div>}
@@ -774,17 +662,13 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
             <Button type="text" size="small" onClick={() => setNewBoilCalibration(true)}>Calibrate unit</Button></div>}
           {ratedEstimate != null && <div className="equipment-parameter">Estimated boil-off at rated power: {Number(ratedEstimate.toFixed(2))} L/h</div>}
           {['all_in_one', 'mash_tun', 'kettle', 'electric_kettle'].includes(item.kind) &&
-            <div className="equipment-parameter"><span>Mash efficiency: {specs.mash_efficiency_pct != null
+            <div className="equipment-parameter">Mash efficiency: {specs.mash_efficiency_pct != null
               ? `${specs.mash_efficiency_pct}% (set)` : recentMashEfficiency != null ? `${recentMashEfficiency}% (recent batch)` : 'Not set'}<br />
-              Grain absorption: {specs.grain_absorption_l_per_kg == null ? 'Not set' : `${specs.grain_absorption_l_per_kg} L/kg`}</span>
-              <Button type="text" size="small" icon={<EditOutlined />} aria-label="Override mash assumptions for this unit" onClick={() => setEditBrewingLosses(true)} /></div>}
+              Grain absorption: {specs.grain_absorption_l_per_kg == null ? 'Not set' : `${specs.grain_absorption_l_per_kg} L/kg`}</div>}
           {item.measurement_channels?.map(channel => <div key={channel.id} className="equipment-parameter"><span>
               {measurementLabel(channel.measurement_kind)}: {channel.measurement_min != null && channel.measurement_max != null
                 ? rangeLabel(channel.measurement_min, channel.measurement_max,
                   channel.measurement_scale || channel.measurement_unit || undefined) : 'Available'}</span>
-              <Button type="text" size="small" icon={<EditOutlined />}
-                aria-label={`Override ${measurementSentenceLabel(channel.measurement_kind)} range for this unit`}
-                onClick={() => setEditRange(channel.measurement_kind)} />
             </div>)}
           {profile?.fields.map(field => <div key={field.key} className="equipment-parameter"><span>{field.label}: {calibrationValues[field.key] == null ? 'Not calibrated' : String(calibrationValues[field.key])}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${field.label}`} onClick={() => setEditCalibration(true)} /></div>)}
@@ -981,92 +865,10 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           Restore to default</Button>}
       </Form>
     </Modal>
-    <Modal title={capabilityModalTitle('Unit capacity override', ['liquid_containment'])} open={editCapacity} onCancel={() => setEditCapacity(false)} footer={null} destroyOnHidden>
-      <Form key={item?.id} form={capacityForm} layout="vertical" onFinish={saveCapacity} initialValues={{ capacity: specs.capacity_liters, capacity_unit: 'L' }}>
-        <div className="capacity-fields"><Form.Item name="capacity" label="Capacity"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
-          <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]}
-            onChange={unit => changeNumberUnit(capacityForm, ['capacity'], editCapacityUnit || 'L', unit)} /></Form.Item></div>
-        <Button type="primary" htmlType="submit">Save capacity</Button>
-        {item?.unit_capacity_liters != null && <Button type="text" onClick={() => void resetUnitOverride(['capacity_liters'])}>Restore to default</Button>}
-      </Form>
-    </Modal>
-    <Modal title={capabilityModalTitle('Unit pressure rating override', ['pressure_rating'])} open={editPressure} onCancel={() => setEditPressure(false)} footer={null} destroyOnHidden>
-      <Form key={item?.id} form={pressureForm} layout="vertical" onFinish={savePressure}
-        initialValues={{ max_pressure: specs.max_pressure_kpa == null ? undefined
-          : convertUnit(specs.max_pressure_kpa, 'kPa', preferredUnits.pressure), pressure_unit: preferredUnits.pressure }}>
-        <div className="form-pair"><Form.Item name="max_pressure" label="Maximum working pressure">
-          <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
-          <Form.Item name="pressure_unit" label="Unit"><Select options={unitOptions(unitGroups.pressure)}
-            onChange={unit => changeNumberUnit(pressureForm, ['max_pressure'],
-              editPressureRatingUnit || preferredUnits.pressure, unit)} /></Form.Item></div>
-        <Button type="primary" htmlType="submit">Save pressure rating</Button>
-        {item?.unit_max_pressure_kpa != null && <Button type="text" onClick={() => void resetUnitOverride(['max_pressure_kpa'])}>Restore to default</Button>}
-      </Form>
-    </Modal>
-    <Modal title={capabilityModalTitle('Unit rated power override', ['heating'])} open={editPower} onCancel={() => setEditPower(false)} footer={null} destroyOnHidden>
-      <Form key={item?.id} form={powerForm} layout="vertical" onFinish={savePower}
-        initialValues={{ rated_power_watts: specs.rated_power_watts }}>
-        <Form.Item name="rated_power_watts" label="Rated power (W)">
-          <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
-        <Button type="primary" htmlType="submit">Save rated power</Button>
-        {item?.unit_rated_power_watts != null && <Button type="text" onClick={() => void resetUnitOverride(['rated_power_watts'])}>Restore to default</Button>}
-      </Form>
-    </Modal>
-    <Modal title={capabilityModalTitle('Unit thermal overrides', [
-      ...(showCooling ? ['cooling' as const] : []),
-      ...(specs.has_temperature_control ? ['temperature_control' as const] : [])
-    ])} open={editThermal} onCancel={() => setEditThermal(false)} footer={null} destroyOnHidden>
-      <Form key={item?.id} form={thermalForm} layout="vertical" onFinish={saveThermal}
-        initialValues={{ has_heating: !!specs.has_heating, rated_power_watts: specs.rated_power_watts,
-          has_cooling: !!specs.has_cooling, rated_heat_removal_watts: specs.rated_heat_removal_watts,
-          min_temperature_c: specs.min_temperature_c, max_temperature_c: specs.max_temperature_c }}>
-        {showCooling && <Form.Item name="rated_heat_removal_watts" label="Rated heat removal (W)">
-          <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
-        {item?.unit_rated_heat_removal_watts != null && <Button type="text" aria-label="Restore heat removal to default"
-          onClick={() => void resetUnitOverride(['rated_heat_removal_watts'])}>Restore to default</Button>}
-        {specs.has_temperature_control && <div className="form-pair">
-          <Form.Item name="min_temperature_c" label="Minimum temperature (°C)"><InputNumber className="full-width" step="any" /></Form.Item>
-          <Form.Item name="max_temperature_c" label="Maximum temperature (°C)"><InputNumber className="full-width" step="any" /></Form.Item>
-        </div>}
-        {item?.unit_min_temperature_c != null && <Button type="text" aria-label="Restore minimum temperature to default"
-          onClick={() => void resetUnitOverride(['min_temperature_c'])}>Restore to default</Button>}
-        {item?.unit_max_temperature_c != null && <Button type="text" aria-label="Restore maximum temperature to default"
-          onClick={() => void resetUnitOverride(['max_temperature_c'])}>Restore to default</Button>}
-        <Button type="primary" htmlType="submit">Save capabilities</Button>
-      </Form>
-    </Modal>
-    <Modal title="Unit mash assumption overrides" open={editBrewingLosses} onCancel={() => setEditBrewingLosses(false)} footer={null} destroyOnHidden>
-      <Form key={item?.id} layout="vertical" onFinish={saveBrewingLosses} initialValues={specs}>
-        <Form.Item name="mash_efficiency_pct" label="Mash efficiency (%)"><InputNumber className="full-width" min={0} max={100} step="any" /></Form.Item>
-        {item?.unit_mash_efficiency_pct != null && <Button type="text" aria-label="Restore mash efficiency to default"
-          onClick={() => void resetUnitOverride(['mash_efficiency_pct'])}>Restore to default</Button>}
-        <Form.Item name="grain_absorption_l_per_kg" label="Grain absorption (L per kg)"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
-        {item?.unit_grain_absorption_l_per_kg != null && <Button type="text" aria-label="Restore grain absorption to default"
-          onClick={() => void resetUnitOverride(['grain_absorption_l_per_kg'])}>Restore to default</Button>}
-        <Button type="primary" htmlType="submit">Save</Button>
-      </Form>
-    </Modal>
     <Modal title="Edit Stock ID" open={editIdentity} onCancel={() => setEditIdentity(false)} footer={null} destroyOnHidden>
       <Form key={item?.id} layout="vertical" onFinish={saveIdentity} initialValues={{ stock_id: item?.stock_id }}>
         <Form.Item name="stock_id" label="Stock ID"><Input maxLength={80} /></Form.Item>
         <Button type="primary" htmlType="submit">Save unit</Button>
-      </Form>
-    </Modal>
-    <Modal title={capabilityModalTitle(editRange ? `Unit ${measurementSentenceLabel(editRange)} range override`
-      : 'Unit measurement range override', ['measurement'])}
-      open={!!editRange} onCancel={() => setEditRange(null)} footer={null} destroyOnHidden>
-      <Form key={`${item?.id}:${editRange}`} form={rangeForm} layout="vertical" onFinish={saveRange}
-        initialValues={{ measurement_min: editingChannel?.measurement_min, measurement_max: editingChannel?.measurement_max,
-          measurement_unit: editingChannel?.measurement_scale || editingChannel?.measurement_unit ||
-            (editRange ? channelUnits(editRange)[0] : undefined) }}>
-        <div className="form-triple"><Form.Item name="measurement_min" label="Range minimum"><InputNumber className="full-width" step="any" /></Form.Item>
-          <Form.Item name="measurement_max" label="Range maximum"><InputNumber className="full-width" step="any" /></Form.Item>
-          <Form.Item name="measurement_unit" label="Scale"><Select options={unitOptions(editRange ? channelUnits(editRange) : [])}
-            onChange={unit => changeNumberUnit(rangeForm, ['measurement_min', 'measurement_max'], editRangeUnit, unit)} /></Form.Item></div>
-        <Button type="primary" htmlType="submit">Save range</Button>
-        {(editingChannel?.unit_measurement_min != null || editingChannel?.unit_measurement_max != null
-          || editingChannel?.unit_measurement_unit != null || editingChannel?.unit_measurement_scale != null)
-          && <Button type="text" onClick={() => void resetMeasurementOverride()}>Restore to default</Button>}
       </Form>
     </Modal>
     <Modal title={profile ? `Calibrate ${equipmentKindLabel(item?.kind || '')}` : 'Edit calibration'} open={editCalibration} onCancel={() => setEditCalibration(false)} footer={null} destroyOnHidden>

@@ -310,13 +310,9 @@ try {
   await catalogEquipmentDialog.getByRole('button', { name: 'Create equipment' }).click();
   await page.getByText('Capacity: 35 L').waitFor();
   if (await page.getByText(/^Cooling:/).count()) throw new Error('VEVOR detail invented a cooling capability');
-  await page.getByRole('button', { name: 'Override thermal settings for this unit' }).click();
-  const vevorThermalDialog = page.getByRole('dialog', { name: 'Unit thermal overrides' });
-  if (await vevorThermalDialog.getByRole('checkbox', { name: 'Cooling' }).count()
-    || await vevorThermalDialog.getByRole('spinbutton', { name: 'Rated heat removal (W)' }).count()) {
-    throw new Error('VEVOR edit offered cooling without a model cooling capability');
+  if (await page.getByRole('button', { name: /Override .* for this unit/ }).count()) {
+    throw new Error('Model specifications are editable from the stock unit page');
   }
-  await vevorThermalDialog.locator('.ant-modal-close').click();
   await page.getByRole('combobox', { name: 'Assign to batch' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: batchName }).click();
   await page.getByRole('button', { name: 'Assign', exact: true }).click();
@@ -350,14 +346,10 @@ try {
   const vevorRow = page.locator('.equipment-table').getByRole('row').filter({ has: page.getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }) });
   await vevorRow.getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   await page.waitForURL(url => /^\/equipment\/vevor-electric-brewing-system-9-2-gal-35-l\/unit-[a-z0-9_-]+$/.test(new URL(url).pathname));
-  await page.getByRole('button', { name: 'Override capacity for this unit' }).click();
-  const vevorUnitCapacityDialog = page.getByRole('dialog', { name: 'Unit capacity override' });
-  await vevorUnitCapacityDialog.getByRole('spinbutton', { name: 'Capacity' }).fill('38');
-  await vevorUnitCapacityDialog.getByRole('button', { name: 'Save capacity' }).click();
-  await page.getByText('Capacity: 38 L (this unit)').waitFor();
-  await page.getByRole('button', { name: 'Override capacity for this unit' }).click();
-  await vevorUnitCapacityDialog.getByRole('button', { name: 'Restore to default' }).click();
-  await page.getByText('Capacity: 35 L (model)').waitFor();
+  await page.getByText('Capacity: 35 L').waitFor();
+  if (await page.getByRole('button', { name: /Override .* for this unit/ }).count()) {
+    throw new Error('A stock unit can override model specifications');
+  }
   const unitBatches = page.locator('.equipment-batches');
   await unitBatches.getByRole('row').filter({ hasText: batchName }).getByText('In use').waitFor();
   await page.getByRole('button', { name: 'Release' }).click();
@@ -398,13 +390,15 @@ try {
   await addedControlDialog.getByRole('button', { name: 'Add capability' }).click();
   await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   await page.getByText('Temperature range: 0–30 °C').waitFor();
-  await page.getByRole('button', { name: 'Override thermal settings for this unit' }).click();
-  const addedControlEditDialog = page.getByRole('dialog', { name: 'Unit thermal overrides' });
-  if (await addedControlEditDialog.getByRole('checkbox', { name: 'Cooling' }).count()) {
-    throw new Error('Temperature control invented a cooling capability');
+  if (await page.getByRole('button', { name: /Override .* for this unit/ }).count()) {
+    throw new Error('Stock unit can edit model temperature limits');
   }
+  await page.getByRole('link', { name: 'Basic smoke fermenter' }).click();
+  await page.getByRole('button', { name: 'Edit model maximum temperature' }).click();
+  const addedControlEditDialog = page.getByRole('dialog', { name: 'Edit model Maximum temperature (°C)' });
   await addedControlEditDialog.getByRole('spinbutton', { name: 'Maximum temperature (°C)' }).fill('32');
-  await addedControlEditDialog.getByRole('button', { name: 'Save capabilities' }).click();
+  await addedControlEditDialog.getByRole('button', { name: 'Save model value' }).click();
+  await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   await page.getByText('Temperature range: 0–32 °C').waitFor();
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
@@ -443,11 +437,14 @@ try {
   const restoreTemperatureDialog = page.getByRole('dialog', { name: 'Add temperature measurement' });
   await restoreTemperatureDialog.getByRole('button', { name: 'Restore to default' }).click();
   await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
-  await page.getByText('Temperature: 0–60 °C').waitFor();
-  await page.getByRole('button', { name: 'Override temperature range for this unit' }).click();
-  const tiltTemperatureDialog = page.getByRole('dialog', { name: 'Unit temperature range override' });
+  await page.getByText('Temperature: Available').waitFor();
+  await page.getByRole('link', { name: 'Tilt Hydrometer and Thermometer' }).click();
+  await page.getByRole('button', { name: 'Edit model temperature range' }).click();
+  const tiltTemperatureDialog = page.getByRole('dialog', { name: 'Edit model temperature range' });
+  await tiltTemperatureDialog.getByRole('spinbutton', { name: 'Range minimum' }).fill('0');
   await tiltTemperatureDialog.getByRole('spinbutton', { name: 'Range maximum' }).fill('65');
-  await tiltTemperatureDialog.getByRole('button', { name: 'Save range' }).click();
+  await tiltTemperatureDialog.getByRole('button', { name: 'Save model range' }).click();
+  await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   await page.getByText('Temperature: 0–65 °C').waitFor();
   await page.getByText('Temperature offset: Not calibrated').waitFor();
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
@@ -480,24 +477,24 @@ try {
   await kettleDialog.getByRole('button', { name: 'Create equipment' }).click();
   await page.getByRole('heading', { name: 'Smoke electric kettle' }).waitFor();
   await page.getByText('Rated power: 1800 W').waitFor();
-  await page.getByRole('button', { name: 'Override capacity for this unit' }).click();
-  await page.getByRole('dialog', { name: 'Unit capacity override' }).getByRole('spinbutton', { name: 'Capacity' }).fill('36');
-  await page.getByRole('button', { name: 'Save capacity' }).click();
-  await page.getByText('Capacity: 36 L').waitFor();
-  await page.getByRole('button', { name: 'Override rated power for this unit' }).click();
-  await page.getByRole('dialog', { name: 'Unit rated power override' }).getByRole('spinbutton', { name: 'Rated power (W)' }).fill('2000');
-  await page.getByRole('button', { name: 'Save rated power' }).click();
-  await page.getByText('Rated power: 2000 W').waitFor();
+  if (await page.getByRole('button', { name: /Override .* for this unit/ }).count()) {
+    throw new Error('Stock unit can edit model capacity or rated power');
+  }
   if (await page.getByRole('button', { name: 'Edit model heat loss' }).count()) {
     throw new Error('Stock unit should not edit model heat loss');
   }
   await page.getByRole('link', { name: 'Smoke electric kettle' }).click();
+  await page.getByRole('button', { name: 'Edit model capacity' }).click();
+  const kettleCapacityDialog = page.getByRole('dialog', { name: 'Edit model Capacity (L)' });
+  await kettleCapacityDialog.getByRole('spinbutton', { name: 'Capacity (L)' }).fill('36');
+  await kettleCapacityDialog.getByRole('button', { name: 'Save model value' }).click();
   await page.getByRole('button', { name: 'Edit model heat loss' }).click();
   const modelBoilDialog = page.getByRole('dialog', { name: 'Edit brewery model heat loss' });
   await modelBoilDialog.getByRole('spinbutton', { name: 'Heat loss at boil (W)' }).fill('100');
   await modelBoilDialog.getByRole('button', { name: 'Save model default' }).click();
   await page.getByText('Heat loss at boil: 100 W (brewery model)').waitFor();
   await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
+  await page.getByText('Capacity: 36 L').waitFor();
   await page.getByRole('button', { name: 'Calibrate unit' }).click();
   const boilDialog = page.getByRole('dialog', { name: "Calibrate this unit's boil-off" });
   await boilDialog.getByRole('spinbutton', { name: 'Start volume (L)' }).fill('30');
@@ -562,9 +559,12 @@ try {
   }
   await page.getByRole('heading', { name: 'Smoke pH meter' }).waitFor();
   await page.getByText('pH: 0–14 pH').waitFor();
-  await page.getByRole('button', { name: 'Override pH range for this unit' }).click();
-  await page.getByRole('dialog', { name: 'Unit pH range override' }).getByRole('spinbutton', { name: 'Range maximum' }).fill('15');
-  await page.getByRole('button', { name: 'Save range' }).click();
+  await page.getByRole('link', { name: 'Smoke pH meter' }).click();
+  await page.getByRole('button', { name: 'Edit model pH range' }).click();
+  const phRangeDialog = page.getByRole('dialog', { name: 'Edit model pH range' });
+  await phRangeDialog.getByRole('spinbutton', { name: 'Range maximum' }).fill('15');
+  await phRangeDialog.getByRole('button', { name: 'Save model range' }).click();
+  await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   await page.getByText('pH: 0–15 pH').waitFor();
   if (!/^\/equipment\/smoke-ph-meter\/unit-[a-z0-9_-]+$/.test(new URL(page.url()).pathname)) {
     throw new Error('Equipment unit URL should sit beneath its model');
