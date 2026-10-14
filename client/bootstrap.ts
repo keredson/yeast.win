@@ -21,12 +21,50 @@ function brand(): string {
 }
 
 function splash(): void {
-  root.innerHTML = `<main class="public-page"><div class="public-shell">${brand()}
-    <section class="public-hero"><p class="public-eyebrow">Free and open source</p>
-    <h1>Keep fermentation in view.</h1>
-    <p>Plan a batch, record what happened, and keep your batch data available on this device.</p>
-    <div class="public-actions"><a class="public-primary" href="/login">Sign in</a>
-    <a class="public-secondary" href="/login?mode=signup">Create account</a></div></section></div></main>`;
+  root.innerHTML = `<main class="public-page splash-page"><div class="public-shell splash-shell">
+    <header class="splash-header">${brand()}<a class="splash-signin" href="/login">Sign in <span aria-hidden="true">↗</span></a></header>
+    <section class="splash-hero">
+      <div class="splash-copy">
+        <p class="public-eyebrow">Free · Open source · Made for makers</p>
+        <h1>Make it again.<br><em>Make it better.</em></h1>
+        <p class="splash-intro">Keep your recipes, batch notes, and measurements together. See what worked and make the next batch your best yet.</p>
+        <div class="public-actions"><a class="public-primary" href="/login?mode=signup">Start a batch <span aria-hidden="true">→</span></a>
+          <a class="public-secondary" href="/login">I have an account</a></div>
+        <p class="splash-note"><span aria-hidden="true">●</span> Your batches stay available on this device, even offline.</p>
+      </div>
+      <div class="splash-art" role="img" aria-label="Illustration of a fermentation batch timeline">
+        <div class="splash-art-glow"></div>
+        <div class="splash-art-bubble splash-art-bubble-one"></div><div class="splash-art-bubble splash-art-bubble-two"></div>
+        <div class="preview-card">
+          <div class="preview-card-header"><span class="preview-kicker">BATCH JOURNAL</span><span class="preview-status"><span></span> In progress</span></div>
+          <h2>Autumn cider</h2><p class="preview-subtitle">From first pitch to final pour</p>
+          <div class="preview-timeline">
+            <div class="preview-event preview-event-done"><span class="preview-marker">✓</span><div><strong>Prepare the must</strong><small>Pressed apples · 20 L</small></div><time>09:30</time></div>
+            <div class="preview-event preview-event-done"><span class="preview-marker">✓</span><div><strong>Pitch yeast</strong><small>Ready to ferment</small></div><time>10:15</time></div>
+            <div class="preview-event preview-event-current"><span class="preview-marker"></span><div><strong>Measure gravity</strong><small>Capture the change</small></div><span class="preview-next">Next</span></div>
+          </div>
+          <div class="preview-card-footer"><span class="preview-footer-icon" aria-hidden="true">↗</span><span>Every detail helps the next batch.</span></div>
+        </div>
+      </div>
+    </section>
+    <section class="splash-details" aria-labelledby="splash-details-title">
+      <div class="splash-section-heading"><p class="public-eyebrow">Built for the whole batch</p>
+        <h2 id="splash-details-title">From a good idea to a better next batch.</h2>
+        <p>Yeast.Win! gives your recipe and what actually happened a place to live together. It is a practical log for beer, cider, mead, and other drinks you ferment.</p></div>
+      <div class="splash-features">
+        <article><span class="splash-feature-number">01 / Plan</span><h3>Build your recipe</h3>
+          <p>Put ingredients, measurements, and process steps in order before the batch begins.</p></article>
+        <article><span class="splash-feature-number">02 / Make</span><h3>Record the real thing</h3>
+          <p>Keep notes, readings, additions, and changes on one timeline as you work.</p></article>
+        <article><span class="splash-feature-number">03 / Learn</span><h3>Know what changed</h3>
+          <p>Look back at the batch you made and use what you learned the next time around.</p></article>
+      </div>
+    </section>
+    <section class="splash-offline"><div><p class="public-eyebrow">Keep making, even offline</p>
+      <h2>Your process stays with you.</h2><p>Open your batches without a connection. Changes sync when you reconnect and use the app again.</p></div>
+      <a href="/login?mode=signup">Get started <span aria-hidden="true">→</span></a></section>
+    <footer class="splash-footer"><span>Yeast.Win! · Free and open source</span><span>Made for curious fermenters.</span></footer>
+  </div></main>`;
 }
 
 function login(message = ''): void {

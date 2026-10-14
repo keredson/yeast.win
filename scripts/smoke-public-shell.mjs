@@ -16,7 +16,7 @@ try {
     if (/\/assets\/(main-|crsqlite-)/.test(request.url())) appAssets.push(request.url());
   });
   await page.goto(base);
-  await page.getByRole('heading', { name: 'Keep fermentation in view.' }).waitFor();
+  await page.getByRole('heading', { name: 'Make it again. Make it better.' }).waitFor();
   assert.equal(await page.title(), 'Yeast.Win!');
   if (!dev) {
     await page.evaluate(() => navigator.serviceWorker?.ready);
