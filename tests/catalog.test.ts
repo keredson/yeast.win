@@ -110,6 +110,19 @@ test('version 22 catalog adds later bundled ingredient photos without overwritin
   } finally { upgraded.close(); }
 });
 
+test('version 23 catalog adds Lallemand package photos', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-lallemand-photos-'));
+  const before = openCatalogDb(dir);
+  before.prepare('DELETE FROM supply_images WHERE supply_id = ?').run('supply_lallemand_nottingham');
+  before.pragma('user_version = 23');
+  before.close();
+  const upgraded = openCatalogDb(dir);
+  try {
+    assert.ok((upgraded.prepare('SELECT length(image_bytes) AS bytes FROM supply_images WHERE supply_id = ?')
+      .get('supply_lallemand_nottingham') as { bytes: number }).bytes > 1000);
+  } finally { upgraded.close(); }
+});
+
 test('version 21 separates US and EU VEVOR systems without replacing catalog edits', () => {
   for (const edited of [false, true]) {
     const dir = mkdtempSync(join(tmpdir(), 'brewlog-vevor-region-'));
