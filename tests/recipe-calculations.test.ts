@@ -65,7 +65,7 @@ test('brewery and app mash defaults are used only after recipe and equipment sou
   assert.ok(model.sources.colorSrm.some(line => line.includes('2 °L')));
 });
 
-test('missing loss attributes default to zero, while missing ingredients still block gravity', () => {
+test('missing loss attributes default to zero, and imported values survive empty supply properties', () => {
   const missingRetention = calculateRecipe(events, [grain, yeast], equipment.map(item => ({ ...item, post_boil_loss_liters: null })),
     { target_fermenter_volume_liters: 20 }, {});
   assert.ok(missingRetention.originalGravity != null);
@@ -73,11 +73,21 @@ test('missing loss attributes default to zero, while missing ingredients still b
   assert.deepEqual(missingRetention.unavailable.colorSrm, []);
   const missingYield = calculateRecipe(events, [{ ...grain, yield_pct: null, color_lovibond: null }, yeast], equipment,
     { target_fermenter_volume_liters: 20 }, { 'grain-add': { yield_pct: 80 } });
-  assert.equal(missingYield.originalGravity, null);
-  assert.ok(missingYield.missing.some(message => message.includes('extract yield')));
+  assert.ok(missingYield.originalGravity != null);
+  assert.ok(missingYield.sources.originalGravity.some(line => line.includes('80% (imported recipe)')));
   assert.equal(missingYield.colorSrm, null);
-  assert.ok(missingYield.unavailable.originalGravity.some(message => message.includes('extract yield')));
+  assert.ok(!missingYield.unavailable.originalGravity.some(message => message.includes('extract yield')));
   assert.ok(missingYield.unavailable.colorSrm.some(message => message.includes('color value')));
+});
+
+test('missing grain yields use named app class estimates without filling missing color', () => {
+  const munich = { ...grain, name: 'Munich malt', yield_pct: null, color_lovibond: null };
+  const result = calculateRecipe([{ ...events[4], title: 'Munich malt', details: {
+    ...events[4].details, item_name: 'Munich malt' } }], [munich], equipment,
+  { target_fermenter_volume_liters: 20 }, {});
+  assert.ok(result.originalGravity != null);
+  assert.ok(result.sources.originalGravity.some(line => line.includes('75% (app estimate for kilned malt)')));
+  assert.equal(result.colorSrm, null);
 });
 
 test('repeated use of one unit contributes its loss only once', () => {

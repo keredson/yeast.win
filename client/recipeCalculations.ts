@@ -18,6 +18,19 @@ export interface RecipeEstimate {
 
 export const appMashEfficiencyPct = 75;
 
+// Estimated as-is extract potential for grains without a recorded specification.
+// Product and brewery values always take precedence over these broad defaults.
+export const appGrainYields = { base: 78, kilned: 75, caramel: 70, roasted: 65, flaked: 70 } as const;
+
+export function grainClassForName(name: string): keyof typeof appGrainYields {
+  const text = name.toLowerCase();
+  if (/roast|chocolate|black|carafa|dehusk/.test(text)) return 'roasted';
+  if (/crystal|caramel|cara(?!fa)/.test(text)) return 'caramel';
+  if (/flak|torrif|rolled/.test(text)) return 'flaked';
+  if (/munich|vienna|biscuit|aromatic|melanoidin|amber|brown malt/.test(text)) return 'kilned';
+  return 'base';
+}
+
 function positive(value: unknown): number | null {
   if (value == null || value === '') return null;
   const number = Number(value);
@@ -123,17 +136,23 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
     if (details.item_category === 'Grain') grainCount++;
     const item = inventory.find(row => row.id === (details.supply_id || details.inventory_item_id));
     const source = eventInputs[event.id] || {};
-    const yieldPct = positive(item ? item.yield_pct : source.yield_pct);
+    const name = String(details.item_name || item?.name || event.title);
+    const recordedYield = positive(item?.yield_pct) ?? positive(source.yield_pct);
+    const grainClass = item?.grain_class || grainClassForName(name);
+    const yieldPct = recordedYield ?? (details.item_category === 'Grain'
+      ? appGrainYields[grainClass as keyof typeof appGrainYields] ?? appGrainYields.base : null);
     const pounds = convertUnit(Number(details.quantity), String(details.unit), 'lb');
-    const rawColor = item ? item.color_lovibond : source.color_lovibond;
+    const rawColor = item?.color_lovibond ?? source.color_lovibond;
     const color = rawColor == null || rawColor === '' ? null : Number(rawColor);
     if (pounds == null || pounds <= 0 || color == null || !Number.isFinite(color) || color < 0) colorReady = false;
     else maltColorUnits += pounds * color;
-    const name = String(details.item_name || item?.name || event.title);
     const amount = `${details.quantity ?? 'unset'} ${details.unit || ''}`.trim();
     if (details.item_category === 'Grain') {
-      gravitySources.push(`${name}: ${amount} (recipe action); extract yield ${yieldPct ?? 'unset'}% (${item ? 'brewery ingredient' : 'imported recipe'}).`);
-      colorSources.push(`${name}: ${amount} (recipe action); color ${color ?? 'unset'} °L (${item ? 'brewery ingredient' : 'imported recipe'}).`);
+      const yieldSource = positive(item?.yield_pct) != null ? 'brewery or catalog ingredient'
+        : positive(source.yield_pct) != null ? 'imported recipe'
+          : `app estimate for ${grainClass} malt`;
+      gravitySources.push(`${name}: ${amount} (recipe action); extract yield ${yieldPct ?? 'unset'}% (${yieldSource}).`);
+      colorSources.push(`${name}: ${amount} (recipe action); color ${color ?? 'unset'} °L (${item?.color_lovibond != null ? 'brewery or catalog ingredient' : source.color_lovibond != null ? 'imported recipe' : 'unset'}).`);
     }
     if (details.item_category === 'Adjunct') continue;
     if (yieldPct == null || yieldPct > 100 || pounds == null || pounds <= 0) {
@@ -164,7 +183,7 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
   const attenuations = yeasts.map(event => {
     const details = event.details;
     const item = inventory.find(row => row.id === (details.supply_id || details.inventory_item_id));
-    return positive(item ? item.attenuation_pct : eventInputs[event.id]?.attenuation_pct);
+    return positive(item?.attenuation_pct) ?? positive(eventInputs[event.id]?.attenuation_pct);
   });
   const attenuation = attenuations.length === 1 && attenuations[0] != null && attenuations[0] <= 100 ? attenuations[0] : null;
   const yeast = yeasts[0];
