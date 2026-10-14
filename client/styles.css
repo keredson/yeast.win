@@ -61,6 +61,8 @@ button, input, textarea { font: inherit; }
 .equipment-index { max-width: none; }
 .equipment-table { margin-top: 24px; }
 .equipment-table .ant-table-cell { overflow-wrap: anywhere; }
+.equipment-model-table-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.equipment-model-table-name img { display: block; width: 20px; height: 20px; flex: none; object-fit: contain; }
 .equipment-capabilities { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .equipment-capability { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
   border-radius: 7px; background: var(--ant-color-fill-tertiary); color: var(--ant-color-text-secondary); }
@@ -110,7 +112,7 @@ button, input, textarea { font: inherit; }
 .equipment-catalog-option { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 14px;
   border: 0; background: white; color: #263c36; text-align: left; cursor: pointer; }
 .equipment-catalog-option:hover, .equipment-catalog-option:focus-visible { background: #f1f7f1; }
-.equipment-catalog-option-name { display: grid; gap: 2px; min-width: 0; }
+.equipment-catalog-option-name { display: grid; flex: 1; gap: 2px; min-width: 0; }
 .equipment-catalog-option-name strong { font-size: 14px; }
 .equipment-catalog-option-name small { color: #728079; font-size: 12px; }
 .equipment-catalog-thumbnail { width: 46px; height: 46px; flex: none; object-fit: contain; }

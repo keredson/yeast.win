@@ -294,7 +294,7 @@ try {
     throw new Error('Catalog should offer one Inkbird ITC-308 model');
   }
   await catalogDialog.getByRole('searchbox', { name: 'Search equipment models' }).fill('VEVOR');
-  await catalogDialog.getByRole('button', { name: /VEVOR Electric Brewing System 9.2 Gal\/35 L/ }).click();
+  await catalogDialog.getByRole('button', { name: /VEVOR Electric Brewing System 9.2 Gal\/35 L/ }).first().click();
   const catalogEquipmentDialog = page.getByRole('dialog', { name: 'Add all-in-one brewing system' });
   if (await catalogEquipmentDialog.getByRole('textbox', { name: 'Name' }).inputValue()
     !== 'VEVOR Electric Brewing System 9.2 Gal/35 L') throw new Error('Catalog model name was not copied');
@@ -306,6 +306,9 @@ try {
     throw new Error('VEVOR import offered cooling without a model cooling capability');
   }
   await catalogEquipmentDialog.getByRole('button', { name: 'Create equipment' }).click();
+  await page.waitForURL('**/equipment');
+  await page.locator('.equipment-table').getByRole('link', { name: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
+  await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   const unitModelCard = page.locator('.equipment-model-card');
   await unitModelCard.getByText('35 L', { exact: true }).waitFor();
   if (await page.locator('.equipment-unit-section').getByText(/^Capacity:/).count()) {
@@ -374,6 +377,21 @@ try {
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
   await page.waitForURL('**/equipment/vevor-electric-brewing-system-9-2-gal-35-l');
   await navigateSection(page, 'Equipment');
+  await page.getByRole('button', { name: 'Add from catalog' }).click();
+  const existingModelPicker = page.getByRole('dialog', { name: 'Add from catalog' });
+  await existingModelPicker.getByRole('searchbox', { name: 'Search equipment models' }).fill('VEVOR Electric Brewing System 9.2 Gal/35 L');
+  await existingModelPicker.getByRole('button', { name: /VEVOR Electric Brewing System 9.2 Gal\/35 L/ }).first().click();
+  await page.waitForURL('**/equipment');
+  const catalogUnitDialog = page.getByRole('dialog', { name: 'Add equipment unit' });
+  await catalogUnitDialog.getByRole('textbox', { name: 'Stock ID' }).fill('Catalog VEVOR');
+  await catalogUnitDialog.getByRole('button', { name: 'Add unit' }).click();
+  await page.waitForURL('**/equipment');
+  await page.locator('.equipment-table').getByRole('link', { name: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
+  await page.locator('.equipment-table').getByRole('link', { name: 'Catalog VEVOR' }).click();
+  await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
+  await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
+  await page.waitForURL('**/equipment/vevor-electric-brewing-system-9-2-gal-35-l');
+  await navigateSection(page, 'Equipment');
   await chooseEquipmentType(page, 'Define equipment', 'Passive vessels', 'Fermenter');
   const basicFermenterDialog = page.getByRole('dialog', { name: 'Add fermenter' });
   await basicFermenterDialog.getByRole('textbox', { name: 'Name' }).fill('Basic smoke fermenter');
@@ -420,6 +438,9 @@ try {
     throw new Error('Tilt temperature unit is missing from the add form');
   }
   await tiltDialog.getByRole('button', { name: 'Create equipment' }).click();
+  await page.waitForURL('**/equipment');
+  await page.locator('.equipment-table').getByRole('link', { name: 'Tilt Hydrometer and Thermometer' }).click();
+  await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   await unitModelCard.getByText('Gravity').waitFor();
   await unitModelCard.getByText('0–60 °C').waitFor();
   await unitModelCard.getByRole('link', { name: 'Tilt Hydrometer and Thermometer' }).click();
@@ -461,6 +482,9 @@ try {
   await cboxDialog.getByRole('spinbutton', { name: 'Dissolved oxygen range minimum' }).fill('0');
   await cboxDialog.getByRole('spinbutton', { name: 'Dissolved oxygen range maximum' }).fill('10');
   await cboxDialog.getByRole('button', { name: 'Create equipment' }).click();
+  await page.waitForURL('**/equipment');
+  await page.locator('.equipment-table').getByRole('link', { name: 'Anton Paar CboxQC' }).click();
+  await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   await unitModelCard.getByText('0–10 mg/L').waitFor();
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();

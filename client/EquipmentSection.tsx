@@ -15,7 +15,7 @@ import { assignEquipmentToBatch, createEquipment, createEquipmentUnit, deleteEqu
   updateEquipmentModelAttribute, updateEquipmentModelMeasurementRange,
   updateEquipmentUnitPostBoilLoss, clearEquipmentUnitOverrides,
   updateEquipmentTemperatureOffset, latestMeasuredMashEfficiency,
-  readEquipmentModelMedia, saveEquipmentModelMedia, type EquipmentModelMedia,
+  readEquipmentModelMedia, listEquipmentModelImages, saveEquipmentModelMedia, type EquipmentModelMedia,
   type Batch, type Equipment, type EquipmentModelOverrideField, type InventoryLocation,
   type EquipmentSpecifications, type EquipmentUse, type LocalDb } from './db.ts';
 import { capacityInLiters, capacityLabel, capacityUnits } from '../shared/capacity.ts';
@@ -186,6 +186,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogKind, setCatalogKind] = useState<string | undefined>();
   const [selectedCatalogModel, setSelectedCatalogModel] = useState<CatalogEquipment | null>(null);
+  const [catalogUnitModelId, setCatalogUnitModelId] = useState<string | null>(null);
   const [editCalibration, setEditCalibration] = useState(false);
   const [newBoilCalibration, setNewBoilCalibration] = useState(false);
   const [editModelBoilHeatLoss, setEditModelBoilHeatLoss] = useState(false);
@@ -196,6 +197,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const [productUrlDraft, setProductUrlDraft] = useState('');
   const [imageEdit, setImageEdit] = useState<File | null | undefined>();
   const [modelMedia, setModelMedia] = useState<{ modelId: string; row: EquipmentModelMedia | null; imageUrl: string | null } | null>(null);
+  const [modelThumbnails, setModelThumbnails] = useState<Record<string, string>>({});
   const [mediaRevision, setMediaRevision] = useState(0);
   const [newTemperatureCalibration, setNewTemperatureCalibration] = useState(false);
   const [editIdentity, setEditIdentity] = useState(false);
@@ -237,6 +239,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           channel.measurement_scale || channel.measurement_unit || undefined) : 'Available' }))
   ] : [];
   const selectedModel = models.find(row => row.id === selectedId) || null;
+  const unitFormModel = models.find(row => row.id === catalogUnitModelId) || selectedModel;
   const catalogParent = selectedModel ? catalog.find(row => row.id === selectedModel.catalog_model_id) : undefined;
   const activeModel = selectedModel || itemModel;
   const activeCatalogModel = selectedModel ? catalogParent : itemCatalogModel;
@@ -258,6 +261,22 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     }).catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => { cancelled = true; if (imageUrl) URL.revokeObjectURL(imageUrl); };
   }, [db, activeModel?.id, mediaRevision]);
+  useEffect(() => {
+    let cancelled = false;
+    const urls: string[] = [];
+    void listEquipmentModelImages(db).then(rows => {
+      const thumbnails: Record<string, string> = {};
+      for (const row of rows) {
+        if (!row.image_bytes?.length || !row.image_mime_type) continue;
+        const url = URL.createObjectURL(new Blob([new Uint8Array(row.image_bytes)], { type: row.image_mime_type }));
+        urls.push(url);
+        thumbnails[row.id] = url;
+      }
+      if (cancelled) urls.forEach(URL.revokeObjectURL);
+      else setModelThumbnails(thumbnails);
+    }).catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => { cancelled = true; urls.forEach(URL.revokeObjectURL); };
+  }, [db, models, mediaRevision]);
   const addingCatalogDefault = !!addingCapability && !!catalogParent && (addingCapability.startsWith('measurement:')
     ? !!catalogParent.measurement_channels?.some(channel => channel.measurement_kind === addingCapability.slice('measurement:'.length))
     : !!catalogParent[modelCapabilityFlags[addingCapability as keyof typeof modelCapabilityFlags]]);
@@ -431,7 +450,10 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       }
       const id = await createEquipment(db, values.name.trim(), creatingKind,
         selectedCatalogModel || undefined, overrides, channelRanges, values.stock_id, values.location_id);
-      setCreatingKind(null); setSelectedCatalogModel(null); onSelect(id); await onChanged();
+      const fromCatalog = !!selectedCatalogModel;
+      setCreatingKind(null); setSelectedCatalogModel(null);
+      if (!fromCatalog) onSelect(id);
+      await onChanged();
     }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -637,7 +659,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     setCatalogPickerOpen(false);
     const existing = models.find(row => row.catalog_model_id === model.id);
     if (existing) {
-      onSelect(existing.id);
+      setCatalogUnitModelId(existing.id);
       setAddingUnit(true);
       return;
     }
@@ -654,7 +676,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     {!selectedId ? <section className="record-index equipment-index"><div className="section-heading"><div><span className="eyebrow">Your gear</span><h1>Equipment</h1></div></div>
       <p className="muted">Measurements, control settings, and transfers can reference your equipment.</p>
       <div className="equipment-add-actions">
-        {models.length > 0 && <Button icon={<PlusOutlined />} onClick={() => setAddingUnit(true)}>Add unit</Button>}
+        {models.length > 0 && <Button icon={<PlusOutlined />} onClick={() => { setCatalogUnitModelId(null); setAddingUnit(true); }}>Add unit</Button>}
         <Button icon={<PlusOutlined />} onClick={() => { setCatalogQuery(''); setCatalogKind(undefined); setCatalogPickerOpen(true); }}>Add from catalog</Button>
         <Dropdown trigger={['click']} menu={addMenu} placement="bottomLeft">
           <Button icon={<PlusOutlined />}>Define equipment</Button>
@@ -662,9 +684,16 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       </div>
       {models.length > 0 && <Table<Equipment> className="equipment-table" dataSource={[...models].sort((a, b) => a.name.localeCompare(b.name))}
         rowKey="id" pagination={false} size="small" tableLayout="fixed" columns={[
-          { title: 'Model', dataIndex: 'name', width: '50%', render: (_, row) =>
-            <a href={`${basePath}/equipment/${equipmentModelPathSegment(row, models)}`}
-              onClick={event => { event.preventDefault(); onSelect(row.id); }}>{row.name}</a> },
+          { title: 'Model', dataIndex: 'name', width: '50%', render: (_, row) => {
+            const catalogImage = catalog.find(model => model.id === row.catalog_model_id);
+            const thumbnail = modelThumbnails[row.id] || catalogImage?.thumbnail_src || catalogImage?.image_src;
+            return <a className="equipment-model-table-name"
+              href={`${basePath}/equipment/${equipmentModelPathSegment(row, models)}`}
+              onClick={event => { event.preventDefault(); onSelect(row.id); }}>
+              {thumbnail && <img src={thumbnail} alt="" loading="lazy" />}
+              {row.name}
+            </a>;
+          } },
           { title: 'Units', key: 'units', width: '20%', render: (_: unknown, row: Equipment) =>
             equipment.filter(unit => unit.model_id === row.id).length },
           { title: 'Capabilities', key: 'capabilities', width: '30%', render: (_: unknown, row: Equipment) => equipmentCapabilities(row) }
@@ -672,7 +701,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     </section> : selectedModel ? <section className="record-detail">
       <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(selectedModel.kind)}</span>
         <h2>{selectedModel.name}</h2></div>
-        <Button icon={<PlusOutlined />} onClick={() => setAddingUnit(true)}>Add unit</Button></div>
+        <Button icon={<PlusOutlined />} onClick={() => { setCatalogUnitModelId(null); setAddingUnit(true); }}>Add unit</Button></div>
       <div className="equipment-model-overview">
         <div className="equipment-model-product-image">
           {modelImageSrc ? <img src={modelImageSrc} alt={selectedModel.name} /> : <span className="muted">No product image</span>}
@@ -892,23 +921,27 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       {matchingModels.length ? <div className="equipment-catalog-list" role="list">
         {matchingModels.map(model => <div key={model.id} role="listitem">
           <button type="button" className="equipment-catalog-option" onClick={() => chooseCatalogModel(model)}>
-            {model.thumbnail_src && <img className="equipment-catalog-thumbnail" src={model.thumbnail_src} alt="" loading="lazy" />}
             <span className="equipment-catalog-option-name"><strong>{model.name}</strong>
               <small>{equipmentKindLabel(model.kind)}{model.measurement_channels?.length
                 ? ` · ${channelSummary(model.measurement_channels)}` : ''}</small></span>
+            {model.thumbnail_src && <img className="equipment-catalog-thumbnail" src={model.thumbnail_src} alt="" loading="lazy" />}
           </button>
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching equipment' : 'No catalog equipment available'} />}
     </Modal>
-    <Modal title="Add equipment unit" open={addingUnit} onCancel={() => setAddingUnit(false)} footer={null} destroyOnHidden>
-      <Form key={selectedModel?.id || 'all'} form={unitForm} layout="vertical" preserve={false} initialValues={{ model_id: selectedModel?.id }}
+    <Modal title="Add equipment unit" open={addingUnit}
+      onCancel={() => { setAddingUnit(false); setCatalogUnitModelId(null); }} footer={null} destroyOnHidden>
+      <Form key={unitFormModel?.id || 'all'} form={unitForm} layout="vertical" preserve={false} initialValues={{ model_id: unitFormModel?.id }}
         onFinish={async (values: { model_id: string; stock_id?: string; location_id?: string }) => {
         try {
-          const id = await createEquipmentUnit(db, selectedModel?.id || values.model_id, values.stock_id, values.location_id);
-          setAddingUnit(false); await onChanged(); onSelect(id);
+          const id = await createEquipmentUnit(db, unitFormModel?.id || values.model_id, values.stock_id, values.location_id);
+          const fromCatalog = !!catalogUnitModelId;
+          setAddingUnit(false); setCatalogUnitModelId(null);
+          await onChanged();
+          if (!fromCatalog) onSelect(id);
         } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
       }}>
-        {!selectedModel && <Form.Item name="model_id" label="Model" rules={[{ required: true }]}>
+        {!unitFormModel && <Form.Item name="model_id" label="Model" rules={[{ required: true }]}>
           <Select showSearch optionFilterProp="label" options={models.map(model => ({ value: model.id, label: model.name }))} />
         </Form.Item>}
         <Form.Item name="stock_id" label="Stock ID"><Input maxLength={80} /></Form.Item>

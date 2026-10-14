@@ -1532,6 +1532,11 @@ export async function readEquipmentModelMedia(db: DB, modelId: string): Promise<
     'SELECT id, product_url, image_bytes, image_mime_type FROM equipment_model_media WHERE id = ?', [modelId]))[0] || null;
 }
 
+export async function listEquipmentModelImages(db: DB): Promise<Pick<EquipmentModelMedia, 'id' | 'image_bytes' | 'image_mime_type'>[]> {
+  return db.execO<Pick<EquipmentModelMedia, 'id' | 'image_bytes' | 'image_mime_type'>>(
+    'SELECT id, image_bytes, image_mime_type FROM equipment_model_media WHERE image_bytes IS NOT NULL');
+}
+
 export async function saveEquipmentModelMedia(db: DB, modelId: string, productUrl: string | null | undefined,
   image: { bytes: Uint8Array; mimeType: string } | null | undefined): Promise<void> {
   const url = productUrl?.trim() || null;
