@@ -991,7 +991,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
             <span className="catalog-explorer-option-name"><strong>{model.name}</strong>
               <small>{equipmentKindLabel(model.kind)}{model.measurement_channels?.length
                 ? ` · ${channelSummary(model.measurement_channels)}` : ''}</small></span>
-            {model.has_thumbnail && <CatalogImage kind="thumbnail" id={model.id} className="catalog-explorer-thumbnail" />}
+            {!!model.has_thumbnail && <CatalogImage kind="thumbnail" id={model.id} className="catalog-explorer-thumbnail" />}
           </button>
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching equipment' : 'No catalog equipment available'} />}
@@ -1025,10 +1025,10 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       {creatingKind && <Form key={`${creatingKind}:${selectedCatalogModel?.id || 'custom'}`} form={equipmentForm} layout="vertical" onFinish={create} preserve={false}
         initialValues={initialEquipmentValues}>
         {selectedCatalogModel && <div className="equipment-catalog-source">
-          {selectedCatalogModel.has_image && <CatalogImage kind="model" id={selectedCatalogModel.id}
+          {!!selectedCatalogModel.has_image && <CatalogImage kind="model" id={selectedCatalogModel.id}
             alt={selectedCatalogModel.name} immediate />}
           {selectedCatalogModel.manufacturer && <div className="equipment-catalog-manufacturer">
-            {selectedCatalogModel.has_manufacturer_logo && <CatalogImage kind="logo"
+            {!!selectedCatalogModel.has_manufacturer_logo && <CatalogImage kind="logo"
               id={selectedCatalogModel.manufacturer} immediate />}
             {selectedCatalogModel.manufacturer_website_url
               ? <a href={selectedCatalogModel.manufacturer_website_url} target="_blank" rel="noopener noreferrer">

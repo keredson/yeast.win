@@ -601,7 +601,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
                 {product.color_lovibond != null ? ` · ${product.color_lovibond} °L` : ''}
                 {product.typical_brix != null ? ` · ${product.typical_brix} °Brix` : ''}
                 {product.extract_color_value != null ? ` · ${product.extract_color_value} ${product.extract_color_scale || ''}` : ''}</small></span>
-            {product.has_image && <CatalogImage kind="supply" id={product.id}
+            {!!product.has_image && <CatalogImage kind="supply" id={product.id}
               className={`catalog-explorer-thumbnail${product.manufacturer === 'Briess'
                 && product.category === 'Grain' ? ' catalog-grain-banner' : ''}`} />}
           </button>
@@ -664,7 +664,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
         {selectedCatalogProduct && (newStockProduct || catalogProductChosen || newItemName === selectedCatalogProduct.name) &&
           <div className={`inventory-catalog-source${selectedCatalogProduct.manufacturer === 'Briess'
             && selectedCatalogProduct.category === 'Grain' ? ' catalog-grain-banner' : ''}`}>
-            {selectedCatalogProduct.has_image && <CatalogImage kind="supply" id={selectedCatalogProduct.id}
+            {!!selectedCatalogProduct.has_image && <CatalogImage kind="supply" id={selectedCatalogProduct.id}
               alt={selectedCatalogProduct.name} immediate />}
             <div><strong>{selectedCatalogProduct.name}</strong>
               {selectedCatalogProduct.manufacturer && <p>{selectedCatalogProduct.manufacturer}</p>}
