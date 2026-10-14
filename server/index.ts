@@ -17,7 +17,12 @@ const catalogDb = openCatalogDb(dataDir);
 const workspaceDbs = new Map<string, Database.Database>();
 const distDir = resolve(projectRoot, 'dist');
 const port = Number(process.env.BREWLOG_PORT || 3001);
-const cookieName = sessionCookieName(port);
+const devSocket = process.env.BREWLOG_DEV_SOCKET;
+if (devSocket && (process.env.BREWLOG_DEV_ROOT !== projectRoot
+  || devSocket !== resolve(projectRoot, '.brewlog-api.sock'))) {
+  throw new Error('Development API socket must belong to this checkout.');
+}
+const cookieName = sessionCookieName(devSocket || port);
 const loginFailures = new Map<string, { count: number; resetAt: number }>();
 const registrationAttempts = new Map<string, { count: number; resetAt: number }>();
 const passwordFailures = new Map<string, { count: number; resetAt: number }>();
@@ -293,7 +298,8 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(port, '0.0.0.0', () => console.log(`Brewlog server listening on port ${port}`));
+if (devSocket) server.listen(devSocket, () => console.log(`Brewlog server listening on ${devSocket}`));
+else server.listen(port, '0.0.0.0', () => console.log(`Brewlog server listening on port ${port}`));
 
 function shutdown() {
   server.close();

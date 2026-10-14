@@ -108,8 +108,9 @@ export function logout(db: Database.Database, token: string | undefined): void {
   if (token) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash(token));
 }
 
-export function sessionCookieName(port: number): string {
-  return `brewlog_session_${port}`;
+export function sessionCookieName(endpoint: number | string): string {
+  if (typeof endpoint === 'number') return `brewlog_session_${endpoint}`;
+  return `brewlog_session_${createHash('sha256').update(endpoint).digest('hex').slice(0, 12)}`;
 }
 
 export function readSessionCookie(cookie: string | undefined, name: string): string | undefined {

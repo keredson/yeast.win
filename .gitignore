@@ -5,3 +5,4 @@ vendor/
 .env
 .DS_Store
 *.log
+.brewlog-api.sock

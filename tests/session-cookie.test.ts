@@ -14,3 +14,11 @@ test('sessions on different API ports keep separate cookies', () => {
   assert.match(sessionCookie('new-token', false, second), /^brewlog_session_3002=new-token;/);
   assert.match(clearSessionCookie(false, second), /^brewlog_session_3002=;.*Max-Age=0/);
 });
+
+test('development sockets in separate checkouts keep separate cookies', () => {
+  const first = sessionCookieName('/home/derek/projects/brewlog/.brewlog-api.sock');
+  const second = sessionCookieName('/home/derek/projects/brewlog2/.brewlog-api.sock');
+  assert.notEqual(first, second);
+  assert.equal(first, sessionCookieName('/home/derek/projects/brewlog/.brewlog-api.sock'));
+  assert.equal(readSessionCookie(`${first}=first; ${second}=second`, second), 'second');
+});
