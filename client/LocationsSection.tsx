@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Form, Modal, Popconfirm } from 'antd';
 import { DeleteOutlined, EnvironmentOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
-import { convertInventoryUnit, deleteInventoryLocation, inventoryLocationPath, listInventoryBalances, saveInventoryLocation,
+import { convertInventoryUnit, deleteInventoryLocation, listInventoryBalances, saveInventoryLocation,
   type InventoryItem, type InventoryLocation, type LocalDb } from './db.ts';
 import { LocationFields } from './LocationFields.tsx';
-import { locationAncestors, locationDescendantIds } from './locationRoutes.ts';
+import { locationDescendantIds } from './locationRoutes.ts';
 import { inventoryPathSegment } from './inventoryRoutes.ts';
 import { compoundMassUnit, formatQuantity } from '../shared/units.ts';
 
@@ -43,7 +43,6 @@ export function LocationsSection({ db, basePath, locations, items, supplies, sel
   const [error, setError] = useState('');
   const [balances, setBalances] = useState<Record<string, number | null>>({});
   const selected = locations.find(location => location.id === selectedId) || null;
-  const ancestors = selected ? locationAncestors(selected, locations) : [];
   const directItems = items.filter(item => item.location_id === selectedId && !!selectedId);
   const categories = [...new Set(directItems.map(item => item.category))].sort();
   const unassigned = items.filter(item => !item.location_id);
@@ -110,13 +109,7 @@ export function LocationsSection({ db, basePath, locations, items, supplies, sel
       {unassigned.length > 0 && <section className="location-stock-section"><h2>Unassigned stock</h2>{stockRows(unassigned)}</section>}
       <Button className="location-add" icon={<PlusOutlined />} onClick={() => openCreate(null)}>Add location</Button>
     </section> : !selected ? <p className="muted">Location not found.</p> : <section className="record-detail location-detail">
-      <nav className="location-breadcrumb" aria-label="Location path">
-        <a href={`${basePath}/locations`} onClick={event => { event.preventDefault(); onSelect(null); }}>Locations</a>
-        {ancestors.map(ancestor => <span key={ancestor.id}><span aria-hidden="true"> / </span>
-          <a href={`${basePath}/location/${ancestor.slug}`} onClick={event => { event.preventDefault(); onSelect(ancestor.id); }}>{ancestor.name}</a></span>)}
-      </nav>
-      <div className="content-heading"><div><span className="eyebrow">{inventoryLocationPath(selected.id, locations)}</span>
-        <h2>{selected.name}</h2></div><div className="heading-actions">
+      <div className="content-heading"><div><h2>{selected.name}</h2></div><div className="heading-actions">
         <Button type="text" shape="circle" icon={<SettingOutlined />} aria-label="Location settings" title="Location settings"
           onClick={openSettings} /></div></div>
       {selected.address && <p className="location-detail-address"><EnvironmentOutlined aria-hidden /> {selected.address}</p>}

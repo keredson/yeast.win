@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppstoreOutlined, BookOutlined, DisconnectOutlined, EnvironmentOutlined, InboxOutlined, MenuOutlined, ToolOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Button, Card, Drawer, Empty, Form, Input, Layout, Menu, Popover, Progress, Select, Spin, Tooltip, Typography } from 'antd';
+import { Alert, Avatar, Breadcrumb, Button, Card, Drawer, Empty, Form, Input, Layout, Menu, Popover, Progress, Select, Spin, Tooltip, Typography } from 'antd';
 import { api, ApiError, ApiUnavailableError, type PreferredUnits, type Session, type Workspace } from './api.ts';
 import { defaultPreferredUnits } from '../shared/units.ts';
 import { forgetLocalDb, openLocalDb, syncNow, type SyncProgress, type Batch, type Equipment, type InventoryItem, type InventoryLocation, type LocalDb, type Recipe, type RecipeType,
@@ -16,6 +16,7 @@ import { EquipmentSection } from './EquipmentSection.tsx';
 import { LocationsSection } from './LocationsSection.tsx';
 import { locationForPath } from './locationRoutes.ts';
 import { recipeForPath } from './recipeRoutes.ts';
+import { breadcrumbNodes, type BreadcrumbRecords, type BreadcrumbSection } from './breadcrumbs.ts';
 import { AccountSection } from './AccountSection.tsx';
 import { openLocalCatalog, readLocalCatalog, syncLocalCatalog } from './catalog.ts';
 import type { CatalogEquipment, CatalogInventory } from '../shared/catalog.ts';
@@ -48,6 +49,21 @@ function workspaceBase(workspaceId: string | null, workspaces: Workspace[]): str
 function routePath(section: Section, selectedId: string | null, base: string): string {
   if (section === 'me') return '/me';
   return selectedId ? `${base}/${detailPaths[section]}/${selectedId}` : `${base}/${section}`;
+}
+
+function recordPath(section: BreadcrumbSection, id: string | null, base: string, records: BreadcrumbRecords): string {
+  if (!id) return routePath(section, null, base);
+  const supply = section === 'inventory' ? records.supplies.find(row => row.id === id)
+    || records.supplies.find(row => row.id === records.inventory.find(stock => stock.id === id)?.supply_id) : null;
+  const unit = section === 'equipment' ? records.equipment.find(row => row.id === id) : null;
+  const model = section === 'equipment' ? records.equipmentModels.find(row => row.id === id) : null;
+  const location = section === 'locations' ? records.locations.find(row => row.id === id) : null;
+  const recipe = section === 'recipes' ? records.recipes.find(row => row.id === id) : null;
+  const segment = supply ? inventoryPathSegment(supply, records.supplies)
+    : unit ? equipmentUnitPathSegment(unit, records.equipment, records.equipmentModels)
+      : model ? equipmentModelPathSegment(model, records.equipmentModels)
+        : location ? location.slug : recipe ? recipe.slug : id;
+  return routePath(section, segment, base);
 }
 const navItems = [
   { key: 'batches', label: 'Batches', icon: AppstoreOutlined },
@@ -391,15 +407,8 @@ export function App() {
     const base = workspaceBase(workspaceId, session?.workspaces || []);
     const inventoryItem = next === 'inventory' && id
       ? supplies.find(row => row.id === id) || supplies.find(row => row.id === inventory.find(stock => stock.id === id)?.supply_id) : null;
-    const equipmentItem = next === 'equipment' && id ? equipment.find(row => row.id === id) : null;
-    const equipmentModel = next === 'equipment' && id ? equipmentModels.find(row => row.id === id) : null;
-    const locationItem = next === 'locations' && id ? locations.find(row => row.id === id) : null;
     const recipeItem = next === 'recipes' && id ? recipes.find(row => row.id === id) : null;
-    const segment = inventoryItem ? inventoryPathSegment(inventoryItem, supplies)
-      : equipmentItem ? equipmentUnitPathSegment(equipmentItem, equipment, equipmentModels)
-        : equipmentModel ? equipmentModelPathSegment(equipmentModel, equipmentModels) : locationItem ? locationItem.slug
-        : recipeItem ? recipeItem.slug : id;
-    const path = routePath(next, segment, base);
+    const path = recordPath(next, id, base, { batches, recipes, inventory, supplies, equipment, equipmentModels, locations });
     if (location.pathname !== path || location.search) history.pushState(null, '', path);
     setRoute({ section: next, selectedId: inventoryItem?.id || recipeItem?.id || id, slug: base.split('/')[2] || null });
   }
@@ -550,6 +559,8 @@ export function App() {
     ? { label: syncProgress.phase === 'uploading' ? 'Sending' : 'Applying', ...syncProgress }
     : catalogSyncProgress && syncPhase !== 'syncing'
       ? { label: 'Updating catalog', ...catalogSyncProgress } : null;
+  const breadcrumbRecords = { batches, recipes, inventory, supplies, equipment, equipmentModels, locations };
+  const crumbs = section !== 'me' && db ? breadcrumbNodes(section, route.selectedId, breadcrumbRecords) : [];
 
   return <div className="app-shell">
     <header className="app-header">
@@ -599,6 +610,16 @@ export function App() {
       </Drawer>
       <main className="app-main">
         {error && <Alert type="warning" showIcon closable onClose={() => setError('')} message={error} className="page-alert" />}
+        {crumbs.length > 0 && <Breadcrumb className="app-breadcrumb" aria-label="Breadcrumb" items={crumbs.map((crumb, index) => ({
+          title: index === crumbs.length - 1 ? <span aria-current="page" title={crumb.label}>{crumb.label}</span>
+            : <a href={recordPath(crumb.section, crumb.id, activeBase, breadcrumbRecords)} title={crumb.label}
+              onClick={event => {
+                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                event.preventDefault();
+                if (crumb.id) showItem(crumb.section, crumb.id);
+                else showSection(crumb.section);
+              }}>{crumb.label}</a>
+        }))} />}
         {section === 'me' ? <AccountSection username={session.account.username} avatarSrc={avatarSrc}
           workspaces={session.workspaces} activeWorkspaceId={workspaceId} db={db} onWorkspaceDataChanged={changed}
           onCreateWorkspace={createWorkspace} onUpdateWorkspace={renameWorkspace} onDeleteWorkspace={removeWorkspace}
