@@ -138,6 +138,7 @@ try {
   const batchName = await page.getByLabel('Batch name').inputValue();
   await page.getByRole('button', { name: 'Create batch' }).click();
   await page.getByRole('heading', { name: batchName }).waitFor();
+  await page.getByRole('region', { name: 'Batch details' }).getByText('Expected OG').waitFor();
   if (!/^\/batch\/[A-Za-z0-9_-]{10,32}$/.test(new URL(page.url()).pathname) || new URL(page.url()).search) {
     throw new Error('Default brewery batch should use a clean root URL');
   }
@@ -203,12 +204,12 @@ try {
   await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).getByRole('button', { name: 'Record Add nutrient dose' }).click();
   const recordAction = page.getByRole('dialog', { name: 'Record: Add nutrient dose' });
   await recordAction.getByRole('spinbutton', { name: 'Quantity' }).fill('2');
-  await recordAction.getByRole('button', { name: 'Save event' }).click();
+  await recordAction.getByRole('button', { name: 'Mark done' }).click();
   await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).getByText('2 g Add nutrient dose').waitFor();
   await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).getByRole('button', { name: 'Edit Add nutrient dose' }).click();
   const editRecorded = page.getByRole('dialog', { name: 'Edit: Add nutrient dose' });
   await editRecorded.getByRole('spinbutton', { name: 'Quantity' }).fill('3');
-  await editRecorded.getByRole('button', { name: 'Save event' }).click();
+  await editRecorded.getByRole('button', { name: 'Save', exact: true }).click();
   await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).getByText('3 g Add nutrient dose').waitFor();
   await page.locator('.plan-card').filter({ hasText: 'Add yeast' }).getByRole('button', { name: 'Record Add yeast' }).click();
   await page.getByRole('dialog', { name: 'Record: Add yeast' }).getByRole('button', { name: 'Skip this event' }).click();
@@ -216,7 +217,7 @@ try {
   await page.locator('.plan-card').filter({ hasText: 'Add yeast' }).getByRole('button', { name: 'Record Add yeast' }).click();
   const doneAfterSkip = page.getByRole('dialog', { name: 'Record: Add yeast' });
   await doneAfterSkip.getByRole('spinbutton', { name: 'Quantity' }).fill('1');
-  await doneAfterSkip.getByRole('button', { name: 'Save event' }).click();
+  await doneAfterSkip.getByRole('button', { name: 'Mark done' }).click();
   await page.locator('.plan-card').filter({ hasText: 'Add yeast' }).getByText('Done', { exact: true }).waitFor();
   const eventNote = `Brew day ${Date.now()}`;
   await choosePlanKind(page, 'Add action', 'Notes');
@@ -226,7 +227,7 @@ try {
   await noteAction.getByRole('button', { name: 'Add notes' }).click();
   const noteRecord = page.getByRole('dialog', { name: 'Record: Brew day note' });
   await noteRecord.getByLabel('Notes').fill(eventNote);
-  await noteRecord.getByRole('button', { name: 'Save event' }).click();
+  await noteRecord.getByRole('button', { name: 'Mark done' }).click();
   await page.locator('.plan-card').getByText(eventNote).waitFor();
   await page.reload();
   await page.getByRole('heading', { name: batchName }).waitFor({ timeout: 30_000 });
@@ -651,7 +652,7 @@ try {
   await measurementDialog.getByRole('spinbutton', { name: 'Corrected value' }).fill('5.2');
   await measurementDialog.getByRole('combobox', { name: 'Instrument' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke pH meter' }).click();
-  await measurementDialog.getByRole('button', { name: 'Save event' }).click();
+  await measurementDialog.getByRole('button', { name: 'Mark done' }).click();
   await page.getByText('ph 5.2 pH').waitFor();
   await navigateSection(page, 'Equipment');
   await page.locator('.equipment-table').getByRole('link', { name: 'Smoke pH meter' }).click();
@@ -926,19 +927,19 @@ try {
     throw new Error('Transfer recording still asks for a source vessel or end time');
   }
   await recordTransfer.getByRole('combobox', { name: 'To vessel' }).locator('..').getByText('Smoke fermenter').waitFor();
-  await recordTransfer.getByRole('button', { name: 'Save event' }).click();
+  await recordTransfer.getByRole('button', { name: 'Mark done' }).click();
   await recordTransfer.waitFor({ state: 'hidden' });
   await page.locator('.plan-card').filter({ hasText: 'Transfer to fermenter' }).getByText('To Smoke fermenter').waitFor();
   await page.getByRole('button', { name: 'Record Package batch' }).click();
   const recordPackaging = page.getByRole('dialog', { name: 'Record: Package batch' });
-  await recordPackaging.getByRole('button', { name: 'Save event' }).click();
+  await recordPackaging.getByRole('button', { name: 'Mark done' }).click();
   await recordPackaging.locator('.ant-form-item-explain-error').filter({ hasText: 'Container' }).waitFor();
   await recordPackaging.getByRole('textbox', { name: 'Container' }).fill('Bottle');
   await recordPackaging.getByRole('combobox', { name: 'Unit' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="US fl oz"]').click();
   await recordPackaging.getByRole('spinbutton', { name: 'Size' }).fill('12');
   await recordPackaging.getByRole('spinbutton', { name: 'Count' }).fill('48');
-  await recordPackaging.getByRole('button', { name: 'Save event' }).click();
+  await recordPackaging.getByRole('button', { name: 'Mark done' }).click();
   await recordPackaging.waitFor({ state: 'hidden' });
   await page.locator('.plan-card').filter({ hasText: 'Package batch' }).getByText('Done').waitFor();
   await navigateSection(page, 'Recipes');
@@ -1263,7 +1264,7 @@ try {
   await photoPlan.getByRole('button', { name: 'Add photo' }).click();
   const photoDialog = page.getByRole('dialog', { name: 'Record: Brew photo' });
   await photoDialog.locator('input[type="file"]').setInputFiles({ name: 'brew.png', mimeType: 'image/png', buffer: imageBytes });
-  await photoDialog.getByRole('button', { name: 'Save event' }).click();
+  await photoDialog.getByRole('button', { name: 'Mark done' }).click();
   await page.locator('.plan-card .photo-grid img').waitFor();
   await page.waitForFunction(previous => {
     const id = JSON.parse(localStorage.getItem('brewlog:last-session')).workspaces[0].id;

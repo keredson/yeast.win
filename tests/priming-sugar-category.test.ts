@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { workspaceSchemaVersion } from '../shared/schema.ts';
 
 const directory = mkdtempSync(join(tmpdir(), 'brewlog-priming-sugar-'));
 process.env.BREWLOG_DATA_DIR = directory;
@@ -57,7 +58,7 @@ test('workspace upgrade reclassifies linked stock and retains other supplies', (
     assert.equal(category('inventory_items', 'priming_stock'), 'Other fermentables');
     assert.equal(category('supplies', 'other_supply'), 'Other');
     assert.equal(category('inventory_items', 'other_stock'), 'Other');
-    assert.equal(upgraded.pragma('user_version', { simple: true }), 36);
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
   } finally { closeWorkspaceDb(upgraded); }
 
   const partial = openWorkspaceDb(id);

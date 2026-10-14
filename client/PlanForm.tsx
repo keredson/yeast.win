@@ -333,7 +333,8 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
     <div className="plan-form-actions">
       <div className="plan-form-save-actions">
         <Button type="primary" htmlType="submit" loading={busy} onClick={() => { addAnotherRef.current = false; }}>
-          {initialPlan ? 'Save event' : kind === 'addition' ? 'Add ingredient' : `Add ${kindLabel(kind).toLowerCase()}`}
+          {initialPlan ? (recipeMode ? 'Save event' : 'Save')
+            : kind === 'addition' ? 'Add ingredient' : `Add ${kindLabel(kind).toLowerCase()}`}
         </Button>
         {['addition', 'measurement'].includes(kind) && !recordNow &&
           <Button htmlType="submit" loading={busy} onClick={() => { addAnotherRef.current = true; }}>Save and add another</Button>}

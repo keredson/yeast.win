@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Tooltip } from 'antd';
-import { DeleteOutlined, DownloadOutlined, QuestionCircleOutlined, PlusOutlined, SettingOutlined, UploadOutlined } from '@ant-design/icons';
+import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select } from 'antd';
+import { DeleteOutlined, DownloadOutlined, PlusOutlined, SettingOutlined, UploadOutlined } from '@ant-design/icons';
 import { addRecipePlan, createRecipe, deleteRecipe, deleteRecipePlan, hasRecipeImport, listRecipePlans, startBatchFromRecipe, updateRecipe, updateRecipePlan,
   recipeImportSource, recipeTargetVolume, updateRecipeTargetVolume,
   breweryMashEfficiency, breweryBatchSize, latestMeasuredMashEfficiencySource,
@@ -16,6 +16,7 @@ import type { PreferredUnits } from './api.ts';
 import { convertUnit, unitGroups, unitOptions } from '../shared/units.ts';
 import { changeNumberUnit } from './unitFields.ts';
 import { calculateRecipe, type RecipeEstimate } from './recipeCalculations.ts';
+import { CalculationsCard } from './CalculationsCard.tsx';
 import { RecipeEquipmentFields } from './RecipeEquipmentFields.tsx';
 import { appBatchSizeLiters } from '../shared/batchSize.ts';
 
@@ -23,15 +24,6 @@ const recipeTypeOptions = [
   { value: 'beer', label: 'Beer' }, { value: 'wine', label: 'Wine' },
   { value: 'mead', label: 'Mead' }, { value: 'cider', label: 'Cider' }
 ];
-
-function EstimateTile({ label, value, help, sources }: { label: string; value: string | null; help: string[]; sources: string[] }) {
-  return <div><span className="recipe-estimate-label">{label}
-    <Tooltip title={<div>{[...sources, ...help].map((line, index) => <div key={index}>{line}</div>)}</div>}
-      trigger={['hover', 'focus', 'click']}>
-      <button type="button" className="recipe-estimate-help" aria-label={`${label} calculation sources`}>
-        <QuestionCircleOutlined /></button>
-    </Tooltip></span><strong>{value ?? '—'}</strong></div>;
-}
 
 export function RecipeSection({ db, basePath, accountId, recipes, equipment, equipmentModels, inventory, supplies, catalogInventory, preferredUnits, selectedId, onSelect, onChanged, onBatchStarted }: {
   db: LocalDb; basePath: string; accountId: string; recipes: Recipe[]; selectedId: string | null; onSelect: (id: string | null) => void;
@@ -240,23 +232,8 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
             <Button type="text" shape="circle" icon={<SettingOutlined />} aria-label="Recipe settings"
               title="Recipe settings" onClick={() => void openSettings()} /></div>
         </div>
-        {estimate && <section className="recipe-estimates" aria-label="Recipe details">
-          <h3>Details</h3>
-          <div className="recipe-estimate-grid">
-            <EstimateTile label="Batch size" value={estimate.targetLiters == null ? null
-              : `${Number((convertUnit(estimate.targetLiters, 'L', preferredUnits.volume) || 0).toFixed(2))} ${preferredUnits.volume}`}
-              help={estimate.unavailable.targetLiters} sources={estimate.sources.targetLiters} />
-            <EstimateTile label="Expected OG" value={estimate.originalGravity?.toFixed(3) ?? null}
-              help={estimate.unavailable.originalGravity} sources={estimate.sources.originalGravity} />
-            <EstimateTile label="Expected FG" value={estimate.finalGravity?.toFixed(3) ?? null}
-              help={estimate.unavailable.finalGravity} sources={estimate.sources.finalGravity} />
-            <EstimateTile label="Expected ABV" value={estimate.abvPct == null ? null : `${estimate.abvPct.toFixed(1)}%`}
-              help={estimate.unavailable.abvPct} sources={estimate.sources.abvPct} />
-            {recipe.recipe_type === 'beer' && <EstimateTile label="Estimated color"
-              value={estimate.colorSrm == null ? null : `${estimate.colorSrm.toFixed(1)} SRM`}
-              help={estimate.unavailable.colorSrm} sources={estimate.sources.colorSrm} />}
-          </div>
-        </section>}
+        {estimate && <CalculationsCard estimate={estimate} volumeUnit={preferredUnits.volume}
+          showColor={recipe.recipe_type === 'beer'} label="Recipe details" />}
         <EventTimeline events={plans} equipment={equipmentModels} onEdit={plan => { setPlanDeleteError(''); setEditingPlan(plan); }}
           onAdd={(kind, settings) => { setEditingPlan(null); setPreset(settings); setCreatingKind(kind); }} />
       </section>}

@@ -97,17 +97,19 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
               onClick={() => onEdit(item)} />}
             <strong>{item.title || planKindLabel(item)}</strong>
             {!isBatch && detail && <span className="recipe-event-detail">{detail}</span>}</div>
-            {metadata && <div className="plan-meta">{metadata}</div>}
-            {isBatch && <Tag color={happened ? (item.event_type === 'equipment_use' || planDuration(item)) && !item.ended_at ? 'cyan' : 'green' : skipped ? 'default' : 'blue'}>
-              {happened ? item.event_type === 'equipment_use' && !item.ended_at ? 'In use'
-                : planDuration(item) && !item.ended_at ? 'In progress' : 'Done' : skipped ? 'Skipped' : 'Pending'}</Tag>}</div>
-            {item.event_type === 'equipment_use' && item.ended_at == null && onReleaseEquipment &&
-              <Button type="text" size="small" onClick={() => onReleaseEquipment(item.id)}>Release</Button>}
-            {onRecord && !happened && <Button type="text" shape="circle" icon={<CheckOutlined />} aria-label={`Record ${item.title}`}
-              title="Record or skip" onClick={() => onRecord(item as ActualEvent)} />}
-            {!isBatch && <Button type="text" shape="circle" size="small" icon={<EditOutlined />}
-              aria-label={`Edit planned event ${item.title || kindLabel(item.event_type)}`}
-              title="Edit event" onClick={() => onEdit(item)} />}</div>
+            {metadata && <div className="plan-meta">{metadata}</div>}</div>
+            <div className="timeline-status-actions">
+              {isBatch && <Tag color={happened ? (item.event_type === 'equipment_use' || planDuration(item)) && !item.ended_at ? 'cyan' : 'green' : skipped ? 'default' : 'blue'}>
+                {happened ? item.event_type === 'equipment_use' && !item.ended_at ? 'In use'
+                  : planDuration(item) && !item.ended_at ? 'In progress' : 'Done' : skipped ? 'Skipped' : 'Pending'}</Tag>}
+              {item.event_type === 'equipment_use' && item.ended_at == null && onReleaseEquipment &&
+                <Button type="text" size="small" onClick={() => onReleaseEquipment(item.id)}>Release</Button>}
+              {onRecord && !happened && <Button type="text" shape="circle" icon={<CheckOutlined />} aria-label={`Record ${item.title}`}
+                title="Record or skip" onClick={() => onRecord(item as ActualEvent)} />}
+              {!isBatch && <Button type="text" shape="circle" size="small" icon={<EditOutlined />}
+                aria-label={`Edit planned event ${item.title || kindLabel(item.event_type)}`}
+                title="Edit event" onClick={() => onEdit(item)} />}
+            </div></div>
           {isBatch && detail && <p className="event-detail">{detail}</p>}
           {images.length > 0 && <div className="photo-grid">{images.map(photo => <img key={photo.id} src={photo.url} alt="Batch activity" />)}</div>}
         </div>;
