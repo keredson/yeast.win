@@ -85,6 +85,9 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
   const selectedContainerUnit = Form.useWatch('container_unit', form) as string | undefined;
   const selectedDurationUnit = Form.useWatch('duration_unit', form) as string | undefined;
   const selectedCategory = Form.useWatch('item_category', form) as string | undefined;
+  const selectedInventoryId = Form.useWatch('inventory_item_id', form) as string | undefined;
+  const genericPitch = initialPlan?.title === 'Pitch yeast' && kind === 'addition';
+  const quantityOptional = kind === 'addition' && (selectedCategory || initialCategory) === 'Yeast' && !selectedInventoryId;
   const vesselOptions = equipment.filter(item => vesselKinds.has(item.kind)).map(item => ({ value: item.id, label: item.name }));
   const destinationId = initialData?.payload.to_vessel_id || plannedString('to_vessel_id');
   if (typeof destinationId === 'string' && !vesselOptions.some(item => item.value === destinationId)) {
@@ -140,13 +143,14 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
           source: values.source || 'manual' };
       } else if (kind === 'addition') {
         const itemName = values.item_name || plannedString('item_name') || initialPlan?.title;
-        const itemId = values.inventory_item_id || plannedString('inventory_item_id');
+        const itemId = values.inventory_item_id;
         const amount = quantityForStorage(values.unit || '', values.quantity, values.pounds, values.ounces);
-        if (!itemName || !amount) throw new Error('Enter an item and quantity');
+        if (!itemName) throw new Error('Enter an item');
+        if (!amount && !quantityOptional) throw new Error('Enter a quantity');
         payload = { item_name: itemName, item_category: values.item_category || initialCategory,
           inventory_item_id: itemId || null,
           supply_id: inventory.find(item => item.id === itemId)?.supply_id || plannedString('supply_id') || null,
-          quantity: amount.quantity, unit: amount.unit };
+          quantity: amount?.quantity ?? null, unit: amount?.unit || null };
       } else if (kind === 'temperature_control') {
         if (chillToTarget && values.target_value == null) throw new Error('Enter a target temperature');
         if (values.target_value == null && values.power_watts == null) throw new Error('Enter a target or power');
@@ -260,12 +264,12 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
           onChange={id => { const item = inventory.find(row => row.id === id);
             if (item) { changeQuantityUnit(form, selectedUnit || initialUnit, item.display_unit);
               form.setFieldsValue({ item_name: item.name, item_category: item.category, unit: item.display_unit }); } }} /></Form.Item>
-        <Form.Item name="item_name" label="What was added?" rules={[{ required: true }]}><Input placeholder="e.g. Fermaid O, yeast, oxygen" /></Form.Item>
+        <Form.Item name="item_name" label="What was added?" rules={genericPitch ? [] : [{ required: true }]}><Input placeholder="e.g. Fermaid O, yeast, oxygen" /></Form.Item>
       </>
       <Form.Item name="unit" label="Unit" rules={[{ required: true }]}>
         <Select showSearch options={unitOptions(quantityUnitsForCategory(selectedCategory || initialCategory))}
           onChange={changeMainUnit} /></Form.Item>
-      <QuantityFields unit={selectedUnit || initialUnit} />
+      <QuantityFields unit={selectedUnit || initialUnit} optional={quantityOptional} />
     </>}
     {(kind === 'temperature_control' || kind === 'pressure_control') && <>
       <Form.Item name="equipment_id" label="Equipment"

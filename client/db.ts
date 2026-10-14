@@ -1478,9 +1478,10 @@ export async function eventDetails(db: DB, event: ActualEvent, preferredMassUnit
     return parts.join(' · ');
   }
   if (event.event_type === 'addition') {
-    const rows = await db.execO<{ item_name: string; quantity: number; unit: string }>(
+    const rows = await db.execO<{ item_name: string; quantity: number | null; unit: string | null }>(
       'SELECT item_name, quantity, unit FROM additions WHERE event_id = ?', [event.id]);
-    return rows.length ? `${formatQuantity(rows[0].quantity, rows[0].unit, preferredMassUnit)} ${rows[0].item_name}` : '';
+    return rows.length && rows[0].quantity != null && rows[0].unit
+      ? `${formatQuantity(rows[0].quantity, rows[0].unit, preferredMassUnit)} ${rows[0].item_name}` : '';
   }
   if (event.event_type === 'temperature_control') {
     const rows = await db.execO<{ mode: string; target_value: number | null; target_unit: string | null; power_watts: number | null }>(
