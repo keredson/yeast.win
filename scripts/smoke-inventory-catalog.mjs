@@ -16,6 +16,23 @@ try {
   await page.getByLabel('Confirm password').fill('smoke-test-1234');
   await page.locator('.login-card form button[type="submit"]').click();
   await page.getByRole('button', { name: 'Account settings' }).waitFor({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'Account settings' }).click();
+  await page.waitForFunction(() => {
+    const button = document.querySelector('button[aria-label="Sync now"]');
+    return button && !button.hasAttribute('disabled');
+  }, undefined, { timeout: 30_000 });
+  const catalogSync = page.waitForResponse(response => response.url().includes('/api/catalog/sync')
+    && response.request().method() === 'GET', { timeout: 60_000 });
+  await page.getByRole('button', { name: 'Sync now' }).click();
+  if (!(await catalogSync).ok()) throw new Error('Manual sync did not fetch catalog changes');
+  await page.waitForFunction(() => {
+    const button = document.querySelector('button[aria-label="Sync now"]');
+    return button && !button.hasAttribute('disabled');
+  }, undefined, { timeout: 60_000 });
+  const forcedCatalogSync = page.waitForResponse(response => response.url().includes('/api/catalog/sync')
+    && response.request().method() === 'GET', { timeout: 60_000 });
+  await page.getByRole('button', { name: 'Sync now' }).click();
+  if (!(await forcedCatalogSync).ok()) throw new Error('Manual sync was blocked by the catalog refresh interval');
   await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Inventory' }).first().click();
   await page.getByRole('heading', { name: 'Inventory', exact: true }).waitFor();
 
@@ -52,15 +69,18 @@ try {
   const weyermann = explorer.getByRole('button', { name: /Weyermann Munich Malt Type 1/ });
   await weyermann.waitFor({ timeout: 60_000 });
   if (!await weyermann.locator('img').count()) throw new Error('Weyermann product has no catalog image');
-  await weyermann.locator('img').evaluate(image => image.decode());
+  await weyermann.locator('img[src]').waitFor();
+  await weyermann.locator('img[src]').evaluate(image => image.decode());
   await explorer.getByRole('searchbox', { name: 'Search inventory products' }).fill('Lighthouse');
   const lighthouse = explorer.getByRole('button', { name: /Briess Lighthouse™ Munich Malt/ });
   await lighthouse.waitFor({ timeout: 60_000 });
-  await lighthouse.locator('img').evaluate(image => image.decode());
+  await lighthouse.locator('img[src]').waitFor();
+  await lighthouse.locator('img[src]').evaluate(image => image.decode());
   await explorer.getByRole('searchbox', { name: 'Search inventory products' }).fill('Briess Caramel Malt 60L');
   const product = explorer.getByRole('button', { name: /Briess Caramel Malt 60L/ });
   await product.waitFor({ timeout: 60_000 });
   if (!await product.locator('img').count()) throw new Error('Catalog result has no product image');
+  await product.locator('img[src]').waitFor();
   await product.click();
 
   const form = page.getByRole('dialog', { name: 'New grain item' });
@@ -69,7 +89,7 @@ try {
   }
   await form.getByText('Briess Caramel Malt 60L', { exact: true }).waitFor();
   const briessImage = form.locator('.inventory-catalog-source img');
-  await briessImage.waitFor();
+  await form.locator('.inventory-catalog-source img[src]').waitFor();
   await briessImage.evaluate(image => image.decode());
   const briessDimensions = await briessImage.evaluate(image => [image.naturalWidth, image.naturalHeight]);
   if (briessDimensions[0] !== briessDimensions[1]) throw new Error(`Briess image is not square: ${briessDimensions}`);
@@ -128,8 +148,16 @@ try {
   if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) {
     throw new Error('Inventory product details overflow a narrow phone');
   }
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Equipment' }).first().click();
+  await page.getByRole('button', { name: 'Add from catalog' }).click();
+  const equipmentCatalog = page.getByRole('dialog', { name: 'Add from catalog' });
+  await equipmentCatalog.getByRole('searchbox', { name: 'Search equipment models' }).fill('VEVOR Electric Brewing System');
+  const vevor = equipmentCatalog.getByRole('button', { name: /VEVOR Electric Brewing System 9.2 Gal\/35 L/ }).first();
+  await vevor.locator('img[src]').waitFor({ timeout: 60_000 });
+  await vevor.locator('img[src]').evaluate(image => image.decode());
   if (errors.length) throw new Error(`Browser errors: ${errors.join('; ')}`);
-  console.log('Inventory catalog, custom specs, product media, and catalog linking passed');
+  console.log('Manual catalog sync, lazy catalog images, inventory catalog, and catalog linking passed');
 } finally {
   await browser.close();
 }

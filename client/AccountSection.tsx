@@ -285,8 +285,8 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
     </Card>
     <Card title="Sync" className="account-card">
       <div className="setting-row"><div><strong>Sync status</strong><div className="muted">{syncPhase === 'syncing' ? 'Syncing…' : syncPhase === 'failed' ? `Sync failed · ${syncStatus}` : syncStatus}</div></div>
-        <Tooltip title={`${syncStatus} · Click to sync`}><Button className="sync-button" type="text" shape="circle" aria-label="Sync now"
-          icon={<SyncOutlined spin={syncPhase === 'syncing'} />} disabled={!canSync} onClick={onManualSync} /></Tooltip></div>
+        <Tooltip title={`${syncStatus} · Sync brewery and catalog`}><Button className="sync-button" type="text" shape="circle" aria-label="Sync now"
+          icon={<SyncOutlined spin={syncPhase === 'syncing'} />} disabled={!canSync || syncPhase === 'syncing'} onClick={onManualSync} /></Tooltip></div>
       <div className="setting-row">
         <div><strong>Automatic sync</strong><Typography.Paragraph type="secondary" className="setting-description">
           Sync when opening a brewery, after changes, on reconnect, and every 30 seconds while the app is open.

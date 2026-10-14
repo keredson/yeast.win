@@ -8,7 +8,46 @@ import { fetchApi } from './api.ts';
 
 let opened: Promise<DB> | undefined;
 let syncing: Promise<boolean> | undefined;
-let catalogMediaUrls: string[] = [];
+type CatalogMediaKind = 'supply' | 'model' | 'thumbnail' | 'logo';
+const mediaCache = new Map<string, Promise<string | null>>();
+let mediaGeneration = 0;
+
+export function catalogMediaGeneration(): number { return mediaGeneration; }
+
+function invalidateCatalogMedia(): void {
+  for (const cached of mediaCache.values()) void cached.then(url => {
+    if (url) URL.revokeObjectURL(url);
+  }).catch(() => undefined);
+  mediaCache.clear();
+  mediaGeneration++;
+}
+
+export function catalogMediaUrl(kind: CatalogMediaKind, id: string): Promise<string | null> {
+  const key = `${kind}:${id}`;
+  let pending = mediaCache.get(key);
+  if (!pending) {
+    const generation = mediaGeneration;
+    pending = (async () => {
+      const db = await openLocalCatalog();
+      const [table, keyColumn, valueColumn, mimeColumn] = kind === 'supply'
+        ? ['supply_images', 'supply_id', 'image_bytes', 'image_mime_type']
+        : kind === 'logo'
+          ? ['manufacturer_logos', 'manufacturer_name', 'image_bytes', 'mime_type']
+          : ['model_images', 'model_id', kind === 'thumbnail' ? 'thumbnail_bytes' : 'image_bytes',
+            kind === 'thumbnail' ? 'thumbnail_mime_type' : 'image_mime_type'];
+      const row = (await db.execO<{ bytes: Uint8Array | null; mime: string | null }>(
+        `SELECT ${valueColumn} AS bytes, ${mimeColumn} AS mime FROM ${table} WHERE ${keyColumn} = ?`, [id]))[0];
+      if (!row?.bytes?.length || generation !== mediaGeneration) return null;
+      return URL.createObjectURL(new Blob([new Uint8Array(row.bytes)],
+        { type: row.mime || 'application/octet-stream' }));
+    })().catch(cause => {
+      if (mediaCache.get(key) === pending) mediaCache.delete(key);
+      throw cause;
+    });
+    mediaCache.set(key, pending);
+  }
+  return pending;
+}
 const catalogRefreshIntervalMs = 24 * 60 * 60_000;
 
 export function openLocalCatalog(): Promise<DB> {
@@ -308,10 +347,10 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
     db.execO<{ model_id: string; min_temperature_c: number | null; max_temperature_c: number | null }>(
       'SELECT * FROM model_temperature_control'),
     db.execO<CatalogMeasurementChannel>('SELECT * FROM model_measurement_channels'),
-    db.execO<{ model_id: string; image_bytes: Uint8Array | null; image_mime_type: string | null;
-      thumbnail_bytes: Uint8Array | null; thumbnail_mime_type: string | null }>('SELECT * FROM model_images'),
-    db.execO<{ manufacturer_name: string; image_bytes: Uint8Array | null;
-      mime_type: string | null }>('SELECT * FROM manufacturer_logos'),
+    db.execO<{ model_id: string; has_image: number; has_thumbnail: number }>(
+      'SELECT model_id, image_bytes IS NOT NULL AS has_image, thumbnail_bytes IS NOT NULL AS has_thumbnail FROM model_images'),
+    db.execO<{ manufacturer_name: string; has_image: number }>(
+      'SELECT manufacturer_name, image_bytes IS NOT NULL AS has_image FROM manufacturer_logos'),
     db.execO<CatalogInventory>(`SELECT s.id, s.name, s.category, s.unit,
       g.yield_pct, g.color_lovibond, h.alpha_acid_pct, h.hop_form, y.attenuation_pct,
       other.typical_brix, other.extract_color_value, other.extract_color_scale,
@@ -323,37 +362,23 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
       LEFT JOIN supply_yeast_specs y ON y.supply_id = s.id
       LEFT JOIN supply_grain_classes gc ON gc.supply_id = s.id
       LEFT JOIN supply_products p ON p.supply_id = s.id ORDER BY s.name COLLATE NOCASE`),
-    db.execO<{ supply_id: string; image_bytes: Uint8Array | null; image_mime_type: string | null }>(
-      'SELECT * FROM supply_images')
+    db.execO<{ supply_id: string; has_image: number }>(
+      'SELECT supply_id, image_bytes IS NOT NULL AS has_image FROM supply_images')
   ]);
-  const oldMediaUrls = catalogMediaUrls;
-  catalogMediaUrls = [];
-  const mediaUrl = (bytes: Uint8Array, mimeType: string): string => {
-    const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: mimeType }));
-    catalogMediaUrls.push(url);
-    return url;
-  };
   const byId = new Map(models.map(model => [model.id, { ...model, measurement_channels: [] as CatalogMeasurementChannel[] }]));
   for (const row of modelImages) {
     const model = byId.get(row.model_id);
-    if (model) Object.assign(model, {
-      image_src: row.image_bytes && mediaUrl(row.image_bytes, row.image_mime_type || 'application/octet-stream'),
-      thumbnail_src: row.thumbnail_bytes && mediaUrl(row.thumbnail_bytes,
-        row.thumbnail_mime_type || 'application/octet-stream')
-    });
+    if (model) Object.assign(model, { has_image: !!row.has_image, has_thumbnail: !!row.has_thumbnail });
   }
-  const logosByName = new Map(logos.filter(row => row.image_bytes).map(row =>
-    [row.manufacturer_name, mediaUrl(row.image_bytes!, row.mime_type || 'application/octet-stream')]));
+  const logosByName = new Set(logos.filter(row => row.has_image).map(row => row.manufacturer_name));
   for (const model of byId.values()) {
-    if (model.manufacturer) Object.assign(model, { manufacturer_logo_src: logosByName.get(model.manufacturer) });
+    if (model.manufacturer) Object.assign(model, { has_manufacturer_logo: logosByName.has(model.manufacturer) });
   }
   const suppliesById = new Map(inventory.map(item => [item.id, item]));
   for (const row of supplyImages) {
     const item = suppliesById.get(row.supply_id);
-    if (item && row.image_bytes) item.image_src = mediaUrl(row.image_bytes,
-      row.image_mime_type || 'application/octet-stream');
+    if (item) item.has_image = !!row.has_image;
   }
-  for (const url of oldMediaUrls) URL.revokeObjectURL(url);
   for (const row of liquid) Object.assign(byId.get(row.model_id) || {},
     { has_liquid_containment: true, capacity_liters: row.capacity_liters });
   for (const row of pressure) Object.assign(byId.get(row.model_id) || {},
@@ -381,15 +406,19 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
   return { equipment, inventory };
 }
 
-export function syncLocalCatalog(db: DB, onProgress?: (applied: number, total: number) => void): Promise<boolean> {
-  if (syncing) return syncing;
+export async function syncLocalCatalog(db: DB, onProgress?: (applied: number, total: number) => void,
+  force = false): Promise<boolean> {
+  if (syncing) {
+    if (!force) return syncing;
+    await syncing;
+  }
   syncing = (async () => {
     const rows = await db.execO<{ key: string; value: string }>(
       "SELECT key, value FROM sync_state WHERE key IN ('serverCursor', 'serverSeq', 'lastRefreshAt')");
     const cursor = rows.find(row => row.key === 'serverCursor')?.value || '0';
     const lastRefreshAt = Number(rows.find(row => row.key === 'lastRefreshAt')?.value);
     const now = Date.now();
-    if (lastRefreshAt > 0 && now >= lastRefreshAt && now - lastRefreshAt < catalogRefreshIntervalMs) return false;
+    if (!force && lastRefreshAt > 0 && now >= lastRefreshAt && now - lastRefreshAt < catalogRefreshIntervalMs) return false;
     let seq = rows.find(row => row.key === 'serverSeq')?.value || '0';
     if (seq === '0' && cursor !== '0') seq = maxSequence;
     const response = await fetchApi(`/api/catalog/sync?version=${cursor}&seq=${seq}`, { credentials: 'same-origin' });
@@ -439,6 +468,7 @@ export function syncLocalCatalog(db: DB, onProgress?: (applied: number, total: n
       await tx.exec(`INSERT INTO sync_state(key,value) VALUES ('lastRefreshAt',?)
         ON CONFLICT(key) DO UPDATE SET value=excluded.value`, [String(Date.now())]);
     });
+    if (applied) invalidateCatalogMedia();
     return applied > 0;
   })().finally(() => { syncing = undefined; });
   return syncing;

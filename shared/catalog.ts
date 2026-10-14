@@ -7,6 +7,7 @@ export interface CatalogMeasurementChannel extends MeasurementChannel { model_id
 export interface CatalogEquipment { id: string; name: string; kind: string; manufacturer?: string | null;
   product_url?: string | null; manufacturer_website_url?: string | null;
   image_src?: string; thumbnail_src?: string; manufacturer_logo_src?: string;
+  has_image?: boolean; has_thumbnail?: boolean; has_manufacturer_logo?: boolean;
   has_liquid_containment?: boolean; has_pressure_rating?: boolean;
   has_heating?: boolean; has_cooling?: boolean; has_temperature_control?: boolean;
   capacity_liters?: number | null; built_in_temperature_control?: number | boolean | null; max_pressure_kpa?: number | null;
@@ -21,7 +22,7 @@ export interface CatalogInventory { id: string; name: string; category: string; 
   extract_color_reference_value?: number | null; extract_color_reference_unit?: string | null;
   hop_form?: string | null; attenuation_pct?: number | null; grain_class?: string | null;
   manufacturer?: string | null; product_url?: string | null;
-  image_src?: string | null }
+  image_src?: string | null; has_image?: boolean }
 export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
 export const catalogSchemaVersion = 31;
 export const inventoryCategories = ['Grain', 'Other fermentables', 'Hops', 'Yeast', 'Nutrient', 'Adjunct', 'Chemical', 'Packaging', 'Other'] as const;
