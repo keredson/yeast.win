@@ -151,18 +151,24 @@ const effectiveEquipmentView = `CREATE TEMP VIEW effective_equipment AS
     control.max_temperature_c AS unit_max_temperature_c,
     mash.mash_efficiency_pct AS unit_mash_efficiency_pct,
     mash.grain_absorption_l_per_kg AS unit_grain_absorption_l_per_kg,
-    COALESCE(liquid.capacity_liters, workspace_model.capacity_liters, model_liquid.capacity_liters) AS capacity_liters,
-    COALESCE(pressure.max_pressure_kpa, workspace_model.max_pressure_kpa, model_pressure.max_pressure_kpa) AS max_pressure_kpa,
-    COALESCE(heat.rated_power_watts, workspace_model.rated_power_watts, model_heat.rated_power_watts) AS rated_power_watts,
-    COALESCE(cool.rated_heat_removal_watts, workspace_model.rated_heat_removal_watts, model_cool.rated_heat_removal_watts) AS rated_heat_removal_watts,
-    COALESCE(control.min_temperature_c, workspace_model.min_temperature_c, model_control.min_temperature_c) AS min_temperature_c,
-    COALESCE(control.max_temperature_c, workspace_model.max_temperature_c, model_control.max_temperature_c) AS max_temperature_c,
-    CASE WHEN liquid.equipment_id IS NOT NULL OR workspace_model.has_liquid_containment = 1 OR model_liquid.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_liquid_containment,
-    CASE WHEN pressure.equipment_id IS NOT NULL OR workspace_model.has_pressure_rating = 1 OR model_pressure.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_pressure_rating,
-    CASE WHEN heat.equipment_id IS NOT NULL OR workspace_model.has_heating = 1 OR model_heat.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_heating,
-    CASE WHEN cool.equipment_id IS NOT NULL OR workspace_model.has_cooling = 1 OR model_cool.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_cooling,
-    CASE WHEN control.equipment_id IS NOT NULL OR workspace_model.has_temperature_control = 1 OR model_control.model_id IS NOT NULL THEN 1 ELSE NULL END AS has_temperature_control,
-    CASE WHEN control.equipment_id IS NOT NULL OR workspace_model.has_temperature_control = 1 OR model_control.model_id IS NOT NULL THEN 1 ELSE NULL END AS built_in_temperature_control,
+    CASE WHEN COALESCE(workspace_model.has_liquid_containment, model_liquid.model_id IS NOT NULL)
+      THEN COALESCE(liquid.capacity_liters, workspace_model.capacity_liters, model_liquid.capacity_liters) END AS capacity_liters,
+    CASE WHEN COALESCE(workspace_model.has_pressure_rating, model_pressure.model_id IS NOT NULL)
+      THEN COALESCE(pressure.max_pressure_kpa, workspace_model.max_pressure_kpa, model_pressure.max_pressure_kpa) END AS max_pressure_kpa,
+    CASE WHEN COALESCE(workspace_model.has_heating, model_heat.model_id IS NOT NULL)
+      THEN COALESCE(heat.rated_power_watts, workspace_model.rated_power_watts, model_heat.rated_power_watts) END AS rated_power_watts,
+    CASE WHEN COALESCE(workspace_model.has_cooling, model_cool.model_id IS NOT NULL)
+      THEN COALESCE(cool.rated_heat_removal_watts, workspace_model.rated_heat_removal_watts, model_cool.rated_heat_removal_watts) END AS rated_heat_removal_watts,
+    CASE WHEN COALESCE(workspace_model.has_temperature_control, model_control.model_id IS NOT NULL)
+      THEN COALESCE(control.min_temperature_c, workspace_model.min_temperature_c, model_control.min_temperature_c) END AS min_temperature_c,
+    CASE WHEN COALESCE(workspace_model.has_temperature_control, model_control.model_id IS NOT NULL)
+      THEN COALESCE(control.max_temperature_c, workspace_model.max_temperature_c, model_control.max_temperature_c) END AS max_temperature_c,
+    CASE WHEN COALESCE(workspace_model.has_liquid_containment, model_liquid.model_id IS NOT NULL) THEN 1 END AS has_liquid_containment,
+    CASE WHEN COALESCE(workspace_model.has_pressure_rating, model_pressure.model_id IS NOT NULL) THEN 1 END AS has_pressure_rating,
+    CASE WHEN COALESCE(workspace_model.has_heating, model_heat.model_id IS NOT NULL) THEN 1 END AS has_heating,
+    CASE WHEN COALESCE(workspace_model.has_cooling, model_cool.model_id IS NOT NULL) THEN 1 END AS has_cooling,
+    CASE WHEN COALESCE(workspace_model.has_temperature_control, model_control.model_id IS NOT NULL) THEN 1 END AS has_temperature_control,
+    CASE WHEN COALESCE(workspace_model.has_temperature_control, model_control.model_id IS NOT NULL) THEN 1 END AS built_in_temperature_control,
     COALESCE(boil.heat_loss_watts, workspace_boil.heat_loss_watts, model_boil.heat_loss_watts) AS boil_heat_loss_watts,
     boil.heat_loss_watts AS unit_boil_heat_loss_watts,
     workspace_boil.heat_loss_watts AS workspace_model_boil_heat_loss_watts,
@@ -224,7 +230,8 @@ const effectiveMeasurementChannelsView = `CREATE TEMP VIEW effective_measurement
   LEFT JOIN main.equipment_model_measurement_channels workspace_model
     ON workspace_model.model_id = m.id AND workspace_model.measurement_kind = k.measurement_kind
   LEFT JOIN catalog.model_measurement_channels catalog_model
-    ON catalog_model.model_id = m.catalog_model_id AND catalog_model.measurement_kind = k.measurement_kind`;
+    ON catalog_model.model_id = m.catalog_model_id AND catalog_model.measurement_kind = k.measurement_kind
+  WHERE COALESCE(workspace_model.is_removed, 0) = 0`;
 
 export async function openLocalDb(workspaceId: string): Promise<DB> {
   let pending = opened.get(workspaceId);
@@ -1407,16 +1414,22 @@ export async function listEquipmentModels(db: DB): Promise<Equipment[]> {
     m.mash_efficiency_pct AS workspace_model_mash_efficiency_pct,
     m.grain_absorption_l_per_kg AS workspace_model_grain_absorption_l_per_kg,
     COALESCE(m.has_liquid_containment, CASE WHEN cl.model_id IS NOT NULL THEN 1 END) AS has_liquid_containment,
-    COALESCE(m.capacity_liters, cl.capacity_liters) AS capacity_liters,
+    CASE WHEN COALESCE(m.has_liquid_containment, cl.model_id IS NOT NULL)
+      THEN COALESCE(m.capacity_liters, cl.capacity_liters) END AS capacity_liters,
     COALESCE(m.has_pressure_rating, CASE WHEN cp.model_id IS NOT NULL THEN 1 END) AS has_pressure_rating,
-    COALESCE(m.max_pressure_kpa, cp.max_pressure_kpa) AS max_pressure_kpa,
+    CASE WHEN COALESCE(m.has_pressure_rating, cp.model_id IS NOT NULL)
+      THEN COALESCE(m.max_pressure_kpa, cp.max_pressure_kpa) END AS max_pressure_kpa,
     COALESCE(m.has_heating, CASE WHEN ch.model_id IS NOT NULL THEN 1 END) AS has_heating,
-    COALESCE(m.rated_power_watts, ch.rated_power_watts) AS rated_power_watts,
+    CASE WHEN COALESCE(m.has_heating, ch.model_id IS NOT NULL)
+      THEN COALESCE(m.rated_power_watts, ch.rated_power_watts) END AS rated_power_watts,
     COALESCE(m.has_cooling, CASE WHEN cc.model_id IS NOT NULL THEN 1 END) AS has_cooling,
-    COALESCE(m.rated_heat_removal_watts, cc.rated_heat_removal_watts) AS rated_heat_removal_watts,
+    CASE WHEN COALESCE(m.has_cooling, cc.model_id IS NOT NULL)
+      THEN COALESCE(m.rated_heat_removal_watts, cc.rated_heat_removal_watts) END AS rated_heat_removal_watts,
     COALESCE(m.has_temperature_control, CASE WHEN ct.model_id IS NOT NULL THEN 1 END) AS has_temperature_control,
-    COALESCE(m.min_temperature_c, ct.min_temperature_c) AS min_temperature_c,
-    COALESCE(m.max_temperature_c, ct.max_temperature_c) AS max_temperature_c,
+    CASE WHEN COALESCE(m.has_temperature_control, ct.model_id IS NOT NULL)
+      THEN COALESCE(m.min_temperature_c, ct.min_temperature_c) END AS min_temperature_c,
+    CASE WHEN COALESCE(m.has_temperature_control, ct.model_id IS NOT NULL)
+      THEN COALESCE(m.max_temperature_c, ct.max_temperature_c) END AS max_temperature_c,
     m.mash_efficiency_pct, m.grain_absorption_l_per_kg,
     COALESCE(wb.heat_loss_watts, cb.heat_loss_watts) AS boil_heat_loss_watts,
     wb.heat_loss_watts AS workspace_model_boil_heat_loss_watts,
@@ -1448,7 +1461,8 @@ export async function listEquipmentModels(db: DB): Promise<Equipment[]> {
   LEFT JOIN equipment_model_measurement_channels w
     ON w.model_id = m.id AND w.measurement_kind = k.measurement_kind
   LEFT JOIN catalog.model_measurement_channels c
-    ON c.model_id = m.catalog_model_id AND c.measurement_kind = k.measurement_kind`)]);
+    ON c.model_id = m.catalog_model_id AND c.measurement_kind = k.measurement_kind
+  WHERE COALESCE(w.is_removed, 0) = 0`)]);
   const byId = new Map(models.map(model => [model.id, model]));
   for (const channel of channels) {
     const model = byId.get(channel.model_id);
@@ -1696,13 +1710,71 @@ export async function addEquipmentModelCapability(db: DB, model: Equipment, capa
     }
     const scale = ['SG', '°Plato', '°Brix', 'pH'].includes(values.measurement_unit) ? values.measurement_unit : null;
     await db.exec(`INSERT INTO equipment_model_measurement_channels
-      (id, model_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`, [`${model.id}:${kind}`, model.id, kind,
+      (id, model_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale, is_removed)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+      ON CONFLICT(id) DO UPDATE SET measurement_min = excluded.measurement_min,
+        measurement_max = excluded.measurement_max, measurement_unit = excluded.measurement_unit,
+        measurement_scale = excluded.measurement_scale, is_removed = 0`, [`${model.id}:${kind}`, model.id, kind,
       values.measurement_min ?? null, values.measurement_max ?? null,
       scale ? null : values.measurement_unit, scale]);
   } else {
     throw new Error('Unknown equipment capability');
   }
+}
+
+export async function removeEquipmentModelCapability(db: DB, model: Equipment, capability: string): Promise<void> {
+  const flag = {
+    liquid_containment: 'has_liquid_containment', pressure_rating: 'has_pressure_rating',
+    heating: 'has_heating', cooling: 'has_cooling', temperature_control: 'has_temperature_control'
+  }[capability];
+  if (flag) {
+    await db.exec(`UPDATE equipment_models SET ${flag} = 0 WHERE id = ?`, [model.id]);
+    return;
+  }
+  if (capability.startsWith('measurement:')) {
+    const kind = capability.slice('measurement:'.length);
+    if (!model.measurement_channels?.some(channel => channel.measurement_kind === kind)) {
+      throw new Error('This model has no matching measurement channel');
+    }
+    await db.exec(`INSERT INTO equipment_model_measurement_channels(id, model_id, measurement_kind, is_removed)
+      VALUES (?, ?, ?, 1) ON CONFLICT(id) DO UPDATE SET is_removed = 1`,
+    [`${model.id}:${kind}`, model.id, kind]);
+    return;
+  }
+  throw new Error('Unknown equipment capability');
+}
+
+export async function restoreEquipmentModelCapability(db: DB, model: Equipment, capability: string): Promise<void> {
+  if (!model.catalog_model_id) throw new Error('This model has no catalog default');
+  const parent = {
+    liquid_containment: { table: 'model_liquid_containment', columns: 'has_liquid_containment = NULL, capacity_liters = NULL' },
+    pressure_rating: { table: 'model_pressure_rating', columns: 'has_pressure_rating = NULL, max_pressure_kpa = NULL' },
+    heating: { table: 'model_heating', columns: 'has_heating = NULL, rated_power_watts = NULL' },
+    cooling: { table: 'model_cooling', columns: 'has_cooling = NULL, rated_heat_removal_watts = NULL' },
+    temperature_control: { table: 'model_temperature_control',
+      columns: 'has_temperature_control = NULL, min_temperature_c = NULL, max_temperature_c = NULL' }
+  }[capability];
+  if (parent) {
+    const rows = await db.execO<{ model_id: string }>(
+      `SELECT model_id FROM catalog.${parent.table} WHERE model_id = ?`, [model.catalog_model_id]);
+    if (!rows.length) throw new Error('This capability has no catalog default');
+    await db.exec(`UPDATE equipment_models SET ${parent.columns} WHERE id = ?`, [model.id]);
+    return;
+  }
+  if (capability.startsWith('measurement:')) {
+    const kind = capability.slice('measurement:'.length);
+    const rows = await db.execO<{ id: string }>(`SELECT id FROM catalog.model_measurement_channels
+      WHERE model_id = ? AND measurement_kind = ?`, [model.catalog_model_id, kind]);
+    if (!rows.length) throw new Error('This measurement has no catalog default');
+    await db.exec(`INSERT INTO equipment_model_measurement_channels(id, model_id, measurement_kind,
+      measurement_min, measurement_max, measurement_unit, measurement_scale, is_removed)
+      VALUES (?, ?, ?, NULL, NULL, NULL, NULL, 0)
+      ON CONFLICT(id) DO UPDATE SET measurement_min = NULL, measurement_max = NULL,
+        measurement_unit = NULL, measurement_scale = NULL, is_removed = 0`,
+    [`${model.id}:${kind}`, model.id, kind]);
+    return;
+  }
+  throw new Error('Unknown equipment capability');
 }
 
 export async function updateEquipmentBoilHeatLoss(db: DB, item: Equipment, watts: number): Promise<void> {

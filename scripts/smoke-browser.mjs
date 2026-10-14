@@ -323,6 +323,9 @@ try {
   await navigateSection(page, 'Equipment');
   await page.locator('.equipment-table').getByRole('link', { name: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
   await page.waitForURL('**/equipment/vevor-electric-brewing-system-9-2-gal-35-l');
+  if (await page.getByText(/Not calibrated|uncalibrated/i).count()) {
+    throw new Error('Model page describes a model default as a calibration');
+  }
   await page.getByRole('button', { name: 'Edit model capacity' }).click();
   const vevorModelCapacityDialog = page.getByRole('dialog', { name: 'Edit model Capacity (L)' });
   await vevorModelCapacityDialog.getByRole('spinbutton', { name: 'Capacity (L)' }).fill('37');
@@ -330,6 +333,18 @@ try {
   await page.getByText('Capacity: 37 L').waitFor();
   await page.getByRole('button', { name: 'Edit model capacity' }).click();
   await vevorModelCapacityDialog.getByRole('button', { name: 'Restore to default' }).click();
+  await page.getByText('Capacity: 35 L').waitFor();
+  await page.getByRole('button', { name: 'Edit model capacity' }).click();
+  await vevorModelCapacityDialog.getByRole('button', { name: 'Remove capability' }).click();
+  await page.locator('.ant-popconfirm').getByRole('button', { name: 'Remove' }).click();
+  await page.getByText(/^Capacity:/).waitFor({ state: 'hidden' });
+  if (await page.getByText(/^Capacity:/).count()) throw new Error('Removed model capacity is still displayed');
+  if (await page.getByRole('img', { name: 'Holds liquid' }).count()) {
+    throw new Error('Removed model capability is still advertised');
+  }
+  await page.getByRole('button', { name: 'Add capability' }).click();
+  await page.getByRole('menuitem', { name: 'Liquid capacity' }).click();
+  await page.getByRole('dialog', { name: 'Add Liquid capacity' }).getByRole('button', { name: 'Restore to default' }).click();
   await page.getByText('Capacity: 35 L').waitFor();
   const vevorRow = page.locator('.equipment-table').getByRole('row').filter({ has: page.getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }) });
   await vevorRow.getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
@@ -406,6 +421,23 @@ try {
   }
   await tiltDialog.getByRole('button', { name: 'Create equipment' }).click();
   await page.getByText('Gravity: Available').waitFor();
+  await page.getByText('Temperature: 0–60 °C').waitFor();
+  await page.getByRole('link', { name: 'Tilt Hydrometer and Thermometer' }).click();
+  await page.getByRole('button', { name: 'Edit model temperature range' }).click();
+  const modelTemperatureDialog = page.getByRole('dialog', { name: 'Edit model temperature range' });
+  await modelTemperatureDialog.getByRole('button', { name: 'Remove capability' }).click();
+  await page.locator('.ant-popconfirm').getByRole('button', { name: 'Remove' }).click();
+  await page.getByText(/^Temperature:/).waitFor({ state: 'hidden' });
+  if (await page.getByText(/^Temperature:/).count()) throw new Error('Removed catalog channel is still on the model');
+  await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
+  if (await page.getByText(/^Temperature:/).count()) throw new Error('Removed model channel is still on the unit');
+  await page.getByRole('link', { name: 'Tilt Hydrometer and Thermometer' }).click();
+  await page.getByRole('button', { name: 'Add capability' }).click();
+  await page.getByRole('menuitem', { name: 'Measurement channel' }).click();
+  await page.getByRole('menuitem', { name: 'Temperature', exact: true }).click();
+  const restoreTemperatureDialog = page.getByRole('dialog', { name: 'Add temperature measurement' });
+  await restoreTemperatureDialog.getByRole('button', { name: 'Restore to default' }).click();
+  await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   await page.getByText('Temperature: 0–60 °C').waitFor();
   await page.getByRole('button', { name: 'Override temperature range for this unit' }).click();
   const tiltTemperatureDialog = page.getByRole('dialog', { name: 'Unit temperature range override' });

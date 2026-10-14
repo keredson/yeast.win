@@ -5,7 +5,8 @@ import { CloudOutlined, ContainerOutlined, ControlOutlined, DashboardOutlined, E
 import { boilOffKinds, capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
 import { assignEquipmentToBatch, createEquipment, createEquipmentUnit, deleteEquipment, listCurrentEquipmentUses, releaseEquipmentUse,
-  addEquipmentModelCapability, updateEquipmentBoilHeatLoss, clearEquipmentBoilHeatLoss,
+  addEquipmentModelCapability, removeEquipmentModelCapability, restoreEquipmentModelCapability,
+  updateEquipmentBoilHeatLoss, clearEquipmentBoilHeatLoss,
   updateEquipmentModelBoilHeatLoss, clearEquipmentModelBoilHeatLoss,
   updateEquipmentCalibration, updateEquipmentStockId,
   clearEquipmentUnitOverrides, clearEquipmentUnitMeasurementOverrides,
@@ -60,6 +61,15 @@ const modelAttributeLabels: Record<EquipmentModelOverrideField, string> = {
   min_temperature_c: 'Minimum temperature (°C)', max_temperature_c: 'Maximum temperature (°C)',
   mash_efficiency_pct: 'Mash efficiency (%)', grain_absorption_l_per_kg: 'Grain absorption (L per kg)'
 };
+const modelAttributeCapabilities: Partial<Record<EquipmentModelOverrideField, string>> = {
+  capacity_liters: 'liquid_containment', max_pressure_kpa: 'pressure_rating',
+  rated_power_watts: 'heating', rated_heat_removal_watts: 'cooling',
+  min_temperature_c: 'temperature_control', max_temperature_c: 'temperature_control'
+};
+const modelCapabilityFlags = {
+  liquid_containment: 'has_liquid_containment', pressure_rating: 'has_pressure_rating',
+  heating: 'has_heating', cooling: 'has_cooling', temperature_control: 'has_temperature_control'
+} as const;
 
 const calibrationProfiles: Record<string, { fields: { key: string; label: string }[] }> = {
   ph_meter: { fields: [
@@ -164,6 +174,9 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const itemModel = item ? models.find(row => row.id === item.model_id) : undefined;
   const selectedModel = models.find(row => row.id === selectedId) || null;
   const catalogParent = selectedModel ? catalog.find(row => row.id === selectedModel.catalog_model_id) : undefined;
+  const addingCatalogDefault = !!addingCapability && !!catalogParent && (addingCapability.startsWith('measurement:')
+    ? !!catalogParent.measurement_channels?.some(channel => channel.measurement_kind === addingCapability.slice('measurement:'.length))
+    : !!catalogParent[modelCapabilityFlags[addingCapability as keyof typeof modelCapabilityFlags]]);
   const modelRangeChannel = selectedModel?.measurement_channels?.find(channel => channel.measurement_kind === editModelRange);
   const modelUnits = selectedModel ? equipment.filter(row => row.model_id === selectedModel.id) : [];
   const sortedModelUnits = [...modelUnits].sort((a, b) => (a.stock_id || '').localeCompare(b.stock_id || '') || a.id.localeCompare(b.id));
@@ -188,7 +201,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const createPrimaryMeasurement = !!creatingKind && !selectedCatalogModel && !!measurementRangeUnits[creatingKind];
   const catalogCreationChannels = selectedCatalogModel?.measurement_channels || [];
   const editingChannel = item?.measurement_channels?.find(channel => channel.measurement_kind === editRange);
-  const ratedEstimate = specs.rated_power_watts == null || specs.boil_heat_loss_watts == null
+  const ratedEstimate = !item?.has_heating || specs.rated_power_watts == null || specs.boil_heat_loss_watts == null
     ? null : predictedBoilOff(specs.rated_power_watts, specs.boil_heat_loss_watts);
   const boilHeatLossSource = specs.unit_boil_heat_loss_watts != null ? 'this unit'
     : specs.workspace_model_boil_heat_loss_watts != null ? 'brewery model'
@@ -533,6 +546,25 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
+  async function removeModelCapability(capability: string) {
+    if (!selectedModel) return;
+    try {
+      await removeEquipmentModelCapability(db, selectedModel, capability);
+      setEditModelField(null); setEditModelRange(null);
+      await onChanged();
+    }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
+  async function restoreModelCapability(capability: string) {
+    if (!selectedModel) return;
+    try {
+      await restoreEquipmentModelCapability(db, selectedModel, capability);
+      setAddingCapability(null);
+      await onChanged();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
   async function remove() {
     if (!item) return;
     try {
@@ -646,8 +678,8 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           <Button type="text" size="small" icon={<EditOutlined />}
             aria-label={`Edit model ${measurementSentenceLabel(channel.measurement_kind)} range`}
             onClick={() => setEditModelRange(channel.measurement_kind)} /></div>)}
-        {boilOffKinds.has(selectedModel.kind) && <div className="equipment-parameter"><span>Heat loss at boil: {
-          selectedModel.boil_heat_loss_watts == null ? 'Not calibrated'
+        {selectedModel.has_heating && boilOffKinds.has(selectedModel.kind) && <div className="equipment-parameter"><span>Heat loss at boil: {
+          selectedModel.boil_heat_loss_watts == null ? 'Not set'
             : `${Math.round(selectedModel.boil_heat_loss_watts)} W (${selectedModel.workspace_model_boil_heat_loss_watts != null
               ? 'brewery model' : 'catalog model'})`}</span>
           <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit model heat loss"
@@ -712,7 +744,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           {hasTemperatureReading && <div className="equipment-parameter"><span>Temperature offset: {specs.temperature_offset_c == null
             ? 'Not calibrated' : `${specs.temperature_offset_c > 0 ? '+' : ''}${Number(specs.temperature_offset_c.toFixed(2))} °C`}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit temperature offset" onClick={() => setNewTemperatureCalibration(true)} /></div>}
-          {boilOffKinds.has(item.kind) && <div className="equipment-parameter"><span>Heat loss at boil: {specs.boil_heat_loss_watts == null
+          {item.has_heating && boilOffKinds.has(item.kind) && <div className="equipment-parameter"><span>Heat loss at boil: {specs.boil_heat_loss_watts == null
             ? 'Not calibrated' : `${Math.round(specs.boil_heat_loss_watts)} W (${boilHeatLossSource})`}</span>
             <Button type="text" size="small" onClick={() => setNewBoilCalibration(true)}>Calibrate unit</Button></div>}
           {ratedEstimate != null && <div className="equipment-parameter">Estimated boil-off at rated power: {Number(ratedEstimate.toFixed(2))} L/h</div>}
@@ -893,6 +925,8 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
                 addChannelUnit || channelUnits(addingCapability.slice('measurement:'.length))[0], unit)} /></Form.Item>
         </div>}
         <Button type="primary" htmlType="submit">Add capability</Button>
+        {addingCatalogDefault && <Button type="text" onClick={() => void restoreModelCapability(addingCapability!)}>
+          Restore to default</Button>}
       </Form>
     </Modal>
     <Modal title="Unit capacity override" open={editCapacity} onCancel={() => setEditCapacity(false)} footer={null} destroyOnHidden>
@@ -1020,6 +1054,13 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <Button type="primary" htmlType="submit">Save model value</Button>
         {editModelField && (selectedModel as EquipmentSpecifications | null)?.[`workspace_model_${editModelField}`] != null
           && <Button type="text" onClick={() => void resetModelOverride()}>Restore to default</Button>}
+        {editModelField && modelAttributeCapabilities[editModelField] && <Popconfirm
+          title="Remove this capability from the model?"
+          description="It will also disappear from every unit of this model."
+          okText="Remove" okButtonProps={{ danger: true }}
+          onConfirm={() => void removeModelCapability(modelAttributeCapabilities[editModelField] as string)}>
+          <Button type="text" danger>Remove capability</Button>
+        </Popconfirm>}
       </Form>
     </Modal>
     <Modal title={editModelRange ? `Edit model ${measurementSentenceLabel(editModelRange)} range` : 'Edit model measurement range'}
@@ -1042,6 +1083,12 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           || modelRangeChannel?.workspace_model_measurement_unit != null
           || modelRangeChannel?.workspace_model_measurement_scale != null)
           && <Button type="text" onClick={() => void resetModelMeasurementOverride()}>Restore to default</Button>}
+        {editModelRange && <Popconfirm title="Remove this measurement from the model?"
+          description="It will also disappear from every unit of this model."
+          okText="Remove" okButtonProps={{ danger: true }}
+          onConfirm={() => void removeModelCapability(`measurement:${editModelRange}`)}>
+          <Button type="text" danger>Remove capability</Button>
+        </Popconfirm>}
       </Form>
     </Modal>
     <Modal title="Calibrate temperature" open={newTemperatureCalibration} onCancel={() => setNewTemperatureCalibration(false)} footer={null} destroyOnHidden>

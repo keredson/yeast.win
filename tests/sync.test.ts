@@ -486,6 +486,35 @@ test('version 19 workspace adds equipment use events without clearing equipment 
   } finally { closeWorkspaceDb(upgraded); }
 });
 
+test('version 27 adds model measurement removal markers while preserving channels and units', () => {
+  const id = nanoid();
+  const modelId = nanoid();
+  const equipmentId = nanoid();
+  const db = openWorkspaceDb(id);
+  db.prepare('INSERT INTO equipment_models(id, name, kind, created_at) VALUES (?, ?, ?, ?)')
+    .run(modelId, 'Meter model', 'hydrometer', 1);
+  db.prepare('INSERT INTO equipment(id, name, model_id, created_at) VALUES (?, ?, ?, ?)')
+    .run(equipmentId, 'Meter unit', modelId, 1);
+  db.prepare(`INSERT INTO equipment_model_measurement_channels
+    (id, model_id, measurement_kind, measurement_min, measurement_max, measurement_scale)
+    VALUES (?, ?, 'gravity', 1, 1.15, 'SG')`).run(`${modelId}:gravity`, modelId);
+  db.prepare("SELECT crsql_begin_alter('equipment_model_measurement_channels')").get();
+  db.exec('ALTER TABLE equipment_model_measurement_channels DROP COLUMN is_removed');
+  db.prepare("SELECT crsql_commit_alter('equipment_model_measurement_channels')").get();
+  db.pragma('user_version = 26');
+  closeWorkspaceDb(db);
+
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.deepEqual(upgraded.prepare(`SELECT measurement_min, measurement_max, measurement_scale, is_removed
+      FROM equipment_model_measurement_channels WHERE model_id = ?`).get(modelId),
+    { measurement_min: 1, measurement_max: 1.15, measurement_scale: 'SG', is_removed: 0 });
+    assert.equal((upgraded.prepare('SELECT model_id FROM equipment WHERE id = ?').get(equipmentId) as { model_id: string }).model_id,
+      modelId);
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
 test('version 21 workspace adds brewery model boil defaults and keeps unit calibrations', () => {
   const id = nanoid();
   const modelId = nanoid();
