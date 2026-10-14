@@ -58,6 +58,21 @@ test('batch estimates use event snapshots, unit efficiency, and the batch wort l
   assert.ok(result.sources.colorSrm.some(line => line.includes('2 °L (batch event input)')));
 });
 
+test('measured batch mash efficiency replaces the planning assumption', () => {
+  const inputs = { target_fermenter_volume_liters: 20 };
+  const snapshots = { drain: { mash_efficiency_pct: 75 } };
+  const assumed = calculateRecipe(events, [grain, yeast], equipment, inputs, snapshots,
+    {}, 'beer', null, 'batch');
+  const measured = calculateRecipe(events, [grain, yeast], equipment, inputs, snapshots,
+    {}, 'beer', null, 'batch', [], {}, 68.4);
+  assert.equal(assumed.mashEfficiencyPct, 75);
+  assert.equal(assumed.measuredMashEfficiency, false);
+  assert.equal(measured.mashEfficiencyPct, 68.4);
+  assert.equal(measured.measuredMashEfficiency, true);
+  assert.ok(measured.originalGravity! < assumed.originalGravity!);
+  assert.ok(measured.sources.mashEfficiency.some(line => line.includes('collected wort volume')));
+});
+
 test('one selected yeast without attenuation uses a labeled app estimate', () => {
   const result = calculateRecipe(events, [grain, { ...yeast, attenuation_pct: null }], equipment,
     { target_fermenter_volume_liters: 20 }, {});

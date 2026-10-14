@@ -3,7 +3,8 @@ import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Select } from 'a
 import { PlusOutlined, SettingOutlined } from '@ant-design/icons';
 import { addBatchPlan, createBatch, eventDetails, eventFormData, listEvents, listPhotos, releaseEquipmentUse,
   startBatchFromRecipe, startBatchFromTemplate, startBatchFromPrevious, updateBatchPlan,
-  batchTargetVolume, breweryBatchSize, breweryMashEfficiency, latestMeasuredMashEfficiencySource, updateBatchSettings,
+  batchTargetVolume, breweryBatchSize, breweryMashEfficiency, latestMeasuredMashEfficiencySource,
+  measuredMashEfficiencyForBatch, updateBatchSettings,
   type ActualEvent, type Batch, type Equipment, type InventoryItem,
   type LocalDb, type MeasurementKind, type PlanInput, type Recipe, type RecipeType } from './db.ts';
 import { kindLabel } from './constants.ts';
@@ -73,7 +74,8 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
     let cancelled = false;
     void (async () => {
       const supplyIds = [...new Set(events.map(event => event.details.supply_id).filter((id): id is string => !!id))];
-      const [batchRows, eventRows, typeRows, breweryEfficiency, supplies, gravityRows, defaultBatchSize] = await Promise.all([
+      const [batchRows, eventRows, typeRows, breweryEfficiency, supplies, gravityRows, defaultBatchSize,
+        measuredEfficiency] = await Promise.all([
         db.execO<{ target_fermenter_volume_liters: number | null; brewhouse_efficiency_pct: number | null;
           wort_loss_liters: number | null }>(
           'SELECT target_fermenter_volume_liters, brewhouse_efficiency_pct, wort_loss_liters FROM batch_recipe_inputs WHERE id = ?', [selectedId]),
@@ -89,7 +91,8 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
           FROM gravity_measurements g JOIN batch_events e ON e.id = g.event_id
           WHERE e.batch_id = ? AND e.actual_at IS NOT NULL AND e.skipped_at IS NULL
           ORDER BY e.actual_at, e.id`, [selectedId]),
-        breweryBatchSize(db)
+        breweryBatchSize(db),
+        measuredMashEfficiencyForBatch(db, selectedId)
       ]);
       const recent: Record<string, { value: number; batchName: string }> = {};
       const equipmentIds = new Set(events.filter(event => event.event_type === 'transfer'
@@ -110,7 +113,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
         setCalculation({ batchId: selectedId, recipeType,
           estimate: calculateRecipe(events.filter(event => event.skipped_at == null), [...inventory, ...supplies], equipment,
             batchInputs, Object.fromEntries(eventRows.map(row => [row.id, row])), recent, recipeType,
-            breweryEfficiency, 'batch', catalogInventory, batchGravityReadings(gravityRows)) });
+            breweryEfficiency, 'batch', catalogInventory, batchGravityReadings(gravityRows), measuredEfficiency) });
       }
     })().catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => { cancelled = true; };
@@ -214,7 +217,8 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
         </div><div className="heading-actions"><Button type="text" shape="circle" icon={<SettingOutlined />}
           aria-label="Batch settings" title="Batch settings" onClick={() => void openBatchSize()} /></div></div>
       {calculation?.batchId === selectedId && <CalculationsCard estimate={calculation.estimate}
-        volumeUnit={preferredUnits.volume} showColor={calculation.recipeType === 'beer'} label="Batch details" />}
+        volumeUnit={preferredUnits.volume} showColor={calculation.recipeType === 'beer'}
+        showMashEfficiency={calculation.recipeType === 'beer'} label="Batch details" />}
       <EventTimeline events={events} batchStartAt={batch.created_at} equipment={equipment} details={details} photos={photos}
         onEdit={event => event.actual_at != null ? void recordOrEdit(event as ActualEvent) : setEditingPlan(event as ActualEvent)}
         onRecord={event => void recordOrEdit(event)}
