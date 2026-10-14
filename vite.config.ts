@@ -19,7 +19,12 @@ function appAssetManifest(): Plugin {
   };
 }
 
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ mode, command }) => {
+  const apiPort = loadEnv(mode, projectRoot, 'BREWLOG_PORT').BREWLOG_PORT;
+  if (command === 'serve' && (process.env.BREWLOG_DEV_ROOT !== projectRoot || !apiPort)) {
+    throw new Error('Start the development app with yarn dev so Vite and the API use the same checkout and port.');
+  }
+  return ({
   root: projectRoot,
   plugins: [
     react(), appAssetManifest(),
@@ -54,6 +59,7 @@ export default defineConfig(({ mode }) => ({
       }
     })
   ],
-  server: { proxy: { '/api': `http://127.0.0.1:${loadEnv(mode, projectRoot, 'BREWLOG_PORT').BREWLOG_PORT || 3001}` } },
+  server: { proxy: { '/api': `http://127.0.0.1:${apiPort || 3001}` } },
   build: { outDir: 'dist' }
-}));
+  });
+});
