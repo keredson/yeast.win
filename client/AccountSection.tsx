@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { DeleteOutlined, EditOutlined, PlusOutlined, SyncOutlined, UploadOutlined } from '@ant-design/icons';
 import { Alert, Avatar, Button, Card, Form, Input, InputNumber, Modal, Select, Switch, Tag, Tooltip, Typography } from 'antd';
 import { api, type PreferredUnits, type Workspace } from './api.ts';
-import { breweryMashEfficiency, updateBreweryMashEfficiency, type LocalDb } from './db.ts';
+import { breweryMashEfficiency, breweryBatchSize, updateBreweryMashEfficiency, updateBreweryBatchSize,
+  type LocalDb } from './db.ts';
 import { appMashEfficiencyPct } from './recipeCalculations.ts';
+import { appBatchSizeLiters } from '../shared/batchSize.ts';
+import { convertUnit } from '../shared/units.ts';
 
 interface Props {
   username: string;
@@ -51,6 +54,10 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
   const [mashEfficiencyDraft, setMashEfficiencyDraft] = useState<number | null>(null);
   const [efficiencyBusy, setEfficiencyBusy] = useState(false);
   const [efficiencyError, setEfficiencyError] = useState('');
+  const [batchSizeLiters, setBatchSizeLiters] = useState<number | null>(null);
+  const [batchSizeDraft, setBatchSizeDraft] = useState<number | null>(null);
+  const [batchSizeBusy, setBatchSizeBusy] = useState(false);
+  const [batchSizeError, setBatchSizeError] = useState('');
   useEffect(() => {
     let cancelled = false;
     setMashEfficiency(null);
@@ -59,6 +66,29 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
       .catch(cause => { if (!cancelled) setEfficiencyError(cause instanceof Error ? cause.message : String(cause)); });
     return () => { cancelled = true; };
   }, [db]);
+  useEffect(() => {
+    let cancelled = false;
+    setBatchSizeDraft(null);
+    if (db) void breweryBatchSize(db).then(value => {
+      if (!cancelled) { setBatchSizeLiters(value); setBatchSizeDraft(value == null ? null
+        : Number((convertUnit(value, 'L', preferredUnits.volume) ?? value).toFixed(2))); }
+    }).catch(cause => { if (!cancelled) setBatchSizeError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => { cancelled = true; };
+  }, [db, preferredUnits.volume]);
+  async function saveBatchSize(value: number | null) {
+    if (!db) return;
+    setBatchSizeBusy(true); setBatchSizeError('');
+    try {
+      const liters = value == null ? null : convertUnit(value, preferredUnits.volume, 'L');
+      if (value != null && liters == null) throw new Error('Choose a valid batch size unit');
+      await updateBreweryBatchSize(db, liters);
+      setBatchSizeLiters(liters);
+    } catch (cause) {
+      setBatchSizeDraft(batchSizeLiters == null ? null
+        : Number((convertUnit(batchSizeLiters, 'L', preferredUnits.volume) ?? batchSizeLiters).toFixed(2)));
+      setBatchSizeError(cause instanceof Error ? cause.message : String(cause));
+    } finally { setBatchSizeBusy(false); }
+  }
   async function saveMashEfficiency(value: number | null) {
     if (!db) return;
     setEfficiencyBusy(true); setEfficiencyError('');
@@ -192,6 +222,17 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
       {breweryError && <Alert type="error" message={breweryError} />}
     </Modal>
     {db && <Card title="Recipe calculations" className="account-card">
+      <div className="setting-row"><div><strong>Default batch size</strong>
+        <div className="muted">Prefills new recipes in {workspaces.find(item => item.id === activeWorkspaceId)?.name || 'this brewery'}.
+          Clear to use the 5 US gal app default. Existing recipes keep their saved size.</div></div>
+        <InputNumber aria-label="Brewery default batch size" min={0.001} precision={2}
+          addonAfter={preferredUnits.volume} value={batchSizeDraft}
+          placeholder={String(Number((convertUnit(appBatchSizeLiters, 'L', preferredUnits.volume) ?? appBatchSizeLiters).toFixed(2)))}
+          disabled={batchSizeBusy} onChange={setBatchSizeDraft}
+          onBlur={() => { const saved = batchSizeLiters == null ? null
+            : Number((convertUnit(batchSizeLiters, 'L', preferredUnits.volume) ?? batchSizeLiters).toFixed(2));
+          if (batchSizeDraft !== saved) void saveBatchSize(batchSizeDraft); }} /></div>
+      {batchSizeError && <Alert type="error" message={batchSizeError} showIcon />}
       <div className="setting-row"><div><strong>Default mash efficiency</strong>
         <div className="muted">Used for recipes in {workspaces.find(item => item.id === activeWorkspaceId)?.name || 'this brewery'}
           {' '}when no equipment, recent batch, or imported efficiency is available. Clear to use the {appMashEfficiencyPct}% app default.</div></div>

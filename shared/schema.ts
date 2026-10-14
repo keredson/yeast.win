@@ -16,7 +16,7 @@ const definitions: Record<string, string> = {
   recipe_packaging: `event_id TEXT PRIMARY KEY NOT NULL, container_name TEXT, container_size REAL, container_count INTEGER, container_unit TEXT`,
   recipe_import_sources: `id TEXT PRIMARY KEY NOT NULL, filename TEXT NOT NULL, format TEXT NOT NULL, sha256 TEXT NOT NULL, byte_count INTEGER NOT NULL, content BLOB NOT NULL, imported_at INTEGER NOT NULL`,
   recipe_import_links: `id TEXT PRIMARY KEY NOT NULL, source_id TEXT NOT NULL, source_index INTEGER NOT NULL, external_id TEXT`,
-  recipe_inputs: `id TEXT PRIMARY KEY NOT NULL, target_fermenter_volume_liters REAL, brewhouse_efficiency_pct REAL, wort_loss_liters REAL`,
+  recipe_inputs: `id TEXT PRIMARY KEY NOT NULL, target_fermenter_volume_liters REAL, brewhouse_efficiency_pct REAL, wort_loss_liters REAL, batch_size_source TEXT`,
   recipe_event_inputs: `id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL, alpha_acid_pct REAL, hop_form TEXT, attenuation_pct REAL`,
   batch_events: `id TEXT PRIMARY KEY NOT NULL, batch_id TEXT NOT NULL, recipe_event_id TEXT, event_type TEXT NOT NULL, title TEXT, planned_at INTEGER, anchor_event_id TEXT, offset_seconds INTEGER, anchor_point TEXT, duration_seconds INTEGER, instructions TEXT, actual_at INTEGER, skipped_at INTEGER, note TEXT, created_at INTEGER NOT NULL, created_by_account_id TEXT, recorded_by_account_id TEXT, source_id TEXT, external_id TEXT, received_at INTEGER`,
   batch_recipe_inputs: `id TEXT PRIMARY KEY NOT NULL, target_fermenter_volume_liters REAL, brewhouse_efficiency_pct REAL, wort_loss_liters REAL`,
@@ -45,7 +45,7 @@ const definitions: Record<string, string> = {
     created_at INTEGER NOT NULL`,
   equipment_model_media: `id TEXT PRIMARY KEY NOT NULL, product_url TEXT,
     image_bytes BLOB, image_mime_type TEXT`,
-  brewery_process_defaults: `id TEXT PRIMARY KEY NOT NULL, wort_loss_liters REAL, mash_efficiency_pct REAL`,
+  brewery_process_defaults: `id TEXT PRIMARY KEY NOT NULL, wort_loss_liters REAL, mash_efficiency_pct REAL, default_batch_size_liters REAL`,
   equipment: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, model_id TEXT NOT NULL,
     slug TEXT, stock_id TEXT, added_at INTEGER, removed_at INTEGER, created_at INTEGER NOT NULL`,
   equipment_locations: `id TEXT PRIMARY KEY NOT NULL, location_id TEXT`,
@@ -327,7 +327,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 30;
+export const workspaceSchemaVersion = 31;
 export const retiredReplicatedTables = ['equipment_calibrations', 'equipment_characterization_observations'] as const;
 
 export function isValidId(value: unknown): value is string {

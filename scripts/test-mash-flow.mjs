@@ -23,8 +23,7 @@ try {
     const itemId = await api.createInventoryItem(db, 'Test malt', 'Grain', 'kg');
     const item = { id: itemId, name: 'Test malt', category: 'Grain', default_unit: 'kg', display_unit: 'kg', location_id: null };
     await api.updateIngredientProperties(db, item, { yield_pct: 80, color_lovibond: 2 });
-    const recipeId = await api.createRecipe(db, 'Mash test beer', '', 'beer');
-    await api.updateRecipeTargetVolume(db, recipeId, 19);
+    const recipeId = await api.createRecipe(db, 'Mash test beer', '', 'beer', '°C', 19);
     const plans = await api.listRecipePlans(db, recipeId);
     const mash = plans.find(plan => plan.title === 'Mash');
     const drain = plans.find(plan => plan.title === 'Drain grain');

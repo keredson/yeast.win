@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nanoid } from 'nanoid';
 import { recordSlug } from '../shared/recordSlug.ts';
+import { fillMissingRecipeBatchSizes } from '../shared/batchSize.ts';
 import { indexStatements, legacyEquipmentCopyStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements,
   workspaceSchemaVersion, workspaceTableColumns, legacyEquipmentModelStatements, supplyMigrationStatements } from '../shared/schema.ts';
 
@@ -242,6 +243,7 @@ export function openWorkspaceDb(id: string): Database.Database {
       throw error;
     }
   }
+  db.transaction(() => { for (const statement of fillMissingRecipeBatchSizes) db.exec(statement); })();
   if (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'equipment_legacy_migration'").get()) {
     db.transaction(() => {
       const columns = (db.pragma('table_info(equipment_legacy_migration)') as { name: string }[])

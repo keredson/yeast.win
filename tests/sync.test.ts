@@ -7,6 +7,7 @@ import { nanoid } from 'nanoid';
 import Database from 'better-sqlite3';
 import { changeColumns, nowSeconds, workspaceSchemaVersion, type SyncRequest, validateChange, } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
+import { appBatchSizeLiters } from '../shared/batchSize.ts';
 
 process.env.BREWLOG_DATA_DIR = mkdtempSync(join(tmpdir(), 'brewlog-sync-'));
 const { openWorkspaceDb, closeWorkspaceDb } = await import('../server/db.ts');
@@ -37,7 +38,7 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
       .run(modelId, 'Shared kettle model', 'electric_kettle', timestamp);
     first.prepare('INSERT INTO equipment_model_media(id, product_url, image_bytes, image_mime_type) VALUES (?, ?, ?, ?)')
       .run(modelId, 'https://example.com/kettle', Buffer.from([255, 216, 255]), 'image/jpeg');
-    first.prepare("INSERT INTO brewery_process_defaults(id, mash_efficiency_pct) VALUES ('brewery', 72)").run();
+    first.prepare("INSERT INTO brewery_process_defaults(id, mash_efficiency_pct, default_batch_size_liters) VALUES ('brewery', 72, 20)").run();
     first.prepare('INSERT INTO equipment(id, name, model_id, added_at, created_at) VALUES (?, ?, ?, ?, ?)')
       .run(equipmentId, 'Shared kettle', modelId, timestamp, timestamp);
     first.prepare('INSERT INTO batch_events(id, batch_id, event_type, title, actual_at, created_at) VALUES (?, ?, ?, ?, ?, ?)')
@@ -85,6 +86,8 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
       image_mime_type: 'image/jpeg' });
     assert.equal((second.prepare("SELECT mash_efficiency_pct FROM brewery_process_defaults WHERE id = 'brewery'")
       .get() as { mash_efficiency_pct: number }).mash_efficiency_pct, 72);
+    assert.equal((second.prepare("SELECT default_batch_size_liters FROM brewery_process_defaults WHERE id = 'brewery'")
+      .get() as { default_batch_size_liters: number }).default_batch_size_liters, 20);
     assert.equal((second.prepare('SELECT quantity FROM inventory_discards WHERE inventory_item_id = ?').get(discardedItem) as { quantity: number }).quantity, 5);
     assert.equal((second.prepare('SELECT parent_id FROM inventory_locations WHERE id = ?').get(shelfId) as { parent_id: string }).parent_id, roomId);
     assert.equal((second.prepare('SELECT address FROM inventory_location_addresses WHERE id = ?').get(roomId) as { address: string }).address, '123 Brew Street');
@@ -708,6 +711,94 @@ test('version 21 workspace adds brewery model boil defaults and keeps unit calib
       .run(modelId, 0);
     assert.equal((upgraded.prepare('SELECT heat_loss_watts FROM equipment_model_boil_characterization WHERE model_id = ?')
       .get(modelId) as { heat_loss_watts: number }).heat_loss_watts, 0);
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
+test('version 30 recipe inputs upgrade fills only missing sizes from an already set brewery default', () => {
+  const id = nanoid();
+  const db = openWorkspaceDb(id);
+  db.prepare("INSERT INTO brewery_process_defaults(id, mash_efficiency_pct, default_batch_size_liters) VALUES ('brewery', 71, 22)").run();
+  for (const recipeId of ['explicit', 'blank', 'absent']) db.prepare(
+    'INSERT INTO recipes(id, name, created_at, updated_at) VALUES (?, ?, 1, 1)')
+    .run(recipeId, recipeId);
+  db.prepare('INSERT INTO recipe_inputs(id, target_fermenter_volume_liters, brewhouse_efficiency_pct) VALUES (?, ?, ?)')
+    .run('explicit', 19, 68);
+  db.prepare('INSERT INTO recipe_inputs(id, target_fermenter_volume_liters, brewhouse_efficiency_pct) VALUES (?, ?, ?)')
+    .run('blank', null, 65);
+  db.prepare('SELECT crsql_as_table(?)').get('recipe_inputs');
+  db.exec(`CREATE TABLE old_recipe_inputs(id TEXT PRIMARY KEY NOT NULL,
+    target_fermenter_volume_liters REAL, brewhouse_efficiency_pct REAL, wort_loss_liters REAL)`);
+  db.exec(`INSERT INTO old_recipe_inputs SELECT id, target_fermenter_volume_liters,
+    brewhouse_efficiency_pct, wort_loss_liters FROM recipe_inputs`);
+  db.exec('DROP TABLE recipe_inputs');
+  db.exec('ALTER TABLE old_recipe_inputs RENAME TO recipe_inputs');
+  db.prepare('SELECT crsql_as_crr(?)').get('recipe_inputs');
+  db.pragma('user_version = 30');
+  closeWorkspaceDb(db);
+
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    const rows = upgraded.prepare(`SELECT id, target_fermenter_volume_liters AS liters, batch_size_source AS source,
+      brewhouse_efficiency_pct AS efficiency FROM recipe_inputs ORDER BY id`).all();
+    assert.deepEqual(rows, [
+      { id: 'absent', liters: 22, source: 'assumed_brewery', efficiency: null },
+      { id: 'blank', liters: 22, source: 'assumed_brewery', efficiency: 65 },
+      { id: 'explicit', liters: 19, source: null, efficiency: 68 }
+    ]);
+    assert.equal((upgraded.prepare("SELECT mash_efficiency_pct FROM brewery_process_defaults WHERE id = 'brewery'")
+      .get() as { mash_efficiency_pct: number }).mash_efficiency_pct, 71);
+    assert.equal((upgraded.prepare("SELECT name FROM recipes WHERE id = 'explicit'").get() as { name: string }).name,
+      'explicit');
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
+test('partially upgraded recipe sizes retain their assumptions and app fallback fills blanks', () => {
+  const id = nanoid();
+  const db = openWorkspaceDb(id);
+  for (const recipeId of ['existing', 'missing']) db.prepare(
+    'INSERT INTO recipes(id, name, created_at, updated_at) VALUES (?, ?, 1, 1)').run(recipeId, recipeId);
+  db.prepare(`INSERT INTO recipe_inputs(id, target_fermenter_volume_liters, batch_size_source)
+    VALUES ('existing', 21, 'assumed_brewery')`).run();
+  db.pragma('user_version = 30');
+  closeWorkspaceDb(db);
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.deepEqual(upgraded.prepare(`SELECT id, target_fermenter_volume_liters AS liters,
+      batch_size_source AS source FROM recipe_inputs ORDER BY id`).all(), [
+      { id: 'existing', liters: 21, source: 'assumed_brewery' },
+      { id: 'missing', liters: appBatchSizeLiters, source: 'assumed_app' }
+    ]);
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
+test('version 30 schema upgrades without a brewery batch default', () => {
+  const id = nanoid();
+  const db = openWorkspaceDb(id);
+  db.prepare("INSERT INTO brewery_process_defaults(id, mash_efficiency_pct) VALUES ('brewery', 74)").run();
+  db.prepare("INSERT INTO recipes(id, name, created_at, updated_at) VALUES ('old-recipe', 'Old recipe', 1, 1)").run();
+  for (const [table, columns] of [
+    ['recipe_inputs', 'id TEXT PRIMARY KEY NOT NULL, target_fermenter_volume_liters REAL, brewhouse_efficiency_pct REAL, wort_loss_liters REAL'],
+    ['brewery_process_defaults', 'id TEXT PRIMARY KEY NOT NULL, wort_loss_liters REAL, mash_efficiency_pct REAL']
+  ]) {
+    db.prepare('SELECT crsql_as_table(?)').get(table);
+    db.exec(`CREATE TABLE old_${table}(${columns})`);
+    const oldColumns = columns.split(', ').map(column => column.split(' ')[0]);
+    db.exec(`INSERT INTO old_${table}(${oldColumns.join(', ')}) SELECT ${oldColumns.join(', ')} FROM ${table}`);
+    db.exec(`DROP TABLE ${table}`);
+    db.exec(`ALTER TABLE old_${table} RENAME TO ${table}`);
+    db.prepare('SELECT crsql_as_crr(?)').get(table);
+  }
+  db.pragma('user_version = 30');
+  closeWorkspaceDb(db);
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.deepEqual(upgraded.prepare("SELECT target_fermenter_volume_liters AS liters, batch_size_source AS source FROM recipe_inputs WHERE id = 'old-recipe'").get(),
+      { liters: appBatchSizeLiters, source: 'assumed_app' });
+    assert.equal((upgraded.prepare("SELECT mash_efficiency_pct FROM brewery_process_defaults WHERE id = 'brewery'")
+      .get() as { mash_efficiency_pct: number }).mash_efficiency_pct, 74);
   } finally { closeWorkspaceDb(upgraded); }
 });
 

@@ -46,7 +46,10 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
   const gravityMissing: string[] = [];
   const colorMissing: string[] = [];
   const targetLiters = positive(recipeInputs.target_fermenter_volume_liters);
-  const targetSources = targetLiters ? [`Batch size: ${targetLiters} L (recipe settings).`] : [];
+  const assumedSize = recipeInputs.batch_size_source === 'assumed_brewery' ? 'brewery default'
+    : recipeInputs.batch_size_source === 'assumed_app' ? '5 US gal app default' : null;
+  const targetSources = targetLiters ? [`Batch size: ${Number(targetLiters.toFixed(3))} L (${assumedSize
+    ? `assumed from ${assumedSize} because the recipe had no size` : 'recipe settings'}).`] : [];
   const targetHelp = 'Set Batch size in recipe settings.';
   if (!targetLiters) { missing.push(targetHelp); gravityMissing.push(targetHelp); colorMissing.push(targetHelp); }
   if (recipeType !== 'beer') return { targetLiters, originalGravity: null, finalGravity: null, abvPct: null, colorSrm: null,
