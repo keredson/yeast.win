@@ -7,7 +7,8 @@ import { recordSlug } from '../shared/recordSlug.ts';
 import { fillMissingRecipeBatchSizes } from '../shared/batchSize.ts';
 import { retiredGenericSupplies } from '../shared/catalogSupplyExpansion.ts';
 import { indexStatements, legacyEquipmentCopyStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements,
-  workspaceSchemaVersion, workspaceTableColumns, legacyEquipmentModelStatements, supplyMigrationStatements } from '../shared/schema.ts';
+  workspaceSchemaVersion, workspaceTableColumns, legacyEquipmentModelStatements, supplyMigrationStatements,
+  primingSugarCategoryMigrationStatements } from '../shared/schema.ts';
 
 export const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const envPath = resolve(projectRoot, '.env');
@@ -237,6 +238,10 @@ export function openWorkspaceDb(id: string): Database.Database {
         db.exec(`DROP TABLE "${table}"`);
       }
       for (const statement of indexStatements) db.exec(statement);
+      if (version < 35) {
+        for (const statement of supplyMigrationStatements) db.exec(statement);
+        for (const statement of primingSugarCategoryMigrationStatements) db.exec(statement);
+      }
       if (hasLegacyMeta) db.exec('DROP TABLE schema_meta');
       db.pragma(`user_version = ${workspaceSchemaVersion}`);
       db.exec('COMMIT');

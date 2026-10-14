@@ -329,7 +329,13 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 34;
+export const workspaceSchemaVersion = 35;
+export const primingSugarCategoryMigrationStatements = [
+  `UPDATE inventory_items SET category = 'Adjunct' WHERE category = 'Other' AND supply_id IN
+    (SELECT id FROM supplies WHERE catalog_supply_id = 'inventory_priming_sugar')`,
+  `UPDATE supplies SET category = 'Adjunct'
+    WHERE catalog_supply_id = 'inventory_priming_sugar' AND category = 'Other'`
+] as const;
 export const retiredReplicatedTables = ['equipment_calibrations', 'equipment_characterization_observations'] as const;
 
 export function isValidId(value: unknown): value is string {

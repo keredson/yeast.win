@@ -8,8 +8,9 @@ import { retiredGenericSupplies } from '../shared/catalogSupplyExpansion.ts';
 import { hasGeneratedLocationSuffix, locationSlug } from './locationSlug.ts';
 import { recordSlug } from './recordSlug.ts';
 import type { CatalogEquipment, MeasurementChannel } from '../shared/catalog.ts';
-import { changeColumns, indexStatements, legacyEquipmentCopyStatements, legacyEquipmentModelStatements, supplyMigrationStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements,
-  workspaceSchemaVersion, workspaceTableColumns } from '../shared/schema.ts';
+import { changeColumns, indexStatements, legacyEquipmentCopyStatements, legacyEquipmentModelStatements,
+  supplyMigrationStatements, primingSugarCategoryMigrationStatements, nowSeconds, replicatedTables,
+  retiredReplicatedTables, schemaStatements, workspaceSchemaVersion, workspaceTableColumns } from '../shared/schema.ts';
 import type { SqlChangeRow } from '../shared/wire.ts';
 import { changeTuple, decodeItem, encodeItem, maxSequence, readSequence, syncContentType,
   syncProtocolVersion, validChangeTuple, type ChangeTuple } from '../shared/cborSync.ts';
@@ -351,6 +352,10 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
           }
           for (const statement of indexStatements) await tx.exec(statement);
           await tx.exec('CREATE TABLE IF NOT EXISTS sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
+          if (version < 35) {
+            for (const statement of supplyMigrationStatements) await tx.exec(statement);
+            for (const statement of primingSugarCategoryMigrationStatements) await tx.exec(statement);
+          }
           if (changed) await tx.exec('DELETE FROM sync_state');
           if (legacyMeta.length) await tx.exec('DROP TABLE schema_meta');
           await tx.exec(`PRAGMA user_version = ${workspaceSchemaVersion}`);

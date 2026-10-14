@@ -22,7 +22,7 @@ export interface CatalogInventory { id: string; name: string; category: string; 
   image_src?: string | null }
 
 export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
-export const catalogSchemaVersion = 27;
+export const catalogSchemaVersion = 28;
 export const vevorModelName = 'VEVOR Electric Brewing System 9.2 Gal/35 L';
 export const catalogModelTables = {
   manufacturers: `CREATE TABLE IF NOT EXISTS manufacturers (
@@ -171,5 +171,5 @@ export const initialCatalogInventory: CatalogInventory[] = [
   { id: 'inventory_bottle_500ml', name: '500 mL bottle', category: 'Packaging', unit: 'each' },
   { id: 'inventory_keg_5gal', name: '5 US gal keg', category: 'Packaging', unit: 'each' },
   { id: 'inventory_bottle_caps', name: 'Swing top bottle gaskets', category: 'Packaging', unit: 'each' },
-  { id: 'inventory_priming_sugar', name: 'Priming sugar', category: 'Other', unit: 'g' }
+  { id: 'inventory_priming_sugar', name: 'Priming sugar', category: 'Adjunct', unit: 'g' }
 ];

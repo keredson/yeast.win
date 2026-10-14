@@ -591,6 +591,13 @@ export function openCatalogDb(dataDir: string): Database.Database {
       db.pragma('user_version = 27');
     })();
   }
+  if ((db.pragma('user_version', { simple: true }) as number) === 27) {
+    db.transaction(() => {
+      db.prepare(`UPDATE supplies SET category = 'Adjunct'
+        WHERE id = 'inventory_priming_sugar' AND category = 'Other'`).run();
+      db.pragma('user_version = 28');
+    })();
+  }
   db.prepare(`UPDATE equipment_models SET model_name = ?
     WHERE id = ? AND model_name IN (?, ?)`).run(vevorModelName, 'equipment_vevor_35l',
     'VEVOR Electric Brewing System 9.2 Gal/35 L Brewing Pot', 'VEVOR 35 L');
