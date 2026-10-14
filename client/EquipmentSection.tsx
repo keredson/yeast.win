@@ -161,6 +161,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const [modelRangeForm] = Form.useForm();
   const [capabilityForm] = Form.useForm();
   const item = equipment.find(row => row.id === selectedId) || null;
+  const itemModel = item ? models.find(row => row.id === item.model_id) : undefined;
   const selectedModel = models.find(row => row.id === selectedId) || null;
   const catalogParent = selectedModel ? catalog.find(row => row.id === selectedModel.catalog_model_id) : undefined;
   const modelRangeChannel = selectedModel?.measurement_channels?.find(channel => channel.measurement_kind === editModelRange);

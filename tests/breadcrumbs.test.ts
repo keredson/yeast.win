@@ -21,12 +21,13 @@ const records: BreadcrumbRecords = {
 test('detail pages use one section-to-record breadcrumb pattern', () => {
   const labels = (section: Parameters<typeof breadcrumbNodes>[0], id: string) =>
     breadcrumbNodes(section, id, records).map(node => node.label);
-  assert.deepEqual(labels('batches', 'batch-one'), ['Batches', 'Autumn brew']);
-  assert.deepEqual(labels('recipes', 'house-ipa'), ['Recipes', 'House IPA']);
-  assert.deepEqual(labels('inventory', 'stock-one'), ['Inventory', 'Pale malt']);
-  assert.deepEqual(labels('equipment', 'model-one'), ['Equipment', 'Fermenter']);
-  assert.deepEqual(labels('equipment', 'fermenter/f-01'), ['Equipment', 'Fermenter', 'F-01']);
-  assert.deepEqual(labels('locations', 'shelf-a'), ['Locations', 'Brew house', 'Cold room', 'Shelf A']);
-  assert.deepEqual(breadcrumbNodes('locations', null, records), []);
-  assert.deepEqual(breadcrumbNodes('locations', 'unknown', records), []);
+  assert.deepEqual(labels('batches', 'batch-one'), ['Home', 'Batches', 'Autumn brew']);
+  assert.deepEqual(labels('recipes', 'house-ipa'), ['Home', 'Recipes', 'House IPA']);
+  assert.deepEqual(labels('inventory', 'stock-one'), ['Home', 'Inventory', 'Pale malt']);
+  assert.deepEqual(labels('equipment', 'model-one'), ['Home', 'Equipment', 'Fermenter']);
+  assert.deepEqual(labels('equipment', 'fermenter/f-01'), ['Home', 'Equipment', 'Fermenter', 'F-01']);
+  assert.deepEqual(labels('locations', 'shelf-a'), ['Home', 'Locations', 'Brew house', 'Cold room', 'Shelf A']);
+  assert.deepEqual(labels('locations', ''), ['Home', 'Locations']);
+  assert.deepEqual(breadcrumbNodes('locations', null, records).map(node => node.label), ['Home', 'Locations']);
+  assert.deepEqual(breadcrumbNodes('locations', 'unknown', records).map(node => node.label), ['Home', 'Locations']);
 });
