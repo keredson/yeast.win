@@ -1021,10 +1021,12 @@ try {
   await catalogGrain.locator('.ant-modal-close').click();
   await catalogGrain.waitFor({ state: 'hidden' });
   await page.getByRole('link', { name: 'grain', exact: true }).click();
-  await page.getByRole('dialog', { name: 'New grain item' }).getByRole('combobox', { name: 'Item' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Briess Pale Ale Malt' }).last().click();
-  await page.getByRole('dialog', { name: 'New grain item' }).getByRole('combobox', { name: 'Item' }).fill('Smoke grain');
-  const newGrain = page.getByRole('dialog', { name: 'New grain item' });
+  const grainCatalog = page.getByRole('dialog', { name: 'Add from catalog' });
+  await grainCatalog.getByRole('combobox', { name: 'Filter inventory type' }).getByText('Grain').waitFor();
+  await grainCatalog.getByRole('button', { name: 'Create your own product spec' }).click();
+  const newGrain = page.getByRole('dialog', { name: 'Create grain product' });
+  await newGrain.getByRole('combobox', { name: 'Item' }).fill('Smoke grain');
+  await newGrain.getByRole('spinbutton', { name: 'Extract yield (%)' }).fill('78');
   if (!await newGrain.getByRole('combobox', { name: 'Unit' }).locator('..').getByText('lb + oz', { exact: true }).count()) {
     throw new Error('Preferred compound grain unit default was not set');
   }
@@ -1045,7 +1047,7 @@ try {
   }
   await newGrain.getByRole('combobox', { name: 'Unit' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="lb + oz"]').click();
-  await page.getByRole('button', { name: 'Create item' }).click();
+  await page.getByRole('button', { name: 'Create product' }).click();
   await newGrain.waitFor({ state: 'hidden' });
   await page.waitForURL(url => url.pathname === '/inventory');
   await page.getByRole('button', { name: 'Add grain' }).waitFor();
@@ -1056,18 +1058,19 @@ try {
   if (!String(await grainRow.getByRole('link', { name: 'Smoke grain' }).getAttribute('href')).endsWith('/inventory/smoke-grain')) {
     throw new Error('Inventory link still uses an item ID');
   }
-  await page.getByRole('button', { name: 'Add grain' }).click();
-  const moreGrain = page.getByRole('dialog', { name: 'New grain item' });
-  await moreGrain.getByRole('combobox', { name: 'Item' }).fill('Smoke grain');
+  await grainRow.getByRole('link', { name: 'Smoke grain' }).click();
+  await page.getByRole('button', { name: 'Add stock' }).click();
+  const moreGrain = page.getByRole('dialog', { name: 'Add Smoke grain stock' });
   if (await page.getByText('Unspecified', { exact: true }).count()) throw new Error('Unset stock location appeared as a named location');
   await moreGrain.getByText('This item is already at this location').waitFor();
   await moreGrain.getByRole('spinbutton', { name: 'Starting quantity on hand · pounds' }).fill('1');
   await moreGrain.getByRole('button', { name: 'Add stock' }).click();
   await moreGrain.waitFor({ state: 'hidden' });
+  await navigateSection(page, 'Inventory');
   if (await page.locator('.group-table').getByRole('link', { name: 'Smoke grain' }).count() !== 1) {
     throw new Error('Adding an existing inventory item created a duplicate row');
   }
-  await grainRow.getByRole('link', { name: 'Smoke grain' }).click();
+  await page.locator('.group-table').getByRole('link', { name: 'Smoke grain' }).click();
   await page.waitForURL(url => url.pathname === '/inventory/smoke-grain');
   await page.getByRole('heading', { name: 'Lots and locations' }).waitFor();
   await page.getByRole('button', { name: 'Actions for Unspecified lot' }).click();

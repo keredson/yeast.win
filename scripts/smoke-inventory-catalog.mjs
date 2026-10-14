@@ -38,9 +38,23 @@ try {
   await form.waitFor({ state: 'hidden' });
   await page.getByRole('link', { name: 'Briess Caramel Malt 60L' }).waitFor();
   await page.locator('.inventory-add-types').getByRole('link', { name: 'grain' }).click();
-  await page.getByRole('dialog', { name: 'New grain item' }).waitFor();
+  const grainExplorer = page.getByRole('dialog', { name: 'Add from catalog' });
+  await grainExplorer.getByRole('button', { name: 'Create your own product spec' }).click();
+  const custom = page.getByRole('dialog', { name: 'Create grain product' });
+  await custom.getByRole('combobox', { name: 'Item' }).fill('House malt');
+  await custom.getByRole('spinbutton', { name: 'Extract yield (%)' }).fill('79');
+  await custom.getByRole('spinbutton', { name: 'Color (°L)' }).fill('3');
+  await custom.getByRole('button', { name: 'Create product' }).click();
+  await custom.waitFor({ state: 'hidden' });
+  await page.getByRole('link', { name: 'House malt' }).click();
+  await page.getByRole('button', { name: 'Supply properties' }).click();
+  const savedSpec = page.getByRole('dialog', { name: 'House malt supply defaults' });
+  if (await savedSpec.getByRole('spinbutton', { name: 'Extract yield (%)' }).inputValue() !== '79') {
+    throw new Error('Custom product specification was not saved');
+  }
+  await savedSpec.locator('.ant-modal-close').click();
   if (errors.length) throw new Error(`Browser errors: ${errors.join('; ')}`);
-  console.log('Inventory catalog selection and persistent add-type links passed');
+  console.log('Inventory catalog selection, type links, and custom product specs passed');
 } finally {
   await browser.close();
 }

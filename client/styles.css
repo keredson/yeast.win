@@ -116,6 +116,7 @@ button, input, textarea { font: inherit; }
 .catalog-explorer-option-name strong { font-size: 14px; }
 .catalog-explorer-option-name small { color: #728079; font-size: 12px; }
 .catalog-explorer-thumbnail { width: 46px; height: 46px; flex: none; object-fit: contain; }
+.catalog-create-custom { margin-top: 12px; padding-left: 0; }
 .equipment-catalog-source > img { display: block; max-width: 160px; max-height: 160px; object-fit: contain; margin: 0 0 12px; }
 .equipment-catalog-manufacturer { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; font-size: 13px; }
 .equipment-catalog-manufacturer img { width: 20px; height: 20px; object-fit: contain; }

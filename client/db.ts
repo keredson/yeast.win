@@ -2129,12 +2129,20 @@ export async function listSupplies(db: Pick<DB, 'execO'>): Promise<InventoryItem
 }
 
 export async function updateIngredientProperties(db: DB, item: InventoryItem, properties: IngredientProperties): Promise<void> {
+  const { table, columns, values } = ingredientPropertyInsert(item.category, properties);
+  if (!item.supply_id) throw new Error('Supply not found');
+  await db.exec(`INSERT INTO ${table}(supply_id, ${columns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')})
+    ON CONFLICT(supply_id) DO UPDATE SET ${columns.map(column => `${column} = excluded.${column}`).join(', ')}`,
+  [item.supply_id, ...values]);
+}
+
+function ingredientPropertyInsert(category: string, properties: IngredientProperties) {
   const allowed: Record<string, (keyof IngredientProperties)[]> = {
     Grain: ['yield_pct', 'color_lovibond', 'grain_class'], Adjunct: ['yield_pct', 'color_lovibond'],
     Hops: ['alpha_acid_pct', 'hop_form'], Yeast: ['attenuation_pct']
   };
-  if (!allowed[item.category]) throw new Error('This inventory category has no calculation properties');
-  const values = Object.fromEntries(allowed[item.category].filter(key => properties[key] != null)
+  if (!allowed[category]) throw new Error('This inventory category has no calculation properties');
+  const values = Object.fromEntries(allowed[category].filter(key => properties[key] != null)
     .map(key => [key, properties[key]])) as IngredientProperties;
   for (const [key, value] of Object.entries(values)) {
     if (key === 'grain_class') {
@@ -2144,13 +2152,10 @@ export async function updateIngredientProperties(db: DB, item: InventoryItem, pr
     } else if (typeof value !== 'number' || !Number.isFinite(value) || value < 0
       || key !== 'color_lovibond' && value > 100) throw new Error(`Enter a valid ${key.replaceAll('_', ' ')}`);
   }
-  const table = item.category === 'Hops' ? 'supply_hop_specs' : item.category === 'Yeast'
+  const table = category === 'Hops' ? 'supply_hop_specs' : category === 'Yeast'
     ? 'supply_yeast_specs' : 'supply_grain_specs';
-  if (!item.supply_id) throw new Error('Supply not found');
-  const columns = allowed[item.category];
-  await db.exec(`INSERT INTO ${table}(supply_id, ${columns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')})
-    ON CONFLICT(supply_id) DO UPDATE SET ${columns.map(column => `${column} = excluded.${column}`).join(', ')}`,
-  [item.supply_id, ...columns.map(column => values[column] ?? null)]);
+  const columns = allowed[category];
+  return { table, columns, values: columns.map(column => values[column] ?? null) };
 }
 
 export async function supplyIngredientProperties(db: DB, item: InventoryItem): Promise<IngredientProperties> {
@@ -2327,8 +2332,11 @@ export function inventoryBalance(rows: InventoryMovement[], unit: string): numbe
 
 export async function createInventoryItem(db: DB, name: string, category: string, defaultUnit: string,
   startingQuantity: number | null = null, accountId: string | null = null, displayUnit = defaultUnit,
-  locationId: string | null = null, catalogSupplyId: string | null = null, lotCode: string | null = null): Promise<string> {
+  locationId: string | null = null, catalogSupplyId: string | null = null, lotCode: string | null = null,
+  properties?: IngredientProperties): Promise<string> {
   const items = await listInventory(db);
+  const spec = properties && Object.values(properties).some(value => value != null)
+    ? ingredientPropertyInsert(category, properties) : null;
   const cleanLot = lotCode?.trim() || null;
   if (stockAtLocation(items, name, category, locationId, cleanLot)) throw new Error('This lot already exists at that location');
   if (items.some(item => sameInventoryProduct(item, name, category)) && (!startingQuantity || startingQuantity <= 0))
@@ -2344,6 +2352,10 @@ export async function createInventoryItem(db: DB, name: string, category: string
       VALUES (?, ?, ?, ?, ?, ?)`, [supplyId, name, category, defaultUnit, catalogSupplyId, now]);
     else if (catalogSupplyId) await tx.exec('UPDATE supplies SET catalog_supply_id = COALESCE(catalog_supply_id, ?) WHERE id = ?',
       [catalogSupplyId, supplyId]);
+    if (spec) await tx.exec(`INSERT INTO ${spec.table}(supply_id, ${spec.columns.join(', ')})
+      VALUES (?, ${spec.columns.map(() => '?').join(', ')})
+      ON CONFLICT(supply_id) DO UPDATE SET ${spec.columns.map(column => `${column} = excluded.${column}`).join(', ')}`,
+    [supplyId, ...spec.values]);
     const existingLot = await tx.execO<{ id: string }>(`SELECT id FROM supply_lots WHERE supply_id = ?
       AND (lot_code = ? OR lot_code IS NULL AND ? IS NULL) ORDER BY created_at, id LIMIT 1`,
     [supplyId, cleanLot, cleanLot]);
