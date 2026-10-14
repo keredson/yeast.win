@@ -9,12 +9,12 @@ const errors = [];
 page.on('pageerror', error => errors.push(error.message));
 
 try {
-  await page.goto(process.env.BREWLOG_TEST_URL || 'http://127.0.0.1:5173');
-  await page.getByRole('button', { name: 'Create account' }).click();
+  await page.goto(`${process.env.BREWLOG_TEST_URL || 'http://127.0.0.1:5173'}/login`);
+  await page.getByRole('link', { name: 'Create account' }).click();
   await page.getByLabel('Username').fill(`inventory-catalog-${Date.now()}`);
   await page.getByLabel('Password', { exact: true }).fill('smoke-test-1234');
   await page.getByLabel('Confirm password').fill('smoke-test-1234');
-  await page.locator('.login-card form button[type="submit"]').click();
+  await page.locator('.public-card form button[type="submit"]').click();
   await page.getByRole('button', { name: 'Account settings' }).waitFor({ timeout: 30_000 });
   await page.getByRole('button', { name: 'Account settings' }).click();
   await page.waitForFunction(() => {
@@ -153,8 +153,8 @@ try {
   }
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Equipment' }).first().click();
-  await page.getByRole('button', { name: 'Add from catalog' }).click();
-  const equipmentCatalog = page.getByRole('dialog', { name: 'Add from catalog' });
+  await page.locator('.equipment-add-types').getByRole('link', { name: 'brewing system', exact: true }).click();
+  const equipmentCatalog = page.getByRole('dialog', { name: 'Add brewing system' });
   await equipmentCatalog.getByRole('searchbox', { name: 'Search equipment models' }).fill('VEVOR Electric Brewing System');
   const vevor = equipmentCatalog.getByRole('button', { name: /VEVOR Electric Brewing System 9.2 Gal\/35 L/ }).first();
   await vevor.locator('img[src]').waitFor({ timeout: 60_000 });

@@ -50,7 +50,7 @@ try {
       FROM recipe_events e JOIN recipe_additions a ON a.event_id = e.id
       WHERE e.recipe_id = ? AND e.title = 'Cascade'`, [recipes[0].id]);
     const hopInputs = await db.execO('SELECT alpha_acid_pct FROM recipe_event_inputs WHERE id = ?', [hops[0].id]);
-    const items = await db.execO("SELECT name FROM inventory_items WHERE name = '2-row pale malt' OR name = 'Cascade'");
+    const items = await db.execO("SELECT name FROM stock_buckets WHERE name = '2-row pale malt' OR name = 'Cascade'");
     const counts = await db.execO('SELECT id FROM inventory_counts');
     const sources = await db.execO('SELECT id FROM recipe_import_sources');
     const links = await db.execO('SELECT id FROM recipe_import_links');

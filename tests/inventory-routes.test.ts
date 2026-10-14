@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { inventorySupplyForPath, inventoryPathSegment } from '../client/inventoryRoutes.ts';
-import type { InventoryItem } from '../client/db.ts';
+import type { InventoryRecord } from '../client/db.ts';
 
-const item = (id: string, name: string, category = 'Hops'): InventoryItem =>
+const item = (id: string, name: string, category = 'Hops'): InventoryRecord =>
   ({ id, name, category, default_unit: 'g', display_unit: 'g', location_id: null });
 
 test('inventory links open supplies and resolve legacy stock IDs', () => {

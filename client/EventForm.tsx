@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Alert, Button, Form, Input, InputNumber, Select } from 'antd';
 import { kindLabel, measurementKinds, planKinds } from './constants.ts';
 import { fromDatetimeLocal, toDatetimeLocal } from './time.ts';
-import { addPhoto, recordEvent, skipBatchEvent, updateEvent, updatePhotoEvent, type ActualEvent, type Equipment, type EventInput, type InventoryItem, type LocalDb, type MeasurementKind, type Plan, type PlanDetails } from './db.ts';
+import { addPhoto, recordEvent, skipBatchEvent, updateEvent, updatePhotoEvent, type ActualEvent, type Equipment, type EventInput, type InventoryRecord, type LocalDb, type MeasurementKind, type Plan, type PlanDetails } from './db.ts';
 import type { PreferredUnits } from './api.ts';
 import { compoundMassUnit, gravityScales, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions } from '../shared/units.ts';
 import { supportsDuration, timeUnits } from './planTiming.ts';
@@ -40,7 +40,7 @@ interface Values {
   gravity_role?: 'og' | 'fg' | '';
   duration_value?: number; duration_unit?: typeof timeUnits[number]['value'];
   note?: string; value?: number; unit?: string; uncertainty?: number; equipment_id?: string;
-  source?: string; item_name?: string; inventory_item_id?: string; catalog_item_id?: string;
+  source?: string; item_name?: string; stock_bucket_id?: string; catalog_item_id?: string;
   item_category?: string; quantity?: number; pounds?: number; ounces?: number;
   mode?: string; target_value?: number; target_unit?: string; power_watts?: number;
   to_vessel_id?: string; container_name?: string; container_size?: number;
@@ -49,7 +49,7 @@ interface Values {
 
 export function EventForm({ db, batchId, accountId, equipment, inventory, catalogRevision, preferredUnits, initialPlan, initialEvent, initialData, onSaved }: {
   db: LocalDb; batchId: string; accountId: string; equipment: Equipment[];
-  inventory: InventoryItem[]; catalogRevision: number; preferredUnits: PreferredUnits; initialPlan?: Plan | null;
+  inventory: InventoryRecord[]; catalogRevision: number; preferredUnits: PreferredUnits; initialPlan?: Plan | null;
   initialEvent?: ActualEvent | null; initialData?: { measurementKind?: MeasurementKind; payload: Record<string, string | number | null> } | null;
   onSaved: () => Promise<void>;
 }) {
@@ -81,13 +81,13 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, catalo
     ? compoundMassUnit : storedUnit;
   const initialSplit = initialUnit === compoundMassUnit && initialQuantity != null ? splitOunces(initialQuantity) : null;
   const initialCategory = plannedString('item_category')
-    || inventory.find(item => item.id === (initialData?.payload.inventory_item_id || plannedString('inventory_item_id')))?.category || 'Other';
+    || inventory.find(item => item.id === (initialData?.payload.stock_bucket_id || plannedString('stock_bucket_id')))?.category || 'Other';
   const selectedCategory = Form.useWatch('item_category', form) as string | undefined;
   const selectedUnit = Form.useWatch('unit', form) as string | undefined;
   const selectedTargetUnit = Form.useWatch('target_unit', form) as string | undefined;
   const selectedContainerUnit = Form.useWatch('container_unit', form) as string | undefined;
   const selectedDurationUnit = Form.useWatch('duration_unit', form) as string | undefined;
-  const selectedInventoryId = Form.useWatch('inventory_item_id', form) as string | undefined;
+  const selectedInventoryId = Form.useWatch('stock_bucket_id', form) as string | undefined;
   const selectedCatalogId = Form.useWatch('catalog_item_id', form) as string | undefined;
   const selectedStock = inventory.find(item => item.id === selectedInventoryId);
   const genericPitch = initialPlan?.title === 'Pitch yeast' && kind === 'addition';
@@ -147,7 +147,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, catalo
           source: values.source || 'manual' };
       } else if (kind === 'addition') {
         const itemName = values.item_name?.trim() || (genericPitch ? initialPlan?.title : undefined);
-        const itemId = values.inventory_item_id;
+        const itemId = values.stock_bucket_id;
         const stock = inventory.find(item => item.id === itemId);
         const category = values.item_category || initialCategory;
         const unchanged = itemName === (plannedString('item_name') || initialPlan?.title)
@@ -160,7 +160,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, catalo
         if (!itemName) throw new Error('Enter an item');
         if (!amount && !quantityOptional) throw new Error('Enter a quantity');
         payload = { item_name: itemName, item_category: category,
-          inventory_item_id: itemId || null,
+          stock_bucket_id: itemId || null,
           catalog_item_id: catalogId || null,
           supply_id: stock ? stock.supply_id || null : (keepPlannedSupply ? plannedString('supply_id') : null) || null,
           quantity: amount?.quantity ?? null, unit: amount?.unit || null };
@@ -179,13 +179,13 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, catalo
         if (!values.container_name || values.container_size == null || !values.container_unit || values.container_count == null) {
           throw new Error('Enter container, size, unit, and count');
         }
-        const stock = inventory.find(item => item.id === values.inventory_item_id);
+        const stock = inventory.find(item => item.id === values.stock_bucket_id);
         const unchanged = values.container_name === plannedString('container_name');
         const catalogId = stock ? null : values.catalog_item_id || (unchanged ? plannedString('catalog_item_id') : null)
           || (await findCatalogSupply('Packaging', values.container_name))?.id || null;
         payload = { container_name: values.container_name, container_size: values.container_size,
           container_unit: values.container_unit, container_count: values.container_count,
-          inventory_item_id: values.inventory_item_id || null, catalog_item_id: catalogId,
+          stock_bucket_id: values.stock_bucket_id || null, catalog_item_id: catalogId,
           supply_id: stock ? stock.supply_id || null : unchanged && (!values.catalog_item_id
             || values.catalog_item_id === plannedString('catalog_item_id')) ? plannedString('supply_id') || null : null };
       }
@@ -218,7 +218,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, catalo
     gravity_role: plannedString('gravity_role') || '',
     mode: initialData?.payload.mode || plannedString('mode') || 'hold', source: initialData?.payload.source || 'manual',
     item_name: plannedString('item_name') || (genericPitch ? undefined : initialPlan?.title), item_category: initialCategory,
-    inventory_item_id: plannedString('inventory_item_id'),
+    stock_bucket_id: plannedString('stock_bucket_id'),
     catalog_item_id: plannedString('catalog_item_id'),
     equipment_id: plannedString('equipment_id'),
     to_vessel_id: plannedString('to_vessel_id'),
@@ -272,13 +272,13 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, catalo
       <Form.Item name="equipment_id" label="Instrument"><Select allowClear placeholder="Choose equipment"
         options={equipment.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
     </>}
-    <Form.Item name="inventory_item_id" hidden><Input /></Form.Item>
+    <Form.Item name="stock_bucket_id" hidden><Input /></Form.Item>
     <Form.Item name="catalog_item_id" hidden><Input /></Form.Item>
     {kind === 'addition' && <>
       <>
         <Form.Item name="item_category" label="Type"><Select options={[...new Set([...inventoryCategories,
           ...inventory.map(row => row.category), ...(initialCategory ? [initialCategory] : [])])].map(value => ({ value, label: value }))}
-          onChange={value => { form.setFieldsValue({ inventory_item_id: undefined, catalog_item_id: undefined,
+          onChange={value => { form.setFieldsValue({ stock_bucket_id: undefined, catalog_item_id: undefined,
             item_name: undefined, unit: unitForCategory(value, preferredUnits.mass),
             quantity: undefined, pounds: undefined, ounces: undefined }); }} /></Form.Item>
         <Form.Item name="item_name" label="What was added?" rules={genericPitch ? [] : [{ required: true }]}
@@ -287,18 +287,18 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, catalo
             : selectedCatalogId ? 'Catalog product' : undefined}>
           <ProductPicker category={selectedCategory || initialCategory} inventory={inventory}
             catalogRevision={catalogRevision} onError={setError}
-            onEdited={() => form.setFieldsValue({ inventory_item_id: undefined, catalog_item_id: undefined })}
+            onEdited={() => form.setFieldsValue({ stock_bucket_id: undefined, catalog_item_id: undefined })}
             onChoose={choice => {
               if (choice.source === 'inventory') {
                 changeQuantityUnit(form, selectedUnit || initialUnit, choice.item.display_unit);
-                form.setFieldsValue({ item_name: choice.item.name, inventory_item_id: choice.item.id,
+                form.setFieldsValue({ item_name: choice.item.name, stock_bucket_id: choice.item.id,
                   catalog_item_id: undefined, unit: choice.item.display_unit });
               } else {
                 const nextUnit = unitGroups.mass.includes(choice.item.unit as typeof unitGroups.mass[number])
                   ? unitForCategory(choice.item.category, preferredUnits.mass) : choice.item.unit;
                 changeQuantityUnit(form, selectedUnit || initialUnit, nextUnit);
                 form.setFieldsValue({ item_name: choice.item.name, catalog_item_id: choice.item.id,
-                  inventory_item_id: undefined, unit: nextUnit });
+                  stock_bucket_id: undefined, unit: nextUnit });
               }
             }} />
         </Form.Item>
@@ -333,9 +333,9 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, catalo
           selectedStock.location_name].filter(Boolean).join(' · ')
           : selectedCatalogId ? 'Catalog product' : undefined}>
         <ProductPicker category="Packaging" inventory={inventory} catalogRevision={catalogRevision} onError={setError}
-          onEdited={() => form.setFieldsValue({ inventory_item_id: undefined, catalog_item_id: undefined })}
+          onEdited={() => form.setFieldsValue({ stock_bucket_id: undefined, catalog_item_id: undefined })}
           onChoose={choice => form.setFieldsValue({ container_name: choice.item.name,
-            inventory_item_id: choice.source === 'inventory' ? choice.item.id : undefined,
+            stock_bucket_id: choice.source === 'inventory' ? choice.item.id : undefined,
             catalog_item_id: choice.source === 'catalog' ? choice.item.id : undefined })} />
       </Form.Item>
       <div className="form-triple"><Form.Item name="container_size" label="Size" rules={[{ required: true }]}><InputNumber className="full-width" step="any" /></Form.Item>

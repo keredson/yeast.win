@@ -1,8 +1,8 @@
-import type { InventoryItem } from './db.ts';
+import type { InventoryRecord } from './db.ts';
 import { recordSlug as slug } from './recordSlug.ts';
 import { uniqueRouteSegments } from './uniqueRouteSegments.ts';
 
-export function inventoryPathSegment(item: InventoryItem, items: InventoryItem[]): string {
+export function inventoryPathSegment(item: InventoryRecord, items: InventoryRecord[]): string {
   return uniqueRouteSegments(items, row => {
     const name = slug(row.name);
     const sameName = items.filter(other => slug(other.name) === name);
@@ -13,7 +13,7 @@ export function inventoryPathSegment(item: InventoryItem, items: InventoryItem[]
   }, true).get(item.id) || item.id;
 }
 
-export function inventorySupplyForPath(segment: string, supplies: InventoryItem[], stock: InventoryItem[]): InventoryItem | undefined {
+export function inventorySupplyForPath(segment: string, supplies: InventoryRecord[], stock: InventoryRecord[]): InventoryRecord | undefined {
   const supply = supplies.find(item => item.id === segment || inventoryPathSegment(item, supplies) === segment);
   if (supply) return supply;
   const legacyStock = stock.find(item => item.id === segment || inventoryPathSegment(item, stock) === segment);

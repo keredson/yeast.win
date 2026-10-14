@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Form, Modal, Popconfirm } from 'antd';
 import { DeleteOutlined, EnvironmentOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
 import { convertInventoryUnit, deleteInventoryLocation, listInventoryBalances, saveInventoryLocation,
-  type Equipment, type InventoryItem, type InventoryLocation, type LocalDb } from './db.ts';
+  type Equipment, type InventoryRecord, type InventoryLocation, type LocalDb } from './db.ts';
 import { LocationFields } from './LocationFields.tsx';
 import { locationDescendantIds, locationPathSegment } from './locationRoutes.ts';
 import { inventoryPathSegment } from './inventoryRoutes.ts';
@@ -10,7 +10,7 @@ import { equipmentUnitPathSegment } from './equipmentRoutes.ts';
 import { compoundMassUnit, formatQuantity } from '../shared/units.ts';
 
 function LocationCards({ parentId, locations, items, equipment, basePath, onSelect, visited = new Set<string>() }: {
-  parentId: string | null; locations: InventoryLocation[]; items: InventoryItem[]; equipment: Equipment[]; basePath: string;
+  parentId: string | null; locations: InventoryLocation[]; items: InventoryRecord[]; equipment: Equipment[]; basePath: string;
   onSelect: (id: string) => void; visited?: Set<string>;
 }) {
   const children = locations.filter(location => !visited.has(location.id)
@@ -37,7 +37,7 @@ function LocationCards({ parentId, locations, items, equipment, basePath, onSele
 
 export function LocationsSection({ db, basePath, locations, items, supplies, equipment, equipmentModels, selectedId,
   onSelect, onInventorySelect, onEquipmentSelect, onChanged }: {
-  db: LocalDb; basePath: string; locations: InventoryLocation[]; items: InventoryItem[]; supplies: InventoryItem[];
+  db: LocalDb; basePath: string; locations: InventoryLocation[]; items: InventoryRecord[]; supplies: InventoryRecord[];
   equipment: Equipment[]; equipmentModels: Equipment[];
   selectedId: string | null; onSelect: (id: string | null) => void; onInventorySelect: (id: string) => void;
   onEquipmentSelect: (id: string) => void;
@@ -93,7 +93,7 @@ export function LocationsSection({ db, basePath, locations, items, supplies, equ
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  const stockRows = (rows: InventoryItem[]) => <div className="location-stock-list">{rows.map(item => {
+  const stockRows = (rows: InventoryRecord[]) => <div className="location-stock-list">{rows.map(item => {
     const supply = supplies.find(row => row.id === item.supply_id);
     const balance = balances[item.id];
     const converted = balance == null || item.display_unit === compoundMassUnit ? balance

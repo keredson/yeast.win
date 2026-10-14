@@ -130,7 +130,7 @@ export function planDetailsLabel(plan: Pick<Plan, 'event_type'> & { title?: stri
   const duration = supportsDuration(plan.event_type, String(details.phase || '')) && typeof details.duration_seconds === 'number' && details.duration_seconds > 0
     ? `For ${formatOffset(details.duration_seconds)}` : '';
   const genericPitch = plan.title === 'Pitch yeast' && details.item_category === 'Yeast'
-    && details.item_name === 'Yeast' && !details.inventory_item_id && !details.catalog_item_id;
+    && details.item_name === 'Yeast' && !details.stock_bucket_id && !details.catalog_item_id;
   const parts = plan.event_type === 'addition' ? [amount, genericPitch || details.item_name === plan.title ? '' : details.item_name]
     : plan.event_type === 'measurement' ? [details.measurement_kind, target]
       : plan.event_type === 'temperature_control' ? [details.mode, target]

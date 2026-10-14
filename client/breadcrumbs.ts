@@ -1,4 +1,4 @@
-import type { Batch, Equipment, InventoryItem, InventoryLocation, Recipe } from './db.ts';
+import type { Batch, Equipment, InventoryRecord, InventoryLocation, Recipe } from './db.ts';
 import { inventorySupplyForPath } from './inventoryRoutes.ts';
 import { equipmentModelForPath, equipmentUnitForPath } from './equipmentRoutes.ts';
 import { locationAncestors, locationForPath } from './locationRoutes.ts';
@@ -7,7 +7,7 @@ import { recipeForPath } from './recipeRoutes.ts';
 export type BreadcrumbSection = 'batches' | 'recipes' | 'inventory' | 'equipment' | 'locations';
 export interface BreadcrumbNode { label: string; section: BreadcrumbSection | 'home'; id: string | null }
 export interface BreadcrumbRecords {
-  batches: Batch[]; recipes: Recipe[]; inventory: InventoryItem[]; supplies: InventoryItem[];
+  batches: Batch[]; recipes: Recipe[]; inventory: InventoryRecord[]; supplies: InventoryRecord[];
   equipment: Equipment[]; equipmentModels: Equipment[]; locations: InventoryLocation[];
 }
 

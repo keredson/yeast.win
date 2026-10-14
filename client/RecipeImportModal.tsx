@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { Alert, Button, Checkbox, Input, Modal, Select, Switch, Table } from 'antd';
-import { importRecipes, type IngredientImportChoice, type InventoryItem, type LocalDb } from './db.ts';
+import { importRecipes, type IngredientImportChoice, type InventoryRecord, type LocalDb } from './db.ts';
 import { decodeImportBytes, parseRecipeImport, type ImportDocument, type ImportedIngredient } from './recipeImport.ts';
 import { quantityUnitsForCategory, unitOptions, type PreferredUnits } from '../shared/units.ts';
 import { unitForCategory } from '../shared/catalog.ts';
 
 export function RecipeImportModal({ open, db, inventory, preferredUnits, onClose, onImported }: {
-  open: boolean; db: LocalDb; inventory: InventoryItem[]; preferredUnits: PreferredUnits;
+  open: boolean; db: LocalDb; inventory: InventoryRecord[]; preferredUnits: PreferredUnits;
   onClose: () => void; onImported: (ids: string[]) => Promise<void>;
 }) {
   const [file, setFile] = useState<File | null>(null);
@@ -51,7 +51,7 @@ export function RecipeImportModal({ open, db, inventory, preferredUnits, onClose
         if (choice === 'unlinked') mapping[ingredient.key] = { mode: 'unlinked' };
         else if (choice === 'create') mapping[ingredient.key] = { mode: 'create',
           unit: units[ingredient.key] || unitForCategory(ingredient.category, preferredUnits.mass) };
-        else mapping[ingredient.key] = { mode: 'existing', inventoryItemId: choice };
+        else mapping[ingredient.key] = { mode: 'existing', stockBucketId: choice };
       }
       const ids = await importRecipes(db, { filename: file.name, format: document.format, bytes, sha256 }, selectedRecipes, mapping);
       await onImported(ids);

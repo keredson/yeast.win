@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Alert, Button, Checkbox, Form, Input, InputNumber, Select } from 'antd';
 import { kindLabel, measurementKinds } from './constants.ts';
-import type { Equipment, InventoryItem, PlanDetails, PlanInput } from './db.ts';
+import type { Equipment, InventoryRecord, PlanDetails, PlanInput } from './db.ts';
 import { vesselKinds } from '../shared/equipment.ts';
 import { compoundMassUnit, convertUnit, gravityScales, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions } from '../shared/units.ts';
 import { planDuration, supportsDuration, timeUnits } from './planTiming.ts';
@@ -37,7 +37,7 @@ interface Values {
   title: string; timing_key: string; offset_value?: number;
   offset_unit?: typeof timeUnits[number]['value']; details?: string;
   item_category?: string; quantity?: number; unit?: string; pounds?: number; ounces?: number;
-  inventory_item_id?: string; supply_id?: string; catalog_item_id?: string;
+  stock_bucket_id?: string; supply_id?: string; catalog_item_id?: string;
   measurement_kind?: string; target_value?: number; target_unit?: string; gravity_role?: 'og' | 'fg' | '';
   mode?: string; container_name?: string; container_size?: number; container_count?: number;
   to_vessel_id?: string; transfer_equipment_ids?: string[];
@@ -50,7 +50,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
   anchors: Anchor[];
   eventType: string;
   initialPlan?: PlanInput & { id: string };
-  equipment: Equipment[]; inventory: InventoryItem[]; catalogRevision: number; preferredUnits: PreferredUnits;
+  equipment: Equipment[]; inventory: InventoryRecord[]; catalogRevision: number; preferredUnits: PreferredUnits;
   preset?: PlanPreset;
   recipeMode?: boolean;
   allowRecordNow?: boolean;
@@ -64,13 +64,13 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
   const offset = initialPlan?.offset_seconds ?? preset?.offsetSeconds ?? 0;
   const offsetUnit = offset === 0 ? timeUnits[1] : [...timeUnits].reverse().find(item => Math.abs(offset) % item.multiplier === 0) || timeUnits[0];
   const genericPitch = kind === 'addition' && initialPlan?.title === 'Pitch yeast'
-    && initialDetails.item_category === 'Yeast' && !initialDetails.inventory_item_id && !initialDetails.supply_id && !initialDetails.catalog_item_id
+    && initialDetails.item_category === 'Yeast' && !initialDetails.stock_bucket_id && !initialDetails.supply_id && !initialDetails.catalog_item_id
     && (!initialDetails.item_name || initialDetails.item_name === 'Yeast');
   const unspecifiedAddition = kind === 'addition' && !!initialPlan && !!initialDetails.item_category
-    && !initialDetails.item_name && !initialDetails.inventory_item_id && !initialDetails.supply_id && !initialDetails.catalog_item_id;
+    && !initialDetails.item_name && !initialDetails.stock_bucket_id && !initialDetails.supply_id && !initialDetails.catalog_item_id;
   const initialItem = genericPitch || unspecifiedAddition ? '' : String(initialDetails.item_name || initialPlan?.title || preset?.title || '');
   const initialCategory = String(initialDetails.item_category || inventory.find(item => item.id === (recipeMode
-    ? initialDetails.supply_id : initialDetails.inventory_item_id))?.category || preset?.itemCategory || '');
+    ? initialDetails.supply_id : initialDetails.stock_bucket_id))?.category || preset?.itemCategory || '');
   const categoryNames = [...new Set([...inventoryCategories,
     ...inventory.map(row => row.category), ...(initialCategory ? [initialCategory] : [])])];
   const initialUnit = String(initialDetails.display_unit || initialDetails.container_unit || initialDetails.unit ||
@@ -105,7 +105,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
   const selectedOffsetUnit = Form.useWatch('offset_unit', form) as string | undefined;
   const selectedOffsetValue = Form.useWatch('offset_value', form) as number | undefined;
   const selectedDurationUnit = Form.useWatch('duration_unit', form) as string | undefined;
-  const selectedInventoryId = Form.useWatch(recipeMode ? 'supply_id' : 'inventory_item_id', form) as string | undefined;
+  const selectedInventoryId = Form.useWatch(recipeMode ? 'supply_id' : 'stock_bucket_id', form) as string | undefined;
   const selectedCatalogId = Form.useWatch('catalog_item_id', form) as string | undefined;
   const selectedInventory = inventory.find(item => item.id === selectedInventoryId);
   const productSource = selectedInventory ? recipeMode ? 'Your brewery product' : 'Your inventory'
@@ -171,10 +171,10 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
       if (kind === 'packaging') {
         const name = values.container_name?.trim();
         const unchanged = name === initialDetails.container_name;
-        const owned = inventory.find(item => item.id === (recipeMode ? values.supply_id : values.inventory_item_id));
+        const owned = inventory.find(item => item.id === (recipeMode ? values.supply_id : values.stock_bucket_id));
         if (owned) {
           if (recipeMode) details.supply_id = owned.id;
-          else { details.inventory_item_id = owned.id; details.supply_id = owned.supply_id || undefined; }
+          else { details.stock_bucket_id = owned.id; details.supply_id = owned.supply_id || undefined; }
         } else if (values.catalog_item_id) details.catalog_item_id = values.catalog_item_id;
         else if (unchanged) {
           details.catalog_item_id = initialDetails.catalog_item_id;
@@ -202,11 +202,11 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
           details.unit = amount.unit;
           if (values.unit === compoundMassUnit) details.display_unit = compoundMassUnit;
         }
-        const owned = inventory.find(item => item.id === (recipeMode ? values.supply_id : values.inventory_item_id));
+        const owned = inventory.find(item => item.id === (recipeMode ? values.supply_id : values.stock_bucket_id));
         const known = !owned && itemName ? await findCatalogSupply(values.item_category || '', itemName) : null;
         if (owned) {
           if (recipeMode) details.supply_id = owned.id;
-          else { details.inventory_item_id = owned.id; details.supply_id = owned.supply_id || undefined; }
+          else { details.stock_bucket_id = owned.id; details.supply_id = owned.supply_id || undefined; }
         }
         else if (values.catalog_item_id || known) details.catalog_item_id = values.catalog_item_id || known!.id;
       }
@@ -238,7 +238,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
           : measurementKind === 'volume' ? preferredUnits.volume : measurementKind === 'pressure' ? preferredUnits.pressure
             : measurementKinds.find(item => item.value === measurementKind)?.unit : undefined),
     details: initialDetails.note, item_category: initialCategory,
-    inventory_item_id: initialDetails.inventory_item_id, supply_id: initialDetails.supply_id,
+    stock_bucket_id: initialDetails.stock_bucket_id, supply_id: initialDetails.supply_id,
     catalog_item_id: initialDetails.catalog_item_id,
     quantity: initialUnit === compoundMassUnit ? undefined : initialDetails.quantity,
     pounds: initialSplit?.pounds, ounces: initialSplit?.ounces,
@@ -251,25 +251,25 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
     equipment_id: initialDetails.equipment_id
   }}>
     {error && <Alert type="error" message={error} className="form-alert" />}
-    <Form.Item name="inventory_item_id" hidden><Input /></Form.Item>
+    <Form.Item name="stock_bucket_id" hidden><Input /></Form.Item>
     <Form.Item name="supply_id" hidden><Input /></Form.Item>
     <Form.Item name="catalog_item_id" hidden><Input /></Form.Item>
     {kind === 'addition' && <>
       <Form.Item name="item_category" label="Type" rules={[{ required: true }]}><Select options={categoryNames.map(value => ({ value, label: value }))}
         onChange={(value: string) => { setItemCategory(value); form.setFieldsValue({ title: undefined,
-          inventory_item_id: undefined, supply_id: undefined, catalog_item_id: undefined,
+          stock_bucket_id: undefined, supply_id: undefined, catalog_item_id: undefined,
           unit: unitForCategory(value, preferredUnits.mass), quantity: undefined, pounds: undefined, ounces: undefined }); }} /></Form.Item>
       <Form.Item name="title" label="What will be added?" extra={productSource}>
         <ProductPicker category={itemCategory} inventory={inventory} catalogRevision={catalogRevision}
           inventoryLabel={recipeMode ? 'Your brewery' : 'Your inventory'} onError={setError}
-          onEdited={() => form.setFieldsValue({ inventory_item_id: undefined, supply_id: undefined, catalog_item_id: undefined })}
+          onEdited={() => form.setFieldsValue({ stock_bucket_id: undefined, supply_id: undefined, catalog_item_id: undefined })}
           onChoose={choice => {
             const nextUnit = choice.source === 'inventory' ? choice.item.display_unit
               : unitGroups.mass.includes(choice.item.unit as typeof unitGroups.mass[number])
                 ? unitForCategory(itemCategory, preferredUnits.mass) : choice.item.unit;
             changeQuantityUnit(form, selectedUnit || initialUnit, nextUnit);
             form.setFieldsValue({ title: choice.item.name, unit: nextUnit,
-              inventory_item_id: !recipeMode && choice.source === 'inventory' ? choice.item.id : undefined,
+              stock_bucket_id: !recipeMode && choice.source === 'inventory' ? choice.item.id : undefined,
               supply_id: recipeMode && choice.source === 'inventory' ? choice.item.id : undefined,
               catalog_item_id: choice.source === 'catalog' ? choice.item.id : undefined });
           }} />
@@ -336,9 +336,9 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
       <Form.Item name="container_name" label="Container" extra={productSource}>
         <ProductPicker category="Packaging" inventory={inventory} catalogRevision={catalogRevision}
           inventoryLabel={recipeMode ? 'Your brewery' : 'Your inventory'} onError={setError}
-          onEdited={() => form.setFieldsValue({ inventory_item_id: undefined, supply_id: undefined, catalog_item_id: undefined })}
+          onEdited={() => form.setFieldsValue({ stock_bucket_id: undefined, supply_id: undefined, catalog_item_id: undefined })}
           onChoose={choice => form.setFieldsValue({ container_name: choice.item.name,
-            inventory_item_id: !recipeMode && choice.source === 'inventory' ? choice.item.id : undefined,
+            stock_bucket_id: !recipeMode && choice.source === 'inventory' ? choice.item.id : undefined,
             supply_id: recipeMode && choice.source === 'inventory' ? choice.item.id : undefined,
             catalog_item_id: choice.source === 'catalog' ? choice.item.id : undefined })} />
       </Form.Item>

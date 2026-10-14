@@ -20,7 +20,7 @@ try {
     await api.updateBrewingLosses(db, equipment, { mash_efficiency_pct: 75,
       grain_absorption_l_per_kg: 0.8 });
     await api.updateBreweryWortLoss(db, 1);
-    const itemId = await api.createInventoryItem(db, 'Test malt', 'Grain', 'kg');
+    const itemId = await api.createInventoryRecord(db, 'Test malt', 'Grain', 'kg');
     const item = { id: itemId, name: 'Test malt', category: 'Grain', default_unit: 'kg', display_unit: 'kg', location_id: null };
     await api.updateIngredientProperties(db, item, { yield_pct: 80, color_lovibond: 2 });
     const recipeId = await api.createRecipe(db, 'Mash test beer', '', 'beer', '°C', 19);
@@ -34,7 +34,7 @@ try {
     await api.updateRecipePlan(db, recipeId, drain.id, { ...drain,
       details: { ...drain.details, mash_equipment_id: equipmentId, to_vessel_id: equipmentId } });
     await api.updateRecipePlan(db, recipeId, grain.id, { ...grain, title: 'Test malt',
-      details: { ...grain.details, item_name: 'Test malt', inventory_item_id: itemId, quantity: 4.5, unit: 'kg' } });
+      details: { ...grain.details, item_name: 'Test malt', stock_bucket_id: itemId, quantity: 4.5, unit: 'kg' } });
     const recipe = { id: recipeId, name: 'Mash test beer', description: null, recipe_type: 'beer' };
     const batchId = await api.startBatchFromRecipe(db, recipe, 'First mash', session.account.id);
     const inputs = await db.execO('SELECT target_fermenter_volume_liters FROM batch_recipe_inputs WHERE id = ?', [batchId]);
@@ -48,7 +48,7 @@ try {
       await db.exec('UPDATE batch_events SET actual_at = ? WHERE id = ?', [at, id]);
     await db.exec('UPDATE transfers SET to_vessel_id = ?, quantity = ?, unit = ? WHERE event_id = ?',
       [equipmentId, 20, 'L', drainBatch.id]);
-    await db.exec('UPDATE additions SET inventory_item_id = ?, item_name = ?, quantity = ?, unit = ? WHERE event_id = ?',
+    await db.exec('UPDATE additions SET stock_bucket_id = ?, item_name = ?, quantity = ?, unit = ? WHERE event_id = ?',
       [itemId, 'Test malt', 4.5, 'kg', grainBatch.id]);
     await db.exec('INSERT INTO gravity_measurements(event_id, value, unit) VALUES (?, ?, ?)', [gravityBatch.id, 1.05, 'SG']);
     const measured = await api.latestMeasuredMashEfficiency(db, equipmentId);

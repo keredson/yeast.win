@@ -2,12 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { appYeastAttenuationPct, calculateRecipe } from '../client/recipeCalculations.ts';
 import { batchGravityReadings } from '../client/batchGravity.ts';
-import type { Equipment, InventoryItem, PlanInput } from '../client/db.ts';
+import type { Equipment, InventoryRecord, PlanInput } from '../client/db.ts';
 
 const grain = { id: 'grain', name: 'Pale malt', category: 'Grain', default_unit: 'kg', display_unit: 'kg',
-  location_id: null, yield_pct: 80, color_lovibond: 2 } satisfies InventoryItem;
+  location_id: null, yield_pct: 80, color_lovibond: 2 } satisfies InventoryRecord;
 const yeast = { id: 'yeast', name: 'Ale yeast', category: 'Yeast', default_unit: 'packet', display_unit: 'packet',
-  location_id: null, attenuation_pct: 75 } satisfies InventoryItem;
+  location_id: null, attenuation_pct: 75 } satisfies InventoryRecord;
 const events: (PlanInput & { id: string })[] = [
   { id: 'mash', event_type: 'temperature_control', title: 'Mash', details: { phase: 'mash', equipment_id: 'tun' } },
   { id: 'drain', event_type: 'transfer', title: 'Drain grain', anchor_event_id: 'mash',
@@ -15,9 +15,9 @@ const events: (PlanInput & { id: string })[] = [
   { id: 'boil', event_type: 'temperature_control', title: 'Boil', details: { phase: 'boil', equipment_id: 'kettle' } },
   { id: 'chill', event_type: 'temperature_control', title: 'Chill', details: { phase: 'chill', equipment_id: 'chiller' } },
   { id: 'grain-add', event_type: 'addition', title: 'Pale malt',
-    details: { item_category: 'Grain', item_name: 'Pale malt', inventory_item_id: 'grain', quantity: 5, unit: 'kg' } },
+    details: { item_category: 'Grain', item_name: 'Pale malt', stock_bucket_id: 'grain', quantity: 5, unit: 'kg' } },
   { id: 'pitch', event_type: 'addition', title: 'Pitch yeast',
-    details: { item_category: 'Yeast', inventory_item_id: 'yeast' } }
+    details: { item_category: 'Yeast', stock_bucket_id: 'yeast' } }
 ];
 const equipment: Equipment[] = [
   { id: 'tun', kind: 'mash_tun', name: 'Tun', mash_efficiency_pct: 75 },
@@ -167,7 +167,7 @@ test('batch grain linked directly to a catalog product contributes its color', (
   const catalogGrain = { id: 'briess-bonlander', name: 'Briess Bonlander Munich Malt 10L', category: 'Grain',
     unit: 'kg', yield_pct: 78, color_lovibond: 10 };
   const batchEvents = events.map(event => event.id === 'grain-add' ? { ...event, details: {
-    ...event.details, inventory_item_id: undefined, catalog_item_id: catalogGrain.id,
+    ...event.details, stock_bucket_id: undefined, catalog_item_id: catalogGrain.id,
     item_name: catalogGrain.name } } : event);
   const result = calculateRecipe(batchEvents, [yeast], equipment,
     { target_fermenter_volume_liters: 20 }, {}, {}, 'beer', null, 'batch', [catalogGrain]);

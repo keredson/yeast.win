@@ -4,7 +4,7 @@ import { Alert, Avatar, Breadcrumb, Button, Drawer, Empty, Layout, Menu, Popover
 import { api, ApiError, ApiUnavailableError, ClientUpdateRequiredError, type PreferredUnits, type Session, type Workspace } from './api.ts';
 import { checkForAppUpdate } from './appUpdate.ts';
 import { defaultPreferredUnits } from '../shared/units.ts';
-import { forgetLocalDb, openLocalDb, syncNow, type SyncProgress, type Batch, type Equipment, type InventoryItem, type InventoryLocation, type LocalDb, type Recipe, type RecipeType,
+import { forgetLocalDb, openLocalDb, syncNow, type SyncProgress, type Batch, type Equipment, type InventoryRecord, type InventoryLocation, type LocalDb, type Recipe, type RecipeType,
   listBatches, listEquipment, listEquipmentModels, listInventory, listSupplies, listInventoryLocations, listRecipes } from './db.ts';
 import { BatchSection } from './BatchSection.tsx';
 import { DashboardSection } from './DashboardSection.tsx';
@@ -194,8 +194,8 @@ export function App() {
   const [autoSync, setAutoSync] = useState(() => localStorage.getItem(autoSyncKey) !== '0');
   const [batches, setBatches] = useState<Batch[]>([]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
-  const [inventory, setInventory] = useState<InventoryItem[]>([]);
-  const [supplies, setSupplies] = useState<InventoryItem[]>([]);
+  const [inventory, setInventory] = useState<InventoryRecord[]>([]);
+  const [supplies, setSupplies] = useState<InventoryRecord[]>([]);
   const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [inventoryWorkspaceId, setInventoryWorkspaceId] = useState<string | null>(null);
   const [equipmentWorkspaceId, setEquipmentWorkspaceId] = useState<string | null>(null);

@@ -5,7 +5,7 @@ import { addBatchPlan, createBatch, eventDetails, eventFormData, listEvents, lis
   startBatchFromRecipe, startBatchFromTemplate, startBatchFromPrevious, updateBatchPlan,
   batchTargetVolume, breweryBatchSize, breweryMashEfficiency, latestMeasuredMashEfficiencySource,
   measuredMashEfficiencyForBatch, updateBatchSettings,
-  type ActualEvent, type Batch, type Equipment, type InventoryItem,
+  type ActualEvent, type Batch, type Equipment, type InventoryRecord,
   type LocalDb, type MeasurementKind, type PlanInput, type Recipe, type RecipeType } from './db.ts';
 import { kindLabel } from './constants.ts';
 import { formatTime } from './time.ts';
@@ -23,7 +23,7 @@ import { batchGravityReadings } from './batchGravity.ts';
 import { appBatchSizeLiters } from '../shared/batchSize.ts';
 
 export function BatchSection({ db, basePath, accountId, batches, recipes, equipment, equipmentModels, inventory, catalogRevision, preferredUnits, selectedId, onSelect, onChanged }: {
-  db: LocalDb; basePath: string; accountId: string; batches: Batch[]; recipes: Recipe[]; equipment: Equipment[]; equipmentModels: Equipment[]; inventory: InventoryItem[];
+  db: LocalDb; basePath: string; accountId: string; batches: Batch[]; recipes: Recipe[]; equipment: Equipment[]; equipmentModels: Equipment[]; inventory: InventoryRecord[];
   catalogRevision: number; preferredUnits: PreferredUnits; selectedId: string | null;
   onSelect: (id: string | null) => void; onChanged: () => Promise<void>;
 }) {
@@ -85,7 +85,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
           JOIN recipe_events re ON re.id = e.recipe_event_id
           JOIN recipe_types rt ON rt.id = re.recipe_id WHERE e.batch_id = ? LIMIT 1`, [selectedId]),
         breweryMashEfficiency(db),
-        supplyIds.length ? db.execO<InventoryItem>(`SELECT * FROM effective_supplies
+        supplyIds.length ? db.execO<InventoryRecord>(`SELECT * FROM effective_supplies
           WHERE id IN (${supplyIds.map(() => '?').join(', ')})`, supplyIds) : Promise.resolve([]),
         db.execO<{ role: 'og' | 'fg' | null; value: number; unit: string }>(`SELECT r.role, g.value, g.unit
           FROM gravity_measurements g JOIN batch_events e ON e.id = g.event_id
@@ -290,7 +290,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
 }
 
 function PreviousBatchFields({ db, batchId, equipment, inventory }: {
-  db: LocalDb; batchId?: string; equipment: Equipment[]; inventory: InventoryItem[];
+  db: LocalDb; batchId?: string; equipment: Equipment[]; inventory: InventoryRecord[];
 }) {
   const [events, setEvents] = useState<ActualEvent[]>([]);
   const [sourceUnits, setSourceUnits] = useState<{ id: string; model_id: string; name: string }[]>([]);
@@ -307,7 +307,7 @@ function PreviousBatchFields({ db, batchId, equipment, inventory }: {
       .filter((id): id is string => typeof id === 'string' && !!id)))];
   const products = [...new Map(events.filter(event => (event.event_type === 'addition' || event.event_type === 'packaging')
     && (event.actual_at != null || event.skipped_at == null))
-    .map(event => [event.details.inventory_item_id || event.details.supply_id, event.details] as const)
+    .map(event => [event.details.stock_bucket_id || event.details.supply_id, event.details] as const)
     .filter(([key]) => !!key)).values()];
   return <>
     {equipmentIds.map(sourceId => {
@@ -323,9 +323,9 @@ function PreviousBatchFields({ db, batchId, equipment, inventory }: {
       </Form.Item>;
     })}
     {products.map(details => {
-      const key = details.inventory_item_id || details.supply_id!;
+      const key = details.stock_bucket_id || details.supply_id!;
       const choices = details.supply_id ? inventory.filter(item => item.supply_id === details.supply_id)
-        : inventory.filter(item => item.id === details.inventory_item_id);
+        : inventory.filter(item => item.id === details.stock_bucket_id);
       return <Form.Item key={key} name={['stock_ids', key]}
         initialValue={choices.length === 1 ? choices[0].id : 'unlinked'}
         label={`Stock for ${details.item_name || details.container_name || choices[0]?.name || 'item'}`}>

@@ -11,7 +11,7 @@ const errors = [];
 
 async function signIn(page, createAccount = false) {
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto(baseUrl);
+  await page.goto(`${baseUrl}/login`);
   if (createAccount) {
     await page.getByRole('link', { name: 'Create account' }).click();
     const shortPasswordStatus = await page.evaluate(async name => (await fetch('/api/register', {

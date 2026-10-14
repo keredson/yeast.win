@@ -4,14 +4,10 @@ import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { createId } from '../shared/id.ts';
 import { boilOffKinds, capacityKinds, equipmentKinds, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import { openLocalCatalog } from './catalog.ts';
-import { retiredGenericSupplies } from '../shared/retiredGenericSupplies.ts';
 import { hasGeneratedLocationSuffix, locationSlug } from './locationSlug.ts';
 import { recordSlug } from './recordSlug.ts';
 import type { CatalogEquipment, MeasurementChannel } from '../shared/catalog.ts';
-import { changeColumns, indexStatements, legacyEquipmentCopyStatements, legacyEquipmentModelStatements,
-  supplyMigrationStatements, primingSugarCategoryMigrationStatements, nowSeconds, replicatedTables,
-  retiredReplicatedTables, schemaStatements, workspaceSchemaVersion, workspaceTableColumns,
-  otherFermentablesMigrationStatements, gravityRoleMigrationStatements } from '../shared/schema.ts';
+import { changeColumns, indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, workspaceViewStatements } from '../shared/schema.ts';
 import type { SqlChangeRow } from '../shared/wire.ts';
 import { changeTuple, decodeItem, encodeItem, maxSequence, readSequence, syncContentType,
   syncProtocolVersion, validChangeTuple, type ChangeTuple } from '../shared/cborSync.ts';
@@ -20,7 +16,7 @@ import { convertUnit, formatQuantity, storageUnit } from '../shared/units.ts';
 import type { ImportedRecipe } from './recipeImport.ts';
 import { mashEfficiencyPct, type MashGrain } from './mashEfficiency.ts';
 import { repeatBatchActions } from './batchRepeat.ts';
-import { appBatchSizeLiters, fillMissingRecipeBatchSizes, importedRecipeBatchSize } from '../shared/batchSize.ts';
+import { appBatchSizeLiters, importedRecipeBatchSize } from '../shared/batchSize.ts';
 import { effectiveSuppliesView } from '../shared/effectiveSupplies.ts';
 
 const profileOpen = new URLSearchParams(location.search).has('profileOpen');
@@ -42,7 +38,7 @@ export type ActualEvent = BatchEvent;
 export interface PlanDetails {
   anchor_point?: string; duration_seconds?: number; note?: string;
   phase?: string; mode?: string; target_value?: number; target_unit?: string;
-  item_category?: string; item_name?: string; catalog_item_id?: string; inventory_item_id?: string; supply_id?: string;
+  item_category?: string; item_name?: string; catalog_item_id?: string; stock_bucket_id?: string; supply_id?: string;
   quantity?: number; unit?: string; display_unit?: string;
   measurement_kind?: string; to_vessel_id?: string; to_vessel_name?: string;
   gravity_role?: GravityRole;
@@ -100,7 +96,7 @@ export interface EquipmentUse { id: string; equipment_id: string; batch_id: stri
 const equipmentCalibrationColumns = ['buffer_4_observed', 'buffer_7_observed', 'reference_sg', 'observed_sg',
   'reference_brix', 'observed_brix', 'reference_g', 'observed_g', 'reference_kpa', 'observed_kpa',
   'reference_volumes', 'observed_volumes', 'reference_mg_l', 'observed_mg_l'] as const;
-export interface InventoryItem { id: string; name: string; category: string; default_unit: string; display_unit: string;
+export interface InventoryRecord { id: string; name: string; category: string; default_unit: string; display_unit: string;
   supply_id?: string | null; lot_id?: string | null; lot_code?: string | null; catalog_supply_id?: string | null;
   grain_class?: string | null;
   location_id: string | null; location_name?: string | null;
@@ -146,7 +142,7 @@ function sourceIngredientProperties(inputs: Record<string, unknown>): Ingredient
   };
 }
 
-export function ingredientProperties(item: InventoryItem | null | undefined): IngredientProperties {
+export function ingredientProperties(item: InventoryRecord | null | undefined): IngredientProperties {
   if (!item) return {};
   return Object.fromEntries(ingredientPropertyColumns.filter(column => item[column] != null)
     .map(column => [column, item[column]])) as IngredientProperties;
@@ -186,8 +182,10 @@ const effectiveEquipmentView = `CREATE TEMP VIEW effective_equipment AS
     post_boil_loss.post_boil_loss_liters AS unit_post_boil_loss_liters,
     workspace_model.post_boil_loss_liters AS workspace_model_post_boil_loss_liters,
     COALESCE(post_boil_loss.post_boil_loss_liters, workspace_model.post_boil_loss_liters) AS post_boil_loss_liters,
-    CASE WHEN COALESCE(workspace_model.has_liquid_containment, model_liquid.model_id IS NOT NULL)
-      THEN COALESCE(liquid.capacity_liters, workspace_model.capacity_liters, model_liquid.capacity_liters) END AS capacity_liters,
+    CASE WHEN COALESCE(workspace_model.has_liquid_containment,
+      model_liquid.model_id IS NOT NULL OR catalog_container.supply_id IS NOT NULL)
+      THEN COALESCE(liquid.capacity_liters, workspace_model.capacity_liters, model_liquid.capacity_liters,
+        catalog_container.capacity_liters) END AS capacity_liters,
     CASE WHEN COALESCE(workspace_model.has_pressure_rating, model_pressure.model_id IS NOT NULL)
       THEN COALESCE(pressure.max_pressure_kpa, workspace_model.max_pressure_kpa, model_pressure.max_pressure_kpa) END AS max_pressure_kpa,
     CASE WHEN COALESCE(workspace_model.has_heating, model_heat.model_id IS NOT NULL)
@@ -198,7 +196,8 @@ const effectiveEquipmentView = `CREATE TEMP VIEW effective_equipment AS
       THEN COALESCE(control.min_temperature_c, workspace_model.min_temperature_c, model_control.min_temperature_c) END AS min_temperature_c,
     CASE WHEN COALESCE(workspace_model.has_temperature_control, model_control.model_id IS NOT NULL)
       THEN COALESCE(control.max_temperature_c, workspace_model.max_temperature_c, model_control.max_temperature_c) END AS max_temperature_c,
-    CASE WHEN COALESCE(workspace_model.has_liquid_containment, model_liquid.model_id IS NOT NULL) THEN 1 END AS has_liquid_containment,
+    CASE WHEN COALESCE(workspace_model.has_liquid_containment,
+      model_liquid.model_id IS NOT NULL OR catalog_container.supply_id IS NOT NULL) THEN 1 END AS has_liquid_containment,
     CASE WHEN COALESCE(workspace_model.has_pressure_rating, model_pressure.model_id IS NOT NULL) THEN 1 END AS has_pressure_rating,
     CASE WHEN COALESCE(workspace_model.has_heating, model_heat.model_id IS NOT NULL) THEN 1 END AS has_heating,
     CASE WHEN COALESCE(workspace_model.has_cooling, model_cool.model_id IS NOT NULL) THEN 1 END AS has_cooling,
@@ -211,12 +210,13 @@ const effectiveEquipmentView = `CREATE TEMP VIEW effective_equipment AS
     temp.offset_c AS temperature_offset_c,
     COALESCE(mash.mash_efficiency_pct, workspace_model.mash_efficiency_pct) AS mash_efficiency_pct,
     COALESCE(mash.grain_absorption_l_per_kg, workspace_model.grain_absorption_l_per_kg) AS grain_absorption_l_per_kg,
-    model.model_name AS catalog_model_name, model.manufacturer AS catalog_manufacturer,
-    COALESCE(workspace_model.capacity_liters, model_liquid.capacity_liters) AS model_capacity_liters,
+    catalog_product.name AS catalog_model_name, catalog_product.manufacturer AS catalog_manufacturer,
+    COALESCE(workspace_model.capacity_liters, model_liquid.capacity_liters, catalog_container.capacity_liters) AS model_capacity_liters,
     COALESCE(workspace_model.max_pressure_kpa, model_pressure.max_pressure_kpa) AS model_max_pressure_kpa,
     COALESCE(workspace_model.rated_power_watts, model_heat.rated_power_watts) AS model_rated_power_watts,
     COALESCE(workspace_model.rated_heat_removal_watts, model_cool.rated_heat_removal_watts) AS model_rated_heat_removal_watts,
-    model_liquid.model_id AS model_liquid_id, model_pressure.model_id AS model_pressure_id,
+    COALESCE(model_liquid.model_id, catalog_container.supply_id) AS model_liquid_id,
+    model_pressure.model_id AS model_pressure_id,
     model_heat.model_id AS model_heat_id, model_cool.model_id AS model_cool_id,
     model_control.model_id AS model_control_id,
     COALESCE(workspace_model.min_temperature_c, model_control.min_temperature_c) AS model_min_temperature_c,
@@ -236,6 +236,8 @@ const effectiveEquipmentView = `CREATE TEMP VIEW effective_equipment AS
   LEFT JOIN main.equipment_mash_assumptions mash ON mash.equipment_id = e.id
   LEFT JOIN main.equipment_post_boil_losses post_boil_loss ON post_boil_loss.equipment_id = e.id
   LEFT JOIN catalog.equipment_models model ON model.id = workspace_model.catalog_model_id
+  LEFT JOIN catalog.products catalog_product ON catalog_product.id = workspace_model.catalog_model_id
+  LEFT JOIN catalog.supply_container_specs catalog_container ON catalog_container.supply_id = workspace_model.catalog_model_id
   LEFT JOIN catalog.model_liquid_containment model_liquid ON model_liquid.model_id = model.id
   LEFT JOIN catalog.model_pressure_rating model_pressure ON model_pressure.model_id = model.id
   LEFT JOIN catalog.model_heating model_heat ON model_heat.model_id = model.id
@@ -282,171 +284,32 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
       profile('SQLite WASM ready');
       const db = await sqlite.open(`brewlog-${workspaceId}`);
       profile('Workspace file open');
-      const storedVersion = (await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version;
-      const containerTable = storedVersion === workspaceSchemaVersion ? await db.execO<{ name: string }>(
-        "SELECT name FROM sqlite_master WHERE name IN ('supply_container_specs', 'supply_container_specs__crsql_clock')") : [];
-      const packageColumns = containerTable.length === 2 ? await db.execO<{ name: string }>('PRAGMA table_info(packaging)') : [];
-      const recipePackageColumns = containerTable.length === 2
-        ? await db.execO<{ name: string }>('PRAGMA table_info(recipe_packaging)') : [];
-      const packagingReady = [packageColumns, recipePackageColumns].every(columns =>
-        ['catalog_item_id', 'supply_id'].every(name => columns.some(column => column.name === name)));
-      if (storedVersion === workspaceSchemaVersion && containerTable.length === 2 && packagingReady) {
-        await openLocalCatalog();
-        profile('Catalog file ready');
-        await db.exec("ATTACH DATABASE 'brewlog-catalog' AS catalog");
-        await db.exec(effectiveEquipmentView);
-        await db.exec(effectiveMeasurementChannelsView);
-        await db.exec(effectiveSuppliesView);
-        profile('Views ready');
-        return db;
-      }
-      const legacyMeta = await db.execO<{ name: string }>(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_meta'");
-      const legacyVersion = legacyMeta.length
-        ? (await db.execO<{ version: number }>('SELECT version FROM schema_meta LIMIT 1'))[0]?.version : undefined;
-      const version = storedVersion || legacyVersion || 0;
-      const existingTables = new Set((await db.execO<{ name: string }>(
-        "SELECT name FROM sqlite_master WHERE type = 'table'")).map(row => row.name));
-      const hasWorkspaceTables = [...existingTables].some(name => replicatedTables.includes(name));
-      const legacyLossValues: number[] = [];
-      const legacyBatchLosses: { batch_id: string; wort_loss_liters: number }[] = [];
-      const legacyModelLosses = new Map<string, number>();
-      const legacyUnitLosses = new Map<string, number>();
-      if (version < 23 && hasWorkspaceTables) {
-        for (const table of ['equipment_models', 'equipment_mash_assumptions', 'equipment']) {
-          if (!existingTables.has(table) || !(await db.execO<{ name: string }>(`PRAGMA table_info("${table}")`))
-            .some(column => column.name === 'kettle_retention_liters')) continue;
-          const idColumn = table === 'equipment_mash_assumptions' ? 'equipment_id' : 'id';
-          const rows = await db.execO<{ id: string; value: number }>(
-            `SELECT ${idColumn} AS id, kettle_retention_liters AS value FROM "${table}"
-              WHERE kettle_retention_liters IS NOT NULL`);
-          legacyLossValues.push(...rows.map(row => row.value));
-          for (const row of rows) (table === 'equipment_models' ? legacyModelLosses : legacyUnitLosses)
-            .set(row.id, row.value);
+      const version = (await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version;
+      const ready = version === workspaceSchemaVersion && (await db.execO<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE name = 'products__crsql_clock'")).length > 0;
+      if (!ready) await db.tx(async tx => {
+        // This is a local prototype reset. The catalog is separately preserved.
+        const views = await tx.execO<{ name: string }>(
+          "SELECT name FROM sqlite_master WHERE type = 'view'");
+        for (const row of views) await tx.exec(`DROP VIEW "${row.name}"`);
+        const tables = await tx.execO<{ name: string }>(`SELECT name FROM sqlite_master WHERE type = 'table'
+          AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'crsql_%'
+          AND name NOT LIKE '%__crsql_%'`);
+        const clocks = new Set((await tx.execO<{ name: string }>(
+          "SELECT name FROM sqlite_master WHERE name LIKE '%__crsql_clock'"))
+          .map(row => row.name));
+        for (const row of tables) {
+          if (clocks.has(`${row.name}__crsql_clock`)) await tx.exec('SELECT crsql_as_table(?)', [row.name]);
+          await tx.exec(`DROP TABLE "${row.name}"`);
         }
-        if (existingTables.has('batch_event_inputs') && existingTables.has('batch_events')
-          && (await db.execO<{ name: string }>('PRAGMA table_info(batch_event_inputs)'))
-            .some(column => column.name === 'kettle_retention_liters')) {
-          legacyBatchLosses.push(...await db.execO<{ batch_id: string; wort_loss_liters: number }>(
-            `SELECT e.batch_id, MIN(i.kettle_retention_liters) AS wort_loss_liters
-              FROM batch_event_inputs i JOIN batch_events e ON e.id = i.id
-              WHERE i.kettle_retention_liters IS NOT NULL GROUP BY e.batch_id
-              HAVING MIN(i.kettle_retention_liters) = MAX(i.kettle_retention_liters)`));
-        }
-      }
-      if (version === 0 && !hasWorkspaceTables) {
-        await db.tx(async tx => {
-          for (const statement of schemaStatements) await tx.exec(statement);
-          for (const table of replicatedTables) await tx.exec('SELECT crsql_as_crr(?)', [table]);
-          for (const statement of indexStatements) await tx.exec(statement);
-          await tx.exec('CREATE TABLE sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
-          if (legacyMeta.length) await tx.exec('DROP TABLE schema_meta');
-        });
-      } else if (version > workspaceSchemaVersion) {
-        throw new Error(`This app cannot open workspace schema ${version}; update Yeast.Win! first.`);
-      } else {
-        await db.tx(async tx => {
-          const existing = new Set((await tx.execO<{ name: string }>(
-            "SELECT name FROM sqlite_master WHERE type = 'table'")).map(row => row.name));
-          let changed = false;
-          for (const [index, table] of replicatedTables.entries()) {
-            const expected = workspaceTableColumns[table];
-            if (existing.has(table)) {
-              const actual = (await tx.execO<{ name: string }>(`PRAGMA table_info("${table}")`)).map(row => row.name);
-              if (actual.join(',') === expected.join(',')) {
-                if (!existing.has(`${table}__crsql_clock`)) {
-                  await tx.exec('SELECT crsql_as_crr(?)', [table]);
-                  changed = true;
-                }
-                continue;
-              }
-              const common = expected.filter(column => actual.includes(column));
-              const snapshot = `migration_${table}`;
-              if (table === 'equipment' && actual.some(column => !expected.includes(column))
-                && !existing.has('equipment_legacy_migration')) {
-                await tx.exec('CREATE TABLE equipment_legacy_migration AS SELECT * FROM equipment');
-              }
-              if (common.length) await tx.exec(`CREATE TEMP TABLE "${snapshot}" AS SELECT ${common.map(column =>
-                table === 'supply_media' && column === 'product_url' && actual.includes('spec_source_url')
-                  ? 'COALESCE(NULLIF(product_url, \'\'), spec_source_url) AS product_url' : column).join(', ')} FROM "${table}"`);
-              if (existing.has(`${table}__crsql_clock`)) await tx.exec('SELECT crsql_as_table(?)', [table]);
-              await tx.exec(`DROP TABLE "${table}"`);
-              await tx.exec(schemaStatements[index]);
-              await tx.exec('SELECT crsql_as_crr(?)', [table]);
-              if (common.length) {
-                await tx.exec(`INSERT INTO "${table}" (${common.join(', ')}) SELECT ${common.join(', ')} FROM "${snapshot}"`);
-                await tx.exec(`DROP TABLE "${snapshot}"`);
-              }
-            } else {
-              await tx.exec(schemaStatements[index]);
-              await tx.exec('SELECT crsql_as_crr(?)', [table]);
-            }
-            changed = true;
-          }
-          for (const table of retiredReplicatedTables) if (existing.has(table)) {
-            if (existing.has(`${table}__crsql_clock`)) await tx.exec('SELECT crsql_as_table(?)', [table]);
-            await tx.exec(`DROP TABLE "${table}"`);
-            changed = true;
-          }
-          for (const statement of indexStatements) await tx.exec(statement);
-          await tx.exec('CREATE TABLE IF NOT EXISTS sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
-          if (version < 35) {
-            for (const statement of supplyMigrationStatements) await tx.exec(statement);
-            for (const statement of primingSugarCategoryMigrationStatements) await tx.exec(statement);
-          }
-          if (version < 36) for (const statement of otherFermentablesMigrationStatements) await tx.exec(statement);
-          if (version < 38) for (const statement of gravityRoleMigrationStatements) await tx.exec(statement);
-          if (changed) await tx.exec('DELETE FROM sync_state');
-          if (legacyMeta.length) await tx.exec('DROP TABLE schema_meta');
-        });
-      }
-      profile('Workspace schema reconciled');
-      if (version > 0 && version < 32) await db.tx(async tx => {
-        await tx.exec(`INSERT OR IGNORE INTO supply_grain_specs(supply_id, color_lovibond)
-          SELECT id, 60 FROM supplies WHERE catalog_supply_id = 'inventory_crystal_60'`);
-        await tx.exec(`UPDATE supply_grain_specs SET color_lovibond = 60
-          WHERE color_lovibond IS NULL AND supply_id IN
-          (SELECT id FROM supplies WHERE catalog_supply_id = 'inventory_crystal_60')`);
-        for (const id of retiredGenericSupplies) {
-          await tx.exec('UPDATE supplies SET catalog_supply_id = NULL WHERE catalog_supply_id = ?', [id]);
-        }
+        for (const statement of schemaStatements) await tx.exec(statement);
+        for (const table of replicatedTables) await tx.exec('SELECT crsql_as_crr(?)', [table]);
+        for (const statement of indexStatements) await tx.exec(statement);
+        for (const statement of workspaceViewStatements) await tx.exec(statement);
+        await tx.exec('CREATE TABLE sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
+        await tx.exec(`PRAGMA user_version = ${workspaceSchemaVersion}`);
       });
-      await db.tx(async tx => { for (const statement of fillMissingRecipeBatchSizes) await tx.exec(statement); });
-      const legacyEquipment = await db.execO<{ name: string }>(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'equipment_legacy_migration'");
-      if (legacyEquipment.length) await db.tx(async tx => {
-        const columns = (await tx.execO<{ name: string }>('PRAGMA table_info(equipment_legacy_migration)'))
-          .map(row => row.name);
-        for (const statement of legacyEquipmentCopyStatements(columns)) await tx.exec(statement);
-        for (const statement of legacyEquipmentModelStatements(columns)) await tx.exec(statement);
-        await tx.exec('DROP TABLE equipment_legacy_migration');
-      });
-      await db.tx(async tx => { for (const statement of supplyMigrationStatements) await tx.exec(statement); });
-      profile('Legacy data repairs complete');
-      const uniqueLegacyLosses = [...new Set(legacyLossValues)];
-      if (uniqueLegacyLosses.length === 1 || legacyBatchLosses.length) await db.tx(async tx => {
-        if (uniqueLegacyLosses.length === 1) await tx.exec(`INSERT INTO brewery_process_defaults(id, wort_loss_liters)
-          VALUES ('brewery', ?) ON CONFLICT(id) DO UPDATE SET
-            wort_loss_liters = COALESCE(brewery_process_defaults.wort_loss_liters, excluded.wort_loss_liters)`,
-        [uniqueLegacyLosses[0]]);
-        for (const row of legacyBatchLosses) await tx.exec(`INSERT INTO batch_recipe_inputs(id, wort_loss_liters)
-          VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET
-            wort_loss_liters = COALESCE(batch_recipe_inputs.wort_loss_liters, excluded.wort_loss_liters)`,
-        [row.batch_id, row.wort_loss_liters]);
-      });
-      if (legacyModelLosses.size || legacyUnitLosses.size) await db.tx(async tx => {
-        for (const [id, liters] of legacyModelLosses) await tx.exec(`UPDATE equipment_models
-          SET post_boil_loss_liters = COALESCE(post_boil_loss_liters, ?) WHERE id = ?`, [liters, id]);
-        for (const [id, liters] of legacyUnitLosses) await tx.exec(`INSERT INTO equipment_post_boil_losses
-          (equipment_id, post_boil_loss_liters) VALUES (?, ?)
-          ON CONFLICT(equipment_id) DO UPDATE SET post_boil_loss_liters =
-            COALESCE(equipment_post_boil_losses.post_boil_loss_liters, excluded.post_boil_loss_liters)`, [id, liters]);
-      });
-      await db.exec('UPDATE equipment SET added_at = COALESCE(added_at, created_at) WHERE added_at IS NULL');
-      await db.exec(`UPDATE equipment SET removed_at =
-        (SELECT archived_at FROM equipment_archives WHERE equipment_id = equipment.id ORDER BY archived_at LIMIT 1)
-        WHERE removed_at IS NULL AND id IN (SELECT equipment_id FROM equipment_archives)`);
-      await db.exec(`PRAGMA user_version = ${workspaceSchemaVersion}`);
+      profile('Workspace schema ready');
       await openLocalCatalog();
       profile('Catalog file ready');
       await db.exec("ATTACH DATABASE 'brewlog-catalog' AS catalog");
@@ -702,12 +565,12 @@ export async function deleteRecipe(db: DB, recipeId: string): Promise<void> {
   });
 }
 
-export type IngredientImportChoice = { mode: 'unlinked' } | { mode: 'existing'; inventoryItemId: string }
+export type IngredientImportChoice = { mode: 'unlinked' } | { mode: 'existing'; stockBucketId: string }
   | { mode: 'create'; unit: string };
 
 const planPayloads = {
   recipe: {
-    addition: ['recipe_additions', ['item_category', 'item_name', 'catalog_item_id', 'inventory_item_id', 'supply_id', 'quantity', 'unit', 'display_unit']],
+    addition: ['recipe_additions', ['item_category', 'item_name', 'catalog_item_id', 'stock_bucket_id', 'supply_id', 'quantity', 'unit', 'display_unit']],
     temperature_control: ['recipe_temperature_control_events', ['phase', 'mode', 'target_value', 'target_unit', 'equipment_id']],
     pressure_control: ['recipe_pressure_control_events', ['target_value', 'target_unit', 'equipment_id']],
     measurement: ['recipe_measurement_targets', ['measurement_kind', 'target_value', 'target_unit']],
@@ -715,12 +578,12 @@ const planPayloads = {
     packaging: ['recipe_packaging', ['container_name', 'container_size', 'container_count', 'container_unit', 'catalog_item_id', 'supply_id']]
   },
   batch: {
-    addition: ['additions', ['item_category', 'item_name', 'catalog_item_id', 'inventory_item_id', 'supply_id', 'quantity', 'unit', 'display_unit']],
+    addition: ['additions', ['item_category', 'item_name', 'catalog_item_id', 'stock_bucket_id', 'supply_id', 'quantity', 'unit', 'display_unit']],
     temperature_control: ['temperature_control_events', ['phase', 'mode', 'target_value', 'target_unit', 'equipment_id']],
     pressure_control: ['pressure_control_events', ['target_value', 'target_unit', 'equipment_id']],
     measurement: ['batch_measurement_targets', ['measurement_kind', 'target_value', 'target_unit']],
     transfer: ['transfers', ['purpose', 'mash_equipment_id', 'to_vessel_id', 'to_vessel_name', 'quantity', 'unit']],
-    packaging: ['packaging', ['container_name', 'container_size', 'container_count', 'container_unit', 'inventory_item_id', 'catalog_item_id', 'supply_id']],
+    packaging: ['packaging', ['container_name', 'container_size', 'container_count', 'container_unit', 'stock_bucket_id', 'catalog_item_id', 'supply_id']],
     equipment_use: ['equipment_use_events', ['equipment_id']]
   }
 } as const;
@@ -841,19 +704,21 @@ export async function importRecipes(db: DB, source: {
       const choice = choices[ingredient.key];
       if (!choice || choice.mode === 'unlinked') continue;
       if (choice.mode === 'existing') {
-        const rows = await tx.execO<{ id: string }>('SELECT id FROM inventory_items WHERE id = ? AND category = ?',
-          [choice.inventoryItemId, ingredient.category]);
+        const rows = await tx.execO<{ id: string }>('SELECT id FROM stock_buckets WHERE id = ? AND category = ?',
+          [choice.stockBucketId, ingredient.category]);
         if (!rows.length) throw new Error(`Choose an inventory item for ${ingredient.name}`);
-        ingredientIds.set(ingredient.key, choice.inventoryItemId);
+        ingredientIds.set(ingredient.key, choice.stockBucketId);
       } else {
         const id = createId();
         const supplyId = createId();
         const lotId = createId();
         if (!choice.unit) throw new Error(`Choose a unit for ${ingredient.name}`);
-        await tx.exec('INSERT INTO supplies(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)',
-          [supplyId, ingredient.name, ingredient.category, storageUnit(choice.unit), now]);
+        await tx.exec('INSERT INTO products(id, name, created_at) VALUES (?, ?, ?)',
+          [supplyId, ingredient.name, now]);
+        await tx.exec('INSERT INTO supply_specs(id, category, default_unit) VALUES (?, ?, ?)',
+          [supplyId, ingredient.category, storageUnit(choice.unit)]);
         await tx.exec('INSERT INTO supply_lots(id, supply_id, created_at) VALUES (?, ?, ?)', [lotId, supplyId, now]);
-        await tx.exec(`INSERT INTO inventory_items(id, name, category, default_unit, supply_id, lot_id, created_at)
+        await tx.exec(`INSERT INTO stock_buckets(id, name, category, default_unit, supply_id, lot_id, created_at)
           VALUES (?, ?, ?, ?, ?, ?, ?)`, [id, ingredient.name, ingredient.category, storageUnit(choice.unit), supplyId, lotId, now]);
         const example = selected.flatMap(recipe => recipe.actions).find(action => action.ingredientKey === ingredient.key);
         const source = example?.inputs || {};
@@ -876,7 +741,7 @@ export async function importRecipes(db: DB, source: {
             [supplyId, ...columns.map(column => validProperties[column as keyof IngredientProperties] ?? null)]);
         }
         if (choice.unit !== storageUnit(choice.unit)) await tx.exec(
-          'INSERT INTO inventory_display_units(id, display_unit) VALUES (?, ?)', [id, choice.unit]);
+          'INSERT INTO stock_bucket_display_units(id, display_unit) VALUES (?, ?)', [id, choice.unit]);
         ingredientIds.set(ingredient.key, id);
       }
     }
@@ -902,7 +767,7 @@ export async function importRecipes(db: DB, source: {
         const details = { ...action.details };
         const inventoryId = action.ingredientKey && ingredientIds.get(action.ingredientKey);
         if (inventoryId) {
-          const linked = await tx.execO<{ supply_id: string | null }>('SELECT supply_id FROM inventory_items WHERE id = ?', [inventoryId]);
+          const linked = await tx.execO<{ supply_id: string | null }>('SELECT supply_id FROM stock_buckets WHERE id = ?', [inventoryId]);
           if (linked[0]?.supply_id) details.supply_id = linked[0].supply_id;
         }
         await tx.exec(`INSERT INTO recipe_events(id, recipe_id, event_type, title, planned_at, anchor_event_id,
@@ -1019,7 +884,7 @@ async function resolveRecipeSupply(db: Pick<DB, 'exec' | 'execO'>, input: PlanIn
   if (input.event_type !== 'addition' || input.details.supply_id) return input;
   const catalogId = input.details.catalog_item_id;
   const known = catalogId ? await db.execO<{ name: string; category: string; unit: string }>(
-    'SELECT name, category, unit FROM catalog.supplies WHERE id = ?', [catalogId]) : [];
+    'SELECT p.name, s.category, s.unit FROM catalog.supplies s JOIN catalog.products p ON p.id = s.id WHERE s.id = ?', [catalogId]) : [];
   const name = known[0]?.name || input.details.item_name?.trim();
   const category = known[0]?.category || input.details.item_category;
   if (!name || !category) return input;
@@ -1027,10 +892,13 @@ async function resolveRecipeSupply(db: Pick<DB, 'exec' | 'execO'>, input: PlanIn
     'SELECT id FROM supplies WHERE catalog_supply_id = ?', [catalogId]) : await db.execO<{ id: string }>(
     'SELECT id FROM supplies WHERE category = ? AND lower(trim(name)) = lower(trim(?)) LIMIT 1', [category, name]);
   const supplyId = existing[0]?.id || createId();
-  if (!existing.length) await db.exec(`INSERT INTO supplies(id, name, category, default_unit, catalog_supply_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)`, [supplyId, name, category, known[0]?.unit || storageUnit(input.details.unit || 'each'),
-      known.length ? catalogId || null : null, nowSeconds()]);
-  return { ...input, details: { ...input.details, supply_id: supplyId, inventory_item_id: undefined } };
+  if (!existing.length) {
+    await db.exec('INSERT INTO products(id, name, catalog_product_id, created_at) VALUES (?, ?, ?, ?)',
+      [supplyId, name, known.length ? catalogId || null : null, nowSeconds()]);
+    await db.exec('INSERT INTO supply_specs(id, category, default_unit) VALUES (?, ?, ?)',
+      [supplyId, category, known[0]?.unit || storageUnit(input.details.unit || 'each')]);
+  }
+  return { ...input, details: { ...input.details, supply_id: supplyId, stock_bucket_id: undefined } };
 }
 
 export async function addRecipePlan(db: DB, recipeId: string, input: PlanInput): Promise<string> {
@@ -1167,7 +1035,7 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
   const physicalDetails = (details: PlanDetails): PlanDetails => {
     const matchingStock = details.supply_id ? stock.filter(item => item.supply_id === details.supply_id) : [];
     return { ...details,
-      inventory_item_id: matchingStock.length === 1 ? matchingStock[0].id : undefined,
+      stock_bucket_id: matchingStock.length === 1 ? matchingStock[0].id : undefined,
       equipment_id: details.equipment_id ? modelToUnit.get(details.equipment_id) : undefined,
       mash_equipment_id: details.mash_equipment_id ? modelToUnit.get(details.mash_equipment_id) : undefined,
       to_vessel_id: details.to_vessel_id ? modelToUnit.get(details.to_vessel_id) : undefined,
@@ -1224,7 +1092,7 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
       if (typeof details.supply_id === 'string') {
         // Snapshot the effective lot when one stock row is known; otherwise use
         // the brewery supply defaults until a particular lot is recorded.
-        const source = stock.find(item => item.id === details.inventory_item_id)
+        const source = stock.find(item => item.id === details.stock_bucket_id)
           || suppliesForRecipe.find(item => item.id === details.supply_id);
         if (source) for (const [column, value] of Object.entries(ingredientProperties(source))) snapshot[column] = value;
       }
@@ -1264,7 +1132,7 @@ export async function startBatchFromPrevious(db: DB, sourceBatchId: string, name
     return matches.length === 1 ? matches[0].id : undefined;
   };
   const mapStock = (details: PlanDetails): string | undefined => {
-    const key = details.inventory_item_id || details.supply_id;
+    const key = details.stock_bucket_id || details.supply_id;
     if (!key) return undefined;
     const selected = stockIds[key];
     if (selected === 'unlinked') return undefined;
@@ -1275,7 +1143,7 @@ export async function startBatchFromPrevious(db: DB, sourceBatchId: string, name
       return choice.id;
     }
     const matches = details.supply_id ? stock.filter(item => item.supply_id === details.supply_id)
-      : stock.filter(item => item.id === details.inventory_item_id);
+      : stock.filter(item => item.id === details.stock_bucket_id);
     return matches.length === 1 ? matches[0].id : undefined;
   };
   const batchId = createId();
@@ -1290,7 +1158,7 @@ export async function startBatchFromPrevious(db: DB, sourceBatchId: string, name
     await tx.exec('INSERT OR IGNORE INTO batch_recipe_inputs(id) VALUES (?)', [batchId]);
     for (const plan of plans) {
       const details: PlanDetails = { ...plan.details,
-        inventory_item_id: plan.event_type === 'addition' || plan.event_type === 'packaging'
+        stock_bucket_id: plan.event_type === 'addition' || plan.event_type === 'packaging'
           ? mapStock(plan.details) : undefined,
         equipment_id: mapEquipment(plan.details.equipment_id),
         mash_equipment_id: mapEquipment(plan.details.mash_equipment_id),
@@ -1383,28 +1251,28 @@ const eventPayloadTables: Record<string, string> = {
 };
 
 async function resolvedAdditionPayload(db: Pick<DB, 'execO'>, payload: NonNullable<EventInput['payload']>): Promise<NonNullable<EventInput['payload']>> {
-  const itemId = payload?.inventory_item_id;
+  const itemId = payload?.stock_bucket_id;
   if (typeof itemId !== 'string') return payload;
-  const rows = await db.execO<{ supply_id: string | null }>('SELECT supply_id FROM inventory_items WHERE id = ?', [itemId]);
+  const rows = await db.execO<{ supply_id: string | null }>('SELECT supply_id FROM stock_buckets WHERE id = ?', [itemId]);
   if (!rows.length) throw new Error('Inventory stock not found');
   return { ...payload, supply_id: rows[0].supply_id };
 }
 
 type AdditionSource = { item_name: string | null; item_category: string | null;
-  inventory_item_id: string | null; supply_id: string | null; catalog_item_id: string | null };
+  stock_bucket_id: string | null; supply_id: string | null; catalog_item_id: string | null };
 
 async function additionSource(db: Pick<DB, 'execO'>, eventId: string): Promise<AdditionSource | null> {
-  return (await db.execO<AdditionSource>(`SELECT item_name, item_category, inventory_item_id,
+  return (await db.execO<AdditionSource>(`SELECT item_name, item_category, stock_bucket_id,
     supply_id, catalog_item_id FROM additions WHERE event_id = ?`, [eventId]))[0] || null;
 }
 
 async function refreshAdditionSnapshot(db: Pick<DB, 'exec' | 'execO'>, eventId: string,
   previous: AdditionSource | null, payload: NonNullable<EventInput['payload']>): Promise<void> {
-  if (previous && (['item_name', 'item_category', 'inventory_item_id', 'supply_id', 'catalog_item_id'] as const)
+  if (previous && (['item_name', 'item_category', 'stock_bucket_id', 'supply_id', 'catalog_item_id'] as const)
     .some(column => previous[column] !== (payload[column] ?? null))) {
     await db.exec('DELETE FROM batch_event_inputs WHERE id = ?', [eventId]);
   }
-  await snapshotAdditionLot(db, eventId, payload.inventory_item_id);
+  await snapshotAdditionLot(db, eventId, payload.stock_bucket_id);
 }
 
 async function snapshotAdditionLot(db: Pick<DB, 'exec' | 'execO'>, eventId: string, itemId: unknown): Promise<void> {
@@ -1674,7 +1542,7 @@ export async function listEquipmentModels(db: DB): Promise<Equipment[]> {
 
 export async function readEquipmentModelMedia(db: DB, modelId: string): Promise<EquipmentModelMedia | null> {
   return (await db.execO<EquipmentModelMedia>(
-    'SELECT id, product_url, image_bytes, image_mime_type FROM equipment_model_media WHERE id = ?', [modelId]))[0] || null;
+    'SELECT id, product_url, image_bytes, image_mime_type FROM product_media WHERE id = ?', [modelId]))[0] || null;
 }
 
 export async function saveEquipmentModelMedia(db: DB, modelId: string, productUrl: string | null | undefined,
@@ -1686,10 +1554,10 @@ export async function saveEquipmentModelMedia(db: DB, modelId: string, productUr
   }
   if (image && (!['image/jpeg', 'image/png', 'image/webp'].includes(image.mimeType)
     || image.bytes.byteLength > 5 * 1024 * 1024)) throw new Error('Choose a JPEG, PNG, or WebP image under 5 MB');
-  await db.exec(`INSERT OR IGNORE INTO equipment_model_media(id) VALUES (?)`, [modelId]);
-  if (productUrl !== undefined) await db.exec('UPDATE equipment_model_media SET product_url = ? WHERE id = ?', [url, modelId]);
+  await db.exec(`INSERT OR IGNORE INTO product_media(id) VALUES (?)`, [modelId]);
+  if (productUrl !== undefined) await db.exec('UPDATE product_media SET product_url = ? WHERE id = ?', [url, modelId]);
   if (image !== undefined) await db.exec(
-    'UPDATE equipment_model_media SET image_bytes = ?, image_mime_type = ? WHERE id = ?',
+    'UPDATE product_media SET image_bytes = ?, image_mime_type = ? WHERE id = ?',
     [image?.bytes || null, image?.mimeType || null, modelId]);
 }
 
@@ -1752,7 +1620,7 @@ async function measuredMashEfficiencyForDrain(db: DB, drain: MeasuredMashDrain):
   if (!volume || !gravities.length) return null;
   const additions = await db.execO<{ quantity: number; unit: string; yield_pct: number | null }>(`SELECT a.quantity, a.unit,
     i.yield_pct FROM additions a JOIN batch_events e ON e.id = a.event_id
-    LEFT JOIN inventory_items item ON item.id = a.inventory_item_id
+    LEFT JOIN stock_buckets item ON item.id = a.stock_bucket_id
     LEFT JOIN batch_event_inputs i ON i.id = e.id
     WHERE e.batch_id = ? AND e.actual_at IS NOT NULL AND e.skipped_at IS NULL AND e.actual_at <= ?
       AND (item.category = 'Grain' OR a.item_category = 'Grain')`, [drain.batch_id, drain.actual_at]);
@@ -1828,14 +1696,18 @@ export async function createEquipment(db: DB, name: string, kind: string, catalo
   const changed = (column: keyof EquipmentSpecifications) => overrides[column] != null
     && (!catalogModel || overrides[column] !== catalogModel[column as keyof CatalogEquipment]);
   await db.tx(async tx => {
-    const modelId = catalogModel?.id || createId();
+    const matchedProduct = catalogModel ? await tx.execO<{ id: string }>(
+      'SELECT id FROM products WHERE catalog_product_id = ? LIMIT 1', [catalogModel.id]) : [];
+    const modelId = matchedProduct[0]?.id || catalogModel?.id || createId();
     const now = nowSeconds();
-    await tx.exec(`INSERT OR IGNORE INTO equipment_models(id, name, kind, catalog_model_id,
+    await tx.exec('INSERT OR IGNORE INTO products(id, name, catalog_product_id, created_at) VALUES (?, ?, ?, ?)',
+      [modelId, catalogModel?.name || name.trim(), catalogModel?.id || null, now]);
+    await tx.exec(`INSERT OR IGNORE INTO equipment_model_specs(id, kind,
       has_liquid_containment, capacity_liters, has_pressure_rating, max_pressure_kpa,
       has_heating, rated_power_watts, has_cooling, rated_heat_removal_watts,
-      has_temperature_control, min_temperature_c, max_temperature_c, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [modelId, catalogModel?.name || name.trim(), kind, catalogModel?.id || null,
+      has_temperature_control, min_temperature_c, max_temperature_c)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [modelId, kind,
       catalogModel ? null : Number(capacityKinds.has(kind)),
       catalogModel && !changed('capacity_liters') ? null : overrides.capacity_liters ?? null,
       catalogModel ? null : Number(kind === 'fermenter' || overrides.max_pressure_kpa != null),
@@ -1847,7 +1719,7 @@ export async function createEquipment(db: DB, name: string, kind: string, catalo
       catalogModel ? null : Number(boilOffKinds.has(kind) || kind === 'fermentation_temperature_control'
         || !!overrides.has_temperature_control || !!overrides.built_in_temperature_control),
       catalogModel && !changed('min_temperature_c') ? null : overrides.min_temperature_c ?? null,
-      catalogModel && !changed('max_temperature_c') ? null : overrides.max_temperature_c ?? null, now]);
+      catalogModel && !changed('max_temperature_c') ? null : overrides.max_temperature_c ?? null]);
     await tx.exec(`INSERT INTO equipment(id, name, model_id, stock_id, added_at, created_at)
       VALUES (?, ?, ?, ?, ?, ?)`, [id, name.trim(), modelId, stockId?.trim() || null, now, now]);
     if (locationId) await tx.exec('INSERT INTO equipment_locations(id, location_id) VALUES (?, ?)', [id, locationId]);
@@ -1906,22 +1778,22 @@ export async function addEquipmentModelCapability(db: DB, model: Equipment, capa
   if (capability === 'liquid_containment') {
     if (model.has_liquid_containment) throw new Error('Liquid capacity is already available');
     if (!positive(values.capacity_liters)) throw new Error('Enter a positive capacity');
-    await db.exec('UPDATE equipment_models SET has_liquid_containment = 1, capacity_liters = ? WHERE id = ?',
+    await db.exec('UPDATE equipment_model_specs SET has_liquid_containment = 1, capacity_liters = ? WHERE id = ?',
       [values.capacity_liters ?? null, model.id]);
   } else if (capability === 'pressure_rating') {
     if (model.has_pressure_rating) throw new Error('Pressure rating is already available');
     if (!positive(values.max_pressure_kpa)) throw new Error('Enter a positive pressure rating');
-    await db.exec('UPDATE equipment_models SET has_pressure_rating = 1, max_pressure_kpa = ? WHERE id = ?',
+    await db.exec('UPDATE equipment_model_specs SET has_pressure_rating = 1, max_pressure_kpa = ? WHERE id = ?',
       [values.max_pressure_kpa ?? null, model.id]);
   } else if (capability === 'heating') {
     if (model.has_heating) throw new Error('Heating is already available');
     if (!positive(values.rated_power_watts)) throw new Error('Enter a positive power');
-    await db.exec('UPDATE equipment_models SET has_heating = 1, rated_power_watts = ? WHERE id = ?',
+    await db.exec('UPDATE equipment_model_specs SET has_heating = 1, rated_power_watts = ? WHERE id = ?',
       [values.rated_power_watts ?? null, model.id]);
   } else if (capability === 'cooling') {
     if (model.has_cooling) throw new Error('Cooling is already available');
     if (!positive(values.rated_heat_removal_watts)) throw new Error('Enter a positive heat removal rate');
-    await db.exec('UPDATE equipment_models SET has_cooling = 1, rated_heat_removal_watts = ? WHERE id = ?',
+    await db.exec('UPDATE equipment_model_specs SET has_cooling = 1, rated_heat_removal_watts = ? WHERE id = ?',
       [values.rated_heat_removal_watts ?? null, model.id]);
   } else if (capability === 'temperature_control') {
     if (model.has_temperature_control) throw new Error('Temperature control is already available');
@@ -1929,7 +1801,7 @@ export async function addEquipmentModelCapability(db: DB, model: Equipment, capa
       || values.max_temperature_c != null && !Number.isFinite(values.max_temperature_c)
       || values.min_temperature_c != null && values.max_temperature_c != null
         && values.min_temperature_c >= values.max_temperature_c) throw new Error('Enter a valid temperature range');
-    await db.exec('UPDATE equipment_models SET has_temperature_control = 1, min_temperature_c = ?, max_temperature_c = ? WHERE id = ?',
+    await db.exec('UPDATE equipment_model_specs SET has_temperature_control = 1, min_temperature_c = ?, max_temperature_c = ? WHERE id = ?',
       [values.min_temperature_c ?? null, values.max_temperature_c ?? null, model.id]);
   } else if (capability.startsWith('measurement:')) {
     const kind = capability.slice('measurement:'.length);
@@ -1964,7 +1836,7 @@ export async function removeEquipmentModelCapability(db: DB, model: Equipment, c
     heating: 'has_heating', cooling: 'has_cooling', temperature_control: 'has_temperature_control'
   }[capability];
   if (flag) {
-    await db.exec(`UPDATE equipment_models SET ${flag} = 0 WHERE id = ?`, [model.id]);
+    await db.exec(`UPDATE equipment_model_specs SET ${flag} = 0 WHERE id = ?`, [model.id]);
     return;
   }
   if (capability.startsWith('measurement:')) {
@@ -1994,7 +1866,7 @@ export async function restoreEquipmentModelCapability(db: DB, model: Equipment, 
     const rows = await db.execO<{ model_id: string }>(
       `SELECT model_id FROM catalog.${parent.table} WHERE model_id = ?`, [model.catalog_model_id]);
     if (!rows.length) throw new Error('This capability has no catalog default');
-    await db.exec(`UPDATE equipment_models SET ${parent.columns} WHERE id = ?`, [model.id]);
+    await db.exec(`UPDATE equipment_model_specs SET ${parent.columns} WHERE id = ?`, [model.id]);
     return;
   }
   if (capability.startsWith('measurement:')) {
@@ -2183,7 +2055,7 @@ export type EquipmentModelOverrideField = typeof modelOverrideFields[number];
 
 export async function clearEquipmentModelOverride(db: DB, model: Equipment,
   field: EquipmentModelOverrideField): Promise<void> {
-  await db.exec(`UPDATE equipment_models SET ${field} = NULL WHERE id = ?`, [model.id]);
+  await db.exec(`UPDATE equipment_model_specs SET ${field} = NULL WHERE id = ?`, [model.id]);
 }
 
 export async function updateEquipmentModelAttribute(db: DB, model: Equipment, field: EquipmentModelOverrideField,
@@ -2198,7 +2070,7 @@ export async function updateEquipmentModelAttribute(db: DB, model: Equipment, fi
       throw new Error('Enter a valid temperature range');
     }
   }
-  await db.exec(`UPDATE equipment_models SET ${field} = ? WHERE id = ?`,
+  await db.exec(`UPDATE equipment_model_specs SET ${field} = ? WHERE id = ?`,
     [value == null || value === catalogValue ? null : value, model.id]);
 }
 
@@ -2248,8 +2120,8 @@ export async function deleteEquipmentUnits(db: DB, unitIds: string[]): Promise<v
   });
 }
 
-export async function listInventory(db: Pick<DB, 'execO'>): Promise<InventoryItem[]> {
-  return db.execO<InventoryItem>(`SELECT i.id, COALESCE(s.name, i.name) AS name,
+export async function listInventory(db: Pick<DB, 'execO'>): Promise<InventoryRecord[]> {
+  return db.execO<InventoryRecord>(`SELECT i.id, COALESCE(s.name, i.name) AS name,
     COALESCE(s.category, i.category) AS category, i.default_unit,
     i.supply_id, i.lot_id, lot.lot_code, s.catalog_supply_id,
     s.grain_class,
@@ -2265,26 +2137,26 @@ export async function listInventory(db: Pick<DB, 'execO'>): Promise<InventoryIte
     COALESCE(lo.extract_color_reference_value, s.extract_color_reference_value) AS extract_color_reference_value,
     COALESCE(lo.extract_color_reference_unit, s.extract_color_reference_unit) AS extract_color_reference_unit,
     s.container_kind, s.capacity_liters, s.material, s.wood_species, s.wood_origin, s.connector_type
-    FROM inventory_items i
+    FROM stock_buckets i
     LEFT JOIN effective_supplies s ON s.id = i.supply_id
     LEFT JOIN supply_lots lot ON lot.id = i.lot_id
     LEFT JOIN lot_grain_specs lg ON lg.lot_id = lot.id
     LEFT JOIN lot_hop_specs lh ON lh.lot_id = lot.id
     LEFT JOIN lot_yeast_specs ly ON ly.lot_id = lot.id
     LEFT JOIN lot_other_fermentable_specs lo ON lo.lot_id = lot.id
-    LEFT JOIN inventory_ingredient_properties p ON p.id = i.id
-    LEFT JOIN inventory_display_units d ON d.id = i.id
-    LEFT JOIN inventory_item_locations l ON l.id = i.id
+    LEFT JOIN stock_bucket_ingredient_properties p ON p.id = i.id
+    LEFT JOIN stock_bucket_display_units d ON d.id = i.id
+    LEFT JOIN stock_bucket_locations l ON l.id = i.id
     LEFT JOIN inventory_locations places ON places.id = l.location_id ORDER BY i.name COLLATE NOCASE`);
 }
 
-export async function listSupplies(db: Pick<DB, 'execO'>): Promise<InventoryItem[]> {
-  return db.execO<InventoryItem>('SELECT * FROM effective_supplies ORDER BY name COLLATE NOCASE');
+export async function listSupplies(db: Pick<DB, 'execO'>): Promise<InventoryRecord[]> {
+  return db.execO<InventoryRecord>('SELECT * FROM effective_supplies ORDER BY name COLLATE NOCASE');
 }
 
 export async function readSupplyMedia(db: DB, supplyId: string): Promise<SupplyMedia | null> {
   return (await db.execO<SupplyMedia>(
-    'SELECT id, product_url, image_bytes, image_mime_type FROM supply_media WHERE id = ?',
+    'SELECT id, product_url, image_bytes, image_mime_type FROM product_media WHERE id = ?',
     [supplyId]))[0] || null;
 }
 
@@ -2300,11 +2172,11 @@ export async function saveSupplyMedia(db: DB, supplyId: string,
   if (changes.image && (!['image/jpeg', 'image/png', 'image/webp'].includes(changes.image.mimeType)
     || changes.image.bytes.byteLength > 5 * 1024 * 1024)) throw new Error('Choose a JPEG, PNG, or WebP image under 5 MB');
   await db.tx(async tx => {
-    await tx.exec('INSERT OR IGNORE INTO supply_media(id) VALUES (?)', [supplyId]);
-    if (changes.productUrl !== undefined) await tx.exec('UPDATE supply_media SET product_url = ? WHERE id = ?',
+    await tx.exec('INSERT OR IGNORE INTO product_media(id) VALUES (?)', [supplyId]);
+    if (changes.productUrl !== undefined) await tx.exec('UPDATE product_media SET product_url = ? WHERE id = ?',
       [changes.productUrl?.trim() || null, supplyId]);
     if (changes.image !== undefined) await tx.exec(
-      'UPDATE supply_media SET image_bytes = ?, image_mime_type = ? WHERE id = ?',
+      'UPDATE product_media SET image_bytes = ?, image_mime_type = ? WHERE id = ?',
       [changes.image?.bytes || null, changes.image?.mimeType || null, supplyId]);
   });
 }
@@ -2317,7 +2189,7 @@ export async function linkSupplyCatalogProduct(db: DB, supplyId: string, catalog
       'SELECT category FROM catalog.supplies WHERE id = ?', [catalogSupplyId]))[0];
     if (!product || product.category !== supply.category) throw new Error('Choose a catalog product of the same type');
   }
-  await db.exec('UPDATE supplies SET catalog_supply_id = ? WHERE id = ?', [catalogSupplyId, supplyId]);
+  await db.exec('UPDATE products SET catalog_product_id = ? WHERE id = ?', [catalogSupplyId, supplyId]);
 }
 
 const containerSpecColumns = ['container_kind', 'capacity_liters', 'material', 'wood_species',
@@ -2340,7 +2212,7 @@ export async function saveSupplyContainerSpecs(db: Pick<DB, 'exec'>, supplyId: s
   [supplyId, ...values]);
 }
 
-export async function updateIngredientProperties(db: DB, item: InventoryItem, properties: IngredientProperties): Promise<void> {
+export async function updateIngredientProperties(db: DB, item: InventoryRecord, properties: IngredientProperties): Promise<void> {
   const { table, columns, values } = ingredientPropertyInsert(item.category, properties);
   if (!item.supply_id) throw new Error('Supply not found');
   await db.exec(`INSERT INTO ${table}(supply_id, ${columns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')})
@@ -2376,14 +2248,14 @@ function ingredientPropertyInsert(category: string, properties: IngredientProper
   return { table, columns, values: columns.map(column => values[column] ?? null) };
 }
 
-export async function supplyIngredientProperties(db: DB, item: InventoryItem): Promise<IngredientProperties> {
+export async function supplyIngredientProperties(db: DB, item: InventoryRecord): Promise<IngredientProperties> {
   if (!item.supply_id) return {};
   const table = item.category === 'Hops' ? 'supply_hop_specs' : item.category === 'Yeast'
     ? 'supply_yeast_specs' : item.category === 'Other fermentables' ? 'supply_other_fermentable_specs' : 'supply_grain_specs';
   return (await db.execO<IngredientProperties>(`SELECT * FROM ${table} WHERE supply_id = ?`, [item.supply_id]))[0] || {};
 }
 
-export async function updateLotIngredientProperties(db: DB, item: InventoryItem, properties: IngredientProperties): Promise<void> {
+export async function updateLotIngredientProperties(db: DB, item: InventoryRecord, properties: IngredientProperties): Promise<void> {
   if (!item.lot_id) throw new Error('Lot not found');
   const columns = item.category === 'Hops' ? ['alpha_acid_pct', 'hop_form']
     : item.category === 'Yeast' ? ['attenuation_pct']
@@ -2396,7 +2268,7 @@ export async function updateLotIngredientProperties(db: DB, item: InventoryItem,
   [item.lot_id, ...columns.map(column => properties[column as keyof IngredientProperties] ?? null)]);
 }
 
-export async function lotIngredientProperties(db: DB, item: InventoryItem): Promise<IngredientProperties> {
+export async function lotIngredientProperties(db: DB, item: InventoryRecord): Promise<IngredientProperties> {
   if (!item.lot_id) return {};
   const table = item.category === 'Hops' ? 'lot_hop_specs' : item.category === 'Yeast'
     ? 'lot_yeast_specs' : item.category === 'Other fermentables' ? 'lot_other_fermentable_specs' : 'lot_grain_specs';
@@ -2481,7 +2353,7 @@ export async function saveInventoryLocation(db: DB, name: string, parentId: stri
 export async function deleteInventoryLocation(db: DB, id: string): Promise<void> {
   const [children, stock, equipment] = await Promise.all([
     db.execO('SELECT id FROM inventory_locations WHERE parent_id = ? LIMIT 1', [id]),
-    db.execO('SELECT id FROM inventory_item_locations WHERE location_id = ? LIMIT 1', [id]),
+    db.execO('SELECT id FROM stock_bucket_locations WHERE location_id = ? LIMIT 1', [id]),
     db.execO('SELECT id FROM equipment_locations WHERE location_id = ? LIMIT 1', [id])
   ]);
   if (children.length || stock.length || equipment.length) throw new Error('Move stock, equipment, and child locations before deleting this location');
@@ -2492,52 +2364,52 @@ export async function deleteInventoryLocation(db: DB, id: string): Promise<void>
   });
 }
 
-function sameInventoryProduct(item: InventoryItem, name: string, category: string): boolean {
+function sameInventoryProduct(item: InventoryRecord, name: string, category: string): boolean {
   return item.category === category && item.name.trim().toLocaleLowerCase() === name.trim().toLocaleLowerCase();
 }
 
-export function stockAtLocation(items: InventoryItem[], name: string, category: string, locationId: string | null,
-  lotCode: string | null = null): InventoryItem | undefined {
+export function stockAtLocation(items: InventoryRecord[], name: string, category: string, locationId: string | null,
+  lotCode: string | null = null): InventoryRecord | undefined {
   return items.find(item => sameInventoryProduct(item, name, category) && item.location_id === locationId
     && (item.lot_code || null) === lotCode);
 }
 
 export async function listInventoryMovements(db: DB, itemId: string): Promise<InventoryMovement[]> {
   return db.execO<InventoryMovement>(`
-    SELECT id, 'Purchased' AS kind, quantity, unit, purchased_at AS at FROM inventory_purchases WHERE inventory_item_id = ?
-    UNION ALL SELECT id, 'Counted' AS kind, quantity, unit, counted_at AS at FROM inventory_counts WHERE inventory_item_id = ?
-    UNION ALL SELECT id, 'Discarded' AS kind, quantity, unit, discarded_at AS at FROM inventory_discards WHERE inventory_item_id = ?
-    UNION ALL SELECT id, 'Moved in' AS kind, quantity, unit, moved_at AS at FROM inventory_moves WHERE to_item_id = ?
-    UNION ALL SELECT id, 'Moved out' AS kind, quantity, unit, moved_at AS at FROM inventory_moves WHERE from_item_id = ?
+    SELECT id, 'Purchased' AS kind, quantity, unit, purchased_at AS at FROM inventory_purchases WHERE stock_bucket_id = ?
+    UNION ALL SELECT id, 'Counted' AS kind, quantity, unit, counted_at AS at FROM inventory_counts WHERE stock_bucket_id = ?
+    UNION ALL SELECT id, 'Discarded' AS kind, quantity, unit, discarded_at AS at FROM inventory_discards WHERE stock_bucket_id = ?
+    UNION ALL SELECT id, 'Moved in' AS kind, quantity, unit, moved_at AS at FROM inventory_moves WHERE to_stock_bucket_id = ?
+    UNION ALL SELECT id, 'Moved out' AS kind, quantity, unit, moved_at AS at FROM inventory_moves WHERE from_stock_bucket_id = ?
     UNION ALL SELECT a.event_id AS id, 'Used' AS kind, a.quantity, a.unit, e.actual_at AS at
-      FROM additions a JOIN batch_events e ON e.id = a.event_id WHERE a.inventory_item_id = ? AND e.actual_at IS NOT NULL
+      FROM additions a JOIN batch_events e ON e.id = a.event_id WHERE a.stock_bucket_id = ? AND e.actual_at IS NOT NULL
     UNION ALL SELECT p.event_id AS id, 'Used' AS kind, p.container_count AS quantity, i.default_unit AS unit, e.actual_at AS at
       FROM packaging p JOIN batch_events e ON e.id = p.event_id
-      JOIN inventory_items i ON i.id = p.inventory_item_id
-      WHERE p.inventory_item_id = ? AND e.actual_at IS NOT NULL
+      JOIN stock_buckets i ON i.id = p.stock_bucket_id
+      WHERE p.stock_bucket_id = ? AND e.actual_at IS NOT NULL
     ORDER BY at DESC, id DESC`, [itemId, itemId, itemId, itemId, itemId, itemId, itemId]);
 }
 
-export async function listInventoryBalances(db: DB, items: InventoryItem[]): Promise<Record<string, number | null>> {
+export async function listInventoryBalances(db: DB, items: InventoryRecord[]): Promise<Record<string, number | null>> {
   if (!items.length) return {};
-  const rows = await db.execO<InventoryMovement & { inventory_item_id: string }>(`
-    SELECT id, inventory_item_id, 'Purchased' AS kind, quantity, unit, purchased_at AS at FROM inventory_purchases
-    UNION ALL SELECT id, inventory_item_id, 'Counted' AS kind, quantity, unit, counted_at AS at FROM inventory_counts
-    UNION ALL SELECT id, inventory_item_id, 'Discarded' AS kind, quantity, unit, discarded_at AS at FROM inventory_discards
-    UNION ALL SELECT id, to_item_id AS inventory_item_id, 'Moved in' AS kind, quantity, unit, moved_at AS at FROM inventory_moves
-    UNION ALL SELECT id, from_item_id AS inventory_item_id, 'Moved out' AS kind, quantity, unit, moved_at AS at FROM inventory_moves
-    UNION ALL SELECT a.event_id AS id, a.inventory_item_id, 'Used' AS kind, a.quantity, a.unit, e.actual_at AS at
-      FROM additions a JOIN batch_events e ON e.id = a.event_id WHERE a.inventory_item_id IS NOT NULL AND e.actual_at IS NOT NULL
-    UNION ALL SELECT p.event_id AS id, p.inventory_item_id, 'Used' AS kind, p.container_count AS quantity,
+  const rows = await db.execO<InventoryMovement & { stock_bucket_id: string }>(`
+    SELECT id, stock_bucket_id, 'Purchased' AS kind, quantity, unit, purchased_at AS at FROM inventory_purchases
+    UNION ALL SELECT id, stock_bucket_id, 'Counted' AS kind, quantity, unit, counted_at AS at FROM inventory_counts
+    UNION ALL SELECT id, stock_bucket_id, 'Discarded' AS kind, quantity, unit, discarded_at AS at FROM inventory_discards
+    UNION ALL SELECT id, to_stock_bucket_id AS stock_bucket_id, 'Moved in' AS kind, quantity, unit, moved_at AS at FROM inventory_moves
+    UNION ALL SELECT id, from_stock_bucket_id AS stock_bucket_id, 'Moved out' AS kind, quantity, unit, moved_at AS at FROM inventory_moves
+    UNION ALL SELECT a.event_id AS id, a.stock_bucket_id, 'Used' AS kind, a.quantity, a.unit, e.actual_at AS at
+      FROM additions a JOIN batch_events e ON e.id = a.event_id WHERE a.stock_bucket_id IS NOT NULL AND e.actual_at IS NOT NULL
+    UNION ALL SELECT p.event_id AS id, p.stock_bucket_id, 'Used' AS kind, p.container_count AS quantity,
       i.default_unit AS unit, e.actual_at AS at FROM packaging p JOIN batch_events e ON e.id = p.event_id
-      JOIN inventory_items i ON i.id = p.inventory_item_id
-      WHERE p.inventory_item_id IS NOT NULL AND e.actual_at IS NOT NULL
-    ORDER BY inventory_item_id, at DESC, id DESC`);
+      JOIN stock_buckets i ON i.id = p.stock_bucket_id
+      WHERE p.stock_bucket_id IS NOT NULL AND e.actual_at IS NOT NULL
+    ORDER BY stock_bucket_id, at DESC, id DESC`);
   const byItem = new Map<string, InventoryMovement[]>();
   for (const row of rows) {
-    const movements = byItem.get(row.inventory_item_id) || [];
+    const movements = byItem.get(row.stock_bucket_id) || [];
     movements.push(row);
-    byItem.set(row.inventory_item_id, movements);
+    byItem.set(row.stock_bucket_id, movements);
   }
   return Object.fromEntries(items.map(item => [item.id, inventoryBalance(byItem.get(item.id) || [], item.default_unit)]));
 }
@@ -2557,7 +2429,7 @@ export function inventoryBalance(rows: InventoryMovement[], unit: string): numbe
   return balance;
 }
 
-export async function createInventoryItem(db: DB, name: string, category: string, defaultUnit: string,
+export async function createInventoryRecord(db: DB, name: string, category: string, defaultUnit: string,
   startingQuantity: number | null = null, accountId: string | null = null, displayUnit = defaultUnit,
   locationId: string | null = null, catalogSupplyId: string | null = null, lotCode: string | null = null,
   properties?: IngredientProperties, containerSpecs?: ContainerSpecs): Promise<string> {
@@ -2574,10 +2446,15 @@ export async function createInventoryItem(db: DB, name: string, category: string
   await db.tx(async tx => {
     const existingSupply = await tx.execO<{ id: string }>(
       'SELECT id FROM supplies WHERE category = ? AND lower(trim(name)) = lower(trim(?)) LIMIT 1', [category, name]);
-    const supplyId = existingSupply[0]?.id || createId();
-    if (!existingSupply.length) await tx.exec(`INSERT INTO supplies(id, name, category, default_unit, catalog_supply_id, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)`, [supplyId, name, category, defaultUnit, catalogSupplyId, now]);
-    else if (catalogSupplyId) await tx.exec('UPDATE supplies SET catalog_supply_id = COALESCE(catalog_supply_id, ?) WHERE id = ?',
+    const matchedProduct = !existingSupply.length && catalogSupplyId ? await tx.execO<{ id: string }>(
+      'SELECT id FROM products WHERE catalog_product_id = ? LIMIT 1', [catalogSupplyId]) : [];
+    const supplyId = existingSupply[0]?.id || matchedProduct[0]?.id || createId();
+    if (!existingSupply.length) {
+      await tx.exec('INSERT OR IGNORE INTO products(id, name, catalog_product_id, created_at) VALUES (?, ?, ?, ?)',
+        [supplyId, name, catalogSupplyId, now]);
+      await tx.exec('INSERT INTO supply_specs(id, category, default_unit) VALUES (?, ?, ?)',
+        [supplyId, category, defaultUnit]);
+    } else if (catalogSupplyId) await tx.exec('UPDATE products SET catalog_product_id = COALESCE(catalog_product_id, ?) WHERE id = ?',
       [catalogSupplyId, supplyId]);
     if (spec) await tx.exec(`INSERT INTO ${spec.table}(supply_id, ${spec.columns.join(', ')})
       VALUES (?, ${spec.columns.map(() => '?').join(', ')})
@@ -2590,18 +2467,18 @@ export async function createInventoryItem(db: DB, name: string, category: string
     const lotId = existingLot[0]?.id || createId();
     if (!existingLot.length) await tx.exec('INSERT INTO supply_lots(id, supply_id, lot_code, created_at) VALUES (?, ?, ?, ?)',
       [lotId, supplyId, cleanLot, now]);
-    await tx.exec(`INSERT INTO inventory_items(id, name, category, default_unit, supply_id, lot_id, created_at)
+    await tx.exec(`INSERT INTO stock_buckets(id, name, category, default_unit, supply_id, lot_id, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)`, [id, name, category, defaultUnit, supplyId, lotId, now]);
-    if (locationId) await tx.exec('INSERT INTO inventory_item_locations(id, location_id) VALUES (?, ?)', [id, locationId]);
-    if (displayUnit !== defaultUnit) await tx.exec('INSERT INTO inventory_display_units(id, display_unit) VALUES (?, ?)',
+    if (locationId) await tx.exec('INSERT INTO stock_bucket_locations(id, location_id) VALUES (?, ?)', [id, locationId]);
+    if (displayUnit !== defaultUnit) await tx.exec('INSERT INTO stock_bucket_display_units(id, display_unit) VALUES (?, ?)',
       [id, displayUnit]);
-    if (startingQuantity != null) await tx.exec(`INSERT INTO inventory_counts(id, inventory_item_id, quantity, unit, counted_at, created_by_account_id)
+    if (startingQuantity != null) await tx.exec(`INSERT INTO inventory_counts(id, stock_bucket_id, quantity, unit, counted_at, created_by_account_id)
       VALUES (?, ?, ?, ?, ?, ?)`, [createId(), id, startingQuantity, defaultUnit, now, accountId]);
   });
   return id;
 }
 
-export async function moveInventoryStock(db: DB, source: InventoryItem, destinationId: string | null,
+export async function moveInventoryStock(db: DB, source: InventoryRecord, destinationId: string | null,
   quantity: number, unit: string): Promise<string> {
   if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Enter a positive quantity');
   if (source.location_id === destinationId) throw new Error('Choose another location');
@@ -2614,28 +2491,28 @@ export async function moveInventoryStock(db: DB, source: InventoryItem, destinat
   if (target && convertInventoryUnit(quantity, unit, target.default_unit) == null) throw new Error('Destination uses an incompatible unit');
   if (!target) target = { ...source, id: createId(), location_id: destinationId };
   const latest = await db.execO<{ at: number | null }>(`SELECT MAX(at) AS at FROM (
-    SELECT purchased_at AS at FROM inventory_purchases WHERE inventory_item_id IN (?, ?)
-    UNION ALL SELECT counted_at FROM inventory_counts WHERE inventory_item_id IN (?, ?)
-    UNION ALL SELECT discarded_at FROM inventory_discards WHERE inventory_item_id IN (?, ?)
-    UNION ALL SELECT moved_at FROM inventory_moves WHERE from_item_id IN (?, ?) OR to_item_id IN (?, ?)
+    SELECT purchased_at AS at FROM inventory_purchases WHERE stock_bucket_id IN (?, ?)
+    UNION ALL SELECT counted_at FROM inventory_counts WHERE stock_bucket_id IN (?, ?)
+    UNION ALL SELECT discarded_at FROM inventory_discards WHERE stock_bucket_id IN (?, ?)
+    UNION ALL SELECT moved_at FROM inventory_moves WHERE from_stock_bucket_id IN (?, ?) OR to_stock_bucket_id IN (?, ?)
     UNION ALL SELECT e.actual_at FROM additions a JOIN batch_events e ON e.id = a.event_id
-      WHERE a.inventory_item_id IN (?, ?) AND e.actual_at IS NOT NULL
+      WHERE a.stock_bucket_id IN (?, ?) AND e.actual_at IS NOT NULL
     UNION ALL SELECT e.actual_at FROM packaging p JOIN batch_events e ON e.id = p.event_id
-      WHERE p.inventory_item_id IN (?, ?) AND e.actual_at IS NOT NULL)`,
+      WHERE p.stock_bucket_id IN (?, ?) AND e.actual_at IS NOT NULL)`,
   [source.id, target.id, source.id, target.id, source.id, target.id, source.id, target.id, source.id, target.id, source.id, target.id, source.id, target.id]);
   await db.tx(async tx => {
-    if (!(await tx.execO('SELECT id FROM inventory_items WHERE id = ?', [target.id])).length) {
-      await tx.exec(`INSERT INTO inventory_items(id, name, category, default_unit, supply_id, lot_id, created_at)
+    if (!(await tx.execO('SELECT id FROM stock_buckets WHERE id = ?', [target.id])).length) {
+      await tx.exec(`INSERT INTO stock_buckets(id, name, category, default_unit, supply_id, lot_id, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [target.id, target.name, target.category, target.default_unit, source.supply_id, source.lot_id, nowSeconds()]);
-      if (destinationId) await tx.exec('INSERT INTO inventory_item_locations(id, location_id) VALUES (?, ?)', [target.id, destinationId]);
-      if (target.display_unit !== target.default_unit) await tx.exec('INSERT INTO inventory_display_units(id, display_unit) VALUES (?, ?)',
+      if (destinationId) await tx.exec('INSERT INTO stock_bucket_locations(id, location_id) VALUES (?, ?)', [target.id, destinationId]);
+      if (target.display_unit !== target.default_unit) await tx.exec('INSERT INTO stock_bucket_display_units(id, display_unit) VALUES (?, ?)',
         [target.id, target.display_unit]);
       const stockPropertyColumns = ingredientPropertyColumns.filter(column => column !== 'grain_class');
-      await tx.exec(`INSERT INTO inventory_ingredient_properties(id, ${stockPropertyColumns.join(', ')})
-        SELECT ?, ${stockPropertyColumns.join(', ')} FROM inventory_ingredient_properties WHERE id = ?`, [target.id, source.id]);
+      await tx.exec(`INSERT INTO stock_bucket_ingredient_properties(id, ${stockPropertyColumns.join(', ')})
+        SELECT ?, ${stockPropertyColumns.join(', ')} FROM stock_bucket_ingredient_properties WHERE id = ?`, [target.id, source.id]);
     }
-    await tx.exec('INSERT INTO inventory_moves(id, from_item_id, to_item_id, quantity, unit, moved_at) VALUES (?, ?, ?, ?, ?, ?)',
+    await tx.exec('INSERT INTO inventory_moves(id, from_stock_bucket_id, to_stock_bucket_id, quantity, unit, moved_at) VALUES (?, ?, ?, ?, ?, ?)',
       [createId(), source.id, target.id, quantity, unit, Math.max(nowSeconds(), (latest[0]?.at ?? 0) + 1)]);
   });
   return target.id;
@@ -2644,23 +2521,23 @@ export async function moveInventoryStock(db: DB, source: InventoryItem, destinat
 export async function addInventoryEntry(db: DB, itemId: string, kind: 'purchase' | 'count' | 'discard', quantity: number, unit: string, accountId: string): Promise<void> {
   if (!Number.isFinite(quantity) || quantity < 0 || kind !== 'count' && quantity === 0) throw new Error('Enter a positive quantity');
   const latest = await db.execO<{ at: number | null }>(`SELECT MAX(at) AS at FROM (
-    SELECT purchased_at AS at FROM inventory_purchases WHERE inventory_item_id = ?
-    UNION ALL SELECT counted_at AS at FROM inventory_counts WHERE inventory_item_id = ?
-    UNION ALL SELECT discarded_at AS at FROM inventory_discards WHERE inventory_item_id = ?
-    UNION ALL SELECT moved_at AS at FROM inventory_moves WHERE from_item_id = ? OR to_item_id = ?
+    SELECT purchased_at AS at FROM inventory_purchases WHERE stock_bucket_id = ?
+    UNION ALL SELECT counted_at AS at FROM inventory_counts WHERE stock_bucket_id = ?
+    UNION ALL SELECT discarded_at AS at FROM inventory_discards WHERE stock_bucket_id = ?
+    UNION ALL SELECT moved_at AS at FROM inventory_moves WHERE from_stock_bucket_id = ? OR to_stock_bucket_id = ?
     UNION ALL SELECT e.actual_at AS at FROM additions a JOIN batch_events e ON e.id = a.event_id
-      WHERE a.inventory_item_id = ? AND e.actual_at IS NOT NULL
+      WHERE a.stock_bucket_id = ? AND e.actual_at IS NOT NULL
     UNION ALL SELECT e.actual_at AS at FROM packaging p JOIN batch_events e ON e.id = p.event_id
-      WHERE p.inventory_item_id = ? AND e.actual_at IS NOT NULL)`, [itemId, itemId, itemId, itemId, itemId, itemId, itemId]);
+      WHERE p.stock_bucket_id = ? AND e.actual_at IS NOT NULL)`, [itemId, itemId, itemId, itemId, itemId, itemId, itemId]);
   const now = Math.max(nowSeconds(), (latest[0]?.at ?? 0) + 1);
   if (kind === 'purchase') {
-    await db.exec('INSERT INTO inventory_purchases(id, inventory_item_id, quantity, unit, purchased_at) VALUES (?, ?, ?, ?, ?)',
+    await db.exec('INSERT INTO inventory_purchases(id, stock_bucket_id, quantity, unit, purchased_at) VALUES (?, ?, ?, ?, ?)',
       [createId(), itemId, quantity, unit, now]);
   } else if (kind === 'discard') {
-    await db.exec('INSERT INTO inventory_discards(id, inventory_item_id, quantity, unit, discarded_at, created_by_account_id) VALUES (?, ?, ?, ?, ?, ?)',
+    await db.exec('INSERT INTO inventory_discards(id, stock_bucket_id, quantity, unit, discarded_at, created_by_account_id) VALUES (?, ?, ?, ?, ?, ?)',
       [createId(), itemId, quantity, unit, now, accountId]);
   } else {
-    await db.exec('INSERT INTO inventory_counts(id, inventory_item_id, quantity, unit, counted_at, created_by_account_id) VALUES (?, ?, ?, ?, ?, ?)',
+    await db.exec('INSERT INTO inventory_counts(id, stock_bucket_id, quantity, unit, counted_at, created_by_account_id) VALUES (?, ?, ?, ?, ?, ?)',
       [createId(), itemId, quantity, unit, now, accountId]);
   }
 }

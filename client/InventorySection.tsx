@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, AutoComplete, Button, Checkbox, Dropdown, Empty, Form, Input, InputNumber, Modal, Select, Table } from 'antd';
 import { EditOutlined, MoreOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
 import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
-import { addInventoryEntry, convertInventoryUnit, createInventoryItem, inventoryBalance, inventoryLocationPath,
+import { addInventoryEntry, convertInventoryUnit, createInventoryRecord, inventoryBalance, inventoryLocationPath,
   listInventoryBalances, listInventoryLocations, listInventoryMovements, moveInventoryStock, saveInventoryLocation, stockAtLocation,
   updateIngredientProperties, updateLotIngredientProperties, supplyIngredientProperties, lotIngredientProperties, ingredientProperties,
   readSupplyMedia, saveSupplyMedia, linkSupplyCatalogProduct,
   supplyContainerSpecs, saveSupplyContainerSpecs,
-  type ContainerSpecs, type IngredientProperties, type InventoryItem, type InventoryLocation, type InventoryMovement, type LocalDb, type SupplyMedia } from './db.ts';
+  type ContainerSpecs, type IngredientProperties, type InventoryRecord, type InventoryLocation, type InventoryMovement, type LocalDb, type SupplyMedia } from './db.ts';
 import { formatTime } from './time.ts';
 import type { PreferredUnits } from './api.ts';
 import { compoundMassUnit, formatQuantity, quantityForStorage, quantityUnitsForCategory, storageUnit, unitOptions } from '../shared/units.ts';
@@ -46,7 +46,7 @@ function catalogCharacteristics(product: CatalogInventory): string {
   return details.join(' · ');
 }
 
-function stockTotal(rows: InventoryItem[], balances: Record<string, number | null>, unit: string): number | null | undefined {
+function stockTotal(rows: InventoryRecord[], balances: Record<string, number | null>, unit: string): number | null | undefined {
   let total = 0;
   for (const row of rows) {
     const balance = balances[row.id];
@@ -59,7 +59,7 @@ function stockTotal(rows: InventoryItem[], balances: Record<string, number | nul
   return total;
 }
 
-function stockQuantity(rows: InventoryItem[], balances: Record<string, number | null>, unit: string,
+function stockQuantity(rows: InventoryRecord[], balances: Record<string, number | null>, unit: string,
   displayUnit: string): string {
   const total = stockTotal(rows, balances, unit);
   return total === undefined ? '—' : total === null ? 'Needs conversion' : formatStockQuantity(total, unit, displayUnit);
@@ -72,15 +72,15 @@ function formatStockQuantity(quantity: number, unit: string, displayUnit: string
 }
 
 type StockMovement = InventoryMovement & { stock_id: string; lot_code: string | null; location_id: string | null };
-type StockTreeRow = { key: string; lotLabel: string; locationLabel: string; rows: InventoryItem[];
-  lotItem?: InventoryItem; stockItem?: InventoryItem; children?: StockTreeRow[] };
-type InventoryIndexRow = { key: string; supply: InventoryItem; stocks: InventoryItem[];
+type StockTreeRow = { key: string; lotLabel: string; locationLabel: string; rows: InventoryRecord[];
+  lotItem?: InventoryRecord; stockItem?: InventoryRecord; children?: StockTreeRow[] };
+type InventoryIndexRow = { key: string; supply: InventoryRecord; stocks: InventoryRecord[];
   locationId?: string | null; child?: boolean; children?: InventoryIndexRow[] };
 
-function inventoryIndexRows(supplies: InventoryItem[], stocks: InventoryItem[], locations: InventoryLocation[]): InventoryIndexRow[] {
+function inventoryIndexRows(supplies: InventoryRecord[], stocks: InventoryRecord[], locations: InventoryLocation[]): InventoryIndexRow[] {
   return supplies.map(supply => {
     const productStocks = stocks.filter(stock => stock.supply_id === supply.id);
-    const byLocation = new Map<string | null, InventoryItem[]>();
+    const byLocation = new Map<string | null, InventoryRecord[]>();
     for (const stock of productStocks) {
       const locationId = stock.location_id || null;
       byLocation.set(locationId, [...(byLocation.get(locationId) || []), stock]);
@@ -94,8 +94,8 @@ function inventoryIndexRows(supplies: InventoryItem[], stocks: InventoryItem[], 
   });
 }
 
-function stockTree(rows: InventoryItem[]): StockTreeRow[] {
-  const lots = new Map<string, InventoryItem[]>();
+function stockTree(rows: InventoryRecord[]): StockTreeRow[] {
+  const lots = new Map<string, InventoryRecord[]>();
   for (const row of rows) {
     const key = row.lot_id || 'no-lot';
     const existing = lots.get(key) || [];
@@ -166,7 +166,7 @@ function PackagingFields({ defaults }: { defaults?: ContainerSpecs }) {
 }
 
 export function InventorySection({ db, basePath, accountId, items, supplies, catalogRevision, preferredUnits, selectedId, onSelect, onChanged }: {
-  db: LocalDb; basePath: string; accountId: string; items: InventoryItem[]; supplies: InventoryItem[]; catalogRevision: number; preferredUnits: PreferredUnits;
+  db: LocalDb; basePath: string; accountId: string; items: InventoryRecord[]; supplies: InventoryRecord[]; catalogRevision: number; preferredUnits: PreferredUnits;
   selectedId: string | null; onSelect: (id: string | null) => void; onChanged: () => Promise<void>;
 }) {
   const [movements, setMovements] = useState<StockMovement[]>([]);
@@ -177,7 +177,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const [moveItemId, setMoveItemId] = useState<string | null>(null);
   const [locationReturn, setLocationReturn] = useState<'item' | 'move' | null>(null);
   const [newItemCategory, setNewItemCategory] = useState<string | null>(null);
-  const [newStockProduct, setNewStockProduct] = useState<InventoryItem | null>(null);
+  const [newStockProduct, setNewStockProduct] = useState<InventoryRecord | null>(null);
   const [newStockLotCode, setNewStockLotCode] = useState<string | null | undefined>(undefined);
   const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
   const [catalogPickerPurpose, setCatalogPickerPurpose] = useState<'add' | 'link'>('add');
@@ -199,7 +199,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const [supplyProperties, setSupplyProperties] = useState<IngredientProperties>({});
   const [containerProperties, setContainerProperties] = useState<ContainerSpecs>({});
   const [lotSettingsOpen, setLotSettingsOpen] = useState(false);
-  const [lotTarget, setLotTarget] = useState<InventoryItem | null>(null);
+  const [lotTarget, setLotTarget] = useState<InventoryRecord | null>(null);
   const [lotProperties, setLotProperties] = useState<IngredientProperties>({});
   const [entryKind, setEntryKind] = useState<'purchase' | 'count' | 'discard' | null>(null);
   const [entryItemId, setEntryItemId] = useState<string | null>(null);
@@ -275,7 +275,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const entryDisplayUnit = entryItem?.display_unit === compoundMassUnit || entryItem?.default_unit === 'oz' && preferredUnits.mass === compoundMassUnit
     ? compoundMassUnit : entryItem?.display_unit || entryItem?.default_unit;
 
-  function openCreate(category: string, product?: InventoryItem, lotCode?: string | null, lockLot = false,
+  function openCreate(category: string, product?: InventoryRecord, lotCode?: string | null, lockLot = false,
     catalogProduct?: CatalogInventory) {
     itemForm.resetFields();
     const unit = product?.default_unit || catalogProduct?.unit || unitForCategory(category, preferredUnits.mass);
@@ -349,7 +349,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
     setLocationsOpen(true);
   }
 
-  async function openEntry(target: InventoryItem, kind: 'purchase' | 'count' | 'discard') {
+  async function openEntry(target: InventoryRecord, kind: 'purchase' | 'count' | 'discard') {
     try {
       const available = kind === 'discard' ? inventoryBalance(await listInventoryMovements(db, target.id), target.default_unit) : null;
       entryForm.resetFields();
@@ -420,7 +420,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
       } else {
         const catalogMatch = creatingCustomProduct ? null : selectedCatalogProduct?.name === values.name
           ? selectedCatalogProduct : await findCatalogSupply(values.category, values.name);
-        await createInventoryItem(db, values.name.trim(), values.category.trim(), storageUnit(values.default_unit),
+        await createInventoryRecord(db, values.name.trim(), values.category.trim(), storageUnit(values.default_unit),
           starting?.quantity ?? null, accountId, values.default_unit, locationId,
           catalogMatch?.id || null,
           values.lot_code || null, creatingCustomProduct ? {

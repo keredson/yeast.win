@@ -77,7 +77,8 @@ test('an incomplete CBOR sequence is rejected', async () => {
 test('catalog also streams CBOR changes from its SQLite snapshot', async () => {
   const catalog = openCatalogDb(process.env.BREWLOG_DATA_DIR!);
   try {
-    catalog.prepare("INSERT OR IGNORE INTO supplies(id,name,category,unit) VALUES ('sync_test','Sync test','Other','each')").run();
+    catalog.prepare("INSERT OR IGNORE INTO products(id,name) VALUES ('sync_test','Sync test')").run();
+    catalog.prepare("INSERT OR IGNORE INTO supplies(id,category,unit) VALUES ('sync_test','Other','each')").run();
     const chunks: Uint8Array[] = [];
     const response = {
       destroyed: false, headersSent: false,

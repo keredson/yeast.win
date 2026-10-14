@@ -4,7 +4,7 @@ import { DeleteOutlined, DownloadOutlined, PlusOutlined, SettingOutlined, Upload
 import { addRecipePlan, createRecipe, deleteRecipe, deleteRecipePlan, hasRecipeImport, listRecipePlans, startBatchFromRecipe, updateRecipe, updateRecipePlan,
   recipeImportSource, recipeTargetVolume, updateRecipeTargetVolume,
   breweryMashEfficiency, breweryBatchSize, latestMeasuredMashEfficiencySource,
-  type Equipment, type InventoryItem, type LocalDb, type PlanInput, type Recipe, type RecipeType } from './db.ts';
+  type Equipment, type InventoryRecord, type LocalDb, type PlanInput, type Recipe, type RecipeType } from './db.ts';
 import { RecipeImportModal } from './RecipeImportModal.tsx';
 import { PlanForm, repeatPreset, type PlanPreset } from './PlanForm.tsx';
 import { recipePathSegment } from './recipeRoutes.ts';
@@ -27,7 +27,7 @@ const recipeTypeOptions = [
 
 export function RecipeSection({ db, basePath, accountId, recipes, equipment, equipmentModels, inventory, supplies, catalogRevision, preferredUnits, selectedId, onSelect, onChanged, onBatchStarted }: {
   db: LocalDb; basePath: string; accountId: string; recipes: Recipe[]; selectedId: string | null; onSelect: (id: string | null) => void;
-  equipment: Equipment[]; equipmentModels: Equipment[]; inventory: InventoryItem[]; supplies: InventoryItem[]; catalogRevision: number; preferredUnits: PreferredUnits;
+  equipment: Equipment[]; equipmentModels: Equipment[]; inventory: InventoryRecord[]; supplies: InventoryRecord[]; catalogRevision: number; preferredUnits: PreferredUnits;
   onChanged: () => Promise<void>; onBatchStarted: (id: string) => void;
 }) {
   const [settingsForm] = Form.useForm<{ name: string; slug: string; description?: string; recipe_type: RecipeType;

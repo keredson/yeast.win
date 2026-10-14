@@ -3,13 +3,7 @@ import { existsSync, mkdirSync, realpathSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createId } from '../shared/id.ts';
-import { recordSlug } from '../shared/recordSlug.ts';
-import { fillMissingRecipeBatchSizes } from '../shared/batchSize.ts';
-import { retiredGenericSupplies } from '../shared/retiredGenericSupplies.ts';
-import { indexStatements, legacyEquipmentCopyStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements,
-  workspaceSchemaVersion, workspaceTableColumns, legacyEquipmentModelStatements, supplyMigrationStatements,
-  primingSugarCategoryMigrationStatements, otherFermentablesMigrationStatements,
-  gravityRoleMigrationStatements } from '../shared/schema.ts';
+import { indexStatements, nowSeconds, replicatedTables, schemaStatements, workspaceSchemaVersion, workspaceViewStatements } from '../shared/schema.ts';
 
 export const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const envPath = resolve(projectRoot, '.env');
@@ -151,177 +145,29 @@ export function openWorkspaceDb(id: string): Database.Database {
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');
   db.loadExtension(extensionPath);
-  const storedVersion = db.pragma('user_version', { simple: true }) as number;
-  const containerTable = storedVersion === workspaceSchemaVersion ? db.prepare(
-    "SELECT name FROM sqlite_master WHERE name IN ('supply_container_specs', 'supply_container_specs__crsql_clock')").all() : [];
-  const packagingReady = containerTable.length === 2 && ['packaging', 'recipe_packaging'].every(table => {
-    const columns = (db.pragma(`table_info(${table})`) as { name: string }[]).map(column => column.name);
-    return ['catalog_item_id', 'supply_id'].every(name => columns.includes(name));
-  });
-  if (storedVersion === workspaceSchemaVersion && packagingReady) {
-    const catalogPath = join(dataDir, 'catalog.sqlite');
-    if (existsSync(catalogPath)) db.prepare('ATTACH DATABASE ? AS catalog').run(realpathSync(catalogPath));
-    return db;
-  }
-  const hasLegacyMeta = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_meta'").get();
-  const legacyVersion = hasLegacyMeta
-    ? (db.prepare('SELECT version FROM schema_meta LIMIT 1').get() as { version: number } | undefined)?.version : undefined;
-  const version = storedVersion || legacyVersion || 0;
-  const existingTables = new Set((db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
-    .all() as { name: string }[]).map(row => row.name));
-  const hasWorkspaceTables = [...existingTables].some(name => replicatedTables.includes(name));
-  const legacyLossValues: number[] = [];
-  const legacyBatchLosses: { batch_id: string; wort_loss_liters: number }[] = [];
-  const legacyModelLosses = new Map<string, number>();
-  const legacyUnitLosses = new Map<string, number>();
-  if (version < 23 && hasWorkspaceTables) {
-    for (const table of ['equipment_models', 'equipment_mash_assumptions', 'equipment']) {
-      if (!existingTables.has(table) || !(db.pragma(`table_info("${table}")`) as { name: string }[])
-        .some(column => column.name === 'kettle_retention_liters')) continue;
-      const idColumn = table === 'equipment_mash_assumptions' ? 'equipment_id' : 'id';
-      const rows = db.prepare(`SELECT ${idColumn} AS id, kettle_retention_liters AS value FROM "${table}"
-        WHERE kettle_retention_liters IS NOT NULL`).all() as { id: string; value: number }[];
-      legacyLossValues.push(...rows.map(row => row.value));
-      for (const row of rows) (table === 'equipment_models' ? legacyModelLosses : legacyUnitLosses)
-        .set(row.id, row.value);
+  const version = db.pragma('user_version', { simple: true }) as number;
+  const ready = version === workspaceSchemaVersion && !!db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE name = 'products__crsql_clock'").get();
+  if (!ready) db.transaction(() => {
+    // Local prototype workspaces predate the product baseline. Their contents
+    // are disposable; the shared catalog is migrated separately and retained.
+    const views = db.prepare("SELECT name FROM sqlite_master WHERE type = 'view'").all() as { name: string }[];
+    for (const row of views) db.exec(`DROP VIEW "${row.name}"`);
+    const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'
+      AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'crsql_%'
+      AND name NOT LIKE '%__crsql_%'`).all() as { name: string }[];
+    const clocks = new Set((db.prepare("SELECT name FROM sqlite_master WHERE name LIKE '%__crsql_clock'")
+      .all() as { name: string }[]).map(row => row.name));
+    for (const row of tables) {
+      if (clocks.has(`${row.name}__crsql_clock`)) db.prepare('SELECT crsql_as_table(?)').get(row.name);
+      db.exec(`DROP TABLE "${row.name}"`);
     }
-    if (existingTables.has('batch_event_inputs') && existingTables.has('batch_events')
-      && (db.pragma('table_info(batch_event_inputs)') as { name: string }[])
-        .some(column => column.name === 'kettle_retention_liters')) {
-      legacyBatchLosses.push(...db.prepare(`SELECT e.batch_id, MIN(i.kettle_retention_liters) AS wort_loss_liters
-        FROM batch_event_inputs i JOIN batch_events e ON e.id = i.id
-        WHERE i.kettle_retention_liters IS NOT NULL GROUP BY e.batch_id
-        HAVING MIN(i.kettle_retention_liters) = MAX(i.kettle_retention_liters)`).all() as typeof legacyBatchLosses);
-    }
-  }
-  if (version === 0 && !hasWorkspaceTables) {
-    db.exec('BEGIN');
-    try {
-      for (const statement of schemaStatements) db.exec(statement);
-      for (const table of replicatedTables) db.prepare('SELECT crsql_as_crr(?)').get(table);
-      for (const statement of indexStatements) db.exec(statement);
-      if (hasLegacyMeta) db.exec('DROP TABLE schema_meta');
-      db.exec('COMMIT');
-    } catch (error) {
-      if (db.inTransaction) db.exec('ROLLBACK');
-      db.close();
-      throw error;
-    }
-  } else if (version > workspaceSchemaVersion) {
-    db.close();
-    throw new Error(`This server cannot open workspace schema ${version}; update Yeast.Win! first.`);
-  } else {
-    db.exec('BEGIN');
-    try {
-      const existing = new Set((db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
-        .all() as { name: string }[]).map(row => row.name));
-      for (const [index, table] of replicatedTables.entries()) {
-        const expected = workspaceTableColumns[table];
-        if (existing.has(table)) {
-          const actual = (db.pragma(`table_info("${table}")`) as { name: string }[]).map(row => row.name);
-          if (actual.join(',') === expected.join(',')) {
-            if (!existing.has(`${table}__crsql_clock`)) db.prepare('SELECT crsql_as_crr(?)').get(table);
-            continue;
-          }
-          const common = expected.filter(column => actual.includes(column));
-          const snapshot = `migration_${table}`;
-          if (table === 'equipment' && actual.some(column => !expected.includes(column))
-            && !existing.has('equipment_legacy_migration')) {
-            db.exec('CREATE TABLE equipment_legacy_migration AS SELECT * FROM equipment');
-          }
-          if (common.length) db.exec(`CREATE TEMP TABLE "${snapshot}" AS SELECT ${common.map(column =>
-            table === 'supply_media' && column === 'product_url' && actual.includes('spec_source_url')
-              ? 'COALESCE(NULLIF(product_url, \'\'), spec_source_url) AS product_url' : column).join(', ')} FROM "${table}"`);
-          if (existing.has(`${table}__crsql_clock`)) db.prepare('SELECT crsql_as_table(?)').get(table);
-          db.exec(`DROP TABLE "${table}"`);
-          db.exec(schemaStatements[index]);
-          db.prepare('SELECT crsql_as_crr(?)').get(table);
-          if (common.length) {
-            db.exec(`INSERT INTO "${table}" (${common.join(', ')}) SELECT ${common.join(', ')} FROM "${snapshot}"`);
-            db.exec(`DROP TABLE "${snapshot}"`);
-          }
-        } else {
-          db.exec(schemaStatements[index]);
-          db.prepare('SELECT crsql_as_crr(?)').get(table);
-        }
-      }
-      for (const table of retiredReplicatedTables) if (existing.has(table)) {
-        if (existing.has(`${table}__crsql_clock`)) db.prepare('SELECT crsql_as_table(?)').get(table);
-        db.exec(`DROP TABLE "${table}"`);
-      }
-      for (const statement of indexStatements) db.exec(statement);
-      if (hasLegacyMeta) db.exec('DROP TABLE schema_meta');
-      db.exec('COMMIT');
-    } catch (error) {
-      if (db.inTransaction) db.exec('ROLLBACK');
-      db.close();
-      throw error;
-    }
-  }
-  if (version > 0 && version < 32) db.transaction(() => {
-    db.exec(`INSERT OR IGNORE INTO supply_grain_specs(supply_id, color_lovibond)
-      SELECT id, 60 FROM supplies WHERE catalog_supply_id = 'inventory_crystal_60'`);
-    db.exec(`UPDATE supply_grain_specs SET color_lovibond = 60
-      WHERE color_lovibond IS NULL AND supply_id IN
-      (SELECT id FROM supplies WHERE catalog_supply_id = 'inventory_crystal_60')`);
-    const unlink = db.prepare('UPDATE supplies SET catalog_supply_id = NULL WHERE catalog_supply_id = ?');
-    for (const id of retiredGenericSupplies) unlink.run(id);
+    for (const statement of schemaStatements) db.exec(statement);
+    for (const table of replicatedTables) db.prepare('SELECT crsql_as_crr(?)').get(table);
+    for (const statement of indexStatements) db.exec(statement);
+    for (const statement of workspaceViewStatements) db.exec(statement);
+    db.pragma(`user_version = ${workspaceSchemaVersion}`);
   })();
-  db.transaction(() => { for (const statement of fillMissingRecipeBatchSizes) db.exec(statement); })();
-  if (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'equipment_legacy_migration'").get()) {
-    db.transaction(() => {
-      const columns = (db.pragma('table_info(equipment_legacy_migration)') as { name: string }[])
-        .map(row => row.name);
-      for (const statement of legacyEquipmentCopyStatements(columns)) db.exec(statement);
-      for (const statement of legacyEquipmentModelStatements(columns)) db.exec(statement);
-      db.exec('DROP TABLE equipment_legacy_migration');
-    })();
-  }
-  db.transaction(() => {
-    for (const statement of supplyMigrationStatements) db.exec(statement);
-    if (version < 35) for (const statement of primingSugarCategoryMigrationStatements) db.exec(statement);
-    if (version < 36) for (const statement of otherFermentablesMigrationStatements) db.exec(statement);
-    if (version < 38) for (const statement of gravityRoleMigrationStatements) db.exec(statement);
-  })();
-  db.transaction(() => {
-    const recipes = db.prepare(`SELECT r.id, r.name, s.slug FROM recipes r
-      LEFT JOIN recipe_slugs s ON s.id = r.id ORDER BY r.created_at, r.id`)
-      .all() as { id: string; name: string; slug: string | null }[];
-    const used = new Set(recipes.flatMap(row => [row.id, ...(row.slug ? [row.slug] : [])]));
-    const insert = db.prepare('INSERT OR IGNORE INTO recipe_slugs(id, slug) VALUES (?, ?)');
-    for (const recipe of recipes) if (!recipe.slug) {
-      const base = recordSlug(recipe.name).slice(0, 70);
-      let slug = base;
-      for (let number = 2; used.has(slug); number++) slug = `${base}-${number}`;
-      used.add(slug);
-      insert.run(recipe.id, slug);
-    }
-  })();
-  const uniqueLegacyLosses = [...new Set(legacyLossValues)];
-  if (uniqueLegacyLosses.length === 1 || legacyBatchLosses.length) db.transaction(() => {
-    if (uniqueLegacyLosses.length === 1) db.prepare(`INSERT INTO brewery_process_defaults(id, wort_loss_liters)
-      VALUES ('brewery', ?) ON CONFLICT(id) DO UPDATE SET
-        wort_loss_liters = COALESCE(brewery_process_defaults.wort_loss_liters, excluded.wort_loss_liters)`)
-      .run(uniqueLegacyLosses[0]);
-    const copyBatch = db.prepare(`INSERT INTO batch_recipe_inputs(id, wort_loss_liters) VALUES (?, ?)
-      ON CONFLICT(id) DO UPDATE SET wort_loss_liters = COALESCE(batch_recipe_inputs.wort_loss_liters, excluded.wort_loss_liters)`);
-    for (const row of legacyBatchLosses) copyBatch.run(row.batch_id, row.wort_loss_liters);
-  })();
-  if (legacyModelLosses.size || legacyUnitLosses.size) db.transaction(() => {
-    const updateModel = db.prepare(`UPDATE equipment_models
-      SET post_boil_loss_liters = COALESCE(post_boil_loss_liters, ?) WHERE id = ?`);
-    const updateUnit = db.prepare(`INSERT INTO equipment_post_boil_losses
-      (equipment_id, post_boil_loss_liters) VALUES (?, ?)
-      ON CONFLICT(equipment_id) DO UPDATE SET post_boil_loss_liters =
-        COALESCE(equipment_post_boil_losses.post_boil_loss_liters, excluded.post_boil_loss_liters)`);
-    for (const [id, liters] of legacyModelLosses) updateModel.run(liters, id);
-    for (const [id, liters] of legacyUnitLosses) updateUnit.run(id, liters);
-  })();
-  db.exec(`UPDATE equipment SET added_at = COALESCE(added_at, created_at) WHERE added_at IS NULL;
-    UPDATE equipment SET removed_at =
-      (SELECT archived_at FROM equipment_archives WHERE equipment_id = equipment.id ORDER BY archived_at LIMIT 1)
-      WHERE removed_at IS NULL AND id IN (SELECT equipment_id FROM equipment_archives)`);
-  db.pragma(`user_version = ${workspaceSchemaVersion}`);
   const catalogPath = join(dataDir, 'catalog.sqlite');
   if (existsSync(catalogPath)) db.prepare('ATTACH DATABASE ? AS catalog').run(realpathSync(catalogPath));
   return db;

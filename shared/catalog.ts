@@ -26,16 +26,18 @@ export interface CatalogInventory { id: string; name: string; category: string; 
   wood_species?: string | null; wood_origin?: string | null; connector_type?: string | null;
   image_src?: string | null; has_image?: boolean }
 export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
-export const catalogSchemaVersion = 34;
+export const catalogSchemaVersion = 1;
 export const inventoryCategories = ['Grain', 'Other fermentables', 'Hops', 'Yeast', 'Nutrient', 'Adjunct', 'Chemical', 'Packaging', 'Other'] as const;
+export const catalogProductTables = {
+  products: `CREATE TABLE IF NOT EXISTS products (
+    id TEXT PRIMARY KEY NOT NULL, name TEXT, manufacturer TEXT,
+    product_url TEXT, image_url TEXT, thumbnail_url TEXT)`
+} as const;
 export const catalogModelTables = {
   manufacturers: `CREATE TABLE IF NOT EXISTS manufacturers (
     name TEXT PRIMARY KEY NOT NULL, website_url TEXT)`,
   equipment_models: `CREATE TABLE IF NOT EXISTS equipment_models (
-    id TEXT PRIMARY KEY NOT NULL, manufacturer TEXT, model_name TEXT, kind TEXT,
-    product_url TEXT)`,
-  model_images: `CREATE TABLE IF NOT EXISTS model_images (
-    model_id TEXT PRIMARY KEY NOT NULL, image_url TEXT, thumbnail_url TEXT)`,
+    id TEXT PRIMARY KEY NOT NULL, kind TEXT)`,
   manufacturer_logos: `CREATE TABLE IF NOT EXISTS manufacturer_logos (
     manufacturer_name TEXT PRIMARY KEY NOT NULL, logo_url TEXT)`,
   model_liquid_containment: `CREATE TABLE IF NOT EXISTS model_liquid_containment (
@@ -56,7 +58,7 @@ export const catalogModelTables = {
 } as const;
 export const catalogSupplyTables = {
   supplies: `CREATE TABLE IF NOT EXISTS supplies (
-    id TEXT PRIMARY KEY NOT NULL, name TEXT, category TEXT, unit TEXT)`,
+    id TEXT PRIMARY KEY NOT NULL, category TEXT, unit TEXT)`,
   supply_grain_specs: `CREATE TABLE IF NOT EXISTS supply_grain_specs (
     supply_id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL)`,
   supply_other_fermentable_specs: `CREATE TABLE IF NOT EXISTS supply_other_fermentable_specs (
@@ -71,12 +73,8 @@ export const catalogSupplyTables = {
   supply_container_specs: `CREATE TABLE IF NOT EXISTS supply_container_specs (
     supply_id TEXT PRIMARY KEY NOT NULL, container_kind TEXT, capacity_liters REAL,
     material TEXT, wood_species TEXT, wood_origin TEXT, connector_type TEXT)`,
-  supply_products: `CREATE TABLE IF NOT EXISTS supply_products (
-    supply_id TEXT PRIMARY KEY NOT NULL, manufacturer TEXT, product_url TEXT)`,
-  supply_images: `CREATE TABLE IF NOT EXISTS supply_images (
-    supply_id TEXT PRIMARY KEY NOT NULL, image_url TEXT)`
 } as const;
-export const catalogTables = [...Object.keys(catalogModelTables), ...Object.keys(catalogSupplyTables)] as const;
+export const catalogTables = [...Object.keys(catalogProductTables), ...Object.keys(catalogModelTables), ...Object.keys(catalogSupplyTables)] as const;
 
 export function unitForCategory(category: string, preferredMass: string): string {
   if (category === 'Grain') return 'lb + oz';

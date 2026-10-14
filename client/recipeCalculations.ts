@@ -1,4 +1,4 @@
-import type { Equipment, EquipmentSpecifications, InventoryItem, PlanInput } from './db.ts';
+import type { Equipment, EquipmentSpecifications, InventoryRecord, PlanInput } from './db.ts';
 import type { CatalogInventory } from '../shared/catalog.ts';
 import { convertUnit } from '../shared/units.ts';
 
@@ -60,7 +60,7 @@ export function estimatedPostBoilLoss(events: Event[], equipment: Equipment[]): 
     equipment.find(item => item.id === id)?.post_boil_loss_liters ?? 0), 0);
 }
 
-export function calculateRecipe(events: Event[], inventory: InventoryItem[], equipment: Equipment[],
+export function calculateRecipe(events: Event[], inventory: InventoryRecord[], equipment: Equipment[],
   recipeInputs: Record<string, unknown>, eventInputs: Record<string, Record<string, unknown>>,
   recentMashEfficiency: Record<string, number | { value: number; batchName: string }> = {}, recipeType = 'beer',
   breweryMashEfficiencyPct: number | null = null, context: 'recipe' | 'batch' = 'recipe',
@@ -89,7 +89,7 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
 
   const ingredient = (event: Event) => {
     const details = event.details;
-    const item = inventory.find(row => row.id === details.inventory_item_id)
+    const item = inventory.find(row => row.id === details.stock_bucket_id)
       || (details.supply_id ? inventory.find(row => row.id === details.supply_id
         || row.supply_id === details.supply_id) : undefined);
     const catalogItem = catalog.find(row => row.id === (details.catalog_item_id || item?.catalog_supply_id));

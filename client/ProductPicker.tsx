@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react';
 import { AutoComplete } from 'antd';
-import type { InventoryItem } from './db.ts';
+import type { InventoryRecord } from './db.ts';
 import type { CatalogInventory } from '../shared/catalog.ts';
 import { queryCatalogSupplies } from './catalog.ts';
 
-export type ProductChoice = { source: 'inventory'; item: InventoryItem }
+export type ProductChoice = { source: 'inventory'; item: InventoryRecord }
   | { source: 'catalog'; item: CatalogInventory };
 
 export function ProductPicker({ category, inventory, catalogRevision, inventoryLabel = 'Your inventory',
   id, value, onChange, onEdited, onChoose, onError }: {
-  category: string; inventory: InventoryItem[]; catalogRevision: number; inventoryLabel?: string;
+  category: string; inventory: InventoryRecord[]; catalogRevision: number; inventoryLabel?: string;
   id?: string; value?: string; onChange?: (value: string) => void; onEdited?: () => void;
   onChoose: (choice: ProductChoice) => void;
   onError?: (message: string) => void;
