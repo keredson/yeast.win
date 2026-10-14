@@ -34,13 +34,20 @@ const yeast = (id: string, name: string, manufacturer: string, productUrl: strin
   id: `supply_${id}`, name: `${manufacturer} ${name}`, category: 'Yeast', unit: 'packet', manufacturer,
   product_url: productUrl, spec_source_url: productUrl
 });
+const nutrient = (id: string, name: string, productUrl: string): Product => ({
+  id: `supply_${id}`, name, category: 'Nutrient', unit: 'g', manufacturer: 'Lallemand',
+  product_url: productUrl, spec_source_url: productUrl
+});
 
 export const catalogSupplyManufacturers = [
   { name: 'Briess', website_url: 'https://brewingwithbriess.com/' },
   { name: 'Weyermann', website_url: 'https://www.weyermann.de/en-gb/' },
+  { name: 'Crisp Malt', website_url: 'https://crispmalt.com/' },
+  { name: 'Simpsons Malt', website_url: 'https://www.simpsonsmalt.co.uk/' },
   { name: 'Yakima Chief Hops', website_url: 'https://www.yakimachief.com/' },
   { name: 'Fermentis', website_url: 'https://fermentis.com/' },
-  { name: 'Lallemand Brewing', website_url: 'https://www.lallemandbrewing.com/' }
+  { name: 'Lallemand Brewing', website_url: 'https://www.lallemandbrewing.com/' },
+  { name: 'Lallemand', website_url: 'https://www.lallemandwine.com/' }
 ];
 
 export const expandedCatalogSupplies: Product[] = [
@@ -74,6 +81,14 @@ export const expandedCatalogSupplies: Product[] = [
   grain('weyermann_caramunich_2', 'CARAMUNICH Type 2', 'Weyermann', 'caramel', weyermann),
   grain('weyermann_carafa_2', 'CARAFA Type 2', 'Weyermann', 'roasted', weyermann),
   grain('weyermann_melanoidin', 'Melanoidin Malt', 'Weyermann', 'kilned', weyermann),
+  grain('crisp_maris_otter', 'Finest Maris Otter Ale Malt', 'Crisp Malt', 'base',
+    'https://crispmalt.com/malts/finest-maris-otter-ale-malt/', undefined, 80.6),
+  grain('crisp_best_ale', 'Best Ale Malt', 'Crisp Malt', 'base',
+    'https://crispmalt.com/malts/best-ale-malt/', undefined, 80.8),
+  grain('simpsons_maris_otter', 'Finest Pale Ale Maris Otter', 'Simpsons Malt', 'base',
+    'https://www.simpsonsmalt.co.uk/our-malts/base-malts/finest-pale-ale-maris-otter/', undefined, 81),
+  grain('simpsons_golden_promise', 'Finest Pale Ale Golden Promise', 'Simpsons Malt', 'base',
+    'https://www.simpsonsmalt.co.uk/our-malts/base-malts/finest-pale-ale-golden-promise/', undefined, 81),
   hops('ych_cascade', 'Cascade', 'Yakima Chief Hops', 'https://www.yakimachief.com/variety/cascade'),
   hops('ych_centennial', 'Centennial', 'Yakima Chief Hops', 'https://www.yakimachief.com/variety/centennial'),
   hops('ych_citra', 'Citra Brand', 'Yakima Chief Hops', 'https://www.yakimachief.com/variety/citra-brand'),
@@ -93,7 +108,15 @@ export const expandedCatalogSupplies: Product[] = [
   yeast('lallemand_new_england', 'LalBrew New England', 'Lallemand Brewing',
     'https://www.lallemandbrewing.com/en/canada/products/lalbrew-new-england/'),
   yeast('lallemand_diamond', 'LalBrew Diamond Lager', 'Lallemand Brewing',
-    'https://www.lallemandbrewing.com/en/united-states/products/diamond-lager-yeast/')
+    'https://www.lallemandbrewing.com/en/united-states/products/diamond-lager-yeast/'),
+  nutrient('fermaid_o', 'Lallemand Fermaid O',
+    'https://scottlab.com/fermaid-o-yeast-fermentation-nutrient-2-5kg-15067'),
+  nutrient('fermaid_k', 'Lallemand Fermaid K',
+    'https://scottlab.com/fermaid-k-yeast-fermentation-nutrient-2-5kg-15073'),
+  nutrient('fermaid_a', 'Lallemand Fermaid A',
+    'https://scottlab.com/fermaid-a-yeast-fermentation-nutrient-10-kg-15070a'),
+  nutrient('fermaid_performens_m', 'Lallemand Fermaid Performens M',
+    'https://scottlab.com/fermaid-performens-m-yeast-fermentation-nutrient-2-15087')
 ];
 
 // Historic generic rows keep their stable IDs and become usable with app class defaults.
