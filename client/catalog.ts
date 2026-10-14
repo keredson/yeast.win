@@ -16,9 +16,6 @@ const profileOpen = new URLSearchParams(location.search).has('profileOpen');
 export function catalogMediaGeneration(): number { return mediaGeneration; }
 
 function invalidateCatalogMedia(): void {
-  for (const cached of mediaCache.values()) void cached.then(url => {
-    if (url) URL.revokeObjectURL(url);
-  }).catch(() => undefined);
   mediaCache.clear();
   mediaGeneration++;
 }
@@ -27,20 +24,16 @@ export function catalogMediaUrl(kind: CatalogMediaKind, id: string): Promise<str
   const key = `${kind}:${id}`;
   let pending = mediaCache.get(key);
   if (!pending) {
-    const generation = mediaGeneration;
     pending = (async () => {
       const db = await openLocalCatalog();
-      const [table, keyColumn, valueColumn, mimeColumn] = kind === 'supply'
-        ? ['supply_images', 'supply_id', 'image_bytes', 'image_mime_type']
+      const [table, keyColumn, valueColumn] = kind === 'supply'
+        ? ['supply_images', 'supply_id', 'image_url']
         : kind === 'logo'
-          ? ['manufacturer_logos', 'manufacturer_name', 'image_bytes', 'mime_type']
-          : ['model_images', 'model_id', kind === 'thumbnail' ? 'thumbnail_bytes' : 'image_bytes',
-            kind === 'thumbnail' ? 'thumbnail_mime_type' : 'image_mime_type'];
-      const row = (await db.execO<{ bytes: Uint8Array | null; mime: string | null }>(
-        `SELECT ${valueColumn} AS bytes, ${mimeColumn} AS mime FROM ${table} WHERE ${keyColumn} = ?`, [id]))[0];
-      if (!row?.bytes?.length || generation !== mediaGeneration) return null;
-      return URL.createObjectURL(new Blob([new Uint8Array(row.bytes)],
-        { type: row.mime || 'application/octet-stream' }));
+          ? ['manufacturer_logos', 'manufacturer_name', 'logo_url']
+          : ['model_images', 'model_id', kind === 'thumbnail' ? 'thumbnail_url' : 'image_url'];
+      const row = (await db.execO<{ url: string | null }>(
+        `SELECT ${valueColumn} AS url FROM ${table} WHERE ${keyColumn} = ?`, [id]))[0];
+      return row?.url || null;
     })().catch(cause => {
       if (mediaCache.get(key) === pending) mediaCache.delete(key);
       throw cause;
@@ -50,6 +43,38 @@ export function catalogMediaUrl(kind: CatalogMediaKind, id: string): Promise<str
   return pending;
 }
 const catalogRefreshIntervalMs = 24 * 60 * 60_000;
+const catalogImageCacheName = 'brewlog-catalog-images-v1';
+
+export async function downloadCatalogImages(onProgress?: (done: number, total: number) => void): Promise<{ downloaded: number; failed: number }> {
+  const db = await openLocalCatalog();
+  const rows = await db.execO<{ url: string }>(`SELECT image_url AS url FROM supply_images WHERE image_url IS NOT NULL
+    UNION SELECT image_url FROM model_images WHERE image_url IS NOT NULL
+    UNION SELECT thumbnail_url FROM model_images WHERE thumbnail_url IS NOT NULL
+    UNION SELECT logo_url FROM manufacturer_logos WHERE logo_url IS NOT NULL`);
+  const urls = [...new Set(rows.map(row => row.url).filter(url => /^https:\/\//i.test(url)))];
+  const cache = await caches.open(catalogImageCacheName);
+  let next = 0;
+  let done = 0;
+  let downloaded = 0;
+  let failed = 0;
+  onProgress?.(0, urls.length);
+  async function worker(): Promise<void> {
+    while (next < urls.length) {
+      const url = urls[next++];
+      try {
+        if (!await cache.match(url)) {
+          const response = await fetch(url, { mode: 'no-cors', cache: 'no-store' });
+          if (response.status !== 0 && !response.ok) throw new Error(`Image request failed: ${response.status}`);
+          await cache.put(url, response);
+          downloaded++;
+        }
+      } catch { failed++; }
+      onProgress?.(++done, urls.length);
+    }
+  }
+  await Promise.all(Array.from({ length: 4 }, () => worker()));
+  return { downloaded, failed };
+}
 
 export function openLocalCatalog(): Promise<DB> {
   if (!opened) opened = (async () => {
@@ -80,7 +105,7 @@ export function openLocalCatalog(): Promise<DB> {
         for (const table of catalogTables) await tx.exec('SELECT crsql_as_crr(?)', [table]);
         await tx.exec('CREATE TABLE IF NOT EXISTS sync_state(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)');
         await tx.exec('DELETE FROM sync_state');
-        await tx.exec('PRAGMA user_version = 12');
+        await tx.exec(`PRAGMA user_version = ${catalogSchemaVersion}`);
       });
     } else if (version > catalogSchemaVersion) {
       throw new Error(`This app cannot open catalog schema ${version}; update Brewlog first.`);
@@ -317,6 +342,30 @@ export function openLocalCatalog(): Promise<DB> {
         await tx.exec('PRAGMA user_version = 31');
       });
     }
+    if ((await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version === 31) {
+      await db.tx(async tx => {
+        for (const [table, urlColumns, oldColumns] of [
+          ['model_images', ['image_url', 'thumbnail_url'],
+            ['image_bytes', 'image_mime_type', 'thumbnail_bytes', 'thumbnail_mime_type', 'image_webp', 'thumbnail_webp']],
+          ['manufacturer_logos', ['logo_url'], ['image_bytes', 'mime_type', 'image_webp']],
+          ['supply_images', ['image_url'], ['image_bytes', 'image_mime_type']]
+        ] as const) {
+          let present = new Set((await tx.execO<{ name: string }>(`PRAGMA table_info(${table})`)).map(row => row.name));
+          if (urlColumns.some(column => !present.has(column)) || oldColumns.some(column => present.has(column))) {
+            await tx.exec('SELECT crsql_begin_alter(?)', [table]);
+            for (const column of urlColumns) if (!present.has(column))
+              await tx.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+            for (const column of oldColumns) if (present.has(column))
+              await tx.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+            await tx.exec('SELECT crsql_commit_alter(?)', [table]);
+          }
+        }
+        // The server's new media URLs must be replayed even when the last
+        // catalog refresh happened before this schema upgrade.
+        await tx.exec("DELETE FROM sync_state WHERE key = 'lastRefreshAt'");
+        await tx.exec('PRAGMA user_version = 32');
+      });
+    }
     // Reconcile a schema already marked current by an interrupted or concurrent upgrade.
     await db.tx(async tx => {
       await tx.exec(catalogSupplyTables.supply_other_fermentable_specs);
@@ -355,9 +404,9 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
       'SELECT * FROM model_temperature_control'),
     db.execO<CatalogMeasurementChannel>('SELECT * FROM model_measurement_channels'),
     db.execO<{ model_id: string; has_image: number; has_thumbnail: number }>(
-      'SELECT model_id, image_bytes IS NOT NULL AS has_image, thumbnail_bytes IS NOT NULL AS has_thumbnail FROM model_images'),
+      'SELECT model_id, image_url IS NOT NULL AS has_image, thumbnail_url IS NOT NULL AS has_thumbnail FROM model_images'),
     db.execO<{ manufacturer_name: string; has_image: number }>(
-      'SELECT manufacturer_name, image_bytes IS NOT NULL AS has_image FROM manufacturer_logos'),
+      'SELECT manufacturer_name, logo_url IS NOT NULL AS has_image FROM manufacturer_logos'),
     db.execO<CatalogInventory>(`SELECT s.id, s.name, s.category, s.unit,
       g.yield_pct, g.color_lovibond, h.alpha_acid_pct, h.hop_form, y.attenuation_pct,
       other.typical_brix, other.extract_color_value, other.extract_color_scale,
@@ -370,7 +419,7 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
       LEFT JOIN supply_grain_classes gc ON gc.supply_id = s.id
       LEFT JOIN supply_products p ON p.supply_id = s.id ORDER BY s.name COLLATE NOCASE`),
     db.execO<{ supply_id: string; has_image: number }>(
-      'SELECT supply_id, image_bytes IS NOT NULL AS has_image FROM supply_images')
+      'SELECT supply_id, image_url IS NOT NULL AS has_image FROM supply_images')
   ]);
   const byId = new Map(models.map(model => [model.id, { ...model, measurement_channels: [] as CatalogMeasurementChannel[] }]));
   for (const row of modelImages) {

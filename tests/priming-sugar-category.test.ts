@@ -4,6 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { workspaceSchemaVersion } from '../shared/schema.ts';
+import { catalogSchemaVersion } from '../shared/catalog.ts';
 
 const directory = mkdtempSync(join(tmpdir(), 'brewlog-priming-sugar-'));
 process.env.BREWLOG_DATA_DIR = directory;
@@ -23,7 +24,7 @@ test('catalog upgrade preserves edited categories and unrelated rows', () => {
       .get(id) as { category: string }).category;
     assert.equal(category('inventory_priming_sugar'), 'Other');
     assert.equal(category('custom_other'), 'Other');
-    assert.equal(upgraded.pragma('user_version', { simple: true }), 31);
+    assert.equal(upgraded.pragma('user_version', { simple: true }), catalogSchemaVersion);
   } finally { upgraded.close(); }
 
   const partial = openCatalogDb(directory);
