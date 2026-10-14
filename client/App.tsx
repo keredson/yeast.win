@@ -248,17 +248,27 @@ export function App() {
   useEffect(() => {
     if (!session || !appActive) return;
     let cancelled = false;
+    let catalogLoaded = false;
+    let running = false;
     const load = async () => {
-      const catalogDb = await openLocalCatalog();
-      const cached = await readLocalCatalog(catalogDb);
-      if (!cancelled) { setCatalogEquipment(cached.equipment); setCatalogInventory(cached.inventory); }
+      if (running) return;
+      running = true;
       try {
+        const catalogDb = await openLocalCatalog();
+        if (!catalogLoaded) {
+          const cached = await readLocalCatalog(catalogDb);
+          if (!cancelled) { setCatalogEquipment(cached.equipment); setCatalogInventory(cached.inventory); }
+          catalogLoaded = true;
+        }
+        let catalogChecked = false;
         const refreshed = await syncLocalCatalog(catalogDb, (applied, total) => {
+          catalogChecked = true;
           if (!cancelled) setCatalogSyncProgress({ applied, total });
         });
         if (!cancelled) setCatalogSyncProgress(null);
-        if (!refreshed || cancelled) return;
-        setServerDisconnected(false);
+        if (cancelled) return;
+        if (catalogChecked) setServerDisconnected(false);
+        if (!refreshed) return;
         const updated = await readLocalCatalog(catalogDb);
         if (cancelled) return;
         setCatalogEquipment(updated.equipment);
@@ -268,7 +278,7 @@ export function App() {
         if (!cancelled) setCatalogSyncProgress(null);
         if (!cancelled && cause instanceof ApiUnavailableError) setServerDisconnected(true);
         // Cached catalog remains searchable offline.
-      }
+      } finally { running = false; }
     };
     const refreshCatalog = () => {
       void load().catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
@@ -527,10 +537,12 @@ export function App() {
   const avatarSrc = session.account.has_avatar ? `/api/me/avatar?v=${avatarVersion}` : undefined;
   const preferredUnits = session.preferred_units || defaultPreferredUnits;
   const activeBase = workspaceBase(workspaceId, session.workspaces);
-  const headerProgress = syncPhase === 'syncing' && syncProgress
-    ? { label: syncProgress.phase === 'uploading' ? 'Sending' : 'Applying', ...syncProgress }
-    : catalogSyncProgress && syncPhase !== 'syncing'
-      ? { label: 'Updating catalog', ...catalogSyncProgress } : null;
+  const workspaceProgress = syncPhase === 'syncing' && syncProgress
+    ? { label: syncProgress.phase === 'uploading' ? 'Sending' : 'Applying', ...syncProgress } : null;
+  const headerProgress = workspaceProgress && catalogSyncProgress
+    ? { label: 'Syncing brewery and catalog', applied: workspaceProgress.applied + catalogSyncProgress.applied,
+      total: workspaceProgress.total + catalogSyncProgress.total }
+    : workspaceProgress || (catalogSyncProgress ? { label: 'Updating catalog', ...catalogSyncProgress } : null);
   const breadcrumbRecords = { batches, recipes, inventory, supplies, equipment, equipmentModels, locations };
   const crumbs = section !== 'me' && section !== 'home' && db
     ? breadcrumbNodes(section, route.selectedId, breadcrumbRecords) : [];

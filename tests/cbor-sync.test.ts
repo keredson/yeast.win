@@ -89,5 +89,12 @@ test('catalog also streams CBOR changes from its SQLite snapshot', async () => {
     assert.equal((header as unknown[])[1], changes.length);
     assert.ok(changes.length > 0);
     assert.ok(changes.every(validChangeTuple));
+    const cursor = String((catalog.prepare('SELECT crsql_db_version() AS version').get() as { version: number }).version);
+    const emptyChunks: Uint8Array[] = [];
+    const currentResponse = { ...response,
+      end(value?: Uint8Array) { if (value) emptyChunks.push(value); }
+    } as ServerResponse;
+    await streamCborChanges(catalog, currentResponse, cursor, maxSequence);
+    assert.deepEqual(decodeItem(Buffer.concat(emptyChunks)), [syncProtocolVersion, 0, cursor]);
   } finally { catalog.close(); }
 });
