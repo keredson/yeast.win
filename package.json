@@ -13,6 +13,7 @@
     "setup:sqlite": "bash scripts/setup-sqlite.sh",
     "catalog:backup": "node scripts/backup-catalog.mjs",
     "smoke:browser": "node scripts/smoke-browser.mjs",
+    "smoke:public-shell": "node scripts/smoke-public-shell.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

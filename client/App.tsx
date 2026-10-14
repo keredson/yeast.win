@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppstoreOutlined, BookOutlined, DisconnectOutlined, EnvironmentOutlined, HomeOutlined, InboxOutlined, MenuOutlined, ToolOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Breadcrumb, Button, Card, Drawer, Empty, Form, Input, Layout, Menu, Popover, Progress, Select, Spin, Tooltip, Typography } from 'antd';
+import { Alert, Avatar, Breadcrumb, Button, Drawer, Empty, Layout, Menu, Popover, Progress, Select, Spin, Tooltip } from 'antd';
 import { api, ApiError, ApiUnavailableError, type PreferredUnits, type Session, type Workspace } from './api.ts';
 import { defaultPreferredUnits } from '../shared/units.ts';
 import { forgetLocalDb, openLocalDb, syncNow, type SyncProgress, type Batch, type Equipment, type InventoryItem, type InventoryLocation, type LocalDb, type Recipe, type RecipeType,
@@ -215,6 +215,7 @@ export function App() {
   useEffect(() => {
     if (localStorage.getItem(signedOutKey) === '1') {
       setLoading(false);
+      location.replace('/');
       return;
     }
     api<Session>('/me').then(result => {
@@ -228,6 +229,11 @@ export function App() {
       if (cause instanceof ApiUnavailableError) setServerDisconnected(true);
       if (cause instanceof ApiError && cause.status === 401) localStorage.removeItem(cachedSessionKey);
       const remembered = cause instanceof ApiError && cause.status === 401 ? null : cachedSession();
+      if (!remembered) {
+        const next = location.pathname + location.search;
+        location.replace(location.pathname === '/' ? '/' : `/login?next=${encodeURIComponent(next)}`);
+        return;
+      }
       if (remembered) canonicalizeLocation(remembered.workspaces);
       setSession(remembered);
       setWorkspaceId(remembered ? initialBrewery(remembered.workspaces) : null);
@@ -401,8 +407,7 @@ export function App() {
     localStorage.setItem(signedOutKey, '1');
     setSession(null);
     setOpenedDb(null);
-    history.replaceState(null, '', '/');
-    setRoute({ section: 'home', selectedId: null, slug: null });
+    location.replace('/');
   }
 
   const refresh = useCallback(async (activeDb: LocalDb, targetWorkspaceId: string) => {
@@ -554,8 +559,7 @@ export function App() {
   }
 
   if (loading) return <div className="loading-screen"><Spin size="large" /></div>;
-  if (!session) return <AccountAccess onAuthenticated={result => { setSession(result); setWorkspaceId(initialBrewery(result.workspaces));
-    canonicalizeLocation(result.workspaces); setRoute(routeFromPath(location.pathname)); }} />;
+  if (!session) return <div className="loading-screen"><Spin size="large" /></div>;
   const avatarSrc = session.account.has_avatar ? `/api/me/avatar?v=${avatarVersion}` : undefined;
   const preferredUnits = session.preferred_units || defaultPreferredUnits;
   const activeBase = workspaceBase(workspaceId, session.workspaces);
@@ -672,51 +676,4 @@ export function App() {
       </main>
     </div>
   </div>;
-}
-
-function AccountAccess({ onAuthenticated }: { onAuthenticated: (session: Session) => void }) {
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  async function submit(values: { username: string; password: string; confirm_password?: string }) {
-    setBusy(true); setError('');
-    try {
-      if (mode === 'signup' && values.password !== values.confirm_password) throw new Error('Passwords do not match');
-      await api(mode === 'signup' ? '/register' : '/login', 'POST', {
-        username: values.username.trim(), password: values.password
-      });
-      const session = await api<Session>('/me');
-      localStorage.removeItem(signedOutKey);
-      rememberSession(session);
-      onAuthenticated(session);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setBusy(false); }
-  }
-  return <div className="login-page"><Card className="login-card">
-    <div className="brand login-brand"><img className="brand-mark" src="/icon.svg" alt="" /><div><strong>Brewlog</strong><small>Your batches, as they happened</small></div></div>
-    <div className="auth-switch" role="group" aria-label="Account access">
-      <button type="button" className={mode === 'login' ? 'active' : ''} aria-pressed={mode === 'login'}
-        onClick={() => { setMode('login'); setError(''); }}>Sign in</button>
-      <button type="button" className={mode === 'signup' ? 'active' : ''} aria-pressed={mode === 'signup'}
-        onClick={() => { setMode('signup'); setError(''); }}>Create account</button>
-    </div>
-    <Typography.Title level={3}>{mode === 'signup' ? 'Create your account' : 'Sign in'}</Typography.Title>
-    {error && <Alert type="error" message={error} className="form-alert" />}
-    <Form key={mode} layout="vertical" onFinish={submit}>
-      <Form.Item name="username" label="Username" rules={[{ required: true },
-        ...(mode === 'signup' ? [{ pattern: /^[A-Za-z0-9][A-Za-z0-9_-]{2,39}$/, message: 'Use 3–40 letters, numbers, _ or -' }] : [])]}>
-        <Input autoComplete="username" size="large" maxLength={40} />
-      </Form.Item>
-      <Form.Item name="password" label="Password" rules={[{ required: true },
-        ...(mode === 'signup' ? [{ min: 8, message: 'Use at least 8 characters' }] : [])]}>
-        <Input.Password autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} size="large" maxLength={256} />
-      </Form.Item>
-      {mode === 'signup' && <Form.Item name="confirm_password" label="Confirm password" rules={[{ required: true }]}>
-        <Input.Password autoComplete="new-password" size="large" maxLength={256} />
-      </Form.Item>}
-      <Button htmlType="submit" type="primary" size="large" block loading={busy}>
-        {mode === 'signup' ? 'Create my account' : 'Sign in'}
-      </Button>
-    </Form>
-  </Card></div>;
 }
