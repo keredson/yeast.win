@@ -493,7 +493,7 @@ try {
   await page.getByText('Heat loss at boil: 100 W (brewery model)').waitFor();
   await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   await page.getByText('Capacity: 36 L').waitFor();
-  await page.getByRole('button', { name: 'Calibrate unit' }).click();
+  await page.getByRole('button', { name: 'Edit heat loss at boil' }).click();
   const boilDialog = page.getByRole('dialog', { name: "Calibrate this unit's boil-off" });
   await boilDialog.getByRole('spinbutton', { name: 'Start volume (L)' }).fill('30');
   await boilDialog.getByRole('spinbutton', { name: 'End volume (L)' }).fill('27');
@@ -501,14 +501,14 @@ try {
   await boilDialog.getByRole('button', { name: 'Save calibration' }).click();
   await page.getByText('Estimated boil-off at rated power: 3 L/h').waitFor();
   await page.getByText('Heat loss at boil: 198 W (this unit)').waitFor();
-  await page.getByRole('button', { name: 'Calibrate unit' }).click();
+  await page.getByRole('button', { name: 'Edit heat loss at boil' }).click();
   const recalibrationDialog = page.getByRole('dialog', { name: "Calibrate this unit's boil-off" });
   await recalibrationDialog.getByRole('spinbutton', { name: 'Start volume (L)' }).fill('30');
   await recalibrationDialog.getByRole('spinbutton', { name: 'End volume (L)' }).fill('28');
   await recalibrationDialog.getByRole('spinbutton', { name: 'Boil duration (minutes)' }).fill('60');
   await recalibrationDialog.getByRole('button', { name: 'Save calibration' }).click();
   await page.getByText('Estimated boil-off at rated power: 2 L/h').waitFor();
-  await page.getByRole('button', { name: 'Calibrate unit' }).click();
+  await page.getByRole('button', { name: 'Edit heat loss at boil' }).click();
   await page.getByRole('dialog', { name: "Calibrate this unit's boil-off" })
     .getByRole('button', { name: 'Restore to default' }).click();
   await page.getByText('Heat loss at boil: 100 W (brewery model)').waitFor();

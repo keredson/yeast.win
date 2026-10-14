@@ -11,6 +11,7 @@ import { assignEquipmentToBatch, createEquipment, createEquipmentUnit, deleteEqu
   updateEquipmentCalibration, updateEquipmentStockId,
   clearEquipmentModelOverride, clearEquipmentModelMeasurementOverrides,
   updateEquipmentModelAttribute, updateEquipmentModelMeasurementRange,
+  updateEquipmentUnitPostBoilLoss, clearEquipmentUnitOverrides,
   updateEquipmentTemperatureOffset, latestMeasuredMashEfficiency,
   type Batch, type Equipment, type EquipmentModelOverrideField,
   type EquipmentSpecifications, type EquipmentUse, type LocalDb } from './db.ts';
@@ -185,6 +186,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const [editModelRange, setEditModelRange] = useState<string | null>(null);
   const [newTemperatureCalibration, setNewTemperatureCalibration] = useState(false);
   const [editIdentity, setEditIdentity] = useState(false);
+  const [editPostBoilLoss, setEditPostBoilLoss] = useState(false);
   const [recentMashEfficiency, setRecentMashEfficiency] = useState<number | null>(null);
   const [addingCapability, setAddingCapability] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -381,6 +383,15 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
+  async function savePostBoilLoss(values: { post_boil_loss?: number; loss_unit: string }) {
+    if (!item) return;
+    try {
+      await updateEquipmentUnitPostBoilLoss(db, item, values.post_boil_loss == null ? null
+        : convertUnit(values.post_boil_loss, values.loss_unit, 'L'));
+      setEditPostBoilLoss(false); await onChanged();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
   async function saveIdentity(values: { stock_id?: string }) {
     if (!item) return;
     try {
@@ -427,6 +438,14 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
+  async function resetPostBoilLoss() {
+    if (!item) return;
+    try {
+      await clearEquipmentUnitOverrides(db, item, ['post_boil_loss_liters']);
+      setEditPostBoilLoss(false);
+      await onChanged();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
   async function resetModelOverride() {
     if (!selectedModel || !editModelField) return;
     try { await clearEquipmentModelOverride(db, selectedModel, editModelField); setEditModelField(null); await onChanged(); }
@@ -672,11 +691,14 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit temperature offset" onClick={() => setNewTemperatureCalibration(true)} /></div>}
           {item.has_heating && boilOffKinds.has(item.kind) && <div className="equipment-parameter"><span>Heat loss at boil: {specs.boil_heat_loss_watts == null
             ? 'Not calibrated' : `${Math.round(specs.boil_heat_loss_watts)} W (${boilHeatLossSource})`}</span>
-            <Button type="text" size="small" onClick={() => setNewBoilCalibration(true)}>Calibrate unit</Button></div>}
+            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit heat loss at boil"
+              onClick={() => setNewBoilCalibration(true)} /></div>}
           {ratedEstimate != null && <div className="equipment-parameter">Estimated boil-off at rated power: {Number(ratedEstimate.toFixed(2))} L/h</div>}
           {postBoilLossKinds.has(item.kind) && <div className="equipment-parameter"><span>
             Post-boil wort retained: {item.post_boil_loss_liters == null ? 'Not set (assume 0 L)'
-              : `${item.post_boil_loss_liters} L (${item.unit_post_boil_loss_liters != null ? 'this unit' : 'model'})`}</span></div>}
+              : `${item.post_boil_loss_liters} L (${item.unit_post_boil_loss_liters != null ? 'this unit' : 'model'})`}</span>
+            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Override post-boil wort retained for this unit"
+              onClick={() => { unitLossUnit.current = preferredUnits.volume; setEditPostBoilLoss(true); }} /></div>}
           {['all_in_one', 'mash_tun', 'kettle', 'electric_kettle'].includes(item.kind) &&
             <div className="equipment-parameter">Mash efficiency: {specs.mash_efficiency_pct != null
               ? `${specs.mash_efficiency_pct}% (set)` : recentMashEfficiency != null ? `${recentMashEfficiency}% (recent batch)` : 'Not set'}<br />
@@ -879,6 +901,20 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <Button type="primary" htmlType="submit">Add capability</Button>
         {addingCatalogDefault && <Button type="text" onClick={() => void restoreModelCapability(addingCapability!)}>
           Restore to default</Button>}
+      </Form>
+    </Modal>
+    <Modal title="Unit post-boil wort retained" open={editPostBoilLoss} onCancel={() => setEditPostBoilLoss(false)} footer={null} destroyOnHidden>
+      <Form key={`${item?.id}:post-boil-loss`} form={postBoilLossForm} layout="vertical" onFinish={savePostBoilLoss}
+        initialValues={{ post_boil_loss: item?.post_boil_loss_liters == null ? undefined
+          : convertUnit(item.post_boil_loss_liters, 'L', preferredUnits.volume), loss_unit: preferredUnits.volume }}>
+        <div className="form-pair"><Form.Item name="post_boil_loss" label="Post-boil wort retained">
+          <InputNumber className="full-width" min={0} step="any" /></Form.Item>
+          <Form.Item name="loss_unit" label="Unit"><Select options={unitOptions(unitGroups.volume)}
+            onChange={unit => { changeNumberUnit(postBoilLossForm, ['post_boil_loss'], unitLossUnit.current, unit);
+              unitLossUnit.current = unit; }} /></Form.Item></div>
+        <Button type="primary" htmlType="submit">Save unit value</Button>
+        {item?.unit_post_boil_loss_liters != null && <Button type="text"
+          onClick={() => void resetPostBoilLoss()}>Restore to model</Button>}
       </Form>
     </Modal>
     <Modal title="Edit Stock ID" open={editIdentity} onCancel={() => setEditIdentity(false)} footer={null} destroyOnHidden>
