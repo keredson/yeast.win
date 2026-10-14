@@ -15,7 +15,7 @@ import { assignEquipmentToBatch, createEquipment, createEquipmentUnit, deleteEqu
   updateEquipmentModelAttribute, updateEquipmentModelMeasurementRange,
   updateEquipmentUnitPostBoilLoss, clearEquipmentUnitOverrides,
   updateEquipmentTemperatureOffset, latestMeasuredMashEfficiency,
-  readEquipmentModelMedia, saveEquipmentModelMedia, type EquipmentModelMedia,
+  readEquipmentModelMedia, listEquipmentModelImages, saveEquipmentModelMedia, type EquipmentModelMedia,
   type Batch, type Equipment, type EquipmentModelOverrideField, type InventoryLocation,
   type EquipmentSpecifications, type EquipmentUse, type LocalDb } from './db.ts';
 import { capacityInLiters, capacityLabel, capacityUnits } from '../shared/capacity.ts';
@@ -196,6 +196,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const [productUrlDraft, setProductUrlDraft] = useState('');
   const [imageEdit, setImageEdit] = useState<File | null | undefined>();
   const [modelMedia, setModelMedia] = useState<{ modelId: string; row: EquipmentModelMedia | null; imageUrl: string | null } | null>(null);
+  const [modelThumbnails, setModelThumbnails] = useState<Record<string, string>>({});
   const [mediaRevision, setMediaRevision] = useState(0);
   const [newTemperatureCalibration, setNewTemperatureCalibration] = useState(false);
   const [editIdentity, setEditIdentity] = useState(false);
@@ -258,6 +259,22 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     }).catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => { cancelled = true; if (imageUrl) URL.revokeObjectURL(imageUrl); };
   }, [db, activeModel?.id, mediaRevision]);
+  useEffect(() => {
+    let cancelled = false;
+    const urls: string[] = [];
+    void listEquipmentModelImages(db).then(rows => {
+      const thumbnails: Record<string, string> = {};
+      for (const row of rows) {
+        if (!row.image_bytes?.length || !row.image_mime_type) continue;
+        const url = URL.createObjectURL(new Blob([new Uint8Array(row.image_bytes)], { type: row.image_mime_type }));
+        urls.push(url);
+        thumbnails[row.id] = url;
+      }
+      if (cancelled) urls.forEach(URL.revokeObjectURL);
+      else setModelThumbnails(thumbnails);
+    }).catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => { cancelled = true; urls.forEach(URL.revokeObjectURL); };
+  }, [db, models, mediaRevision]);
   const addingCatalogDefault = !!addingCapability && !!catalogParent && (addingCapability.startsWith('measurement:')
     ? !!catalogParent.measurement_channels?.some(channel => channel.measurement_kind === addingCapability.slice('measurement:'.length))
     : !!catalogParent[modelCapabilityFlags[addingCapability as keyof typeof modelCapabilityFlags]]);
@@ -662,9 +679,16 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       </div>
       {models.length > 0 && <Table<Equipment> className="equipment-table" dataSource={[...models].sort((a, b) => a.name.localeCompare(b.name))}
         rowKey="id" pagination={false} size="small" tableLayout="fixed" columns={[
-          { title: 'Model', dataIndex: 'name', width: '50%', render: (_, row) =>
-            <a href={`${basePath}/equipment/${equipmentModelPathSegment(row, models)}`}
-              onClick={event => { event.preventDefault(); onSelect(row.id); }}>{row.name}</a> },
+          { title: 'Model', dataIndex: 'name', width: '50%', render: (_, row) => {
+            const catalogImage = catalog.find(model => model.id === row.catalog_model_id);
+            const thumbnail = modelThumbnails[row.id] || catalogImage?.thumbnail_src || catalogImage?.image_src;
+            return <a className="equipment-model-table-name"
+              href={`${basePath}/equipment/${equipmentModelPathSegment(row, models)}`}
+              onClick={event => { event.preventDefault(); onSelect(row.id); }}>
+              {thumbnail && <img src={thumbnail} alt="" loading="lazy" />}
+              {row.name}
+            </a>;
+          } },
           { title: 'Units', key: 'units', width: '20%', render: (_: unknown, row: Equipment) =>
             equipment.filter(unit => unit.model_id === row.id).length },
           { title: 'Capabilities', key: 'capabilities', width: '30%', render: (_: unknown, row: Equipment) => equipmentCapabilities(row) }
