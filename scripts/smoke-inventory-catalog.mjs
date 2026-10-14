@@ -83,7 +83,7 @@ try {
   await page.getByRole('link', { name: 'https://example.com/house-malt' }).waitFor();
   await page.getByRole('button', { name: 'Edit image' }).click();
   const image = page.getByRole('dialog', { name: 'Edit product image' });
-  await image.getByLabel('Product image').setInputFiles('assets/catalog/supplies/supply_briess_pale_ale.jpg');
+  await image.getByLabel('Product image').setInputFiles('tests/fixtures/old-briess-caramel-60.jpg');
   await image.getByRole('button', { name: 'Save image' }).click();
   await image.waitFor({ state: 'hidden' });
   await page.locator('.supply-product-image img').waitFor();

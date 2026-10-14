@@ -11,6 +11,7 @@
     "start": "node --import tsx server/index.ts",
     "test": "tsx --test tests/*.test.ts",
     "setup:sqlite": "bash scripts/setup-sqlite.sh",
+    "catalog:backup": "node scripts/backup-catalog.mjs",
     "smoke:browser": "node scripts/smoke-browser.mjs",
     "typecheck": "tsc --noEmit"
   },

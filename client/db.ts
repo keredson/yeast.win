@@ -4,7 +4,7 @@ import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { nanoid } from 'nanoid';
 import { boilOffKinds, capacityKinds, equipmentKinds, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import { openLocalCatalog } from './catalog.ts';
-import { retiredGenericSupplies } from '../shared/catalogSupplyExpansion.ts';
+import { retiredGenericSupplies } from '../shared/retiredGenericSupplies.ts';
 import { hasGeneratedLocationSuffix, locationSlug } from './locationSlug.ts';
 import { recordSlug } from './recordSlug.ts';
 import type { CatalogEquipment, MeasurementChannel } from '../shared/catalog.ts';

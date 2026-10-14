@@ -246,6 +246,24 @@ export function openLocalCatalog(): Promise<DB> {
         await tx.exec('PRAGMA user_version = 28');
       });
     }
+    if ((await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version === 28) {
+      await db.tx(async tx => {
+        // The authoritative catalog was consolidated from two server histories.
+        // Old cursors cannot identify which history a device followed.
+        for (const table of catalogTables) {
+          const clock = await tx.execO<{ name: string }>(
+            'SELECT name FROM sqlite_master WHERE name = ?', [`${table}__crsql_clock`]);
+          if (clock.length) await tx.exec('SELECT crsql_as_table(?)', [table]);
+          await tx.exec(`DROP TABLE IF EXISTS "${table}"`);
+        }
+        for (const statement of [...Object.values(catalogModelTables), ...Object.values(catalogSupplyTables)]) {
+          await tx.exec(statement);
+        }
+        for (const table of catalogTables) await tx.exec('SELECT crsql_as_crr(?)', [table]);
+        await tx.exec('DELETE FROM sync_state');
+        await tx.exec('PRAGMA user_version = 29');
+      });
+    }
     return db;
   })().catch(error => { opened = undefined; throw error; });
   return opened;

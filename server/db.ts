@@ -1,11 +1,11 @@
 import Database from 'better-sqlite3';
-import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nanoid } from 'nanoid';
 import { recordSlug } from '../shared/recordSlug.ts';
 import { fillMissingRecipeBatchSizes } from '../shared/batchSize.ts';
-import { retiredGenericSupplies } from '../shared/catalogSupplyExpansion.ts';
+import { retiredGenericSupplies } from '../shared/retiredGenericSupplies.ts';
 import { indexStatements, legacyEquipmentCopyStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements,
   workspaceSchemaVersion, workspaceTableColumns, legacyEquipmentModelStatements, supplyMigrationStatements,
   primingSugarCategoryMigrationStatements } from '../shared/schema.ts';
@@ -238,10 +238,6 @@ export function openWorkspaceDb(id: string): Database.Database {
         db.exec(`DROP TABLE "${table}"`);
       }
       for (const statement of indexStatements) db.exec(statement);
-      if (version < 35) {
-        for (const statement of supplyMigrationStatements) db.exec(statement);
-        for (const statement of primingSugarCategoryMigrationStatements) db.exec(statement);
-      }
       if (hasLegacyMeta) db.exec('DROP TABLE schema_meta');
       db.pragma(`user_version = ${workspaceSchemaVersion}`);
       db.exec('COMMIT');
@@ -270,7 +266,10 @@ export function openWorkspaceDb(id: string): Database.Database {
       db.exec('DROP TABLE equipment_legacy_migration');
     })();
   }
-  db.transaction(() => { for (const statement of supplyMigrationStatements) db.exec(statement); })();
+  db.transaction(() => {
+    for (const statement of supplyMigrationStatements) db.exec(statement);
+    if (version < 35) for (const statement of primingSugarCategoryMigrationStatements) db.exec(statement);
+  })();
   db.transaction(() => {
     const recipes = db.prepare(`SELECT r.id, r.name, s.slug FROM recipes r
       LEFT JOIN recipe_slugs s ON s.id = r.id ORDER BY r.created_at, r.id`)
@@ -310,7 +309,7 @@ export function openWorkspaceDb(id: string): Database.Database {
       (SELECT archived_at FROM equipment_archives WHERE equipment_id = equipment.id ORDER BY archived_at LIMIT 1)
       WHERE removed_at IS NULL AND id IN (SELECT equipment_id FROM equipment_archives)`);
   const catalogPath = join(dataDir, 'catalog.sqlite');
-  if (existsSync(catalogPath)) db.prepare('ATTACH DATABASE ? AS catalog').run(catalogPath);
+  if (existsSync(catalogPath)) db.prepare('ATTACH DATABASE ? AS catalog').run(realpathSync(catalogPath));
   return db;
 }
 

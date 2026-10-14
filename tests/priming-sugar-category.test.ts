@@ -9,9 +9,9 @@ process.env.BREWLOG_DATA_DIR = directory;
 const { openCatalogDb } = await import('../server/catalog.ts');
 const { openWorkspaceDb, closeWorkspaceDb } = await import('../server/db.ts');
 
-test('catalog upgrade puts priming sugar in Adjunct and preserves unrelated rows', () => {
+test('catalog upgrade preserves edited categories and unrelated rows', () => {
   const before = openCatalogDb(directory);
-  before.prepare("UPDATE supplies SET category = 'Other' WHERE id = 'inventory_priming_sugar'").run();
+  before.prepare("INSERT INTO supplies(id, name, category, unit) VALUES ('inventory_priming_sugar', 'Priming sugar', 'Other', 'g')").run();
   before.prepare("INSERT INTO supplies(id, name, category, unit) VALUES ('custom_other', 'Custom item', 'Other', 'each')").run();
   before.pragma('user_version = 27');
   before.close();
@@ -20,9 +20,9 @@ test('catalog upgrade puts priming sugar in Adjunct and preserves unrelated rows
   try {
     const category = (id: string) => (upgraded.prepare('SELECT category FROM supplies WHERE id = ?')
       .get(id) as { category: string }).category;
-    assert.equal(category('inventory_priming_sugar'), 'Adjunct');
+    assert.equal(category('inventory_priming_sugar'), 'Other');
     assert.equal(category('custom_other'), 'Other');
-    assert.equal(upgraded.pragma('user_version', { simple: true }), 28);
+    assert.equal(upgraded.pragma('user_version', { simple: true }), 29);
   } finally { upgraded.close(); }
 
   const partial = openCatalogDb(directory);
@@ -31,7 +31,7 @@ test('catalog upgrade puts priming sugar in Adjunct and preserves unrelated rows
   const resumed = openCatalogDb(directory);
   try {
     assert.equal((resumed.prepare("SELECT category FROM supplies WHERE id = 'inventory_priming_sugar'")
-      .get() as { category: string }).category, 'Adjunct');
+      .get() as { category: string }).category, 'Other');
     assert.equal((resumed.prepare("SELECT category FROM supplies WHERE id = 'custom_other'")
       .get() as { category: string }).category, 'Other');
   } finally { resumed.close(); }
