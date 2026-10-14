@@ -4,7 +4,7 @@ Status: working design, 2026-10-11. This records the decisions made so far and t
 
 ## Purpose
 
-Yeast.Win! is an offline-capable PWA for recording **what happened to a batch and when**. A recipe is a reusable plan for events; a batch is the actual fermentation record. The primary screen is a batch timeline that shows planned work, completed work, measurements, sensor data, and photos together.
+Yeast.Win! is an offline-capable notebook for recording **what happened to a batch and when**. It is designed for experimentation: a batch can start with a recipe, a rough idea, or no plan at all. Recipes are optional reusable plans; the batch is the actual fermentation record. The primary screen is a batch timeline that shows planned work, completed work, measurements, sensor data, and photos together. The product should help makers remember changes and observations, without treating repeated batches as attempts to hit an identical target.
 
 The public brand is **Yeast.Win!**, matching the `yeast.win` domain. Existing `brewlog` names in database files, browser storage, cookies, cache entries, environment variables, and the development socket are stable internal identifiers. Keep them compatible across the rebrand so existing users retain sessions and offline data.
 

@@ -35,7 +35,7 @@ export default defineConfig(({ command }) => {
       manifest: {
         name: 'Yeast.Win!',
         short_name: 'Yeast.Win!',
-        description: 'Plan and track your fermentation batches',
+        description: 'A notebook for fermentation experiments and batches',
         theme_color: '#193b39',
         background_color: '#f5f3ed',
         display: 'standalone',

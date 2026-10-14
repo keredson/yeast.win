@@ -78,16 +78,13 @@ button, input { font: inherit; }
   gap: 12px; min-height: 76px; border-top: 1px solid #edf0e9; }
 .preview-event strong { display: block; color: #254039; font-size: 14px; }
 .preview-event small { display: block; margin-top: 3px; color: #708078; font-size: 12px; }
-.preview-event time, .preview-next { color: #829086; font-size: 11px; }
+.preview-event time { color: #829086; font-size: 11px; }
 .preview-marker { z-index: 1; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%;
   background: #e7eee7; color: #28745b; font-size: 14px; font-weight: 700; }
-.preview-event-done .preview-marker { background: #dceee3; }
-.preview-event-current .preview-marker { border: 5px solid #fffefa; background: #d89b59; box-shadow: 0 0 0 2px #e6cead; }
-.preview-next { padding: 5px 9px; border-radius: 20px; background: #f9ecdb; color: #996b38; font-weight: 700; }
 .preview-card-footer { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding-top: 18px;
-  border-top: 1px solid #edf0e9; color: #62786c; font-size: 12px; }
+  border-top: 1px solid #edf0e9; color: #936b43; font-family: Georgia, serif; font-size: 14px; font-style: italic; }
 .preview-footer-icon { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 8px;
-  background: #e7eee7; color: #2d745a; font-size: 16px; }
+  background: #f7e9d7; color: #a47443; font-family: sans-serif; font-size: 16px; font-style: normal; }
 .splash-footer { display: flex; justify-content: space-between; gap: 16px; border-top: 1px solid #dfdfd3;
   padding-top: 20px; color: #7b8a7c; font-size: 13px; }
 .splash-details { padding: 84px 0 96px; border-top: 1px solid #dfdfd3; }
