@@ -540,8 +540,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(item.kind)}</span>
           <div className="equipment-title"><h2>{item.name}</h2>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit equipment name and slug" onClick={() => setEditIdentity(true)} /></div>
-          <div className="muted">Model: {item.model_name || item.name}{item.stock_id ? ` · Stock ID: ${item.stock_id}` : ''}</div>
-          <div className="muted">Slug: {equipmentPathSegment(item, equipment)}</div></div></div>
+          <div className="muted">Model: {item.model_name || item.name}{item.stock_id ? ` · Stock ID: ${item.stock_id}` : ''}</div></div></div>
         <div className="equipment-parameters">
           <div className="equipment-parameter equipment-assignments"><strong>Current batches</strong>
             {itemUses.map(use => <div key={use.id} className="equipment-assignment">
