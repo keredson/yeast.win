@@ -916,10 +916,10 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       {matchingModels.length ? <div className="equipment-catalog-list" role="list">
         {matchingModels.map(model => <div key={model.id} role="listitem">
           <button type="button" className="equipment-catalog-option" onClick={() => chooseCatalogModel(model)}>
-            {model.thumbnail_src && <img className="equipment-catalog-thumbnail" src={model.thumbnail_src} alt="" loading="lazy" />}
             <span className="equipment-catalog-option-name"><strong>{model.name}</strong>
               <small>{equipmentKindLabel(model.kind)}{model.measurement_channels?.length
                 ? ` · ${channelSummary(model.measurement_channels)}` : ''}</small></span>
+            {model.thumbnail_src && <img className="equipment-catalog-thumbnail" src={model.thumbnail_src} alt="" loading="lazy" />}
           </button>
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching equipment' : 'No catalog equipment available'} />}
