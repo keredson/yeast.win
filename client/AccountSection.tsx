@@ -1,16 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { DeleteOutlined, EditOutlined, PlusOutlined, SyncOutlined, UploadOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Button, Card, Form, Input, InputNumber, Modal, Select, Switch, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Avatar, Button, Card, Form, Input, Modal, Select, Switch, Tag, Tooltip, Typography } from 'antd';
 import { api, type PreferredUnits, type Workspace } from './api.ts';
-import { breweryWortLoss, updateBreweryWortLoss, type LocalDb } from './db.ts';
-import { convertUnit } from '../shared/units.ts';
 
 interface Props {
   username: string;
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
-  db: LocalDb | null;
-  onWorkspaceDataChanged: () => Promise<void>;
   onCreateWorkspace: (name: string) => Promise<void>;
   onUpdateWorkspace: (id: string, name: string, slug: string | null) => Promise<void>;
   onDeleteWorkspace: (id: string) => Promise<void>;
@@ -29,7 +25,7 @@ interface Props {
 
 interface PasswordValues { currentPassword: string; newPassword: string; confirmPassword: string }
 
-export function AccountSection({ username, workspaces, activeWorkspaceId, db, onWorkspaceDataChanged,
+export function AccountSection({ username, workspaces, activeWorkspaceId,
   onCreateWorkspace, onUpdateWorkspace, onDeleteWorkspace,
   avatarSrc, onAvatarUploaded, preferredUnits, onPreferredUnitsChange,
   syncPhase, syncStatus, canSync, onManualSync, autoSync, onAutoSyncChange, onSignOut }: Props) {
@@ -48,32 +44,6 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db, on
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [unitsBusy, setUnitsBusy] = useState(false);
   const [unitsError, setUnitsError] = useState('');
-  const [wortLoss, setWortLoss] = useState<number | null>(null);
-  const [wortLossBusy, setWortLossBusy] = useState(false);
-  const [wortLossError, setWortLossError] = useState('');
-  const [wortLossForm] = Form.useForm<{ wort_loss?: number }>();
-
-  useEffect(() => {
-    if (!db) { setWortLoss(null); return; }
-    let active = true;
-    void breweryWortLoss(db).then(value => { if (active) setWortLoss(value); })
-      .catch(cause => { if (active) setWortLossError(cause instanceof Error ? cause.message : String(cause)); });
-    return () => { active = false; };
-  }, [db, activeWorkspaceId, syncPhase]);
-
-  async function saveWortLoss(values: { wort_loss?: number }) {
-    if (!db) return;
-    setWortLossBusy(true); setWortLossError('');
-    try {
-      const liters = values.wort_loss == null ? null : convertUnit(values.wort_loss, preferredUnits.volume, 'L');
-      await updateBreweryWortLoss(db, liters);
-      setWortLoss(liters);
-      wortLossForm.resetFields();
-      await onWorkspaceDataChanged();
-    } catch (cause) { setWortLossError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setWortLossBusy(false); }
-  }
-
   async function uploadAvatar(file: File) {
     setAvatarBusy(true);
     setAvatarError('');
@@ -199,18 +169,6 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db, on
       <Typography.Paragraph>This permanently deletes this brewery’s batches, recipes, inventory, equipment, and photos from the server and this device.</Typography.Paragraph>
       {breweryError && <Alert type="error" message={breweryError} />}
     </Modal>
-    {db && <Card title="Brewing defaults" className="account-card">
-      <p className="muted">Estimated wort lost between the kettle and fermenter. Recipes can override this default; batches keep their starting value and can be adjusted separately.</p>
-      <p>Wort loss to fermenter: {wortLoss == null ? 'Not set'
-        : `${Number((convertUnit(wortLoss, 'L', preferredUnits.volume) || 0).toFixed(2))} ${preferredUnits.volume}`}</p>
-      <Form form={wortLossForm} layout="vertical" onFinish={saveWortLoss}>
-        <Form.Item name="wort_loss" label={`Brewery default (${preferredUnits.volume})`}>
-          <InputNumber className="full-width" min={0} step="any" /></Form.Item>
-        <Button type="primary" htmlType="submit" loading={wortLossBusy}>Save default</Button>
-        {wortLoss != null && <Button type="text" disabled={wortLossBusy} onClick={() => void saveWortLoss({})}>Clear default</Button>}
-      </Form>
-      {wortLossError && <Alert type="error" message={wortLossError} className="form-alert" />}
-    </Card>}
     <Card title="Security" className="account-card">
       {passwordChanged && <Alert type="success" message="Password changed. Other sessions have been signed out." showIcon />}
       <Button onClick={() => { setPasswordError(''); setPasswordOpen(true); }}>Change password</Button>

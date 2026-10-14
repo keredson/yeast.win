@@ -30,7 +30,8 @@ async function signIn(page, createAccount = false) {
   await page.getByLabel('Password', { exact: true }).fill(password);
   if (createAccount) await page.getByLabel('Confirm password').fill(password);
   await page.locator('.login-card form button[type="submit"]').click();
-  await page.getByRole('heading', { name: 'Batches' }).waitFor({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'Account settings' }).waitFor({ timeout: 30_000 });
+  await navigateSection(page, 'Batches');
   await page.getByRole('button', { name: 'New batch' }).waitFor();
 }
 
@@ -127,12 +128,8 @@ try {
   await page.getByRole('combobox', { name: 'Brewery' }).click();
   await page.getByText('Homebrew', { exact: true }).last().click();
   await page.locator('.workspace-select').getByText('Homebrew').waitFor();
-  if (new URL(page.url()).pathname !== '/batches') throw new Error('Homebrew should use the root batch URL');
-  await page.goBack();
-  await page.getByRole('heading', { name: 'Equipment', exact: true }).waitFor();
-  await page.locator('.workspace-select').getByText(secondBrewery).waitFor();
-  await page.goForward();
-  await page.getByRole('heading', { name: 'Batches', exact: true }).waitFor();
+  if (new URL(page.url()).pathname !== '/') throw new Error('Homebrew should use the root dashboard URL');
+  await navigateSection(page, 'Batches');
   await page.getByRole('button', { name: 'New batch' }).waitFor();
   console.log('Created a brewery in Settings and switched from the header');
 
@@ -291,6 +288,7 @@ try {
   await page.getByRole('button', { name: 'Add from catalog' }).click();
   const catalogDialog = page.getByRole('dialog', { name: 'Add from catalog' });
   await catalogDialog.getByRole('searchbox', { name: 'Search equipment models' }).fill('Inkbird');
+  await catalogDialog.getByRole('button', { name: /Inkbird ITC-308\b/ }).first().waitFor();
   if (!await catalogDialog.getByRole('button', { name: /Inkbird ITC-308\b/ }).count()
     || await catalogDialog.getByRole('button', { name: /Inkbird ITC-308-WIFI/ }).count()) {
     throw new Error('Catalog should offer one Inkbird ITC-308 model');
@@ -645,9 +643,9 @@ try {
 
   await page.getByRole('button', { name: 'Account settings' }).click();
   await page.getByRole('heading', { name: 'Settings' }).waitFor();
-  await page.getByRole('spinbutton', { name: 'Brewery default (L)' }).fill('2');
-  await page.getByRole('button', { name: 'Save default' }).click();
-  await page.getByText('Wort loss to fermenter: 2 L').waitFor();
+  if (await page.getByRole('heading', { name: 'Brewing defaults' }).count()) {
+    throw new Error('Settings still exposes the aggregate wort loss default');
+  }
   await page.getByRole('combobox', { name: 'Preferred mass unit' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="oz"]').click();
   await page.waitForFunction(async () => (await (await fetch('/api/me')).json()).preferred_units.mass === 'oz');
@@ -664,6 +662,18 @@ try {
     await page.getByRole('heading', { name, exact: true }).waitFor();
     await navigateSection(page, 'Equipment');
   }
+  await page.locator('.equipment-table').getByRole('link', { name: 'Smoke kettle' }).click();
+  await page.getByRole('button', { name: 'Edit model post-boil wort retained' }).click();
+  const modelLossDialog = page.getByRole('dialog', { name: /Edit model Post-boil wort retained/ });
+  await modelLossDialog.getByRole('spinbutton', { name: 'Post-boil wort retained' }).fill('1');
+  await modelLossDialog.getByRole('button', { name: 'Save model value' }).click();
+  await page.getByText('Post-boil wort retained: 1 L').waitFor();
+  await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
+  await page.getByRole('button', { name: 'Override post-boil wort retained for this unit' }).click();
+  const unitLossDialog = page.getByRole('dialog', { name: 'Unit post-boil wort retained' });
+  await unitLossDialog.getByRole('spinbutton', { name: 'Post-boil wort retained' }).fill('0');
+  await unitLossDialog.getByRole('button', { name: 'Save unit value' }).click();
+  await page.getByText('Post-boil wort retained: 0 L (this unit)').waitFor();
   await navigateSection(page, 'Recipes');
   if (await page.locator('.recipe-index-actions .ant-btn-default').count() !== 2
     || await page.locator('.section-heading').getByRole('button', { name: /New recipe|Import recipes/ }).count()) {
@@ -873,12 +883,9 @@ try {
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke recipe' }).click();
   await page.getByRole('button', { name: 'Create batch' }).click();
   await page.getByRole('heading', { name: 'Batch from recipe' }).waitFor();
-  await page.getByText('Expected wort loss to fermenter: 2 L').waitFor();
-  await page.getByRole('button', { name: 'Edit batch wort loss' }).click();
-  const batchWortLossDialog = page.getByRole('dialog', { name: 'Batch wort loss' });
-  await batchWortLossDialog.getByRole('spinbutton', { name: 'Wort loss to fermenter (L)' }).fill('1.5');
-  await batchWortLossDialog.getByRole('button', { name: 'Save batch value' }).click();
-  await page.getByText('Expected wort loss to fermenter: 1.5 L').waitFor();
+  if (await page.getByRole('button', { name: 'Edit batch wort loss' }).count()) {
+    throw new Error('Batch still exposes the aggregate wort loss override');
+  }
   await page.locator('.plan-card').getByText('2-row pale malt extra').waitFor();
   await page.getByRole('button', { name: 'Record Transfer to fermenter' }).click();
   const recordTransfer = page.getByRole('dialog', { name: 'Record: Transfer to fermenter' });
@@ -929,27 +936,22 @@ try {
   const recipeSettings = page.getByRole('dialog', { name: 'Recipe settings' });
   await recipeSettings.getByRole('textbox', { name: 'Recipe name' }).fill('Smoke recipe revised');
   await recipeSettings.getByRole('textbox', { name: 'Description' }).fill('Edited recipe description');
-  await recipeSettings.getByRole('spinbutton', { name: 'Wort loss to fermenter (L)' }).fill('3');
+  if (await recipeSettings.getByRole('spinbutton', { name: /Wort loss/ }).count()) {
+    throw new Error('Recipe settings still exposes a wort loss override');
+  }
   await recipeSettings.getByRole('combobox', { name: 'Type' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Wine' }).click();
   await recipeSettings.getByRole('button', { name: 'Save changes' }).click();
   await recipeSettings.waitFor({ state: 'hidden' });
   await page.getByRole('heading', { name: 'Smoke recipe revised' }).waitFor();
   await page.getByText('Edited recipe description').waitFor();
-  await page.getByRole('button', { name: 'Recipe settings' }).click();
-  await page.getByRole('dialog', { name: 'Recipe settings' })
-    .getByRole('spinbutton', { name: 'Wort loss to fermenter (L)' }).inputValue()
-    .then(value => { if (value !== '3') throw new Error(`Recipe wort loss override was ${value}`); });
-  await page.getByRole('dialog', { name: 'Recipe settings' }).locator('.ant-modal-close').click();
-  await recipeSettings.waitFor({ state: 'hidden' });
   if (await page.getByText('Recipe plan · wine').count()) throw new Error('Recipe header still repeats its type');
   await page.locator('.recipe-detail-heading .recipe-type-icon[data-recipe-type="wine"]').waitFor();
   await page.getByRole('button', { name: 'Start batch' }).click();
   await page.getByRole('dialog', { name: 'Start a batch' }).getByRole('textbox', { name: 'Batch name' })
-    .fill('Batch with recipe wort loss');
+    .fill('Batch from revised recipe');
   await page.getByRole('dialog', { name: 'Start a batch' }).getByRole('button', { name: 'Create batch' }).click();
-  await page.getByRole('heading', { name: 'Batch with recipe wort loss' }).waitFor();
-  await page.getByText('Expected wort loss to fermenter: 3 L').waitFor();
+  await page.getByRole('heading', { name: 'Batch from revised recipe' }).waitFor();
   await navigateSection(page, 'Recipes');
   await page.locator('.record-link').filter({ hasText: 'Smoke recipe revised' }).click();
   await page.getByRole('button', { name: 'Recipe settings' }).click();

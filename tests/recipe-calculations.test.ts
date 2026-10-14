@@ -11,6 +11,8 @@ const events: (PlanInput & { id: string })[] = [
   { id: 'mash', event_type: 'temperature_control', title: 'Mash', details: { phase: 'mash', equipment_id: 'tun' } },
   { id: 'drain', event_type: 'transfer', title: 'Drain grain', anchor_event_id: 'mash',
     details: { purpose: 'drain_grain', to_vessel_id: 'kettle' } },
+  { id: 'boil', event_type: 'temperature_control', title: 'Boil', details: { phase: 'boil', equipment_id: 'kettle' } },
+  { id: 'chill', event_type: 'temperature_control', title: 'Chill', details: { phase: 'chill', equipment_id: 'chiller' } },
   { id: 'grain-add', event_type: 'addition', title: 'Pale malt',
     details: { item_category: 'Grain', item_name: 'Pale malt', inventory_item_id: 'grain', quantity: 5, unit: 'kg' } },
   { id: 'pitch', event_type: 'addition', title: 'Pitch yeast',
@@ -18,19 +20,20 @@ const events: (PlanInput & { id: string })[] = [
 ];
 const equipment: Equipment[] = [
   { id: 'tun', kind: 'mash_tun', name: 'Tun', mash_efficiency_pct: 75 },
-  { id: 'kettle', kind: 'kettle', name: 'Kettle' }
+  { id: 'kettle', kind: 'kettle', name: 'Kettle', post_boil_loss_liters: 1.5 },
+  { id: 'chiller', kind: 'chiller', name: 'Chiller', post_boil_loss_liters: .5 }
 ];
 
-test('estimates OG, FG and ABV using mash efficiency and expected wort loss', () => {
+test('sums losses from post-boil equipment for OG, FG and ABV', () => {
   const result = calculateRecipe(events, [grain, yeast], equipment,
-    { target_fermenter_volume_liters: 20, wort_loss_liters: 2 }, {});
+    { target_fermenter_volume_liters: 20 }, {});
   const expectedOg = 1 + (5 / 0.45359237 * 46 * .8 * .75) / (22 / 3.785411784) / 1000;
   assert.ok(Math.abs(result.originalGravity! - expectedOg) < .000001);
   assert.ok(Math.abs(result.finalGravity! - (1 + (expectedOg - 1) * .25)) < .000001);
   assert.ok(Math.abs(result.abvPct! - (expectedOg - result.finalGravity!) * 131.25) < .000001);
   const mcu = 5 / 0.45359237 * 2 / (20 / 3.785411784);
   assert.ok(Math.abs(result.colorSrm! - 1.4922 * mcu ** .6859) < .000001);
-  assert.match(result.efficiencyLabel!, /wort loss/);
+  assert.match(result.efficiencyLabel!, /2 L post-boil loss/);
 });
 
 test('imported brewhouse efficiency works without selected equipment', () => {
@@ -39,15 +42,14 @@ test('imported brewhouse efficiency works without selected equipment', () => {
   assert.match(imported.efficiencyLabel!, /brewhouse/);
 });
 
-test('incomplete equipment or ingredient inputs do not produce misleading gravity', () => {
-  const missingRetention = calculateRecipe(events, [grain, yeast], equipment,
+test('missing loss attributes default to zero, while missing ingredients still block gravity', () => {
+  const missingRetention = calculateRecipe(events, [grain, yeast], equipment.map(item => ({ ...item, post_boil_loss_liters: null })),
     { target_fermenter_volume_liters: 20 }, {});
-  assert.equal(missingRetention.originalGravity, null);
-  assert.ok(missingRetention.missing.some(message => message.includes('wort loss')));
-  assert.ok(missingRetention.unavailable.originalGravity.some(message => message.includes('wort loss')));
+  assert.ok(missingRetention.originalGravity != null);
+  assert.match(missingRetention.efficiencyLabel!, /0 L post-boil loss/);
   assert.deepEqual(missingRetention.unavailable.colorSrm, []);
   const missingYield = calculateRecipe(events, [{ ...grain, yield_pct: null, color_lovibond: null }, yeast], equipment,
-    { target_fermenter_volume_liters: 20, wort_loss_liters: 2 }, { 'grain-add': { yield_pct: 80 } });
+    { target_fermenter_volume_liters: 20 }, { 'grain-add': { yield_pct: 80 } });
   assert.equal(missingYield.originalGravity, null);
   assert.ok(missingYield.missing.some(message => message.includes('extract yield')));
   assert.equal(missingYield.colorSrm, null);
@@ -55,11 +57,25 @@ test('incomplete equipment or ingredient inputs do not produce misleading gravit
   assert.ok(missingYield.unavailable.colorSrm.some(message => message.includes('color value')));
 });
 
-test('zero wort loss is an explicit recipe input', () => {
-  const result = calculateRecipe(events, [grain, yeast], equipment,
-    { target_fermenter_volume_liters: 20, wort_loss_liters: 0 }, {});
+test('repeated use of one unit contributes its loss only once', () => {
+  const repeated = [...events, { id: 'second-boil', event_type: 'temperature_control', title: 'Boil again',
+    details: { phase: 'boil', equipment_id: 'kettle' } }] as (PlanInput & { id: string })[];
+  const result = calculateRecipe(repeated, [grain, yeast], equipment,
+    { target_fermenter_volume_liters: 20 }, {});
   assert.ok(result.originalGravity != null);
-  assert.match(result.efficiencyLabel!, /0 L wort loss/);
+  assert.match(result.efficiencyLabel!, /2 L post-boil loss/);
+});
+
+test('transfer equipment contributes post-boil loss without counting grain draining or duplicate equipment', () => {
+  const transfer = { id: 'to-fermenter', event_type: 'transfer', title: 'Transfer to fermenter',
+    details: { purpose: 'to_fermenter', transfer_equipment_ids: ['pump', 'chiller'] } };
+  const draining = { id: 'drain-again', event_type: 'transfer', title: 'Drain grain',
+    details: { purpose: 'drain_grain', transfer_equipment_ids: ['tun'] } };
+  const result = calculateRecipe([...events, transfer, draining], [grain, yeast],
+    [...equipment, { id: 'pump', kind: 'pump', name: 'Pump', post_boil_loss_liters: .25 },
+      { id: 'tun', kind: 'mash_tun', name: 'Tun', mash_efficiency_pct: 75, post_boil_loss_liters: 3 }],
+    { target_fermenter_volume_liters: 20 }, {});
+  assert.match(result.efficiencyLabel!, /2.25 L post-boil loss/);
 });
 
 test('cider recipe asks for sugar inputs rather than grain mash equipment', () => {

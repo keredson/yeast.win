@@ -43,7 +43,7 @@ interface Values {
   item_category?: string; quantity?: number; unit?: string; pounds?: number; ounces?: number;
   measurement_kind?: string; target_value?: number; target_unit?: string;
   mode?: string; container_name?: string; container_size?: number; container_count?: number;
-  to_vessel_id?: string;
+  to_vessel_id?: string; transfer_equipment_ids?: string[];
   mash_equipment_id?: string;
   equipment_id?: string;
   duration_value?: number; duration_unit?: typeof timeUnits[number]['value'];
@@ -155,6 +155,9 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
       if (kind === 'packaging' && values.unit) details.container_unit = values.unit;
       if (kind === 'transfer') {
         const vessel = equipment.find(item => item.id === values.to_vessel_id);
+        details.transfer_equipment_ids = values.transfer_equipment_ids || [];
+        if (details.purpose !== 'drain_grain' && (vessel?.kind.includes('fermenter') ||
+          /transfer to fermenter/i.test(title))) details.purpose = 'to_fermenter';
         if (vessel) details.to_vessel_name = vessel.name;
         else if (values.to_vessel_id === initialDetails.to_vessel_id && initialDetails.to_vessel_name) {
           details.to_vessel_name = initialDetails.to_vessel_name;
@@ -211,6 +214,7 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
         : phase === 'chill' ? convertUnit(20, '°C', preferredUnits.temperature) : undefined), container_name: initialDetails.container_name,
     container_size: initialDetails.container_size, container_count: initialDetails.container_count,
     to_vessel_id: initialDetails.to_vessel_id, mash_equipment_id: initialDetails.mash_equipment_id,
+    transfer_equipment_ids: initialDetails.transfer_equipment_ids || [],
     equipment_id: initialDetails.equipment_id
   }}>
     {error && <Alert type="error" message={error} className="form-alert" />}
@@ -283,6 +287,10 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
             if (item?.kind === 'all_in_one' && !form.getFieldValue('to_vessel_id')) form.setFieldValue('to_vessel_id', id); }} /></Form.Item>}
       <Form.Item name="to_vessel_id" label={preset?.purpose === 'drain_grain' || initialDetails.purpose === 'drain_grain'
         ? 'Collecting vessel' : 'To vessel'}><Select allowClear showSearch optionFilterProp="label" options={vesselOptions} /></Form.Item>
+      {preset?.purpose !== 'drain_grain' && initialDetails.purpose !== 'drain_grain' &&
+        <Form.Item name="transfer_equipment_ids" label="Transfer equipment"><Select mode="multiple" showSearch optionFilterProp="label"
+          options={equipment.filter(item => !['fermenter', 'temp_control_fermenter', 'pressure_fermenter', 'temp_pressure_fermenter'].includes(item.kind))
+            .map(item => ({ value: item.id, label: item.name }))} /></Form.Item>}
       <div className="form-pair"><Form.Item name="quantity" label="Volume"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
         <Form.Item name="unit" label="Unit"><Select options={unitOptions(unitGroups.volume)} onChange={changeMainUnit} /></Form.Item></div>
     </>}

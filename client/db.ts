@@ -36,6 +36,7 @@ export interface PlanDetails {
   item_category?: string; item_name?: string; catalog_item_id?: string; inventory_item_id?: string; supply_id?: string;
   quantity?: number; unit?: string; display_unit?: string;
   measurement_kind?: string; to_vessel_id?: string; to_vessel_name?: string;
+  transfer_equipment_ids?: string[];
   purpose?: string; mash_equipment_id?: string; equipment_id?: string;
   container_name?: string; container_size?: number; container_count?: number; container_unit?: string;
 }
@@ -49,6 +50,8 @@ export interface EquipmentSpecifications {
   catalog_model_boil_heat_loss_watts?: number | null;
   rated_heat_removal_watts?: number | null; min_temperature_c?: number | null; max_temperature_c?: number | null;
   mash_efficiency_pct?: number | null; grain_absorption_l_per_kg?: number | null;
+  post_boil_loss_liters?: number | null; unit_post_boil_loss_liters?: number | null;
+  workspace_model_post_boil_loss_liters?: number | null;
   temperature_offset_c?: number | null;
   buffer_4_observed?: number | null; buffer_7_observed?: number | null;
   reference_sg?: number | null; observed_sg?: number | null;
@@ -151,6 +154,9 @@ const effectiveEquipmentView = `CREATE TEMP VIEW effective_equipment AS
     control.max_temperature_c AS unit_max_temperature_c,
     mash.mash_efficiency_pct AS unit_mash_efficiency_pct,
     mash.grain_absorption_l_per_kg AS unit_grain_absorption_l_per_kg,
+    post_boil_loss.post_boil_loss_liters AS unit_post_boil_loss_liters,
+    workspace_model.post_boil_loss_liters AS workspace_model_post_boil_loss_liters,
+    COALESCE(post_boil_loss.post_boil_loss_liters, workspace_model.post_boil_loss_liters) AS post_boil_loss_liters,
     CASE WHEN COALESCE(workspace_model.has_liquid_containment, model_liquid.model_id IS NOT NULL)
       THEN COALESCE(liquid.capacity_liters, workspace_model.capacity_liters, model_liquid.capacity_liters) END AS capacity_liters,
     CASE WHEN COALESCE(workspace_model.has_pressure_rating, model_pressure.model_id IS NOT NULL)
@@ -197,6 +203,7 @@ const effectiveEquipmentView = `CREATE TEMP VIEW effective_equipment AS
   LEFT JOIN main.equipment_model_boil_characterization workspace_boil ON workspace_boil.model_id = workspace_model.id
   LEFT JOIN main.equipment_temperature_calibration temp ON temp.equipment_id = e.id
   LEFT JOIN main.equipment_mash_assumptions mash ON mash.equipment_id = e.id
+  LEFT JOIN main.equipment_post_boil_losses post_boil_loss ON post_boil_loss.equipment_id = e.id
   LEFT JOIN catalog.equipment_models model ON model.id = workspace_model.catalog_model_id
   LEFT JOIN catalog.model_liquid_containment model_liquid ON model_liquid.model_id = model.id
   LEFT JOIN catalog.model_pressure_rating model_pressure ON model_pressure.model_id = model.id
@@ -250,13 +257,19 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
       const hasWorkspaceTables = [...existingTables].some(name => replicatedTables.includes(name));
       const legacyLossValues: number[] = [];
       const legacyBatchLosses: { batch_id: string; wort_loss_liters: number }[] = [];
+      const legacyModelLosses = new Map<string, number>();
+      const legacyUnitLosses = new Map<string, number>();
       if (version < 23 && hasWorkspaceTables) {
         for (const table of ['equipment_models', 'equipment_mash_assumptions', 'equipment']) {
           if (!existingTables.has(table) || !(await db.execO<{ name: string }>(`PRAGMA table_info("${table}")`))
             .some(column => column.name === 'kettle_retention_liters')) continue;
-          legacyLossValues.push(...(await db.execO<{ value: number }>(
-            `SELECT DISTINCT kettle_retention_liters AS value FROM "${table}"
-              WHERE kettle_retention_liters IS NOT NULL`)).map(row => row.value));
+          const idColumn = table === 'equipment_mash_assumptions' ? 'equipment_id' : 'id';
+          const rows = await db.execO<{ id: string; value: number }>(
+            `SELECT ${idColumn} AS id, kettle_retention_liters AS value FROM "${table}"
+              WHERE kettle_retention_liters IS NOT NULL`);
+          legacyLossValues.push(...rows.map(row => row.value));
+          for (const row of rows) (table === 'equipment_models' ? legacyModelLosses : legacyUnitLosses)
+            .set(row.id, row.value);
         }
         if (existingTables.has('batch_event_inputs') && existingTables.has('batch_events')
           && (await db.execO<{ name: string }>('PRAGMA table_info(batch_event_inputs)'))
@@ -348,6 +361,14 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
           VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET
             wort_loss_liters = COALESCE(batch_recipe_inputs.wort_loss_liters, excluded.wort_loss_liters)`,
         [row.batch_id, row.wort_loss_liters]);
+      });
+      if (legacyModelLosses.size || legacyUnitLosses.size) await db.tx(async tx => {
+        for (const [id, liters] of legacyModelLosses) await tx.exec(`UPDATE equipment_models
+          SET post_boil_loss_liters = COALESCE(post_boil_loss_liters, ?) WHERE id = ?`, [liters, id]);
+        for (const [id, liters] of legacyUnitLosses) await tx.exec(`INSERT INTO equipment_post_boil_losses
+          (equipment_id, post_boil_loss_liters) VALUES (?, ?)
+          ON CONFLICT(equipment_id) DO UPDATE SET post_boil_loss_liters =
+            COALESCE(equipment_post_boil_losses.post_boil_loss_liters, excluded.post_boil_loss_liters)`, [id, liters]);
       });
       await db.exec('UPDATE equipment SET added_at = COALESCE(added_at, created_at) WHERE added_at IS NULL');
       await db.exec(`UPDATE equipment SET removed_at =
@@ -442,8 +463,7 @@ export async function createBatch(db: DB, name: string, description: string, acc
   await db.tx(async tx => {
     await tx.exec('INSERT INTO batches(id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
       [id, name, description || null, 'active', now, now]);
-    await tx.exec(`INSERT INTO batch_recipe_inputs(id, wort_loss_liters)
-      VALUES (?, (SELECT wort_loss_liters FROM brewery_process_defaults WHERE id = 'brewery'))`, [id]);
+    await tx.exec('INSERT INTO batch_recipe_inputs(id) VALUES (?)', [id]);
   });
   return id;
 }
@@ -456,8 +476,7 @@ export async function startBatchFromTemplate(db: DB, recipeType: RecipeType, nam
   await db.tx(async tx => {
     await tx.exec('INSERT INTO batches(id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
       [id, name, description || null, 'active', now, now]);
-    await tx.exec(`INSERT INTO batch_recipe_inputs(id, wort_loss_liters)
-      VALUES (?, (SELECT wort_loss_liters FROM brewery_process_defaults WHERE id = 'brewery'))`, [id]);
+    await tx.exec('INSERT INTO batch_recipe_inputs(id) VALUES (?)', [id]);
     for (const plan of plans) {
       await tx.exec(`INSERT INTO batch_events(id, batch_id, event_type, title, anchor_event_id,
         offset_seconds, anchor_point, duration_seconds, instructions, created_at, created_by_account_id)
@@ -501,46 +520,6 @@ export async function recipeTargetVolume(db: DB, recipeId: string): Promise<numb
   return rows[0]?.target_fermenter_volume_liters ?? null;
 }
 
-function validWortLoss(liters: number | null): void {
-  if (liters != null && (!Number.isFinite(liters) || liters < 0)) throw new Error('Enter a valid wort loss');
-}
-
-export async function breweryWortLoss(db: DB): Promise<number | null> {
-  const rows = await db.execO<{ wort_loss_liters: number | null }>(
-    "SELECT wort_loss_liters FROM brewery_process_defaults WHERE id = 'brewery'");
-  return rows[0]?.wort_loss_liters ?? null;
-}
-
-export async function updateBreweryWortLoss(db: DB, liters: number | null): Promise<void> {
-  validWortLoss(liters);
-  await db.exec(`INSERT INTO brewery_process_defaults(id, wort_loss_liters) VALUES ('brewery', ?)
-    ON CONFLICT(id) DO UPDATE SET wort_loss_liters = excluded.wort_loss_liters`, [liters]);
-}
-
-export async function recipeWortLoss(db: DB, recipeId: string): Promise<number | null> {
-  const rows = await db.execO<{ wort_loss_liters: number | null }>(
-    'SELECT wort_loss_liters FROM recipe_inputs WHERE id = ?', [recipeId]);
-  return rows[0]?.wort_loss_liters ?? null;
-}
-
-export async function updateRecipeWortLoss(db: DB, recipeId: string, liters: number | null): Promise<void> {
-  validWortLoss(liters);
-  await db.exec(`INSERT INTO recipe_inputs(id, wort_loss_liters) VALUES (?, ?)
-    ON CONFLICT(id) DO UPDATE SET wort_loss_liters = excluded.wort_loss_liters`, [recipeId, liters]);
-}
-
-export async function batchWortLoss(db: DB, batchId: string): Promise<number | null> {
-  const rows = await db.execO<{ wort_loss_liters: number | null }>(
-    'SELECT wort_loss_liters FROM batch_recipe_inputs WHERE id = ?', [batchId]);
-  return rows[0]?.wort_loss_liters ?? null;
-}
-
-export async function updateBatchWortLoss(db: DB, batchId: string, liters: number | null): Promise<void> {
-  validWortLoss(liters);
-  await db.exec(`INSERT INTO batch_recipe_inputs(id, wort_loss_liters) VALUES (?, ?)
-    ON CONFLICT(id) DO UPDATE SET wort_loss_liters = excluded.wort_loss_liters`, [batchId, liters]);
-}
-
 export async function updateRecipeTargetVolume(db: DB, recipeId: string, liters: number | null): Promise<void> {
   if (liters != null && (!Number.isFinite(liters) || liters <= 0)) throw new Error('Enter a positive batch size');
   await db.exec(`INSERT INTO recipe_inputs(id, target_fermenter_volume_liters) VALUES (?, ?)
@@ -575,6 +554,7 @@ export async function deleteRecipe(db: DB, recipeId: string): Promise<void> {
     const events = await tx.execO<{ id: string }>('SELECT id FROM recipe_events WHERE recipe_id = ?', [recipeId]);
     for (const event of events) {
       await tx.exec('DELETE FROM recipe_event_inputs WHERE id = ?', [event.id]);
+      await tx.exec('DELETE FROM recipe_transfer_equipment WHERE event_id = ?', [event.id]);
       for (const [table] of Object.values(planPayloads.recipe)) await tx.exec(`DELETE FROM ${table} WHERE event_id = ?`, [event.id]);
     }
     await tx.exec('DELETE FROM recipe_events WHERE recipe_id = ?', [recipeId]);
@@ -620,6 +600,12 @@ function payloadFor(scope: PlanScope, eventType: string): readonly [string, read
 }
 
 async function writePlanPayload(db: Pick<DB, 'exec'>, scope: PlanScope, id: string, eventType: string, details: PlanDetails): Promise<void> {
+  const equipmentTable = scope === 'recipe' ? 'recipe_transfer_equipment' : 'transfer_equipment';
+  await db.exec(`DELETE FROM ${equipmentTable} WHERE event_id = ?`, [id]);
+  if (eventType === 'transfer') for (const equipmentId of new Set(details.transfer_equipment_ids || [])) {
+    await db.exec(`INSERT INTO ${equipmentTable}(id, event_id, equipment_id) VALUES (?, ?, ?)`,
+      [`${id}:${equipmentId}`, id, equipmentId]);
+  }
   const payload = payloadFor(scope, eventType);
   for (const [kind, [table]] of Object.entries(planPayloads[scope])) {
     if (kind !== eventType) await db.exec(`DELETE FROM ${table} WHERE event_id = ?`, [id]);
@@ -633,7 +619,10 @@ async function writePlanPayload(db: Pick<DB, 'exec'>, scope: PlanScope, id: stri
     await db.exec('DELETE FROM packaging WHERE event_id = ?', [id]);
     return;
   }
-  const values = columns.map(column => details[column as keyof PlanDetails] ?? null);
+  const values = columns.map(column => {
+    const value = details[column as keyof PlanDetails];
+    return typeof value === 'string' || typeof value === 'number' ? value : null;
+  });
   await db.exec(`INSERT INTO ${table}(event_id, ${columns.join(', ')}) VALUES (?, ${columns.map(() => '?').join(', ')})
     ON CONFLICT(event_id) DO UPDATE SET ${columns.map(column => `${column} = excluded.${column}`).join(', ')}`,
   [id, ...values]);
@@ -666,6 +655,15 @@ async function fillPlanDetails<T extends StoredPlan>(db: Pick<DB, 'execO'>, scop
         }
       }
     }
+  }
+  const transfers = rows.filter(row => row.event_type === 'transfer');
+  if (transfers.length) {
+    const equipmentTable = scope === 'recipe' ? 'recipe_transfer_equipment' : 'transfer_equipment';
+    const links = await db.execO<{ event_id: string; equipment_id: string }>(
+      `SELECT event_id, equipment_id FROM ${equipmentTable} WHERE event_id IN (${transfers.map(() => '?').join(', ')})`,
+      transfers.map(row => row.id));
+    for (const row of transfers) row.details.transfer_equipment_ids = links
+      .filter(link => link.event_id === row.id).map(link => link.equipment_id);
   }
   return rows;
 }
@@ -807,7 +805,7 @@ export function recipeTemplatePlans(recipeType: RecipeType, temperatureUnit: '°
         { phase: 'chill', mode: 'chill', target_value: convertUnit(20, '°C', temperatureUnit)!, target_unit: temperatureUnit,
           anchor_point: 'end' }, 6);
       insert(transferId, 'transfer', 'Transfer to fermenter', chillId,
-        { anchor_point: 'end' }, 7);
+        { anchor_point: 'end', purpose: 'to_fermenter' }, 7);
     }
     const gravityId = nanoid();
     insert(gravityId, 'measurement', 'Measure original specific gravity', recipeType === 'beer' ? transferId : null,
@@ -942,6 +940,7 @@ export async function deleteRecipePlan(db: DB, recipeId: string, planId: string)
         WHERE id = ? AND recipe_id = ?`, [effectiveOffset(child), child.id, recipeId]);
     }
     await tx.exec('DELETE FROM recipe_event_inputs WHERE id = ?', [planId]);
+    await tx.exec('DELETE FROM recipe_transfer_equipment WHERE event_id = ?', [planId]);
     for (const [table] of Object.values(planPayloads.recipe)) await tx.exec(`DELETE FROM ${table} WHERE event_id = ?`, [planId]);
     await tx.exec('DELETE FROM recipe_events WHERE id = ? AND recipe_id = ?', [planId, recipeId]);
   });
@@ -979,7 +978,8 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
   const stock = await listInventory(db);
   const suppliesForRecipe = await listSupplies(db);
   const referencedModels = new Set(plans.flatMap(plan =>
-    [plan.details.equipment_id, plan.details.mash_equipment_id, plan.details.to_vessel_id]
+    [plan.details.equipment_id, plan.details.mash_equipment_id, plan.details.to_vessel_id,
+      ...(plan.details.transfer_equipment_ids || [])]
       .filter((id): id is string => typeof id === 'string' && !!id)));
   const units = await db.execO<{ id: string; model_id: string; name: string }>(
     'SELECT id, model_id, name FROM equipment WHERE removed_at IS NULL');
@@ -999,7 +999,8 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
       inventory_item_id: matchingStock.length === 1 ? matchingStock[0].id : undefined,
       equipment_id: details.equipment_id ? modelToUnit.get(details.equipment_id) : undefined,
       mash_equipment_id: details.mash_equipment_id ? modelToUnit.get(details.mash_equipment_id) : undefined,
-      to_vessel_id: details.to_vessel_id ? modelToUnit.get(details.to_vessel_id) : undefined };
+      to_vessel_id: details.to_vessel_id ? modelToUnit.get(details.to_vessel_id) : undefined,
+      transfer_equipment_ids: details.transfer_equipment_ids?.map(id => modelToUnit.get(id)!).filter(Boolean) };
   };
   const latestEfficiencies = new Map<string, number | null>();
   for (const plan of plans) {
@@ -1015,12 +1016,10 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
   await db.tx(async tx => {
     await tx.exec('INSERT INTO batches(id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
       [batchId, name, description, 'active', now, now]);
-    await tx.exec(`INSERT INTO batch_recipe_inputs(id, target_fermenter_volume_liters, brewhouse_efficiency_pct, wort_loss_liters)
-      SELECT ?, r.target_fermenter_volume_liters, r.brewhouse_efficiency_pct,
-        COALESCE(r.wort_loss_liters, (SELECT wort_loss_liters FROM brewery_process_defaults WHERE id = 'brewery'))
+    await tx.exec(`INSERT INTO batch_recipe_inputs(id, target_fermenter_volume_liters, brewhouse_efficiency_pct)
+      SELECT ?, r.target_fermenter_volume_liters, r.brewhouse_efficiency_pct
       FROM recipe_inputs r WHERE r.id = ?`, [batchId, recipe.id]);
-    await tx.exec(`INSERT OR IGNORE INTO batch_recipe_inputs(id, wort_loss_liters)
-      VALUES (?, (SELECT wort_loss_liters FROM brewery_process_defaults WHERE id = 'brewery'))`, [batchId]);
+    await tx.exec('INSERT OR IGNORE INTO batch_recipe_inputs(id) VALUES (?)', [batchId]);
     for (const plan of plans) {
       await tx.exec(`INSERT INTO batch_events(id, batch_id, recipe_event_id, event_type, title, planned_at,
         anchor_event_id, offset_seconds, anchor_point, duration_seconds, instructions, created_at, created_by_account_id)
@@ -1113,17 +1112,18 @@ export async function startBatchFromPrevious(db: DB, sourceBatchId: string, name
     await tx.exec('INSERT INTO batches(id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
       [batchId, name, description || null, 'active', now, now]);
     await tx.exec('INSERT INTO batch_origins(id, source_batch_id) VALUES (?, ?)', [batchId, sourceBatchId]);
-    await tx.exec(`INSERT INTO batch_recipe_inputs(id, target_fermenter_volume_liters, brewhouse_efficiency_pct, wort_loss_liters)
-      SELECT ?, target_fermenter_volume_liters, brewhouse_efficiency_pct, wort_loss_liters
+    await tx.exec(`INSERT INTO batch_recipe_inputs(id, target_fermenter_volume_liters, brewhouse_efficiency_pct)
+      SELECT ?, target_fermenter_volume_liters, brewhouse_efficiency_pct
       FROM batch_recipe_inputs WHERE id = ?`, [batchId, sourceBatchId]);
-    await tx.exec(`INSERT OR IGNORE INTO batch_recipe_inputs(id, wort_loss_liters)
-      VALUES (?, (SELECT wort_loss_liters FROM brewery_process_defaults WHERE id = 'brewery'))`, [batchId]);
+    await tx.exec('INSERT OR IGNORE INTO batch_recipe_inputs(id) VALUES (?)', [batchId]);
     for (const plan of plans) {
       const details: PlanDetails = { ...plan.details,
         inventory_item_id: plan.event_type === 'addition' ? mapStock(plan.details) : undefined,
         equipment_id: mapEquipment(plan.details.equipment_id),
         mash_equipment_id: mapEquipment(plan.details.mash_equipment_id),
-        to_vessel_id: mapEquipment(plan.details.to_vessel_id) };
+        to_vessel_id: mapEquipment(plan.details.to_vessel_id),
+        transfer_equipment_ids: plan.details.transfer_equipment_ids?.map(mapEquipment)
+          .filter((id): id is string => !!id) };
       await tx.exec(`INSERT INTO batch_events(id, batch_id, event_type, title, planned_at, anchor_event_id,
         offset_seconds, anchor_point, duration_seconds, instructions, created_at, created_by_account_id)
         VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1430,7 +1430,8 @@ export async function listEquipmentModels(db: DB): Promise<Equipment[]> {
       THEN COALESCE(m.min_temperature_c, ct.min_temperature_c) END AS min_temperature_c,
     CASE WHEN COALESCE(m.has_temperature_control, ct.model_id IS NOT NULL)
       THEN COALESCE(m.max_temperature_c, ct.max_temperature_c) END AS max_temperature_c,
-    m.mash_efficiency_pct, m.grain_absorption_l_per_kg,
+    m.mash_efficiency_pct, m.grain_absorption_l_per_kg, m.post_boil_loss_liters,
+    m.post_boil_loss_liters AS workspace_model_post_boil_loss_liters,
     COALESCE(wb.heat_loss_watts, cb.heat_loss_watts) AS boil_heat_loss_watts,
     wb.heat_loss_watts AS workspace_model_boil_heat_loss_watts,
     cb.heat_loss_watts AS catalog_model_boil_heat_loss_watts
@@ -1906,10 +1907,18 @@ const unitOverrideLocation = {
   capacity_liters: 'equipment_liquid_containment', max_pressure_kpa: 'equipment_pressure_rating',
   rated_power_watts: 'equipment_heating', rated_heat_removal_watts: 'equipment_cooling',
   min_temperature_c: 'equipment_temperature_control', max_temperature_c: 'equipment_temperature_control',
-  mash_efficiency_pct: 'equipment_mash_assumptions', grain_absorption_l_per_kg: 'equipment_mash_assumptions'
+  mash_efficiency_pct: 'equipment_mash_assumptions', grain_absorption_l_per_kg: 'equipment_mash_assumptions',
+  post_boil_loss_liters: 'equipment_post_boil_losses'
 } as const;
 
 export type EquipmentOverrideField = keyof typeof unitOverrideLocation;
+
+export async function updateEquipmentUnitPostBoilLoss(db: DB, item: Equipment, liters: number | null): Promise<void> {
+  if (liters != null && (!Number.isFinite(liters) || liters < 0)) throw new Error('Enter a valid wort loss');
+  await db.exec(`INSERT INTO equipment_post_boil_losses(equipment_id, post_boil_loss_liters) VALUES (?, ?)
+    ON CONFLICT(equipment_id) DO UPDATE SET post_boil_loss_liters = excluded.post_boil_loss_liters`,
+  [item.id, liters]);
+}
 
 export async function clearEquipmentUnitOverrides(db: DB, item: Equipment,
   fields: EquipmentOverrideField[]): Promise<void> {
@@ -1932,7 +1941,8 @@ export async function clearEquipmentUnitMeasurementOverrides(db: DB, item: Equip
 
 const modelOverrideFields = [
   'capacity_liters', 'max_pressure_kpa', 'rated_power_watts', 'rated_heat_removal_watts',
-  'min_temperature_c', 'max_temperature_c', 'mash_efficiency_pct', 'grain_absorption_l_per_kg'
+  'min_temperature_c', 'max_temperature_c', 'mash_efficiency_pct', 'grain_absorption_l_per_kg',
+  'post_boil_loss_liters'
 ] as const;
 export type EquipmentModelOverrideField = typeof modelOverrideFields[number];
 
@@ -1947,7 +1957,7 @@ export async function updateEquipmentModelAttribute(db: DB, model: Equipment, fi
     if (!Number.isFinite(value)) throw new Error('Enter a valid model value');
     if (['capacity_liters', 'max_pressure_kpa', 'rated_power_watts', 'rated_heat_removal_watts'].includes(field)
       && value <= 0 || field === 'mash_efficiency_pct' && (value < 0 || value > 100)
-      || field === 'grain_absorption_l_per_kg' && value < 0) throw new Error('Enter a valid model value');
+      || ['grain_absorption_l_per_kg', 'post_boil_loss_liters'].includes(field) && value < 0) throw new Error('Enter a valid model value');
     if (field === 'min_temperature_c' && model.max_temperature_c != null && value >= model.max_temperature_c
       || field === 'max_temperature_c' && model.min_temperature_c != null && value <= model.min_temperature_c) {
       throw new Error('Enter a valid temperature range');

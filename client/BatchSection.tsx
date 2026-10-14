@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Select } from 'antd';
-import { PlusOutlined, SettingOutlined } from '@ant-design/icons';
+import { Alert, Button, Empty, Form, Input, Modal, Select } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
 import { addBatchPlan, createBatch, eventDetails, eventFormData, listEvents, listPhotos, releaseEquipmentUse,
-  startBatchFromRecipe, startBatchFromTemplate, startBatchFromPrevious, updateBatchPlan, batchWortLoss, updateBatchWortLoss,
+  startBatchFromRecipe, startBatchFromTemplate, startBatchFromPrevious, updateBatchPlan,
   type ActualEvent, type Batch, type Equipment, type InventoryItem,
   type LocalDb, type MeasurementKind, type PlanInput, type Recipe, type RecipeType } from './db.ts';
 import { kindLabel } from './constants.ts';
@@ -13,7 +13,6 @@ import { EventTimeline } from './EventTimeline.tsx';
 import { RecipeEquipmentFields } from './RecipeEquipmentFields.tsx';
 import type { PreferredUnits } from './api.ts';
 import type { CatalogInventory } from '../shared/catalog.ts';
-import { convertUnit } from '../shared/units.ts';
 
 export function BatchSection({ db, basePath, accountId, batches, recipes, equipment, equipmentModels, inventory, catalogInventory, preferredUnits, selectedId, onSelect, onChanged }: {
   db: LocalDb; basePath: string; accountId: string; batches: Batch[]; recipes: Recipe[]; equipment: Equipment[]; equipmentModels: Equipment[]; inventory: InventoryItem[];
@@ -34,16 +33,13 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   const [recordingEvent, setRecordingEvent] = useState<ActualEvent | null>(null);
   const [editingData, setEditingData] = useState<{ measurementKind?: MeasurementKind; payload: Record<string, string | number | null> } | null>(null);
   const [error, setError] = useState('');
-  const [wortLoss, setWortLoss] = useState<number | null>(null);
-  const [editWortLoss, setEditWortLoss] = useState(false);
   const batch = batches.find(item => item.id === selectedId) || null;
 
   async function refreshDetail() {
     if (!selectedId) return;
-    const [nextEvents, nextPhotos, nextWortLoss] = await Promise.all([
-      listEvents(db, selectedId), listPhotos(db, selectedId), batchWortLoss(db, selectedId)]);
+    const [nextEvents, nextPhotos] = await Promise.all([
+      listEvents(db, selectedId), listPhotos(db, selectedId)]);
     setEvents(nextEvents);
-    setWortLoss(nextWortLoss);
     const nextDetails: Record<string, string> = {};
     for (const event of nextEvents.filter(item => item.actual_at != null)) {
       nextDetails[event.id] = await eventDetails(db, event, preferredUnits.mass);
@@ -61,7 +57,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   async function changed() { await refreshDetail(); await onChanged(); }
 
   async function create(values: { name: string; description?: string; start_from: string; recipe_id?: string;
-    source_batch_id?: string; unit_ids?: Record<string, string>; stock_ids?: Record<string, string>; wort_loss?: number }) {
+    source_batch_id?: string; unit_ids?: Record<string, string>; stock_ids?: Record<string, string> }) {
     try {
       let id: string;
       if (values.start_from === 'recipe') {
@@ -79,18 +75,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
       } else {
         id = await createBatch(db, values.name.trim(), values.description || '', accountId);
       }
-      if (values.wort_loss != null) await updateBatchWortLoss(db, id,
-        convertUnit(values.wort_loss, preferredUnits.volume, 'L'));
       onSelect(id); setNewBatch(false); await onChanged();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-  }
-
-  async function saveWortLoss(values: { wort_loss: number }) {
-    if (!batch) return;
-    try {
-      await updateBatchWortLoss(db, batch.id, convertUnit(values.wort_loss, preferredUnits.volume, 'L'));
-      setEditWortLoss(false);
-      await changed();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
@@ -134,10 +119,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
           ? <a href={`${basePath}/batch/${batch.source_batch_id}`}
             onClick={event => { event.preventDefault(); onSelect(batch.source_batch_id!); }}>{batch.source_batch_name}</a>
           : 'a previous batch'}</p>}
-        <div className="equipment-parameter"><span>Expected wort loss to fermenter: {wortLoss == null ? 'Not set'
-          : `${Number((convertUnit(wortLoss, 'L', preferredUnits.volume) || 0).toFixed(2))} ${preferredUnits.volume}`}</span>
-          <Button type="text" size="small" icon={<SettingOutlined />} aria-label="Edit batch wort loss"
-            onClick={() => setEditWortLoss(true)} /></div></div></div>
+        </div></div>
       <EventTimeline events={events} batchStartAt={batch.created_at} equipment={equipment} details={details} photos={photos}
         onEdit={event => event.actual_at != null ? void recordOrEdit(event as ActualEvent) : setEditingPlan(event as ActualEvent)}
         onRecord={event => void recordOrEdit(event)}
@@ -166,19 +148,8 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
           <Select showSearch optionFilterProp="label" placeholder="Choose a batch"
             options={batches.map(previous => ({ value: previous.id, label: previous.name }))} /></Form.Item>
           <PreviousBatchFields db={db} batchId={selectedPreviousId} equipment={equipment} inventory={inventory} /></>}
-        <Form.Item name="wort_loss" label={`Wort loss override (${preferredUnits.volume})`}>
-          <InputNumber className="full-width" min={0} step="any" /></Form.Item>
         <Form.Item name="description" label="Description"><Input.TextArea rows={2} /></Form.Item>
         <Button type="primary" htmlType="submit">Create batch</Button>
-      </Form>
-    </Modal>
-    <Modal title="Batch wort loss" open={editWortLoss} onCancel={() => setEditWortLoss(false)} footer={null} destroyOnHidden>
-      <Form key={`${batch?.id}:${editWortLoss}`} layout="vertical" onFinish={saveWortLoss}
-        initialValues={{ wort_loss: wortLoss == null ? undefined : convertUnit(wortLoss, 'L', preferredUnits.volume) }}>
-        <p className="muted">Adjust the expected loss for this batch without changing its recipe or brewery default.</p>
-        <Form.Item name="wort_loss" label={`Wort loss to fermenter (${preferredUnits.volume})`} rules={[{ required: true }]}>
-          <InputNumber className="full-width" min={0} step="any" /></Form.Item>
-        <Button type="primary" htmlType="submit">Save batch value</Button>
       </Form>
     </Modal>
     <Modal title={editingPlan ? editingPlan.event_type === 'addition' ? 'Edit ingredient'

@@ -20,14 +20,20 @@ function positive(value: unknown): number | null {
   return Number.isFinite(number) && number > 0 ? number : null;
 }
 
-function nonNegative(value: unknown): number | null {
-  if (value == null || value === '') return null;
-  const number = Number(value);
-  return Number.isFinite(number) && number >= 0 ? number : null;
+// Only equipment linked to post-boil actions contributes to this estimate.
+// A missing loss is treated as zero, not as an unrecorded equipment default.
+export function estimatedPostBoilLoss(events: Event[], equipment: Equipment[]): number {
+  const ids = new Set(events.filter(event => event.event_type === 'temperature_control'
+    && ['boil', 'chill'].includes(String(event.details.phase || '')))
+    .map(event => String(event.details.equipment_id || '')).filter(Boolean));
+  for (const event of events) {
+    if (event.event_type !== 'transfer' || event.details.purpose !== 'to_fermenter') continue;
+    for (const id of event.details.transfer_equipment_ids || []) ids.add(id);
+  }
+  return [...ids].reduce((total, id) => total + Math.max(0,
+    equipment.find(item => item.id === id)?.post_boil_loss_liters ?? 0), 0);
 }
 
-// Estimates deliberately use only explicit inputs. Mash efficiency requires
-// an expected wort loss to translate kettle extract into fermenter gravity.
 export function calculateRecipe(events: Event[], inventory: InventoryItem[], equipment: Equipment[],
   recipeInputs: Record<string, unknown>, eventInputs: Record<string, Record<string, unknown>>,
   recentMashEfficiency: Record<string, number> = {}, recipeType = 'beer'): RecipeEstimate {
@@ -56,15 +62,10 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
   let efficiency: number | null = null;
   let extractVolume: number | null = targetLiters;
   if (mashEfficiency != null) {
-    const wortLoss = nonNegative(recipeInputs.wort_loss_liters);
-    if (wortLoss != null) {
-      efficiency = mashEfficiency;
-      extractVolume = targetLiters == null ? null : targetLiters + wortLoss;
-      efficiencyLabel = `${mashEfficiency}% mash efficiency${mashSpecs.mash_efficiency_pct == null ? ' (recent batch)' : ''}; ${wortLoss} L wort loss`;
-    } else if (importedBrewhouseEfficiency == null) {
-      const message = 'Set expected wort loss in brewery or recipe settings to use mash efficiency.';
-      missing.push(message); gravityMissing.push(message);
-    }
+    const wortLoss = estimatedPostBoilLoss(events, equipment);
+    efficiency = mashEfficiency;
+    extractVolume = targetLiters == null ? null : targetLiters + wortLoss;
+    efficiencyLabel = `${mashEfficiency}% mash efficiency${mashSpecs.mash_efficiency_pct == null ? ' (recent batch)' : ''}; ${wortLoss} L post-boil loss`;
   }
   if (efficiency == null && importedBrewhouseEfficiency != null && importedBrewhouseEfficiency <= 100) {
     efficiency = importedBrewhouseEfficiency;

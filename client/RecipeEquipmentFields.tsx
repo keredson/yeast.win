@@ -11,7 +11,8 @@ export function RecipeEquipmentFields({ db, recipeId, equipment, models }: {
     let active = true;
     void listRecipePlans(db, recipeId).then(plans => {
       if (active) setModelIds([...new Set(plans.flatMap(plan =>
-        [plan.details.equipment_id, plan.details.mash_equipment_id, plan.details.to_vessel_id]
+        [plan.details.equipment_id, plan.details.mash_equipment_id, plan.details.to_vessel_id,
+          ...(plan.details.transfer_equipment_ids || [])]
           .filter((id): id is string => typeof id === 'string' && !!id)))]);
     });
     return () => { active = false; };
