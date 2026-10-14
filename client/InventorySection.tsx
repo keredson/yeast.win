@@ -95,6 +95,10 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const [newItemCategory, setNewItemCategory] = useState<string | null>(null);
   const [newStockProduct, setNewStockProduct] = useState<InventoryItem | null>(null);
   const [newStockLotCode, setNewStockLotCode] = useState<string | null | undefined>(undefined);
+  const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
+  const [catalogQuery, setCatalogQuery] = useState('');
+  const [catalogCategory, setCatalogCategory] = useState<string | undefined>();
+  const [selectedCatalogProduct, setSelectedCatalogProduct] = useState<CatalogInventory | null>(null);
   const [ingredientSettingsOpen, setIngredientSettingsOpen] = useState(false);
   const [supplyProperties, setSupplyProperties] = useState<IngredientProperties>({});
   const [lotSettingsOpen, setLotSettingsOpen] = useState(false);
@@ -135,22 +139,36 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const visibleLocationIds = activeLocationId ? locationDescendantIds(activeLocationId, locations) : null;
   const visibleItems = visibleLocationIds ? items.filter(row => row.location_id && visibleLocationIds.has(row.location_id)) : items;
   const visibleSupplies = supplies.filter(row => visibleItems.some(stock => stock.supply_id === row.id));
-  const missingCategories = categories.filter(category => !visibleSupplies.some(row => row.category === category));
+  const catalogCategories = categories.filter(category => catalog.some(row => row.category === category));
+  const normalizedCatalogQuery = catalogQuery.trim().toLocaleLowerCase();
+  const matchingCatalog = catalog.filter(row => (!catalogCategory || row.category === catalogCategory)
+    && (!normalizedCatalogQuery || `${row.name} ${row.manufacturer || ''} ${row.category}`
+      .toLocaleLowerCase().includes(normalizedCatalogQuery)));
   const existingItem = items.find(row => row.category === newItemCategory && row.name.trim().toLocaleLowerCase() === newItemName?.trim().toLocaleLowerCase());
   const existingAtLocation = existingItem
     ? stockAtLocation(items, existingItem.name, existingItem.category, newLocationId || null, newLotCode?.trim() || null) : undefined;
   const entryDisplayUnit = entryItem?.display_unit === compoundMassUnit || entryItem?.default_unit === 'oz' && preferredUnits.mass === compoundMassUnit
     ? compoundMassUnit : entryItem?.display_unit || entryItem?.default_unit;
 
-  function openCreate(category: string, product?: InventoryItem, lotCode?: string | null, lockLot = false) {
+  function openCreate(category: string, product?: InventoryItem, lotCode?: string | null, lockLot = false,
+    catalogProduct?: CatalogInventory) {
     itemForm.resetFields();
     const unit = product?.default_unit || unitForCategory(category, preferredUnits.mass);
     previousItemUnit.current = unit;
     itemForm.setFieldsValue({ category, name: product?.name, lot_code: lotCode || undefined,
       default_unit: unit, location_id: activeLocationId || undefined });
     setNewStockProduct(product || null);
+    setSelectedCatalogProduct(catalogProduct || null);
     setNewStockLotCode(lockLot ? lotCode || null : undefined);
     setNewItemCategory(category);
+  }
+
+  function chooseCatalogProduct(product: CatalogInventory) {
+    setCatalogPickerOpen(false);
+    const existing = supplies.find(row => row.catalog_supply_id === product.id)
+      || supplies.find(row => row.category === product.category && row.name.toLocaleLowerCase() === product.name.toLocaleLowerCase());
+    openCreate(product.category, existing, undefined, false, product);
+    if (!existing) itemForm.setFieldValue('name', product.name);
   }
 
   async function saveIngredientProperties(values: IngredientProperties) {
@@ -224,10 +242,11 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
       } else {
         await createInventoryItem(db, values.name.trim(), values.category.trim(), storageUnit(values.default_unit),
           starting?.quantity ?? null, accountId, values.default_unit, locationId,
-          catalog.find(row => row.category === values.category && row.name === values.name)?.id || null,
+          selectedCatalogProduct?.name === values.name ? selectedCatalogProduct.id
+            : catalog.find(row => row.category === values.category && row.name === values.name)?.id || null,
           values.lot_code || null);
       }
-      setNewItemCategory(null); setNewStockProduct(null); setNewStockLotCode(undefined);
+      setNewItemCategory(null); setNewStockProduct(null); setNewStockLotCode(undefined); setSelectedCatalogProduct(null);
       itemForm.resetFields(); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -278,6 +297,9 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
     {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
     {!selectedId ? <section className="record-index"><div className="section-heading"><div><span className="eyebrow">Stock ledger</span><h1>Inventory</h1></div></div>
       <p className="muted">Purchases, uses from batches, and physical counts.</p>
+      <Button icon={<PlusOutlined />} onClick={() => {
+        setCatalogQuery(''); setCatalogCategory(undefined); setCatalogPickerOpen(true);
+      }}>Add from catalog</Button>
       {locations.length > 0 && <div className="inventory-filter"><label htmlFor="inventory-location-filter">Location</label>
         <LocationTreeSelect id="inventory-location-filter" locations={locations} value={activeLocationId}
           style={{ width: `min(100%, ${locationFilterWidth}ch)` }}
@@ -298,9 +320,9 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
               row.default_unit === 'oz' && preferredUnits.mass === compoundMassUnit ? compoundMassUnit
                 : visibleItems.find(stock => stock.supply_id === row.id)?.display_unit || row.default_unit) }]} /></section> : null;
       })}</div>}
-      {missingCategories.length > 0 && <p className="inventory-add-types">Add {missingCategories.map((category, index) =>
-        <span key={category}>{index > 0 && (index === missingCategories.length - 1 ? missingCategories.length === 2 ? ' or ' : ', or ' : ', ')}
-          <a href={`${basePath}/inventory`} onClick={event => { event.preventDefault(); openCreate(category); }}>{category.toLowerCase()}</a></span>)}.</p>}
+      <p className="inventory-add-types">Add {categories.map((category, index) =>
+        <span key={category}>{index > 0 && (index === categories.length - 1 ? categories.length === 2 ? ' or ' : ', or ' : ', ')}
+          <a href={`${basePath}/inventory`} onClick={event => { event.preventDefault(); openCreate(category); }}>{category.toLowerCase()}</a></span>)}.</p>
     </section> : !item ? <Empty description="Inventory item not found" /> : <section className="record-detail">
         <div className="content-heading"><div><span className="eyebrow">{item.category}</span><h2>{item.name}</h2>
           <p className="muted">{balance === undefined ? 'Calculating stock' : balance === null ? 'Balance needs unit conversion'
@@ -367,6 +389,25 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
             { title: 'Quantity', key: 'quantity', align: 'right', render: (_, row) =>
               `${row.kind === 'Purchased' || row.kind === 'Moved in' ? '+' : row.kind === 'Used' || row.kind === 'Discarded' || row.kind === 'Moved out' ? '−' : 'Set to '}${formatStockQuantity(row.quantity, row.unit, itemDisplayUnit || row.unit)}` }]} /></>}
       </section>}
+    <Modal title="Add from catalog" open={catalogPickerOpen} onCancel={() => setCatalogPickerOpen(false)} footer={null} destroyOnHidden>
+      <div className="catalog-explorer-filters">
+        <Input.Search aria-label="Search inventory products" placeholder="Search inventory products" allowClear value={catalogQuery}
+          onChange={event => setCatalogQuery(event.target.value)} />
+        <Select aria-label="Filter inventory type" placeholder="All inventory types" allowClear
+          value={catalogCategory} onChange={setCatalogCategory}
+          options={catalogCategories.map(category => ({ value: category, label: category }))} />
+      </div>
+      {matchingCatalog.length ? <div className="catalog-explorer-list" role="list">
+        {matchingCatalog.map(product => <div key={product.id} role="listitem">
+          <button type="button" className="catalog-explorer-option" onClick={() => chooseCatalogProduct(product)}>
+            <span className="catalog-explorer-option-name"><strong>{product.name}</strong>
+              <small>{product.category}{product.yield_pct != null ? ` · ${product.yield_pct}% yield` : ''}
+                {product.color_lovibond != null ? ` · ${product.color_lovibond} °L` : ''}</small></span>
+            {product.image_src && <img className="catalog-explorer-thumbnail" src={product.image_src} alt="" loading="lazy" />}
+          </button>
+        </div>)}
+      </div> : <Empty description={catalog.length ? 'No matching products' : 'No catalog products available'} />}
+    </Modal>
     <Modal title={item ? `${item.name} supply defaults` : 'Supply defaults'} open={ingredientSettingsOpen}
       onCancel={() => setIngredientSettingsOpen(false)} footer={null} destroyOnHidden>
       {error && <Alert type="error" message={error} className="form-alert" />}
@@ -385,13 +426,14 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
     </Modal>
     <Modal title={newStockProduct ? `Add ${newStockProduct.name} stock` : newItemCategory
       ? `New ${newItemCategory.toLowerCase()} item` : 'New inventory item'} open={!!newItemCategory}
-      onCancel={() => { setNewItemCategory(null); setNewStockProduct(null); setNewStockLotCode(undefined); }} footer={null} destroyOnHidden>
+      onCancel={() => { setNewItemCategory(null); setNewStockProduct(null); setNewStockLotCode(undefined); setSelectedCatalogProduct(null); }} footer={null} destroyOnHidden>
       {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
       <Form form={itemForm} layout="vertical" onFinish={create}>
         <Form.Item name="category" hidden><Input /></Form.Item>
         {newStockProduct ? <Form.Item name="name" hidden><Input /></Form.Item>
           : <Form.Item name="name" label="Item" rules={[{ required: true, whitespace: true }]}>
           <AutoComplete placeholder="Search supplies or enter an item" maxLength={120}
+            onChange={value => { if (value !== selectedCatalogProduct?.name) setSelectedCatalogProduct(null); }}
             options={[
               ...supplies.filter(row => row.category === newItemCategory).map(row => ({ value: row.name, label: `${row.name} · Your supplies` })),
               ...catalog.filter(row => row.category === newItemCategory && !supplies.some(owned =>
@@ -399,8 +441,9 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
                 .map(row => ({ value: row.name, label: `${row.name} · Catalog` }))
             ]}
             filterOption={(input, option) => String(option?.value || '').toLowerCase().includes(input.toLowerCase())}
-            onSelect={value => { const entry = supplies.find(row => row.category === newItemCategory && row.name === value)
-              || catalog.find(row => row.category === newItemCategory && row.name === value);
+            onSelect={value => { const catalogEntry = catalog.find(row => row.category === newItemCategory && row.name === value);
+              setSelectedCatalogProduct(catalogEntry || null);
+              const entry = supplies.find(row => row.category === newItemCategory && row.name === value) || catalogEntry;
               if (entry) { const storedUnit = 'unit' in entry ? entry.unit : entry.default_unit;
                 const nextUnit = ['Grain', 'Hops', 'Nutrient'].includes(entry.category)
                   ? unitForCategory(entry.category, preferredUnits.mass) : storedUnit === 'ml' ? 'mL' : storedUnit;
@@ -408,6 +451,16 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
                 previousItemUnit.current = nextUnit;
                 itemForm.setFieldValue('default_unit', nextUnit); } }} />
         </Form.Item>}
+        {selectedCatalogProduct && (newStockProduct || newItemName === selectedCatalogProduct.name) &&
+          <div className="inventory-catalog-source">
+            {selectedCatalogProduct.image_src && <img src={selectedCatalogProduct.image_src} alt={selectedCatalogProduct.name} />}
+            <div><strong>{selectedCatalogProduct.manufacturer || 'Shared catalog'}</strong>
+              {selectedCatalogProduct.product_url && <p><a href={selectedCatalogProduct.product_url}
+                target="_blank" rel="noopener noreferrer">Product page</a></p>}
+              {selectedCatalogProduct.spec_source_url && selectedCatalogProduct.spec_source_url !== selectedCatalogProduct.product_url &&
+                <p><a href={selectedCatalogProduct.spec_source_url} target="_blank" rel="noopener noreferrer">Specification source</a></p>}
+            </div>
+          </div>}
         <Form.Item name="location_id" label="Location" normalize={(value, previousValue) => {
           if (value === newLocationOption) { openLocationCreate('item'); return previousValue; }
           return value;

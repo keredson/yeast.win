@@ -1007,9 +1007,22 @@ try {
   if (await page.getByRole('combobox', { name: 'Location' }).count()) {
     throw new Error('Inventory should hide the location filter when there are no locations');
   }
+  await page.getByRole('button', { name: 'Add from catalog' }).click();
+  const inventoryCatalog = page.getByRole('dialog', { name: 'Add from catalog' });
+  await inventoryCatalog.getByRole('combobox', { name: 'Filter inventory type' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="Grain"]').click();
+  await inventoryCatalog.getByRole('searchbox', { name: 'Search inventory products' }).fill('Briess Caramel Malt 60L');
+  await inventoryCatalog.getByRole('button', { name: /Briess Caramel Malt 60L/ }).click();
+  const catalogGrain = page.getByRole('dialog', { name: 'New grain item' });
+  if (await catalogGrain.getByRole('combobox', { name: 'Item' }).inputValue() !== 'Briess Caramel Malt 60L') {
+    throw new Error('Inventory catalog selection did not fill the product name');
+  }
+  await catalogGrain.getByRole('link', { name: 'Product page' }).waitFor();
+  await catalogGrain.locator('.ant-modal-close').click();
+  await catalogGrain.waitFor({ state: 'hidden' });
   await page.getByRole('link', { name: 'grain', exact: true }).click();
   await page.getByRole('dialog', { name: 'New grain item' }).getByRole('combobox', { name: 'Item' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Maris Otter malt' }).last().click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Briess Pale Ale Malt' }).last().click();
   await page.getByRole('dialog', { name: 'New grain item' }).getByRole('combobox', { name: 'Item' }).fill('Smoke grain');
   const newGrain = page.getByRole('dialog', { name: 'New grain item' });
   if (!await newGrain.getByRole('combobox', { name: 'Unit' }).locator('..').getByText('lb + oz', { exact: true }).count()) {
@@ -1036,6 +1049,7 @@ try {
   await newGrain.waitFor({ state: 'hidden' });
   await page.waitForURL(url => url.pathname === '/inventory');
   await page.getByRole('button', { name: 'Add grain' }).waitFor();
+  await page.locator('.inventory-add-types').getByRole('link', { name: 'grain' }).waitFor();
   const grainRow = page.locator('.group-table').getByRole('row').filter({ has: page.getByRole('link', { name: 'Smoke grain' }) });
   await page.getByRole('columnheader', { name: 'On hand' }).waitFor();
   await grainRow.getByText('2 lb 5 oz').waitFor();

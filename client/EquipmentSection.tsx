@@ -911,20 +911,20 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       </Form>
     </Modal>
     <Modal title="Add from catalog" open={catalogPickerOpen} onCancel={() => setCatalogPickerOpen(false)} footer={null} destroyOnHidden>
-      <div className="equipment-catalog-filters">
+      <div className="catalog-explorer-filters">
         <Input.Search aria-label="Search equipment models" placeholder="Search equipment models" allowClear value={catalogQuery}
           onChange={event => setCatalogQuery(event.target.value)} />
         <Select aria-label="Filter equipment type" placeholder="All equipment types" allowClear showSearch optionFilterProp="label"
           value={catalogKind} onChange={setCatalogKind}
           options={catalogKinds.map(kind => ({ value: kind, label: equipmentKindLabel(kind) }))} />
       </div>
-      {matchingModels.length ? <div className="equipment-catalog-list" role="list">
+      {matchingModels.length ? <div className="catalog-explorer-list" role="list">
         {matchingModels.map(model => <div key={model.id} role="listitem">
-          <button type="button" className="equipment-catalog-option" onClick={() => chooseCatalogModel(model)}>
-            <span className="equipment-catalog-option-name"><strong>{model.name}</strong>
+          <button type="button" className="catalog-explorer-option" onClick={() => chooseCatalogModel(model)}>
+            <span className="catalog-explorer-option-name"><strong>{model.name}</strong>
               <small>{equipmentKindLabel(model.kind)}{model.measurement_channels?.length
                 ? ` · ${channelSummary(model.measurement_channels)}` : ''}</small></span>
-            {model.thumbnail_src && <img className="equipment-catalog-thumbnail" src={model.thumbnail_src} alt="" loading="lazy" />}
+            {model.thumbnail_src && <img className="catalog-explorer-thumbnail" src={model.thumbnail_src} alt="" loading="lazy" />}
           </button>
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching equipment' : 'No catalog equipment available'} />}
