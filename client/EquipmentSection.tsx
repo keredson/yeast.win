@@ -703,11 +703,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         ]} />}
     </section> : !item ? <Empty description="Equipment not found" /> : <section className="record-detail">
         <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(item.kind)}</span>
-          <div className="equipment-title"><h2>{itemModel?.name || item.model_name || item.name}</h2></div>
-          <div className="muted">Model: {itemModel
-            ? <a href={`${basePath}/equipment/${equipmentModelPathSegment(itemModel, models)}`}
-              onClick={event => { event.preventDefault(); onSelect(itemModel.id); }}>{itemModel.name}</a>
-            : item.model_name || item.name}</div></div></div>
+          <div className="equipment-title"><h2>{item.stock_id || `Unit ${item.id.slice(0, 6)}`}</h2></div></div></div>
         <div className="equipment-parameters">
           <div className="equipment-parameter"><span>Stock ID: {item.stock_id || 'Not set'}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit Stock ID" onClick={() => setEditIdentity(true)} /></div>
