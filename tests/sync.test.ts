@@ -20,6 +20,63 @@ const selectChanges = `SELECT "table", pk, cid, val, col_version, db_version,
   WHERE db_version > ? ORDER BY db_version, seq`;
 const insertChange = `INSERT INTO crsql_changes (${changeColumns.map(name => `"${name}"`).join(',')}) VALUES (${changeColumns.map(() => '?').join(',')})`;
 
+test('version 37 assigns legacy gravity roles and preserves partial assignments and unrelated rows', () => {
+  for (const partial of [false, true]) {
+    const workspaceId = nanoid();
+    const recipeId = nanoid();
+    const batchId = nanoid();
+    const recipeOg = nanoid();
+    const recipeOther = nanoid();
+    const batchOg = nanoid();
+    const batchFg = nanoid();
+    const before = openWorkspaceDb(workspaceId);
+    try {
+      before.prepare('INSERT INTO recipes(id, name, created_at, updated_at) VALUES (?, ?, ?, ?)')
+        .run(recipeId, 'Old recipe', 1, 1);
+      before.prepare('INSERT INTO batches(id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+        .run(batchId, 'Old batch', 'active', 1, 1);
+      const addRecipe = before.prepare(`INSERT INTO recipe_events(id, recipe_id, event_type, title, sort_order)
+        VALUES (?, ?, 'measurement', ?, ?)`);
+      addRecipe.run(recipeOg, recipeId, 'Measure original specific gravity', 1);
+      addRecipe.run(recipeOther, recipeId, 'My chosen OG', 2);
+      const addRecipeTarget = before.prepare(`INSERT INTO recipe_measurement_targets(event_id, measurement_kind)
+        VALUES (?, 'gravity')`);
+      addRecipeTarget.run(recipeOg);
+      addRecipeTarget.run(recipeOther);
+      const addBatch = before.prepare(`INSERT INTO batch_events(id, batch_id, event_type, title, created_at)
+        VALUES (?, ?, 'measurement', ?, ?)`);
+      addBatch.run(batchOg, batchId, 'Measure original specific gravity', 2);
+      addBatch.run(batchFg, batchId, 'Measure final specific gravity', 3);
+      const addBatchTarget = before.prepare(`INSERT INTO batch_measurement_targets(event_id, measurement_kind)
+        VALUES (?, 'gravity')`);
+      addBatchTarget.run(batchOg);
+      addBatchTarget.run(batchFg);
+      before.prepare('INSERT INTO gravity_measurements(event_id, value, unit) VALUES (?, ?, ?)')
+        .run(batchOg, 1.052, 'SG');
+      if (partial) before.prepare(`INSERT INTO recipe_gravity_roles(id, recipe_id, role, event_id)
+        VALUES (?, ?, 'og', ?)`).run(`${recipeId}:og`, recipeId, recipeOther);
+      for (const table of partial ? ['batch_gravity_roles'] : ['recipe_gravity_roles', 'batch_gravity_roles']) {
+        before.prepare('SELECT crsql_as_table(?)').get(table);
+        before.exec(`DROP TABLE ${table}`);
+      }
+      before.pragma('user_version = 37');
+    } finally { closeWorkspaceDb(before); }
+
+    const upgraded = openWorkspaceDb(workspaceId);
+    try {
+      assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+      assert.deepEqual(upgraded.prepare('SELECT role, event_id FROM recipe_gravity_roles WHERE recipe_id = ?')
+        .all(recipeId), [{ role: 'og', event_id: partial ? recipeOther : recipeOg }]);
+      assert.deepEqual(upgraded.prepare('SELECT role, event_id FROM batch_gravity_roles WHERE batch_id = ? ORDER BY role')
+        .all(batchId), [{ role: 'fg', event_id: batchFg }, { role: 'og', event_id: batchOg }]);
+      assert.deepEqual(upgraded.prepare('SELECT value, unit FROM gravity_measurements WHERE event_id = ?')
+        .get(batchOg), { value: 1.052, unit: 'SG' });
+      assert.equal((upgraded.prepare('SELECT name FROM batches WHERE id = ?').get(batchId) as { name: string }).name,
+        'Old batch');
+    } finally { closeWorkspaceDb(upgraded); }
+  }
+});
+
 test('version 35 event inputs gain grain class and preserve existing snapshots', () => {
   for (const partiallyUpgraded of [false, true]) {
     const id = nanoid();

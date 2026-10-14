@@ -270,6 +270,7 @@ button, input, textarea { font: inherit; }
 .title-edit-row { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .title-edit-row .ant-btn { flex: none; color: #667; margin-left: -7px; }
 .title-edit-row strong { min-width: 0; overflow-wrap: anywhere; }
+.gravity-role-tag { flex: none; margin-inline-end: 0; }
 .timeline-card > div:first-child { min-width: 0; }
 .recipe-title-detail { flex-wrap: wrap; column-gap: 8px; }
 .recipe-event-detail { color: #66766d; font-size: 13px; line-height: 1.45; }

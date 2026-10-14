@@ -36,7 +36,7 @@ interface Values {
   title: string; timing_key: string; offset_value?: number;
   offset_unit?: typeof timeUnits[number]['value']; details?: string;
   item_category?: string; quantity?: number; unit?: string; pounds?: number; ounces?: number;
-  measurement_kind?: string; target_value?: number; target_unit?: string;
+  measurement_kind?: string; target_value?: number; target_unit?: string; gravity_role?: 'og' | 'fg' | '';
   mode?: string; container_name?: string; container_size?: number; container_count?: number;
   to_vessel_id?: string; transfer_equipment_ids?: string[];
   mash_equipment_id?: string;
@@ -171,6 +171,8 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
         }
       }
       if (kind === 'packaging' && values.unit) details.container_unit = values.unit;
+      if (kind === 'measurement' && measurementKind === 'gravity' && values.gravity_role)
+        details.gravity_role = values.gravity_role;
       if (kind === 'transfer') {
         const vessel = equipment.find(item => item.id === values.to_vessel_id);
         details.transfer_equipment_ids = values.transfer_equipment_ids || [];
@@ -215,7 +217,8 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
     timing_key: initialPlan?.anchor_event_id ? `${offset < 0 ? 'before' : 'after'}:${initialDetails.anchor_point === 'end' ? 'end' : 'start'}:${initialPlan.anchor_event_id}` : preset?.timingKey || 'start',
     offset_value: gravityMeasurement && offset === 0 ? undefined : Math.abs(offset) / offsetUnit.multiplier,
     offset_unit: gravityMeasurement && offset === 0 ? undefined : offsetUnit.value,
-    measurement_kind: measurementKind, mode: initialDetails.mode || (phase === 'boil' ? 'heat' : phase === 'chill' ? 'chill' : 'hold'),
+    measurement_kind: measurementKind, gravity_role: initialDetails.gravity_role || '',
+    mode: initialDetails.mode || (phase === 'boil' ? 'heat' : phase === 'chill' ? 'chill' : 'hold'),
     duration_value: duration ? duration % 3600 === 0 ? duration / 3600 : duration % 60 === 0 ? duration / 60 : duration : undefined,
     duration_unit: duration % 3600 === 0 ? 'hours' : duration % 60 === 0 ? 'minutes' : 'seconds',
     unit: initialUnit,
@@ -269,10 +272,14 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
     </Form.Item>}
     {kind === 'measurement' && <>
       {!lockedMeasurementKind && <Form.Item name="measurement_kind" label="Measurement"><Select options={measurementKinds.map(item => ({ value: item.value, label: item.label }))}
-        onChange={value => { setMeasurementKind(value); form.setFieldsValue({ target_value: undefined,
+        onChange={value => { setMeasurementKind(value); form.setFieldsValue({ target_value: undefined, gravity_role: '',
           target_unit: value === 'temperature' ? preferredUnits.temperature : value === 'volume' ? preferredUnits.volume
             : value === 'pressure' ? preferredUnits.pressure : measurementKinds.find(item => item.value === value)?.unit }); }} /></Form.Item>
       }
+      {measurementKind === 'gravity' && <Form.Item name="gravity_role" label="Gravity role"><Select options={[
+        { value: '', label: 'Other reading' }, { value: 'og', label: 'Original gravity (OG)' },
+        { value: 'fg', label: 'Final gravity (FG)' }
+      ]} /></Form.Item>}
       <div className="form-pair"><Form.Item name="target_value" label="Target"><InputNumber className="full-width" step="any" /></Form.Item>
         <Form.Item name="target_unit" label={measurementKind === 'gravity' ? 'Scale' : 'Unit'}><Select options={unitOptions(
           measurementKind === 'ph' ? ['pH'] : measurementKind === 'gravity' ? gravityScales

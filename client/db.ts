@@ -11,7 +11,7 @@ import type { CatalogEquipment, MeasurementChannel } from '../shared/catalog.ts'
 import { changeColumns, indexStatements, legacyEquipmentCopyStatements, legacyEquipmentModelStatements,
   supplyMigrationStatements, primingSugarCategoryMigrationStatements, nowSeconds, replicatedTables,
   retiredReplicatedTables, schemaStatements, workspaceSchemaVersion, workspaceTableColumns,
-  otherFermentablesMigrationStatements } from '../shared/schema.ts';
+  otherFermentablesMigrationStatements, gravityRoleMigrationStatements } from '../shared/schema.ts';
 import type { SqlChangeRow } from '../shared/wire.ts';
 import { changeTuple, decodeItem, encodeItem, maxSequence, readSequence, syncContentType,
   syncProtocolVersion, validChangeTuple, type ChangeTuple } from '../shared/cborSync.ts';
@@ -28,6 +28,7 @@ export type LocalDb = DB;
 export interface Batch { id: string; name: string; description: string | null; status: string; created_at: number;
   source_batch_id?: string | null; source_batch_name?: string | null }
 export type RecipeType = 'beer' | 'wine' | 'mead' | 'cider';
+export type GravityRole = 'og' | 'fg';
 export interface Recipe { id: string; name: string; slug: string; description: string | null; recipe_type: RecipeType | null }
 export interface BatchEvent {
   id: string; batch_id: string; event_type: string; title: string; planned_at: number | null;
@@ -43,6 +44,7 @@ export interface PlanDetails {
   item_category?: string; item_name?: string; catalog_item_id?: string; inventory_item_id?: string; supply_id?: string;
   quantity?: number; unit?: string; display_unit?: string;
   measurement_kind?: string; to_vessel_id?: string; to_vessel_name?: string;
+  gravity_role?: GravityRole;
   transfer_equipment_ids?: string[];
   purpose?: string; mash_equipment_id?: string; equipment_id?: string;
   container_name?: string; container_size?: number; container_count?: number; container_unit?: string;
@@ -380,6 +382,7 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
             for (const statement of primingSugarCategoryMigrationStatements) await tx.exec(statement);
           }
           if (version < 36) for (const statement of otherFermentablesMigrationStatements) await tx.exec(statement);
+          if (version < 38) for (const statement of gravityRoleMigrationStatements) await tx.exec(statement);
           if (changed) await tx.exec('DELETE FROM sync_state');
           if (legacyMeta.length) await tx.exec('DROP TABLE schema_meta');
         });
@@ -548,6 +551,7 @@ export async function startBatchFromTemplate(db: DB, recipeType: RecipeType, nam
         plan.details.anchor_point ?? null, plan.details.duration_seconds ?? null,
         plan.details.note ?? null, now, accountId]);
       await writePlanPayload(tx, 'batch', plan.id, plan.event_type, plan.details);
+      if (plan.details.gravity_role) await setGravityRole(tx, 'batch', id, plan.id, plan.details.gravity_role);
     }
   });
   return id;
@@ -671,6 +675,7 @@ export async function deleteRecipe(db: DB, recipeId: string): Promise<void> {
       for (const [table] of Object.values(planPayloads.recipe)) await tx.exec(`DELETE FROM ${table} WHERE event_id = ?`, [event.id]);
     }
     await tx.exec('DELETE FROM recipe_events WHERE recipe_id = ?', [recipeId]);
+    await tx.exec('DELETE FROM recipe_gravity_roles WHERE recipe_id = ?', [recipeId]);
     await tx.exec('DELETE FROM recipe_inputs WHERE id = ?', [recipeId]);
     const links = await tx.execO<{ source_id: string }>('SELECT source_id FROM recipe_import_links WHERE id = ?', [recipeId]);
     await tx.exec('DELETE FROM recipe_import_links WHERE id = ?', [recipeId]);
@@ -741,6 +746,28 @@ async function writePlanPayload(db: Pick<DB, 'exec'>, scope: PlanScope, id: stri
   [id, ...values]);
 }
 
+async function setGravityRole(db: Pick<DB, 'exec' | 'execO'>, scope: PlanScope,
+  ownerId: string, eventId: string, role: GravityRole | null): Promise<void> {
+  const table = scope === 'recipe' ? 'recipe_gravity_roles' : 'batch_gravity_roles';
+  const ownerColumn = scope === 'recipe' ? 'recipe_id' : 'batch_id';
+  const previous = await db.execO<{ id: string; role: GravityRole }>(
+    `SELECT id, role FROM ${table} WHERE ${ownerColumn} = ? AND event_id = ?`, [ownerId, eventId]);
+  if (previous.length === 1 && previous[0].role === role) return;
+  if (role) {
+    const events = scope === 'recipe' ? 'recipe_events' : 'batch_events';
+    const targets = scope === 'recipe' ? 'recipe_measurement_targets' : 'batch_measurement_targets';
+    const valid = await db.execO<{ id: string }>(`SELECT e.id FROM ${events} e
+      LEFT JOIN ${targets} t ON t.event_id = e.id
+      ${scope === 'batch' ? 'LEFT JOIN gravity_measurements g ON g.event_id = e.id' : ''}
+      WHERE e.id = ? AND e.${ownerColumn} = ? AND e.event_type = 'measurement'
+        AND (t.measurement_kind = 'gravity'${scope === 'batch' ? ' OR g.event_id IS NOT NULL' : ''})`, [eventId, ownerId]);
+    if (!valid.length) throw new Error('Choose a gravity measurement for OG or FG');
+  }
+  if (previous.length) await db.exec(`DELETE FROM ${table} WHERE ${ownerColumn} = ? AND event_id = ?`, [ownerId, eventId]);
+  if (role) await db.exec(`INSERT INTO ${table}(id, ${ownerColumn}, role, event_id) VALUES (?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET event_id = excluded.event_id`, [`${ownerId}:${role}`, ownerId, role, eventId]);
+}
+
 type StoredPlan = { id: string; event_type: string; anchor_point: string | null;
   duration_seconds: number | null; instructions: string | null; details: PlanDetails };
 
@@ -768,6 +795,15 @@ async function fillPlanDetails<T extends StoredPlan>(db: Pick<DB, 'execO'>, scop
         }
       }
     }
+  }
+  const measurements = rows.filter(row => row.event_type === 'measurement');
+  if (measurements.length) {
+    const table = scope === 'recipe' ? 'recipe_gravity_roles' : 'batch_gravity_roles';
+    const roles = await db.execO<{ event_id: string; role: GravityRole }>(
+      `SELECT event_id, role FROM ${table} WHERE event_id IN (${measurements.map(() => '?').join(', ')})`,
+      measurements.map(row => row.id));
+    const byId = new Map(roles.map(row => [row.event_id, row.role]));
+    for (const row of measurements) if (byId.has(row.id)) row.details.gravity_role = byId.get(row.id);
   }
   const transfers = rows.filter(row => row.event_type === 'transfer');
   if (transfers.length) {
@@ -924,13 +960,17 @@ export function recipeTemplatePlans(recipeType: RecipeType, temperatureUnit: '°
     }
     const gravityId = createId();
     insert(gravityId, 'measurement', 'Measure original specific gravity', recipeType === 'beer' ? transferId : null,
-      { measurement_kind: 'gravity', target_unit: 'SG' }, recipeType === 'beer' ? 8 : 1);
+      { measurement_kind: 'gravity', target_unit: 'SG', gravity_role: 'og' }, recipeType === 'beer' ? 8 : 1);
     const pitchId = createId();
     insert(pitchId, 'addition', 'Pitch yeast', recipeType === 'beer' ? chillId : gravityId,
       { item_category: 'Yeast', ...(recipeType === 'beer' ? { anchor_point: 'end' } : {}) }, recipeType === 'beer' ? 9 : 2);
     const packagingDays: Record<RecipeType, number> = { beer: 21, cider: 28, wine: 60, mead: 60 };
-    insert(createId(), 'packaging', 'Package batch', pitchId,
-      {}, recipeType === 'beer' ? 10 : 3, packagingDays[recipeType] * 86400);
+    const finalGravityId = createId();
+    insert(finalGravityId, 'measurement', 'Measure final specific gravity', pitchId,
+      { measurement_kind: 'gravity', target_unit: 'SG', gravity_role: 'fg' }, recipeType === 'beer' ? 10 : 3,
+      packagingDays[recipeType] * 86400);
+    insert(createId(), 'packaging', 'Package batch', finalGravityId,
+      {}, recipeType === 'beer' ? 11 : 4);
   return plans.sort((a, b) => a.sort_order - b.sort_order);
 }
 
@@ -954,6 +994,7 @@ export async function createRecipe(db: DB, name: string, description: string, re
         [plan.id, id, plan.event_type, plan.title, plan.anchor_event_id ?? null, plan.offset_seconds ?? 0,
           plan.details.anchor_point ?? null, plan.details.duration_seconds ?? null, plan.details.note ?? null, plan.sort_order]);
       await writePlanPayload(tx, 'recipe', plan.id, plan.event_type, plan.details);
+      if (plan.details.gravity_role) await setGravityRole(tx, 'recipe', id, plan.id, plan.details.gravity_role);
     }
   });
   return id;
@@ -998,6 +1039,7 @@ export async function addRecipePlan(db: DB, recipeId: string, input: PlanInput):
         input.offset_seconds ?? null, input.details.anchor_point ?? null, input.details.duration_seconds ?? null,
         input.details.note ?? null, order[0].next_order]);
     await writePlanPayload(tx, 'recipe', id, input.event_type, input.details);
+    if (input.details.gravity_role) await setGravityRole(tx, 'recipe', recipeId, id, input.details.gravity_role);
   });
   return id;
 }
@@ -1035,6 +1077,8 @@ export async function updateRecipePlan(db: DB, recipeId: string, planId: string,
       input.offset_seconds ?? null, input.details.anchor_point ?? null, input.details.duration_seconds ?? null,
       input.details.note ?? null, planId, recipeId]);
     await writePlanPayload(tx, 'recipe', planId, input.event_type, input.details);
+    await setGravityRole(tx, 'recipe', recipeId, planId, input.event_type === 'measurement'
+      && input.details.measurement_kind === 'gravity' ? input.details.gravity_role || null : null);
   });
 }
 
@@ -1057,6 +1101,7 @@ export async function deleteRecipePlan(db: DB, recipeId: string, planId: string)
         WHERE id = ? AND recipe_id = ?`, [effectiveOffset(child), child.id, recipeId]);
     }
     await tx.exec('DELETE FROM recipe_event_inputs WHERE id = ?', [planId]);
+    await tx.exec('DELETE FROM recipe_gravity_roles WHERE recipe_id = ? AND event_id = ?', [recipeId, planId]);
     await tx.exec('DELETE FROM recipe_transfer_equipment WHERE event_id = ?', [planId]);
     for (const [table] of Object.values(planPayloads.recipe)) await tx.exec(`DELETE FROM ${table} WHERE event_id = ?`, [planId]);
     await tx.exec('DELETE FROM recipe_events WHERE id = ? AND recipe_id = ?', [planId, recipeId]);
@@ -1073,6 +1118,7 @@ export async function addBatchPlan(db: DB, batchId: string, input: PlanInput, ac
         input.offset_seconds ?? null, input.details.anchor_point ?? null, input.details.duration_seconds ?? null,
         input.details.note ?? null, nowSeconds(), accountId]);
     await writePlanPayload(tx, 'batch', id, input.event_type, input.details);
+    if (input.details.gravity_role) await setGravityRole(tx, 'batch', batchId, id, input.details.gravity_role);
   });
   return id;
 }
@@ -1086,6 +1132,8 @@ export async function updateBatchPlan(db: DB, batchId: string, planId: string, i
       input.offset_seconds ?? null, input.details.anchor_point ?? null, input.details.duration_seconds ?? null,
       input.details.note ?? null, planId, batchId]);
     await writePlanPayload(tx, 'batch', planId, input.event_type, input.details);
+    await setGravityRole(tx, 'batch', batchId, planId, input.event_type === 'measurement'
+      && input.details.measurement_kind === 'gravity' ? input.details.gravity_role || null : null);
   });
 }
 
@@ -1146,6 +1194,7 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
           plan.offset_seconds ?? null, plan.details.anchor_point ?? null, plan.details.duration_seconds ?? null,
           plan.details.note ?? null, now, accountId]);
       await writePlanPayload(tx, 'batch', ids.get(plan.id)!, plan.event_type, physicalDetails(plan.details));
+      if (plan.details.gravity_role) await setGravityRole(tx, 'batch', batchId, ids.get(plan.id)!, plan.details.gravity_role);
       const eventInputs = await tx.execO<IngredientProperties>('SELECT * FROM recipe_event_inputs WHERE id = ?', [plan.id]);
       const snapshot: Record<string, string | number | null> = {};
       if (eventInputs.length) for (const column of ingredientPropertyColumns) snapshot[column] = eventInputs[0][column] ?? null;
@@ -1247,6 +1296,7 @@ export async function startBatchFromPrevious(db: DB, sourceBatchId: string, name
         [plan.id, batchId, plan.event_type, plan.title, plan.anchor_event_id, plan.offset_seconds,
           details.anchor_point ?? null, details.duration_seconds ?? null, details.note ?? null, now, accountId]);
       await writePlanPayload(tx, 'batch', plan.id, plan.event_type, details);
+      if (details.gravity_role) await setGravityRole(tx, 'batch', batchId, plan.id, details.gravity_role);
     }
   });
   return batchId;
@@ -1281,6 +1331,7 @@ export interface EventInput {
   accountId: string;
   payload?: Record<string, string | number | null>;
   measurementKind?: MeasurementKind;
+  gravityRole?: GravityRole | null;
 }
 
 export async function recordEvent(db: DB, input: EventInput): Promise<string> {
@@ -1313,6 +1364,7 @@ export async function recordEvent(db: DB, input: EventInput): Promise<string> {
       await snapshotAdditionLot(tx, id, payload.inventory_item_id);
     }
     if (input.eventType === 'transfer') await updateTransferName(tx, id, payload.to_vessel_id);
+    if (input.gravityRole !== undefined) await setGravityRole(tx, 'batch', input.batchId, id, input.gravityRole);
   });
   return id;
 }
@@ -1344,7 +1396,10 @@ async function snapshotAdditionLot(db: Pick<DB, 'exec' | 'execO'>, eventId: stri
 
 export async function eventFormData(db: DB, event: ActualEvent): Promise<{ measurementKind?: MeasurementKind; payload: Record<string, string | number | null> }> {
   if (event.event_type === 'measurement') {
-    for (const [kind, table] of Object.entries(measurementTables)) {
+    // A sensor event can contain both temperature and gravity. Open its gravity
+    // reading first so the user can assign OG or FG to that event.
+    for (const kind of ['gravity', ...Object.keys(measurementTables).filter(value => value !== 'gravity')] as MeasurementKind[]) {
+      const table = measurementTables[kind];
       const rows = await db.execO<Record<string, string | number | null>>(`SELECT * FROM ${table} WHERE event_id = ?`, [event.id]);
       if (rows.length) return { measurementKind: kind as MeasurementKind, payload: rows[0] };
     }
@@ -1382,6 +1437,7 @@ export async function updateEvent(db: DB, event: ActualEvent, input: EventInput)
       await tx.exec('UPDATE transfers SET from_vessel_id = NULL WHERE event_id = ?', [event.id]);
       await updateTransferName(tx, event.id, input.payload.to_vessel_id);
     }
+    if (input.gravityRole !== undefined) await setGravityRole(tx, 'batch', input.batchId, event.id, input.gravityRole);
   });
 }
 
