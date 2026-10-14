@@ -1024,9 +1024,9 @@ try {
   await page.getByRole('link', { name: 'grain', exact: true }).click();
   const grainCatalog = page.getByRole('dialog', { name: 'Add from catalog' });
   await grainCatalog.getByRole('combobox', { name: 'Filter inventory type' }).getByText('Grain').waitFor();
-  await grainCatalog.getByRole('button', { name: 'Create your own product spec' }).click();
+  await grainCatalog.getByRole('button', { name: 'Create custom product' }).click();
   const newGrain = page.getByRole('dialog', { name: 'Create grain product' });
-  await newGrain.getByRole('combobox', { name: 'Item' }).fill('Smoke grain');
+  await newGrain.getByRole('combobox', { name: 'Product name' }).fill('Smoke grain');
   await newGrain.getByRole('spinbutton', { name: 'Extract yield (%)' }).fill('78');
   if (!await newGrain.getByRole('combobox', { name: 'Unit' }).locator('..').getByText('lb + oz', { exact: true }).count()) {
     throw new Error('Preferred compound grain unit default was not set');

@@ -536,10 +536,10 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching products' : 'No catalog products available'} />}
       {catalogPickerPurpose === 'link' ? null : catalogCategory ? <Button type="link" className="catalog-create-custom"
-        onClick={() => createCustomProduct(catalogCategory)}>Create your own product spec</Button>
+        onClick={() => createCustomProduct(catalogCategory)}>Create custom product</Button>
         : <Dropdown trigger={['click']} menu={{ items: categories.map(category => ({ key: category, label: category })),
           onClick: ({ key }) => createCustomProduct(key) }}>
-          <Button type="link" className="catalog-create-custom">Create your own product spec</Button>
+          <Button type="link" className="catalog-create-custom">Create custom product</Button>
         </Dropdown>}
     </Modal>
     <Modal title={item ? `${item.name} supply defaults` : 'Supply defaults'} open={ingredientSettingsOpen}
@@ -567,7 +567,8 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
       <Form form={itemForm} layout="vertical" onFinish={create}>
         <Form.Item name="category" hidden><Input /></Form.Item>
         {newStockProduct || catalogProductChosen ? <Form.Item name="name" hidden><Input /></Form.Item>
-          : <Form.Item name="name" label="Item" rules={[{ required: true, whitespace: true }]}>
+          : <Form.Item name="name" label={creatingCustomProduct ? 'Product name' : 'Item'}
+            rules={[{ required: true, whitespace: true }]}>
           <AutoComplete placeholder={creatingCustomProduct ? 'Product name' : 'Search supplies or enter an item'} maxLength={120}
             onChange={value => { if (value !== selectedCatalogProduct?.name) setSelectedCatalogProduct(null); }}
             options={creatingCustomProduct ? [] : [
