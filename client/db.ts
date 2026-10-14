@@ -1349,6 +1349,7 @@ export async function recordEvent(db: DB, input: EventInput): Promise<string> {
     if (input.endedAt != null) await tx.exec('INSERT INTO event_ends(id, ended_at) VALUES (?, ?)', [id, input.endedAt]);
     if (input.endedAt != null) await tx.exec('UPDATE batch_events SET duration_seconds = NULL WHERE id = ?', [id]);
     if (!input.payload) return;
+    const previousAddition = input.eventType === 'addition' ? await additionSource(tx, id) : null;
     const payload = input.eventType === 'addition' ? await resolvedAdditionPayload(tx, input.payload) : input.payload;
     const table = input.measurementKind ? measurementTables[input.measurementKind] : {
       addition: 'additions', temperature_control: 'temperature_control_events', pressure_control: 'pressure_control_events',
@@ -1361,7 +1362,7 @@ export async function recordEvent(db: DB, input: EventInput): Promise<string> {
       [id, ...Object.values(payload)]);
     if (input.eventType === 'addition' && typeof payload.item_name === 'string') {
       await tx.exec('UPDATE batch_events SET title = ? WHERE id = ?', [payload.item_name, id]);
-      await snapshotAdditionLot(tx, id, payload.inventory_item_id);
+      await refreshAdditionSnapshot(tx, id, previousAddition, payload);
     }
     if (input.eventType === 'transfer') await updateTransferName(tx, id, payload.to_vessel_id);
     if (input.gravityRole !== undefined) await setGravityRole(tx, 'batch', input.batchId, id, input.gravityRole);
@@ -1380,6 +1381,23 @@ async function resolvedAdditionPayload(db: Pick<DB, 'execO'>, payload: NonNullab
   const rows = await db.execO<{ supply_id: string | null }>('SELECT supply_id FROM inventory_items WHERE id = ?', [itemId]);
   if (!rows.length) throw new Error('Inventory stock not found');
   return { ...payload, supply_id: rows[0].supply_id };
+}
+
+type AdditionSource = { item_name: string | null; item_category: string | null;
+  inventory_item_id: string | null; supply_id: string | null; catalog_item_id: string | null };
+
+async function additionSource(db: Pick<DB, 'execO'>, eventId: string): Promise<AdditionSource | null> {
+  return (await db.execO<AdditionSource>(`SELECT item_name, item_category, inventory_item_id,
+    supply_id, catalog_item_id FROM additions WHERE event_id = ?`, [eventId]))[0] || null;
+}
+
+async function refreshAdditionSnapshot(db: Pick<DB, 'exec' | 'execO'>, eventId: string,
+  previous: AdditionSource | null, payload: NonNullable<EventInput['payload']>): Promise<void> {
+  if (previous && (['item_name', 'item_category', 'inventory_item_id', 'supply_id', 'catalog_item_id'] as const)
+    .some(column => previous[column] !== (payload[column] ?? null))) {
+    await db.exec('DELETE FROM batch_event_inputs WHERE id = ?', [eventId]);
+  }
+  await snapshotAdditionLot(db, eventId, payload.inventory_item_id);
 }
 
 async function snapshotAdditionLot(db: Pick<DB, 'exec' | 'execO'>, eventId: string, itemId: unknown): Promise<void> {
@@ -1425,13 +1443,14 @@ export async function updateEvent(db: DB, event: ActualEvent, input: EventInput)
     if (input.endedAt != null) await tx.exec('UPDATE batch_events SET duration_seconds = NULL WHERE id = ?', [event.id]);
     const table = input.measurementKind ? measurementTables[input.measurementKind] : eventPayloadTables[input.eventType];
     if (!table) throw new Error('Unsupported event payload');
+    const previousAddition = input.eventType === 'addition' ? await additionSource(tx, event.id) : null;
     const payload = input.eventType === 'addition' ? await resolvedAdditionPayload(tx, input.payload) : input.payload;
     const columns = Object.keys(payload);
     await tx.exec(`UPDATE ${table} SET ${columns.map(column => `${column} = ?`).join(', ')} WHERE event_id = ?`,
       [...Object.values(payload), event.id]);
     if (input.eventType === 'addition' && typeof payload.item_name === 'string') {
       await tx.exec('UPDATE batch_events SET title = ? WHERE id = ?', [payload.item_name, event.id]);
-      await snapshotAdditionLot(tx, event.id, payload.inventory_item_id);
+      await refreshAdditionSnapshot(tx, event.id, previousAddition, payload);
     }
     if (input.eventType === 'transfer') {
       await tx.exec('UPDATE transfers SET from_vessel_id = NULL WHERE event_id = ?', [event.id]);

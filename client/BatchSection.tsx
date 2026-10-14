@@ -282,7 +282,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
     <Modal title={recordingEvent?.actual_at != null ? `Edit: ${recordingEvent.title}` : `Record: ${recordingEvent?.title || ''}`}
       open={!!recordingEvent} onCancel={() => { setRecordingEvent(null); setEditingData(null); }} footer={null} destroyOnHidden width={600}>
       {batch && recordingEvent && <EventForm key={recordingEvent.id} db={db} batchId={batch.id} accountId={accountId}
-        equipment={equipment} inventory={inventory} preferredUnits={preferredUnits} initialPlan={recordingEvent}
+        equipment={equipment} inventory={inventory} catalogRevision={catalogRevision} preferredUnits={preferredUnits} initialPlan={recordingEvent}
         initialEvent={recordingEvent.actual_at != null ? recordingEvent : null} initialData={editingData}
         onSaved={async () => { setRecordingEvent(null); setEditingData(null); await changed(); }} />}
     </Modal>
