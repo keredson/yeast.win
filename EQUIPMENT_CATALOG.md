@@ -55,7 +55,7 @@ catalog defaults for its specific unit.
 
 ## FermZilla additions
 
-Catalog version 23 adds the 60 L All Rounder, Gen3 Tri-Conical 27 L and 55 L,
+Catalog version 25 adds the 60 L All Rounder, Gen3 Tri-Conical 27 L and 55 L,
 and Flat Bottom 30 L alongside the existing 30 L All Rounder. KegLand's
 [All Rounder instructions](https://docs.kegland.com.au/products/fermentation-equipment/fermzilla-all-rounder-30l-and-60l-or-user-guide/important-information-and-warnings)
 specify a 2.5 bar limit for the 60 L vessel. The [27 L](https://kegland.com.au/products/27l-fermzilla-tri-conical-pressure-brewing-kit)

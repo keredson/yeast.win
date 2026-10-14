@@ -92,6 +92,37 @@ test('ingredient catalog migration adds named products and preserves catalog edi
   } finally { upgraded.close(); }
 });
 
+test('version 22 catalog adds later bundled ingredient photos without overwriting edits', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-supply-photos-'));
+  const before = openCatalogDb(dir);
+  const edited = Buffer.from([255, 216, 255, 1, 2]);
+  before.prepare('DELETE FROM supply_images WHERE supply_id = ?').run('supply_weyermann_pilsner');
+  before.prepare('UPDATE supply_images SET image_bytes = ? WHERE supply_id = ?')
+    .run(edited, 'supply_briess_pale_ale');
+  before.pragma('user_version = 22');
+  before.close();
+  const upgraded = openCatalogDb(dir);
+  try {
+    assert.ok((upgraded.prepare('SELECT length(image_bytes) AS bytes FROM supply_images WHERE supply_id = ?')
+      .get('supply_weyermann_pilsner') as { bytes: number }).bytes > 1000);
+    assert.deepEqual((upgraded.prepare('SELECT image_bytes FROM supply_images WHERE supply_id = ?')
+      .get('supply_briess_pale_ale') as { image_bytes: Buffer }).image_bytes, edited);
+  } finally { upgraded.close(); }
+});
+
+test('version 23 catalog adds Lallemand package photos', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-lallemand-photos-'));
+  const before = openCatalogDb(dir);
+  before.prepare('DELETE FROM supply_images WHERE supply_id = ?').run('supply_lallemand_nottingham');
+  before.pragma('user_version = 23');
+  before.close();
+  const upgraded = openCatalogDb(dir);
+  try {
+    assert.ok((upgraded.prepare('SELECT length(image_bytes) AS bytes FROM supply_images WHERE supply_id = ?')
+      .get('supply_lallemand_nottingham') as { bytes: number }).bytes > 1000);
+  } finally { upgraded.close(); }
+});
+
 test('version 21 separates US and EU VEVOR systems without replacing catalog edits', () => {
   for (const edited of [false, true]) {
     const dir = mkdtempSync(join(tmpdir(), 'brewlog-vevor-region-'));
@@ -142,55 +173,57 @@ test('version 21 separates US and EU VEVOR systems without replacing catalog edi
   }
 });
 
-test('version 23 adds the missing FermZilla vessels while preserving catalog edits', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'brewlog-fermzilla-'));
-  const db = openCatalogDb(dir);
-  const addedIds = ['equipment_fermzilla_all_rounder_60l', 'equipment_fermzilla_tri_conical_27l',
-    'equipment_fermzilla_tri_conical_55l', 'equipment_fermzilla_flat_bottom_30l'];
-  for (const id of addedIds.filter(id => id !== 'equipment_fermzilla_tri_conical_27l')) {
-    db.prepare('DELETE FROM model_images WHERE model_id = ?').run(id);
-    db.prepare('DELETE FROM model_pressure_rating WHERE model_id = ?').run(id);
-    db.prepare('DELETE FROM model_liquid_containment WHERE model_id = ?').run(id);
-    db.prepare('DELETE FROM equipment_models WHERE id = ?').run(id);
-  }
-  const customImage = Buffer.from([255, 216, 255, 1, 2]);
-  db.prepare('UPDATE equipment_models SET model_name = ? WHERE id = ?')
-    .run('My FermZilla 27 L', 'equipment_fermzilla_tri_conical_27l');
-  db.prepare('UPDATE model_liquid_containment SET capacity_liters = 28 WHERE model_id = ?')
-    .run('equipment_fermzilla_tri_conical_27l');
-  db.prepare('UPDATE model_images SET image_bytes = ? WHERE model_id = ?')
-    .run(customImage, 'equipment_fermzilla_tri_conical_27l');
-  db.prepare('INSERT INTO supplies(id, name, category, unit) VALUES (?, ?, ?, ?)')
-    .run('my_supply', 'My supply', 'Other', 'each');
-  db.pragma('user_version = 22');
-  const cursor = BigInt((db.prepare('SELECT crsql_db_version() AS version').get() as { version: number }).version);
-  db.close();
-
-  const upgraded = openCatalogDb(dir);
-  try {
-    assert.equal(upgraded.pragma('user_version', { simple: true }), catalogSchemaVersion);
-    assert.equal((upgraded.prepare('SELECT model_name FROM equipment_models WHERE id = ?')
-      .get('equipment_fermzilla_tri_conical_27l') as { model_name: string }).model_name, 'My FermZilla 27 L');
-    assert.equal((upgraded.prepare('SELECT capacity_liters FROM model_liquid_containment WHERE model_id = ?')
-      .get('equipment_fermzilla_tri_conical_27l') as { capacity_liters: number }).capacity_liters, 28);
-    assert.deepEqual((upgraded.prepare('SELECT image_bytes FROM model_images WHERE model_id = ?')
-      .get('equipment_fermzilla_tri_conical_27l') as { image_bytes: Buffer }).image_bytes, customImage);
-    assert.ok(upgraded.prepare('SELECT 1 FROM supplies WHERE id = ?').get('my_supply'));
-    for (const [id, capacity, pressure] of [
-      ['equipment_fermzilla_all_rounder_60l', 60, 250],
-      ['equipment_fermzilla_tri_conical_55l', 55, 240],
-      ['equipment_fermzilla_flat_bottom_30l', 30, null]
-    ] as const) {
-      assert.equal((upgraded.prepare('SELECT capacity_liters FROM model_liquid_containment WHERE model_id = ?')
-        .get(id) as { capacity_liters: number }).capacity_liters, capacity);
-      assert.equal((upgraded.prepare('SELECT max_pressure_kpa FROM model_pressure_rating WHERE model_id = ?')
-        .get(id) as { max_pressure_kpa: number } | undefined)?.max_pressure_kpa ?? null, pressure);
-      assert.deepEqual((upgraded.prepare('SELECT image_bytes FROM model_images WHERE model_id = ?')
-        .get(id) as { image_bytes: Buffer }).image_bytes, readFileSync(`assets/catalog/models/${id}.jpg`));
+test('version 25 adds the missing FermZilla vessels while preserving catalog edits', () => {
+  for (const previousVersion of [22, 23, 24]) {
+    const dir = mkdtempSync(join(tmpdir(), 'brewlog-fermzilla-'));
+    const db = openCatalogDb(dir);
+    const addedIds = ['equipment_fermzilla_all_rounder_60l', 'equipment_fermzilla_tri_conical_27l',
+      'equipment_fermzilla_tri_conical_55l', 'equipment_fermzilla_flat_bottom_30l'];
+    for (const id of addedIds.filter(id => id !== 'equipment_fermzilla_tri_conical_27l')) {
+      db.prepare('DELETE FROM model_images WHERE model_id = ?').run(id);
+      db.prepare('DELETE FROM model_pressure_rating WHERE model_id = ?').run(id);
+      db.prepare('DELETE FROM model_liquid_containment WHERE model_id = ?').run(id);
+      db.prepare('DELETE FROM equipment_models WHERE id = ?').run(id);
     }
-    assert.ok(catalogChanges(upgraded, cursor).changes.some(change => change.table === 'equipment_models'));
-    assert.ok(catalogChanges(upgraded, cursor).changes.some(change => change.table === 'model_images'));
-  } finally { upgraded.close(); }
+    const customImage = Buffer.from([255, 216, 255, 1, 2]);
+    db.prepare('UPDATE equipment_models SET model_name = ? WHERE id = ?')
+      .run('My FermZilla 27 L', 'equipment_fermzilla_tri_conical_27l');
+    db.prepare('UPDATE model_liquid_containment SET capacity_liters = 28 WHERE model_id = ?')
+      .run('equipment_fermzilla_tri_conical_27l');
+    db.prepare('UPDATE model_images SET image_bytes = ? WHERE model_id = ?')
+      .run(customImage, 'equipment_fermzilla_tri_conical_27l');
+    db.prepare('INSERT INTO supplies(id, name, category, unit) VALUES (?, ?, ?, ?)')
+      .run('my_supply', 'My supply', 'Other', 'each');
+    db.pragma(`user_version = ${previousVersion}`);
+    const cursor = BigInt((db.prepare('SELECT crsql_db_version() AS version').get() as { version: number }).version);
+    db.close();
+
+    const upgraded = openCatalogDb(dir);
+    try {
+      assert.equal(upgraded.pragma('user_version', { simple: true }), catalogSchemaVersion);
+      assert.equal((upgraded.prepare('SELECT model_name FROM equipment_models WHERE id = ?')
+        .get('equipment_fermzilla_tri_conical_27l') as { model_name: string }).model_name, 'My FermZilla 27 L');
+      assert.equal((upgraded.prepare('SELECT capacity_liters FROM model_liquid_containment WHERE model_id = ?')
+        .get('equipment_fermzilla_tri_conical_27l') as { capacity_liters: number }).capacity_liters, 28);
+      assert.deepEqual((upgraded.prepare('SELECT image_bytes FROM model_images WHERE model_id = ?')
+        .get('equipment_fermzilla_tri_conical_27l') as { image_bytes: Buffer }).image_bytes, customImage);
+      assert.ok(upgraded.prepare('SELECT 1 FROM supplies WHERE id = ?').get('my_supply'));
+      for (const [id, capacity, pressure] of [
+        ['equipment_fermzilla_all_rounder_60l', 60, 250],
+        ['equipment_fermzilla_tri_conical_55l', 55, 240],
+        ['equipment_fermzilla_flat_bottom_30l', 30, null]
+      ] as const) {
+        assert.equal((upgraded.prepare('SELECT capacity_liters FROM model_liquid_containment WHERE model_id = ?')
+          .get(id) as { capacity_liters: number }).capacity_liters, capacity);
+        assert.equal((upgraded.prepare('SELECT max_pressure_kpa FROM model_pressure_rating WHERE model_id = ?')
+          .get(id) as { max_pressure_kpa: number } | undefined)?.max_pressure_kpa ?? null, pressure);
+        assert.deepEqual((upgraded.prepare('SELECT image_bytes FROM model_images WHERE model_id = ?')
+          .get(id) as { image_bytes: Buffer }).image_bytes, readFileSync(`assets/catalog/models/${id}.jpg`));
+      }
+      assert.ok(catalogChanges(upgraded, cursor).changes.some(change => change.table === 'equipment_models'));
+      assert.ok(catalogChanges(upgraded, cursor).changes.some(change => change.table === 'model_images'));
+    } finally { upgraded.close(); }
+  }
 });
 
 test('version 11 catalog adds Anton Paar instruments without replacing existing rows', () => {

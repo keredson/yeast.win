@@ -514,6 +514,18 @@ export function openCatalogDb(dataDir: string): Database.Database {
   }
   if ((db.pragma('user_version', { simple: true }) as number) === 22) {
     db.transaction(() => {
+      seedSupplyImages(db);
+      db.pragma('user_version = 23');
+    })();
+  }
+  if ((db.pragma('user_version', { simple: true }) as number) === 23) {
+    db.transaction(() => {
+      seedSupplyImages(db);
+      db.pragma('user_version = 24');
+    })();
+  }
+  if ((db.pragma('user_version', { simple: true }) as number) === 24) {
+    db.transaction(() => {
       const addModel = db.prepare(`INSERT OR IGNORE INTO equipment_models
         (id, manufacturer, model_name, kind, product_url) VALUES (?, ?, ?, ?, ?)`);
       const addLiquid = db.prepare(`INSERT OR IGNORE INTO model_liquid_containment
@@ -526,7 +538,7 @@ export function openCatalogDb(dataDir: string): Database.Database {
         if (item.max_pressure_kpa != null) addPressure.run(item.id, item.max_pressure_kpa);
       }
       seedModelImages(db);
-      db.pragma('user_version = 23');
+      db.pragma('user_version = 25');
     })();
   }
   db.prepare(`UPDATE equipment_models SET model_name = ?
