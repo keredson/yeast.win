@@ -16,6 +16,7 @@ import { convertUnit, formatQuantity, storageUnit } from '../shared/units.ts';
 import type { ImportedRecipe } from './recipeImport.ts';
 import { mashEfficiencyPct, type MashGrain } from './mashEfficiency.ts';
 import { repeatBatchActions } from './batchRepeat.ts';
+import { appBatchSizeLiters, fillMissingRecipeBatchSizes, importedRecipeBatchSize } from '../shared/batchSize.ts';
 
 export type LocalDb = DB;
 export interface Batch { id: string; name: string; description: string | null; status: string; created_at: number;
@@ -348,6 +349,7 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
           await tx.exec(`PRAGMA user_version = ${workspaceSchemaVersion}`);
         });
       }
+      await db.tx(async tx => { for (const statement of fillMissingRecipeBatchSizes) await tx.exec(statement); });
       const legacyEquipment = await db.execO<{ name: string }>(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'equipment_legacy_migration'");
       if (legacyEquipment.length) await db.tx(async tx => {
@@ -534,6 +536,19 @@ export async function breweryMashEfficiency(db: DB): Promise<number | null> {
   return rows[0]?.mash_efficiency_pct ?? null;
 }
 
+export async function breweryBatchSize(db: Pick<DB, 'execO'>): Promise<number | null> {
+  const rows = await db.execO<{ default_batch_size_liters: number | null }>(
+    "SELECT default_batch_size_liters FROM brewery_process_defaults WHERE id = 'brewery'");
+  const value = rows[0]?.default_batch_size_liters;
+  return value != null && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+export async function updateBreweryBatchSize(db: DB, liters: number | null): Promise<void> {
+  if (liters != null && (!Number.isFinite(liters) || liters <= 0)) throw new Error('Enter a positive batch size');
+  await db.exec(`INSERT INTO brewery_process_defaults(id, default_batch_size_liters) VALUES ('brewery', ?)
+    ON CONFLICT(id) DO UPDATE SET default_batch_size_liters = excluded.default_batch_size_liters`, [liters]);
+}
+
 export async function updateBreweryMashEfficiency(db: DB, value: number | null): Promise<void> {
   if (value != null && (!Number.isFinite(value) || value <= 0 || value > 100)) {
     throw new Error('Enter an efficiency between 0 and 100%');
@@ -542,10 +557,11 @@ export async function updateBreweryMashEfficiency(db: DB, value: number | null):
     ON CONFLICT(id) DO UPDATE SET mash_efficiency_pct = excluded.mash_efficiency_pct`, [value]);
 }
 
-export async function updateRecipeTargetVolume(db: DB, recipeId: string, liters: number | null): Promise<void> {
-  if (liters != null && (!Number.isFinite(liters) || liters <= 0)) throw new Error('Enter a positive batch size');
-  await db.exec(`INSERT INTO recipe_inputs(id, target_fermenter_volume_liters) VALUES (?, ?)
-    ON CONFLICT(id) DO UPDATE SET target_fermenter_volume_liters = excluded.target_fermenter_volume_liters`, [recipeId, liters]);
+export async function updateRecipeTargetVolume(db: DB, recipeId: string, liters: number): Promise<void> {
+  if (!Number.isFinite(liters) || liters <= 0) throw new Error('Enter a positive batch size');
+  await db.exec(`INSERT INTO recipe_inputs(id, target_fermenter_volume_liters, batch_size_source) VALUES (?, ?, NULL)
+    ON CONFLICT(id) DO UPDATE SET target_fermenter_volume_liters = excluded.target_fermenter_volume_liters,
+      batch_size_source = NULL`, [recipeId, liters]);
 }
 
 export async function updateRecipe(db: DB, recipeId: string, name: string, description: string, recipeType: RecipeType,
@@ -747,6 +763,7 @@ export async function importRecipes(db: DB, source: {
         ingredientIds.set(ingredient.key, id);
       }
     }
+    const importBreweryBatchSize = await breweryBatchSize(tx);
     for (const recipe of selected) {
       const recipeId = nanoid();
       ids.push(recipeId);
@@ -759,8 +776,9 @@ export async function importRecipes(db: DB, source: {
         [recipeId, sourceId, recipe.sourceIndex, recipe.externalId || null]);
       const targetLiters = sourceNumber(recipe.inputs.batch_size ?? recipe.inputs.batchSize);
       const brewhouseEfficiency = sourceNumber(recipe.inputs.efficiency);
-      await tx.exec(`INSERT INTO recipe_inputs(id, target_fermenter_volume_liters, brewhouse_efficiency_pct)
-        VALUES (?, ?, ?)`, [recipeId, targetLiters, brewhouseEfficiency]);
+      const batchSize = importedRecipeBatchSize(targetLiters, importBreweryBatchSize);
+      await tx.exec(`INSERT INTO recipe_inputs(id, target_fermenter_volume_liters, brewhouse_efficiency_pct, batch_size_source)
+        VALUES (?, ?, ?, ?)`, [recipeId, batchSize.liters, brewhouseEfficiency, batchSize.source]);
       const eventIds = new Map(recipe.actions.map(action => [action.key, nanoid()]));
       for (const [order, action] of recipe.actions.entries()) {
         const eventId = eventIds.get(action.key)!;
@@ -842,7 +860,8 @@ export function recipeTemplatePlans(recipeType: RecipeType, temperatureUnit: '°
 }
 
 export async function createRecipe(db: DB, name: string, description: string, recipeType: RecipeType,
-  temperatureUnit: '°C' | '°F' = '°C'): Promise<string> {
+  temperatureUnit: '°C' | '°F', batchSizeLiters: number): Promise<string> {
+  if (!Number.isFinite(batchSizeLiters) || batchSizeLiters <= 0) throw new Error('Enter a positive batch size');
   const id = nanoid();
   const now = nowSeconds();
   const plans = recipeTemplatePlans(recipeType, temperatureUnit);
@@ -852,6 +871,7 @@ export async function createRecipe(db: DB, name: string, description: string, re
       [id, name, description || null, now, now]);
     await tx.exec('INSERT INTO recipe_slugs(id, slug) VALUES (?, ?)', [id, slug]);
     await tx.exec('INSERT INTO recipe_types(id, recipe_type) VALUES (?, ?)', [id, recipeType]);
+    await tx.exec('INSERT INTO recipe_inputs(id, target_fermenter_volume_liters) VALUES (?, ?)', [id, batchSizeLiters]);
     for (const plan of plans) {
       await tx.exec(`INSERT INTO recipe_events
         (id, recipe_id, event_type, title, planned_at, anchor_event_id, offset_seconds, anchor_point, duration_seconds, instructions, sort_order)

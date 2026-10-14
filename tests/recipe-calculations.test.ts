@@ -108,3 +108,12 @@ test('cider recipe asks for sugar inputs rather than grain mash equipment', () =
   assert.ok(result.missing.some(message => message.includes('fermentable sugar inputs')));
   assert.ok(result.missing.every(message => !message.includes('grain') && !message.includes('mash')));
 });
+
+test('batch size tooltip identifies saved assumptions and explicit recipe settings', () => {
+  const assumed = calculateRecipe([], [], [],
+    { target_fermenter_volume_liters: 18.92705892, batch_size_source: 'assumed_app' }, {});
+  assert.match(assumed.sources.targetLiters[0], /assumed from 5 US gal app default/);
+  const explicit = calculateRecipe([], [], [],
+    { target_fermenter_volume_liters: 20, batch_size_source: null }, {});
+  assert.match(explicit.sources.targetLiters[0], /recipe settings/);
+});

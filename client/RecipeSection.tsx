@@ -3,7 +3,7 @@ import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Popconfirm, Sele
 import { DeleteOutlined, DownloadOutlined, QuestionCircleOutlined, PlusOutlined, SettingOutlined, UploadOutlined } from '@ant-design/icons';
 import { addRecipePlan, createRecipe, deleteRecipe, deleteRecipePlan, hasRecipeImport, listRecipePlans, startBatchFromRecipe, updateRecipe, updateRecipePlan,
   recipeImportSource, recipeTargetVolume, updateRecipeTargetVolume,
-  breweryMashEfficiency, latestMeasuredMashEfficiencySource,
+  breweryMashEfficiency, breweryBatchSize, latestMeasuredMashEfficiencySource,
   type Equipment, type InventoryItem, type LocalDb, type PlanInput, type Recipe, type RecipeType } from './db.ts';
 import { RecipeImportModal } from './RecipeImportModal.tsx';
 import { PlanForm, repeatPreset, type PlanPreset } from './PlanForm.tsx';
@@ -17,6 +17,7 @@ import { convertUnit, unitGroups, unitOptions } from '../shared/units.ts';
 import { changeNumberUnit } from './unitFields.ts';
 import { calculateRecipe, type RecipeEstimate } from './recipeCalculations.ts';
 import { RecipeEquipmentFields } from './RecipeEquipmentFields.tsx';
+import { appBatchSizeLiters } from '../shared/batchSize.ts';
 
 const recipeTypeOptions = [
   { value: 'beer', label: 'Beer' }, { value: 'wine', label: 'Wine' },
@@ -38,8 +39,13 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
   onChanged: () => Promise<void>; onBatchStarted: (id: string) => void;
 }) {
   const [settingsForm] = Form.useForm<{ name: string; slug: string; description?: string; recipe_type: RecipeType;
-    target_volume?: number; target_volume_unit: string }>();
+    target_volume: number; target_volume_unit: string }>();
+  const [newRecipeForm] = Form.useForm<{ name: string; description?: string; recipe_type: RecipeType;
+    target_volume: number; target_volume_unit: string }>();
   const targetVolumeUnit = useRef<string>(preferredUnits.volume);
+  const newRecipeVolumeUnit = useRef<string>(preferredUnits.volume);
+  const newRecipeDefault = useRef<{ liters: number; display: number; unit: string } | null>(null);
+  const originalRecipeVolume = useRef<{ liters: number; display: number; unit: string } | null>(null);
   const [plans, setPlans] = useState<(PlanInput & { id: string })[]>([]);
   const [estimate, setEstimate] = useState<RecipeEstimate | null>(null);
   const [importedRecipe, setImportedRecipe] = useState(false);
@@ -57,6 +63,12 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
   const [error, setError] = useState('');
   const recipe = recipes.find(item => item.id === selectedId) || null;
 
+  useEffect(() => {
+    const initial = newRecipeDefault.current;
+    if (newRecipe && initial) newRecipeForm.setFieldsValue({ name: '', description: '', recipe_type: 'beer',
+      target_volume: initial.display, target_volume_unit: initial.unit });
+  }, [newRecipe, newRecipeForm]);
+
   async function refreshPlans() {
     if (selectedId) setPlans(await listRecipePlans(db, selectedId));
   }
@@ -70,8 +82,9 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
     setEstimate(null);
     void (async () => {
       const [recipeRows, eventRows, breweryEfficiency] = await Promise.all([
-        db.execO<{ target_fermenter_volume_liters: number | null; brewhouse_efficiency_pct: number | null }>(
-          'SELECT target_fermenter_volume_liters, brewhouse_efficiency_pct FROM recipe_inputs WHERE id = ?', [selectedId]),
+        db.execO<{ target_fermenter_volume_liters: number | null; brewhouse_efficiency_pct: number | null;
+          batch_size_source: string | null }>(
+          'SELECT target_fermenter_volume_liters, brewhouse_efficiency_pct, batch_size_source FROM recipe_inputs WHERE id = ?', [selectedId]),
         db.execO<{ id: string; yield_pct: number | null; color_lovibond: number | null; attenuation_pct: number | null }>(`SELECT i.id, i.yield_pct, i.color_lovibond, i.attenuation_pct FROM recipe_event_inputs i
           JOIN recipe_events e ON e.id = i.id WHERE e.recipe_id = ?`, [selectedId]),
         breweryMashEfficiency(db)
@@ -96,9 +109,26 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
     return () => { cancelled = true; };
   }, [db, selectedId, plans, supplies, equipment, equipmentModels, settingsOpen, recipe?.recipe_type]);
 
-  async function addRecipe(values: { name: string; description?: string; recipe_type: RecipeType }) {
+  async function openNewRecipe() {
     try {
-      const id = await createRecipe(db, values.name.trim(), values.description || '', values.recipe_type, preferredUnits.temperature);
+      const liters = await breweryBatchSize(db) ?? appBatchSizeLiters;
+      const unit = preferredUnits.volume;
+      const display = Number((convertUnit(liters, 'L', unit) ?? liters).toFixed(2));
+      newRecipeDefault.current = { liters, display, unit };
+      newRecipeVolumeUnit.current = unit;
+      setNewRecipe(true);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
+  async function addRecipe(values: { name: string; description?: string; recipe_type: RecipeType;
+    target_volume: number; target_volume_unit: string }) {
+    try {
+      const initial = newRecipeDefault.current;
+      const liters = initial && values.target_volume === initial.display && values.target_volume_unit === initial.unit
+        ? initial.liters : convertUnit(values.target_volume, values.target_volume_unit, 'L');
+      if (liters == null) throw new Error('Choose a batch size unit');
+      const id = await createRecipe(db, values.name.trim(), values.description || '', values.recipe_type,
+        preferredUnits.temperature, liters);
       onSelect(id); setNewRecipe(false); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -134,13 +164,19 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
   }
 
   async function saveSettings(values: { name: string; slug: string; description?: string; recipe_type: RecipeType;
-    target_volume?: number; target_volume_unit: string }) {
+    target_volume: number; target_volume_unit: string }) {
     if (!recipe) return;
     setSettingsBusy(true); setSettingsError('');
     try {
+      if (!Number.isFinite(values.target_volume) || values.target_volume <= 0) throw new Error('Enter a positive batch size');
       await updateRecipe(db, recipe.id, values.name, values.description || '', values.recipe_type, values.slug);
-      await updateRecipeTargetVolume(db, recipe.id, values.target_volume == null ? null
-        : convertUnit(values.target_volume, values.target_volume_unit, 'L'));
+      const original = originalRecipeVolume.current;
+      const unchanged = original && values.target_volume === original.display && values.target_volume_unit === original.unit;
+      if (!unchanged) {
+        const liters = convertUnit(values.target_volume, values.target_volume_unit, 'L');
+        if (liters == null) throw new Error('Choose a batch size unit');
+        await updateRecipeTargetVolume(db, recipe.id, liters);
+      }
       await onChanged();
       setSettingsOpen(false);
     } catch (cause) { setSettingsError(cause instanceof Error ? cause.message : String(cause)); }
@@ -152,8 +188,10 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
     setSettingsError('');
     const liters = await recipeTargetVolume(db, recipe.id);
     targetVolumeUnit.current = preferredUnits.volume;
+    const display = liters == null ? 0 : Number((convertUnit(liters, 'L', preferredUnits.volume) ?? 0).toFixed(2));
+    originalRecipeVolume.current = liters == null ? null : { liters, display, unit: preferredUnits.volume };
     settingsForm.setFieldsValue({ name: recipe.name, slug: recipe.slug, description: recipe.description || '', recipe_type: recipe.recipe_type || 'beer',
-      target_volume: liters == null ? undefined : convertUnit(liters, 'L', preferredUnits.volume) ?? undefined,
+      target_volume: liters == null ? undefined : display,
       target_volume_unit: preferredUnits.volume });
     setSettingsOpen(true);
   }
@@ -191,7 +229,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
           <span className="recipe-link-copy"><strong>{item.name}</strong><small>{item.description || 'No description'}</small></span>
         </a>)}</div>}
       <div className="recipe-index-actions">
-        <Button icon={<PlusOutlined />} onClick={() => setNewRecipe(true)}>New recipe</Button>
+        <Button icon={<PlusOutlined />} onClick={() => void openNewRecipe()}>New recipe</Button>
         <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>Import recipes</Button>
       </div>
     </section> : !recipe ? <Empty description="Recipe not found" /> : <section className="record-detail">
@@ -223,10 +261,18 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
           onAdd={(kind, settings) => { setEditingPlan(null); setPreset(settings); setCreatingKind(kind); }} />
       </section>}
     <Modal title="New recipe" open={newRecipe} onCancel={() => setNewRecipe(false)} footer={null} destroyOnHidden>
-      <Form layout="vertical" onFinish={addRecipe} initialValues={{ recipe_type: 'beer' }}>
+      <Form form={newRecipeForm} layout="vertical" onFinish={addRecipe}>
         <Form.Item name="name" label="Recipe name" rules={[{ required: true }]}><Input maxLength={100} /></Form.Item>
         <Form.Item name="recipe_type" label="Type" rules={[{ required: true }]}><Select options={recipeTypeOptions} /></Form.Item>
         <Form.Item name="description" label="Description"><Input.TextArea rows={2} /></Form.Item>
+        <div className="form-pair recipe-volume-fields"><Form.Item name="target_volume" label="Batch size"
+          rules={[{ required: true, message: 'Enter a batch size' }]}>
+          <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
+          <Form.Item name="target_volume_unit" label="Unit" rules={[{ required: true }]}>
+            <Select options={unitOptions(unitGroups.volume)} onChange={unit => {
+              changeNumberUnit(newRecipeForm, ['target_volume'], newRecipeVolumeUnit.current, unit);
+              newRecipeVolumeUnit.current = unit;
+            }} /></Form.Item></div>
         <Button type="primary" htmlType="submit">Create recipe</Button>
       </Form>
     </Modal>
@@ -240,7 +286,8 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
         <Form.Item name="recipe_type" label="Type" rules={[{ required: true }]}>
           <Select options={recipeTypeOptions} /></Form.Item>
         <Form.Item name="description" label="Description"><Input.TextArea rows={3} /></Form.Item>
-        <div className="form-pair recipe-volume-fields"><Form.Item name="target_volume" label="Batch size">
+        <div className="form-pair recipe-volume-fields"><Form.Item name="target_volume" label="Batch size"
+          rules={[{ required: true, message: 'Enter a batch size' }]}>
           <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
           <Form.Item name="target_volume_unit" label="Unit"><Select options={unitOptions(unitGroups.volume)}
             onChange={unit => { changeNumberUnit(settingsForm, ['target_volume'], targetVolumeUnit.current, unit);
