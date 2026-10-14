@@ -358,7 +358,10 @@ try {
   await page.getByRole('button', { name: 'Override capacity for this unit' }).click();
   await vevorUnitCapacityDialog.getByRole('button', { name: 'Restore to default' }).click();
   await page.getByText('Capacity: 35 L (model)').waitFor();
+  const unitBatches = page.locator('.equipment-batches');
+  await unitBatches.getByRole('row').filter({ hasText: batchName }).getByText('In use').waitFor();
   await page.getByRole('button', { name: 'Release' }).click();
+  await unitBatches.getByRole('row').filter({ hasText: batchName }).getByText('Previous').waitFor();
   await page.getByRole('link', { name: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
   await vevorRow.getByRole('cell', { name: '—' }).last().waitFor();
   await vevorRow.getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();

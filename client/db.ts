@@ -77,7 +77,8 @@ export interface Equipment extends EquipmentSpecifications { id: string; name: s
   model_id?: string; model_name?: string; stock_id?: string | null; added_at?: number | null; removed_at?: number | null;
   catalog_model_id?: string | null; catalog_model?: CatalogEquipment;
   measurement_channels?: EquipmentMeasurementChannel[] }
-export interface EquipmentUse { id: string; equipment_id: string; batch_id: string; batch_name: string; assigned_at: number }
+export interface EquipmentUse { id: string; equipment_id: string; batch_id: string; batch_name: string;
+  assigned_at: number; ended_at: number | null }
 const equipmentCalibrationColumns = ['buffer_4_observed', 'buffer_7_observed', 'reference_sg', 'observed_sg',
   'reference_brix', 'observed_brix', 'reference_g', 'observed_g', 'reference_kpa', 'observed_kpa',
   'reference_volumes', 'observed_volumes', 'reference_mg_l', 'observed_mg_l'] as const;
@@ -402,12 +403,13 @@ export async function listBatches(db: DB): Promise<Batch[]> {
     ORDER BY b.created_at DESC, b.id DESC`);
 }
 
-export async function listCurrentEquipmentUses(db: DB): Promise<EquipmentUse[]> {
-  return db.execO<EquipmentUse>(`SELECT e.id, u.equipment_id, e.batch_id, b.name AS batch_name, e.actual_at AS assigned_at
+export async function listEquipmentUses(db: DB): Promise<EquipmentUse[]> {
+  return db.execO<EquipmentUse>(`SELECT e.id, u.equipment_id, e.batch_id, b.name AS batch_name,
+      e.actual_at AS assigned_at, x.ended_at
     FROM batch_events e JOIN equipment_use_events u ON u.event_id = e.id
     JOIN batches b ON b.id = e.batch_id LEFT JOIN event_ends x ON x.id = e.id
-    WHERE e.actual_at IS NOT NULL AND e.skipped_at IS NULL AND x.id IS NULL
-    ORDER BY e.actual_at DESC, e.id DESC`);
+    WHERE e.actual_at IS NOT NULL AND e.skipped_at IS NULL
+    ORDER BY (x.id IS NOT NULL), COALESCE(x.ended_at, e.actual_at) DESC, e.id DESC`);
 }
 
 export async function assignEquipmentToBatch(db: DB, equipmentId: string, batchId: string, accountId: string): Promise<void> {

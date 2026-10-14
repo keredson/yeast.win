@@ -4,7 +4,7 @@ import { CloudOutlined, ContainerOutlined, ControlOutlined, DashboardOutlined, E
   FireOutlined, PlusOutlined, SwapOutlined } from '@ant-design/icons';
 import { boilOffKinds, capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
-import { assignEquipmentToBatch, createEquipment, createEquipmentUnit, deleteEquipment, listCurrentEquipmentUses, releaseEquipmentUse,
+import { assignEquipmentToBatch, createEquipment, createEquipmentUnit, deleteEquipment, listEquipmentUses, releaseEquipmentUse,
   addEquipmentModelCapability, removeEquipmentModelCapability, restoreEquipmentModelCapability,
   updateEquipmentBoilHeatLoss, clearEquipmentBoilHeatLoss,
   updateEquipmentModelBoilHeatLoss, clearEquipmentModelBoilHeatLoss,
@@ -275,17 +275,23 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       : convertUnit(selectedCatalogModel.max_pressure_kpa, 'kPa', preferredUnits.pressure),
     pressure_unit: preferredUnits.pressure
   };
-  const itemUses = uses.filter(use => use.equipment_id === item?.id);
+  const currentUses = uses.filter(use => use.ended_at == null);
+  const itemUses = currentUses.filter(use => use.equipment_id === item?.id);
+  const previousUses = uses.filter(use => use.equipment_id === item?.id && use.ended_at != null
+    && !itemUses.some(current => current.batch_id === use.batch_id));
+  const previousBatchUses = previousUses.filter((use, index) =>
+    previousUses.findIndex(previous => previous.batch_id === use.batch_id) === index);
+  const batchUses = [...itemUses, ...previousBatchUses];
   const availableBatches = batches.filter(batch => !itemUses.some(use => use.batch_id === batch.id));
 
-  useEffect(() => { void listCurrentEquipmentUses(db).then(setUses).catch(cause => setError(String(cause))); }, [db, equipment, batches]);
+  useEffect(() => { void listEquipmentUses(db).then(setUses).catch(cause => setError(String(cause))); }, [db, equipment, batches]);
 
   async function assignBatch() {
     if (!item || !assignBatchId) return;
     try {
       await assignEquipmentToBatch(db, item.id, assignBatchId, accountId);
       setAssignBatchId(undefined);
-      setUses(await listCurrentEquipmentUses(db));
+      setUses(await listEquipmentUses(db));
       await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -293,7 +299,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   async function releaseBatch(useId: string) {
     try {
       await releaseEquipmentUse(db, useId);
-      setUses(await listCurrentEquipmentUses(db));
+      setUses(await listEquipmentUses(db));
       await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -730,7 +736,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
             <a href={`${basePath}/equipment/${equipmentUnitPathSegment(row, equipment, models)}`}
               onClick={event => { event.preventDefault(); onSelect(row.id); }}>{value || `Unit ${row.id.slice(0, 6)}`}</a> },
           { title: 'Current batch', key: 'current-batch', width: '35%', render: (_: unknown, row: Equipment) => {
-            const current = uses.filter(use => use.equipment_id === row.id);
+            const current = currentUses.filter(use => use.equipment_id === row.id);
             return current.length ? <div className="equipment-current-batches">{current.map(use =>
               <a key={use.id} href={`${basePath}/batch/${use.batch_id}`}
                 onClick={event => { event.preventDefault(); onSelectBatch(use.batch_id); }}>{use.batch_name}</a>)}</div> : '—';
@@ -742,18 +748,6 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <div className="equipment-parameters">
           <div className="equipment-parameter"><span>Stock ID: {item.stock_id || 'Not set'}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit Stock ID" onClick={() => setEditIdentity(true)} /></div>
-          <div className="equipment-parameter equipment-assignments"><strong>Current batches</strong>
-            {itemUses.map(use => <div key={use.id} className="equipment-assignment">
-              <a href={`${basePath}/batch/${use.batch_id}`} onClick={event => { event.preventDefault(); onSelectBatch(use.batch_id); }}>{use.batch_name}</a>
-              <Button type="text" size="small" onClick={() => void releaseBatch(use.id)}>Release</Button>
-            </div>)}
-            {availableBatches.length > 0 && <div className="equipment-assignment-form">
-              <Select aria-label="Assign to batch" placeholder="Choose a batch" showSearch optionFilterProp="label"
-                value={assignBatchId} onChange={setAssignBatchId}
-                options={availableBatches.map(batch => ({ value: batch.id, label: batch.name }))} />
-              <Button disabled={!assignBatchId} onClick={() => void assignBatch()}>Assign</Button>
-            </div>}
-          </div>
           {item.has_liquid_containment && <div className="equipment-parameter"><span>Capacity: {capacityLabel(specs.capacity_liters ?? undefined) || 'Not set'}
             {specs.capacity_liters != null && (item.unit_capacity_liters != null ? ' (this unit)' : ' (model)')}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Override capacity for this unit" onClick={() => setEditCapacity(true)} /></div>}
@@ -795,6 +789,25 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           {profile?.fields.map(field => <div key={field.key} className="equipment-parameter"><span>{field.label}: {calibrationValues[field.key] == null ? 'Not calibrated' : String(calibrationValues[field.key])}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${field.label}`} onClick={() => setEditCalibration(true)} /></div>)}
         </div>
+        {(batchUses.length > 0 || availableBatches.length > 0) && <div className="equipment-batches">
+          <h3>Batches</h3>
+          {batchUses.length > 0 && <Table<EquipmentUse> className="equipment-table" dataSource={batchUses}
+            rowKey="id" pagination={false} size="small" columns={[
+              { title: 'Batch', dataIndex: 'batch_name', render: (_: string, use: EquipmentUse) =>
+                <a href={`${basePath}/batch/${use.batch_id}`}
+                  onClick={event => { event.preventDefault(); onSelectBatch(use.batch_id); }}>{use.batch_name}</a> },
+              { title: 'Status', key: 'status', render: (_: unknown, use: EquipmentUse) =>
+                use.ended_at == null ? 'In use' : 'Previous' },
+              { title: '', key: 'action', render: (_: unknown, use: EquipmentUse) =>
+                use.ended_at == null ? <Button type="text" size="small" onClick={() => void releaseBatch(use.id)}>Release</Button> : null }
+            ]} />}
+          {availableBatches.length > 0 && <div className="equipment-assignment-form">
+            <Select aria-label="Assign to batch" placeholder="Choose a batch" showSearch optionFilterProp="label"
+              value={assignBatchId} onChange={setAssignBatchId}
+              options={availableBatches.map(batch => ({ value: batch.id, label: batch.name }))} />
+            <Button disabled={!assignBatchId} onClick={() => void assignBatch()}>Assign</Button>
+          </div>}
+        </div>}
         <div className="equipment-delete"><Popconfirm title={`Delete ${item.name}?`}
           description="The unit is removed from your equipment list. Its batch history and calibrations remain."
           okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => void remove()}>
