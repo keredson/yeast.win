@@ -42,6 +42,20 @@ The added 2.5 and 3 US gal keg sizes are documented by [MoreBeer's KegLand 2.5 g
 
 Generic food photos come from Wikimedia Commons: [honey jar](https://commons.wikimedia.org/wiki/File:Big_Honey_Jar.jpg) (CC0), [maple syrup](https://commons.wikimedia.org/wiki/File:Maple_syrup.jpg) (public domain), [brown sugar](https://commons.wikimedia.org/wiki/File:Brown_sugar_(20240904).jpg) (CC0), and [grape juice](https://commons.wikimedia.org/wiki/File:Green_grape_juice.jpg) (CC0). The six previously unpictured Simpsons distilling malts use the images on their matching [Simpsons distilling malt product pages](https://www.simpsonsmalt.co.uk/our-malts/distilling-malts/); Simpsons reuses some photos across those pages.
 
+The remaining generic rows use these representative images. The photo of corn syrup is unbranded; the generic catalog entry does not point to Karo or any other specific product. Photographs of nutrient ingredients illustrate their appearance and do not define a formula or grade for a user's stock.
+
+| Generic catalog rows | Image and credit | License |
+| --- | --- | --- |
+| Corn sugar, priming sugar | [D-glucose monohydrate](https://commons.wikimedia.org/wiki/File:D-(%2B)-Glucose_monohydrate.jpg), Lecaimant | CC BY-SA 3.0 |
+| Corn syrup | [Corn syrup](https://commons.wikimedia.org/wiki/File:Corn_syrup.jpg), Malinaccier | Public domain |
+| Fresh apple cider | [Unpasteurized apple cider](https://commons.wikimedia.org/wiki/File:Applecider.JPG), AaronS | Public domain |
+| Molasses | [Pour molasses into a mixing bowl](https://commons.wikimedia.org/wiki/File:Pour_Molasses_into_a_Mixing_Bowl.JPG), ParentingPatch | CC BY-SA 3.0 |
+| Table sugar | [A bowl of sugar](https://commons.wikimedia.org/wiki/File:A_Bowl_of_Sugar.jpg), Sparkveela | CC0 |
+| Lactic acid | [Lactic acid sample](https://commons.wikimedia.org/wiki/File:Racemic_lactic_acid_sample_horizontal.jpg), LHcheM | CC BY 3.0 |
+| Diammonium phosphate | [DAP granules](https://commons.wikimedia.org/wiki/File:DAP_(Diammonium_Phosphate)_Granules_(3).jpg), Suyash Dwivedi | CC BY-SA 4.0 |
+| Yeast energizer | [Yeast and nutrients](https://commons.wikimedia.org/wiki/File:Yeast_and_nutrients.JPG), Agne27 | CC BY-SA 3.0 |
+| Yeast nutrient | [Yeast extract](https://commons.wikimedia.org/wiki/File:Yeast_extract.jpg), Yulianna.x | CC BY-SA 4.0 |
+
 ## Yeast apparent attenuation reviewed 2026-10-14
 
 The catalog currently has one attenuation percentage per yeast. The values below are the midpoint of the manufacturer's published range, used as a planning default rather than a guarantee for a particular wort or fermentation. These are catalog data edits, not startup seeds.
