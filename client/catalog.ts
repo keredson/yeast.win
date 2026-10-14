@@ -4,7 +4,8 @@ import { catalogModelTables, catalogSupplyTables, catalogSchemaVersion, catalogT
   type CatalogEquipment, type CatalogInventory, type CatalogMeasurementChannel } from '../shared/catalog.ts';
 import { changeColumns } from '../shared/schema.ts';
 import { maxSequence, readSequence, syncProtocolVersion, validChangeTuple, type ChangeTuple } from '../shared/cborSync.ts';
-import { fetchApi } from './api.ts';
+import { syncSchemaHeader } from '../shared/syncSchema.ts';
+import { fetchApi, syncError } from './api.ts';
 
 let opened: Promise<DB> | undefined;
 let syncing: Promise<boolean> | undefined;
@@ -546,8 +547,9 @@ export async function syncLocalCatalog(db: DB, onProgress?: (applied: number, to
     if (!force && lastRefreshAt > 0 && now >= lastRefreshAt && now - lastRefreshAt < catalogRefreshIntervalMs) return false;
     let seq = rows.find(row => row.key === 'serverSeq')?.value || '0';
     if (seq === '0' && cursor !== '0') seq = maxSequence;
-    const response = await fetchApi(`/api/catalog/sync?version=${cursor}&seq=${seq}`, { credentials: 'same-origin' });
-    if (!response.ok) throw new Error('Catalog sync failed');
+    const response = await fetchApi(`/api/catalog/sync?version=${cursor}&seq=${seq}`,
+      { credentials: 'same-origin', headers: { [syncSchemaHeader]: String(catalogSchemaVersion) } });
+    if (!response.ok) throw await syncError(response, 'Catalog sync failed');
     if (!response.body) throw new Error('Catalog sync response cannot be streamed');
     const stream = readSequence(response.body);
     const first = await stream.next();

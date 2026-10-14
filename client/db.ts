@@ -1,5 +1,5 @@
 import initWasm, { type DB } from '@vlcn.io/crsqlite-wasm';
-import { fetchApi } from './api.ts';
+import { fetchApi, syncError } from './api.ts';
 import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { createId } from '../shared/id.ts';
 import { boilOffKinds, capacityKinds, equipmentKinds, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
@@ -15,6 +15,7 @@ import { changeColumns, indexStatements, legacyEquipmentCopyStatements, legacyEq
 import type { SqlChangeRow } from '../shared/wire.ts';
 import { changeTuple, decodeItem, encodeItem, maxSequence, readSequence, syncContentType,
   syncProtocolVersion, validChangeTuple, type ChangeTuple } from '../shared/cborSync.ts';
+import { syncSchemaHeader } from '../shared/syncSchema.ts';
 import { convertUnit, formatQuantity, storageUnit } from '../shared/units.ts';
 import type { ImportedRecipe } from './recipeImport.ts';
 import { mashEfficiencyPct, type MashGrain } from './mashEfficiency.ts';
@@ -2729,10 +2730,10 @@ async function performSync(db: DB, workspaceId: string, onProgress?: (progress: 
       COALESCE(site_id, crsql_site_id()) AS site_id, cl, seq FROM crsql_changes
       WHERE ${uploadWhere} ORDER BY db_version, seq LIMIT ${count}`, uploadArgs(uploadVersion, uploadSeq));
     const response = await fetchApi(`/api/workspaces/${workspaceId}/sync/upload`, {
-      method: 'POST', headers: { 'Content-Type': syncContentType }, credentials: 'same-origin',
+      method: 'POST', headers: { 'Content-Type': syncContentType, [syncSchemaHeader]: String(workspaceSchemaVersion) }, credentials: 'same-origin',
       body: encodeItem([syncProtocolVersion, uploadVersion, uploadSeq, rows.map(changeTuple)]) as BodyInit
     });
-    if (!response.ok) throw new Error((await response.json() as { error?: string }).error || 'Sync upload failed');
+    if (!response.ok) throw await syncError(response, 'Sync upload failed');
     const ack = decodeItem(new Uint8Array(await response.arrayBuffer()));
     if (!Array.isArray(ack) || ack[0] !== syncProtocolVersion || !/^\d+$/.test(ack[1]) || !/^\d+$/.test(ack[2]))
       throw new Error('Invalid sync upload acknowledgement');
@@ -2749,8 +2750,8 @@ async function performSync(db: DB, workspaceId: string, onProgress?: (progress: 
   let serverSeq = await stateValue(db, 'serverSeq');
   if (serverSeq === '0' && serverVersion !== '0') serverSeq = maxSequence;
   const response = await fetchApi(`/api/workspaces/${workspaceId}/sync/download?version=${serverVersion}&seq=${serverSeq}`,
-    { credentials: 'same-origin' });
-  if (!response.ok) throw new Error((await response.json() as { error?: string }).error || 'Sync download failed');
+    { credentials: 'same-origin', headers: { [syncSchemaHeader]: String(workspaceSchemaVersion) } });
+  if (!response.ok) throw await syncError(response, 'Sync download failed');
   if (!response.body) throw new Error('Sync response cannot be streamed');
   const stream = readSequence(response.body);
   const first = await stream.next();

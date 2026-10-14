@@ -8,6 +8,7 @@ import { assertCrSqliteAvailable, closeWorkspaceDb, createWorkspace, dataDir, de
 import { openCatalogDb } from './catalog.ts';
 import { receiveCborChanges, streamCborChanges } from './sync.ts';
 import { syncContentType } from '../shared/cborSync.ts';
+import { syncSchemaConflict, syncSchemaHeader } from '../shared/syncSchema.ts';
 import { isValidId } from '../shared/schema.ts';
 import { validPreferredUnits } from '../shared/units.ts';
 
@@ -174,6 +175,9 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { account, workspaces: ownerWorkspaces(account.id), preferred_units: getPreferredUnits(authDb, account.id) });
     }
     if (pathname === '/api/catalog/sync' && req.method === 'GET') {
+      const conflict = syncSchemaConflict(req.headers[syncSchemaHeader.toLowerCase()] as string | undefined,
+        catalogDb.pragma('user_version', { simple: true }) as number);
+      if (conflict) return json(res, 409, conflict);
       const version = url.searchParams.get('version') || '0';
       const seq = url.searchParams.get('seq') || '0';
       if (!/^\d+$/.test(version) || !/^\d+$/.test(seq)) return json(res, 400, { error: 'Invalid catalog cursor' });
@@ -273,9 +277,13 @@ const server = createServer(async (req, res) => {
     if (binarySyncMatch && (req.method === 'POST' || req.method === 'GET')) {
       const [, workspaceId, action] = binarySyncMatch;
       if (!isValidId(workspaceId) || !ownsWorkspace(account.id, workspaceId)) return json(res, 404, { error: 'Brewery not found' });
+      const workspaceDb = getWorkspaceDb(workspaceId);
+      const conflict = syncSchemaConflict(req.headers[syncSchemaHeader.toLowerCase()] as string | undefined,
+        workspaceDb.pragma('user_version', { simple: true }) as number);
+      if (conflict) return json(res, 409, conflict);
       if (action === 'upload' && req.method === 'POST') {
         let result: Uint8Array;
-        try { result = receiveCborChanges(getWorkspaceDb(workspaceId), await readCbor(req)); }
+        try { result = receiveCborChanges(workspaceDb, await readCbor(req)); }
         catch (cause) {
           if (cause instanceof Error && /Invalid CBOR|Expected CBOR|too large/i.test(cause.message))
             return json(res, 400, { error: cause.message });
@@ -288,7 +296,7 @@ const server = createServer(async (req, res) => {
         const version = url.searchParams.get('version') || '0';
         const seq = url.searchParams.get('seq') || '0';
         if (!/^\d+$/.test(version) || !/^\d+$/.test(seq)) return json(res, 400, { error: 'Invalid sync cursor' });
-        return await streamCborChanges(getWorkspaceDb(workspaceId), res, version, seq);
+        return await streamCborChanges(workspaceDb, res, version, seq);
       }
     }
     return json(res, 404, { error: 'Not found' });

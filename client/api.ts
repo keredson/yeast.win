@@ -1,5 +1,6 @@
 export type { PreferredUnits } from '../shared/units.ts';
 import type { PreferredUnits } from '../shared/units.ts';
+import type { SyncSchemaConflict } from '../shared/syncSchema.ts';
 
 export interface Workspace { id: string; name: string; slug: string | null }
 export interface Session {
@@ -14,6 +15,20 @@ export class ApiError extends Error {
 
 export class ApiUnavailableError extends Error {
   constructor() { super('Cannot reach the server. Check that it is running and try again.'); }
+}
+
+export class ClientUpdateRequiredError extends Error {
+  constructor(readonly requiredSchemaVersion: number) {
+    super('This app needs an update before it can sync.');
+  }
+}
+
+export async function syncError(response: Response, fallback: string): Promise<Error> {
+  let result: Partial<SyncSchemaConflict> = {};
+  try { result = await response.json() as Partial<SyncSchemaConflict>; } catch { /* Keep the fallback. */ }
+  if (response.status === 409 && result.code === 'client_update_required')
+    return new ClientUpdateRequiredError(result.requiredSchemaVersion || 0);
+  return new ApiError(result.error || fallback, response.status);
 }
 
 export async function fetchApi(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {

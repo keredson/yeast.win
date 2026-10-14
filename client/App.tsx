@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppstoreOutlined, BookOutlined, DisconnectOutlined, EnvironmentOutlined, HomeOutlined, InboxOutlined, MenuOutlined, ToolOutlined } from '@ant-design/icons';
 import { Alert, Avatar, Breadcrumb, Button, Drawer, Empty, Layout, Menu, Popover, Progress, Select, Spin, Tooltip } from 'antd';
-import { api, ApiError, ApiUnavailableError, type PreferredUnits, type Session, type Workspace } from './api.ts';
+import { api, ApiError, ApiUnavailableError, ClientUpdateRequiredError, type PreferredUnits, type Session, type Workspace } from './api.ts';
+import { checkForAppUpdate } from './appUpdate.ts';
 import { defaultPreferredUnits } from '../shared/units.ts';
 import { forgetLocalDb, openLocalDb, syncNow, type SyncProgress, type Batch, type Equipment, type InventoryItem, type InventoryLocation, type LocalDb, type Recipe, type RecipeType,
   listBatches, listEquipment, listEquipmentModels, listInventory, listSupplies, listInventoryLocations, listRecipes } from './db.ts';
@@ -279,6 +280,11 @@ export function App() {
         if (profileOpen) console.info(`[open catalog] Sync failed: ${cause instanceof Error ? cause.message : String(cause)}`);
         if (!cancelled) setCatalogSyncProgress(null);
         if (!cancelled && cause instanceof ApiUnavailableError) setServerDisconnected(true);
+        if (!cancelled && cause instanceof ClientUpdateRequiredError) {
+          setError('Updating the app to continue syncing…');
+          if (!await checkForAppUpdate() && !cancelled)
+            setError('This app needs an update before it can sync. Reopen it once the new version is available. Your local changes are saved.');
+        }
         // Cached catalog remains searchable offline.
       } finally { running = false; }
     };
@@ -473,8 +479,11 @@ export function App() {
         await refresh(activeDb, targetWorkspaceId);
       }
       if (breweryResult.status === 'rejected') throw breweryResult.reason;
-      if (catalogResult.status === 'rejected') throw new Error(`Catalog sync failed: ${
-        catalogResult.reason instanceof Error ? catalogResult.reason.message : String(catalogResult.reason)}`);
+      if (catalogResult.status === 'rejected') {
+        if (catalogResult.reason instanceof ClientUpdateRequiredError) throw catalogResult.reason;
+        throw new Error(`Catalog sync failed: ${
+          catalogResult.reason instanceof Error ? catalogResult.reason.message : String(catalogResult.reason)}`);
+      }
       const syncedAt = Date.now();
       localStorage.setItem(lastSyncKey(targetWorkspaceId), String(syncedAt));
       setLastSyncedAt(syncedAt);
@@ -488,7 +497,12 @@ export function App() {
       setSyncPhase('failed');
       setSyncProgress(null);
       setCatalogSyncProgress(null);
-      if (cause instanceof ApiUnavailableError) setServerDisconnected(true);
+      if (cause instanceof ClientUpdateRequiredError) {
+        setError('Updating the app to continue syncing…');
+        const updated = await checkForAppUpdate();
+        if (!updated && activeWorkspaceId.current === targetWorkspaceId)
+          setError('This app needs an update before it can sync. Reopen it once the new version is available. Your local changes are saved.');
+      } else if (cause instanceof ApiUnavailableError) setServerDisconnected(true);
       else if (navigator.onLine) setError(cause instanceof Error ? cause.message : 'Sync failed');
     }
   }, [refresh]);
