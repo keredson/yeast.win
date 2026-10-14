@@ -1024,8 +1024,8 @@ try {
   await page.getByRole('link', { name: 'grain', exact: true }).click();
   const grainCatalog = page.getByRole('dialog', { name: 'Add from catalog' });
   await grainCatalog.getByRole('combobox', { name: 'Filter inventory type' }).getByText('Grain').waitFor();
-  await grainCatalog.getByRole('button', { name: 'Create custom product' }).click();
-  const newGrain = page.getByRole('dialog', { name: 'Create grain product' });
+  await grainCatalog.getByRole('button', { name: 'Specify grain not in catalog' }).click();
+  const newGrain = page.getByRole('dialog', { name: 'Specify grain product' });
   await newGrain.getByRole('combobox', { name: 'Product name' }).fill('Smoke grain');
   await newGrain.getByRole('spinbutton', { name: 'Extract yield (%)' }).fill('78');
   if (!await newGrain.getByRole('combobox', { name: 'Unit' }).locator('..').getByText('lb + oz', { exact: true }).count()) {
@@ -1048,7 +1048,7 @@ try {
   }
   await newGrain.getByRole('combobox', { name: 'Unit' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="lb + oz"]').click();
-  await page.getByRole('button', { name: 'Create product' }).click();
+  await page.getByRole('button', { name: 'Save product' }).click();
   await newGrain.waitFor({ state: 'hidden' });
   await page.waitForURL(url => url.pathname === '/inventory');
   await page.getByRole('button', { name: 'Add grain' }).waitFor();

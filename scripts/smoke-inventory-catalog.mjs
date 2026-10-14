@@ -61,12 +61,12 @@ try {
   await page.getByRole('link', { name: 'Briess Caramel Malt 60L' }).waitFor();
   await page.locator('.inventory-add-types').getByRole('link', { name: 'grain' }).click();
   const grainExplorer = page.getByRole('dialog', { name: 'Add from catalog' });
-  await grainExplorer.getByRole('button', { name: 'Create custom product' }).click();
-  const custom = page.getByRole('dialog', { name: 'Create grain product' });
+  await grainExplorer.getByRole('button', { name: 'Specify grain not in catalog' }).click();
+  const custom = page.getByRole('dialog', { name: 'Specify grain product' });
   await custom.getByRole('combobox', { name: 'Product name' }).fill('House malt');
   await custom.getByRole('spinbutton', { name: 'Extract yield (%)' }).fill('79');
   await custom.getByRole('spinbutton', { name: 'Color (°L)' }).fill('3');
-  await custom.getByRole('button', { name: 'Create product' }).click();
+  await custom.getByRole('button', { name: 'Save product' }).click();
   await custom.waitFor({ state: 'hidden' });
   await page.getByRole('link', { name: 'House malt' }).click();
   await page.getByRole('button', { name: 'Supply properties' }).click();

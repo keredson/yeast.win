@@ -536,10 +536,10 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching products' : 'No catalog products available'} />}
       {catalogPickerPurpose === 'link' ? null : catalogCategory ? <Button type="link" className="catalog-create-custom"
-        onClick={() => createCustomProduct(catalogCategory)}>Create custom product</Button>
+        onClick={() => createCustomProduct(catalogCategory)}>Specify {catalogCategory.toLowerCase()} not in catalog</Button>
         : <Dropdown trigger={['click']} menu={{ items: categories.map(category => ({ key: category, label: category })),
           onClick: ({ key }) => createCustomProduct(key) }}>
-          <Button type="link" className="catalog-create-custom">Create custom product</Button>
+          <Button type="link" className="catalog-create-custom">Specify product not in catalog</Button>
         </Dropdown>}
     </Modal>
     <Modal title={item ? `${item.name} supply defaults` : 'Supply defaults'} open={ingredientSettingsOpen}
@@ -559,7 +559,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
       </Form>
     </Modal>
     <Modal title={newStockProduct ? `Add ${newStockProduct.name} stock` : creatingCustomProduct && newItemCategory
-      ? `Create ${newItemCategory.toLowerCase()} product` : newItemCategory
+      ? `Specify ${newItemCategory.toLowerCase()} product` : newItemCategory
       ? `New ${newItemCategory.toLowerCase()} item` : 'New inventory item'} open={!!newItemCategory}
       onCancel={() => { setNewItemCategory(null); setNewStockProduct(null); setNewStockLotCode(undefined);
         setSelectedCatalogProduct(null); setCatalogProductChosen(false); setCreatingCustomProduct(false); }} footer={null} destroyOnHidden>
@@ -611,7 +611,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
         <QuantityFields unit={newItemUnit} label="Starting quantity on hand" name="starting_quantity" optional={!existingItem} />
         {existingAtLocation && <p className="muted">This item is already at this location. The quantity will be recorded as a purchase.</p>}
         {existingItem && !existingAtLocation && <p className="muted">This creates another stock row for the selected location.</p>}
-        <Button type="primary" htmlType="submit">{existingAtLocation ? 'Add stock' : creatingCustomProduct ? 'Create product' : 'Create item'}</Button>
+        <Button type="primary" htmlType="submit">{existingAtLocation ? 'Add stock' : creatingCustomProduct ? 'Save product' : 'Create item'}</Button>
       </Form>
     </Modal>
     <Modal title="Move stock" open={!!moveItem} onCancel={() => setMoveItemId(null)} footer={null} destroyOnHidden>
