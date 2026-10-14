@@ -38,7 +38,11 @@ export function CatalogImage({ kind, id, className, alt = '', immediate = false 
 }) {
   const ref = useRef<HTMLImageElement>(null);
   const [visible, setVisible] = useState(immediate);
+  const [retryUrl, setRetryUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
+    setRetryUrl(null);
+    setFailed(false);
     if (immediate || !ref.current || !('IntersectionObserver' in window)) {
       setVisible(true);
       return;
@@ -51,5 +55,15 @@ export function CatalogImage({ kind, id, className, alt = '', immediate = false 
     return () => { observer.unobserve(element); visibleCallbacks.delete(element); };
   }, [id, immediate]);
   const src = useCatalogMedia(kind, id, visible);
-  return <img ref={ref} className={className} src={src || undefined} alt={alt} loading="lazy" />;
+  useEffect(() => { setRetryUrl(null); setFailed(false); }, [src]);
+  return <img ref={ref} className={className} src={failed ? undefined : retryUrl || src || undefined}
+    alt={alt} loading="lazy" onError={() => {
+      if (!src || failed) return;
+      if (retryUrl) { setFailed(true); return; }
+      // An opaque failed response can linger in the offline image cache. A new
+      // URL bypasses that entry while keeping the catalog source unchanged.
+      const next = new URL(src, location.href);
+      next.searchParams.set('brewlog_retry', Date.now().toString());
+      setRetryUrl(next.href);
+    }} />;
 }
