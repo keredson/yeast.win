@@ -119,6 +119,7 @@ button, input, textarea { font: inherit; }
 .catalog-explorer-option-name strong { font-size: 14px; }
 .catalog-explorer-option-name small { color: #728079; font-size: 12px; }
 .catalog-explorer-thumbnail { width: 46px; height: 46px; flex: none; object-fit: contain; }
+.catalog-explorer-thumbnail.catalog-grain-banner { object-fit: cover; }
 .catalog-create-custom { margin-top: 12px; padding-left: 0; }
 .equipment-catalog-source > img { display: block; max-width: 160px; max-height: 160px; object-fit: contain; margin: 0 0 12px; }
 .equipment-catalog-manufacturer { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; font-size: 13px; }
@@ -136,6 +137,7 @@ button, input, textarea { font: inherit; }
 .supply-product-links > .ant-btn { padding-left: 0; }
 .supply-product-image { width: 160px; display: flex; align-items: flex-end; flex-direction: column; }
 .supply-product-image > img { width: 160px; height: 160px; object-fit: contain; }
+.supply-product-image.catalog-grain-banner > img { object-fit: cover; }
 .supply-product-image > .muted { min-height: 130px; }
 @media (max-width: 550px) {
   .supply-product-overview { grid-template-columns: minmax(0, 1fr) 88px; gap: 12px; }
@@ -145,6 +147,7 @@ button, input, textarea { font: inherit; }
 }
 .inventory-catalog-source { display: flex; align-items: center; gap: 14px; margin: 0 0 18px; }
 .inventory-catalog-source img { width: 92px; height: 92px; flex: none; object-fit: contain; }
+.inventory-catalog-source.catalog-grain-banner img { object-fit: cover; }
 .inventory-catalog-source p { margin: 3px 0; }
 .record-list, .card-stack, .group-tables { display: flex; flex-direction: column; gap: 12px; }
 .record-list { margin-top: 22px; }

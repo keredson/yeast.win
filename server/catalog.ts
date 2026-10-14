@@ -36,30 +36,14 @@ function migrateColumns(db: Database.Database): void {
   const modelCols = columns(db, 'equipment_models');
   alter(db, 'equipment_models', [
     ...(!modelCols.has('product_url') ? ['ALTER TABLE equipment_models ADD COLUMN product_url TEXT'] : []),
-    ...['image_url', 'thumbnail_url', 'specification_json']
+    ...['specification_json']
       .filter(column => modelCols.has(column))
       .map(column => `ALTER TABLE equipment_models DROP COLUMN ${column}`)
   ]);
   const manufacturerCols = columns(db, 'manufacturers');
   alter(db, 'manufacturers', [
-    ...(!manufacturerCols.has('website_url') ? ['ALTER TABLE manufacturers ADD COLUMN website_url TEXT'] : []),
-    ...(manufacturerCols.has('logo_url') ? ['ALTER TABLE manufacturers DROP COLUMN logo_url'] : [])
+    ...(!manufacturerCols.has('website_url') ? ['ALTER TABLE manufacturers ADD COLUMN website_url TEXT'] : [])
   ]);
-  for (const [table, renamed, mimeColumns] of [
-    ['model_images', [['image_webp', 'image_bytes'], ['thumbnail_webp', 'thumbnail_bytes']],
-      ['image_mime_type', 'thumbnail_mime_type']],
-    ['manufacturer_logos', [['image_webp', 'image_bytes']], ['mime_type']]
-  ] as const) {
-    const present = columns(db, table);
-    const statements: string[] = [];
-    for (const [oldName, newName] of renamed) if (present.has(oldName) && !present.has(newName)) {
-      statements.push(`ALTER TABLE ${table} RENAME COLUMN ${oldName} TO ${newName}`);
-    }
-    for (const column of mimeColumns) if (!present.has(column)) {
-      statements.push(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
-    }
-    alter(db, table, statements);
-  }
   const productCols = columns(db, 'supply_products');
   if (!productCols.has('product_url')) alter(db, 'supply_products',
     ['ALTER TABLE supply_products ADD COLUMN product_url TEXT']);
@@ -68,18 +52,46 @@ function migrateColumns(db: Database.Database): void {
       WHERE (product_url IS NULL OR product_url = '') AND spec_source_url IS NOT NULL`);
     alter(db, 'supply_products', ['ALTER TABLE supply_products DROP COLUMN spec_source_url']);
   }
-  const mime = (column: string) => `CASE
-    WHEN substr(${column}, 1, 3) = x'FFD8FF' THEN 'image/jpeg'
-    WHEN substr(${column}, 1, 4) = x'89504E47' THEN 'image/png'
-    WHEN substr(${column}, 1, 4) = x'52494646' AND substr(${column}, 9, 4) = x'57454250' THEN 'image/webp'
-    ELSE 'application/octet-stream' END`;
-  for (const [table, dataColumn, mimeColumn] of [
-    ['model_images', 'image_bytes', 'image_mime_type'],
-    ['model_images', 'thumbnail_bytes', 'thumbnail_mime_type'],
-    ['manufacturer_logos', 'image_bytes', 'mime_type'],
-    ['supply_images', 'image_bytes', 'image_mime_type']
-  ]) db.exec(`UPDATE ${table} SET ${mimeColumn} = ${mime(dataColumn)}
-    WHERE ${dataColumn} IS NOT NULL AND ${mimeColumn} IS NULL`);
+}
+
+function migrateMediaUrls(db: Database.Database): void {
+  for (const [table, urlColumns, oldColumns] of [
+    ['model_images', ['image_url', 'thumbnail_url'],
+      ['image_bytes', 'image_mime_type', 'thumbnail_bytes', 'thumbnail_mime_type', 'image_webp', 'thumbnail_webp']],
+    ['manufacturer_logos', ['logo_url'], ['image_bytes', 'mime_type', 'image_webp']],
+    ['supply_images', ['image_url'], ['image_bytes', 'image_mime_type']]
+  ] as const) {
+    const present = columns(db, table);
+    alter(db, table, urlColumns.filter(column => !present.has(column))
+      .map(column => `ALTER TABLE ${table} ADD COLUMN ${column} TEXT`));
+  }
+  const modelCols = columns(db, 'equipment_models');
+  if (modelCols.has('image_url')) db.exec(`UPDATE model_images SET image_url =
+    (SELECT image_url FROM equipment_models WHERE id = model_id)
+    WHERE image_url IS NULL AND EXISTS (SELECT 1 FROM equipment_models
+      WHERE id = model_id AND image_url IS NOT NULL)`);
+  if (modelCols.has('thumbnail_url')) db.exec(`UPDATE model_images SET thumbnail_url =
+    (SELECT thumbnail_url FROM equipment_models WHERE id = model_id)
+    WHERE thumbnail_url IS NULL AND EXISTS (SELECT 1 FROM equipment_models
+      WHERE id = model_id AND thumbnail_url IS NOT NULL)`);
+  const manufacturerCols = columns(db, 'manufacturers');
+  if (manufacturerCols.has('logo_url')) db.exec(`UPDATE manufacturer_logos SET logo_url =
+    (SELECT logo_url FROM manufacturers WHERE name = manufacturer_name)
+    WHERE logo_url IS NULL AND EXISTS (SELECT 1 FROM manufacturers
+      WHERE name = manufacturer_name AND logo_url IS NOT NULL)`);
+  for (const [table, , oldColumns] of [
+    ['model_images', [], ['image_bytes', 'image_mime_type', 'thumbnail_bytes', 'thumbnail_mime_type', 'image_webp', 'thumbnail_webp']],
+    ['manufacturer_logos', [], ['image_bytes', 'mime_type', 'image_webp']],
+    ['supply_images', [], ['image_bytes', 'image_mime_type']]
+  ] as const) {
+    const present = columns(db, table);
+    alter(db, table, oldColumns.filter(column => present.has(column))
+      .map(column => `ALTER TABLE ${table} DROP COLUMN ${column}`));
+  }
+  alter(db, 'equipment_models', ['image_url', 'thumbnail_url'].filter(column => modelCols.has(column))
+    .map(column => `ALTER TABLE equipment_models DROP COLUMN ${column}`));
+  alter(db, 'manufacturers', manufacturerCols.has('logo_url')
+    ? ['ALTER TABLE manufacturers DROP COLUMN logo_url'] : []);
 }
 
 function migrateLegacyRows(db: Database.Database): void {
@@ -148,8 +160,10 @@ export function openCatalogDb(dataDir: string): Database.Database {
     if (version < catalogSchemaVersion) {
       migrateColumns(db);
       migrateLegacyRows(db);
+      migrateMediaUrls(db);
       db.pragma(`user_version = ${catalogSchemaVersion}`);
     }
+    else migrateMediaUrls(db);
   })();
   return db;
 }

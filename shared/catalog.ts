@@ -24,7 +24,7 @@ export interface CatalogInventory { id: string; name: string; category: string; 
   manufacturer?: string | null; product_url?: string | null;
   image_src?: string | null; has_image?: boolean }
 export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
-export const catalogSchemaVersion = 31;
+export const catalogSchemaVersion = 32;
 export const inventoryCategories = ['Grain', 'Other fermentables', 'Hops', 'Yeast', 'Nutrient', 'Adjunct', 'Chemical', 'Packaging', 'Other'] as const;
 export const catalogModelTables = {
   manufacturers: `CREATE TABLE IF NOT EXISTS manufacturers (
@@ -33,10 +33,9 @@ export const catalogModelTables = {
     id TEXT PRIMARY KEY NOT NULL, manufacturer TEXT, model_name TEXT, kind TEXT,
     product_url TEXT)`,
   model_images: `CREATE TABLE IF NOT EXISTS model_images (
-    model_id TEXT PRIMARY KEY NOT NULL, image_bytes BLOB, image_mime_type TEXT,
-    thumbnail_bytes BLOB, thumbnail_mime_type TEXT)`,
+    model_id TEXT PRIMARY KEY NOT NULL, image_url TEXT, thumbnail_url TEXT)`,
   manufacturer_logos: `CREATE TABLE IF NOT EXISTS manufacturer_logos (
-    manufacturer_name TEXT PRIMARY KEY NOT NULL, image_bytes BLOB, mime_type TEXT)`,
+    manufacturer_name TEXT PRIMARY KEY NOT NULL, logo_url TEXT)`,
   model_liquid_containment: `CREATE TABLE IF NOT EXISTS model_liquid_containment (
     model_id TEXT PRIMARY KEY NOT NULL, capacity_liters REAL)`,
   model_pressure_rating: `CREATE TABLE IF NOT EXISTS model_pressure_rating (
@@ -70,7 +69,7 @@ export const catalogSupplyTables = {
   supply_products: `CREATE TABLE IF NOT EXISTS supply_products (
     supply_id TEXT PRIMARY KEY NOT NULL, manufacturer TEXT, product_url TEXT)`,
   supply_images: `CREATE TABLE IF NOT EXISTS supply_images (
-    supply_id TEXT PRIMARY KEY NOT NULL, image_bytes BLOB, image_mime_type TEXT)`
+    supply_id TEXT PRIMARY KEY NOT NULL, image_url TEXT)`
 } as const;
 export const catalogTables = [...Object.keys(catalogModelTables), ...Object.keys(catalogSupplyTables)] as const;
 

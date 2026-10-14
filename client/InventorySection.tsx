@@ -489,7 +489,8 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
               Link catalog product
             </Button>}
           </div>
-          <div className="supply-product-image">
+          <div className={`supply-product-image${!activeMedia?.imageUrl && catalogProduct?.manufacturer === 'Briess'
+            && catalogProduct.category === 'Grain' ? ' catalog-grain-banner' : ''}`}>
             {productImageUrl ? <img src={productImageUrl} alt={item.name} /> : <span className="muted">No product image</span>}
             <Button type="text" size="small" icon={<EditOutlined />} onClick={() => {
               setImageEdit(undefined); setEditingProductImage(true);
@@ -600,7 +601,9 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
                 {product.color_lovibond != null ? ` · ${product.color_lovibond} °L` : ''}
                 {product.typical_brix != null ? ` · ${product.typical_brix} °Brix` : ''}
                 {product.extract_color_value != null ? ` · ${product.extract_color_value} ${product.extract_color_scale || ''}` : ''}</small></span>
-            {product.has_image && <CatalogImage kind="supply" id={product.id} className="catalog-explorer-thumbnail" />}
+            {product.has_image && <CatalogImage kind="supply" id={product.id}
+              className={`catalog-explorer-thumbnail${product.manufacturer === 'Briess'
+                && product.category === 'Grain' ? ' catalog-grain-banner' : ''}`} />}
           </button>
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching products' : 'No catalog products available'} />}
@@ -659,7 +662,8 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
                 itemForm.setFieldValue('default_unit', nextUnit); } }} />
         </Form.Item>}
         {selectedCatalogProduct && (newStockProduct || catalogProductChosen || newItemName === selectedCatalogProduct.name) &&
-          <div className="inventory-catalog-source">
+          <div className={`inventory-catalog-source${selectedCatalogProduct.manufacturer === 'Briess'
+            && selectedCatalogProduct.category === 'Grain' ? ' catalog-grain-banner' : ''}`}>
             {selectedCatalogProduct.has_image && <CatalogImage kind="supply" id={selectedCatalogProduct.id}
               alt={selectedCatalogProduct.name} immediate />}
             <div><strong>{selectedCatalogProduct.name}</strong>

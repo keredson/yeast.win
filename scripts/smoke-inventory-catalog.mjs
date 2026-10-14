@@ -91,8 +91,11 @@ try {
   const briessImage = form.locator('.inventory-catalog-source img');
   await form.locator('.inventory-catalog-source img[src]').waitFor();
   await briessImage.evaluate(image => image.decode());
-  const briessDimensions = await briessImage.evaluate(image => [image.naturalWidth, image.naturalHeight]);
-  if (briessDimensions[0] !== briessDimensions[1]) throw new Error(`Briess image is not square: ${briessDimensions}`);
+  const briessPresentation = await briessImage.evaluate(image => [image.clientWidth, image.clientHeight,
+    getComputedStyle(image).objectFit]);
+  if (briessPresentation[0] !== briessPresentation[1] || briessPresentation[2] !== 'cover') {
+    throw new Error(`Briess image is not visually cropped square: ${briessPresentation}`);
+  }
   const briessLink = form.getByRole('link', { name: 'Product information' });
   await briessLink.waitFor();
   if (!(await briessLink.getAttribute('href'))?.endsWith('/Briess-PISB-Caramel-Malt-60L.pdf')) {

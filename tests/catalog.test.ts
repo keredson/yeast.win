@@ -25,26 +25,59 @@ test('a new catalog has the current schema and no bundled products', () => {
   } finally { db.close(); }
 });
 
-test('catalog content and CR-SQLite changes persist across a schema upgrade', () => {
+test('catalog URLs and unrelated content persist when legacy image bytes are removed', () => {
   const dir = directory();
   const before = openCatalogDb(dir);
   const image = Buffer.from([255, 216, 255, 11, 12]);
   before.prepare("INSERT INTO supplies(id,name,category,unit) VALUES ('malt','My malt','Grain','g')").run();
-  before.prepare('INSERT INTO supply_images(supply_id,image_bytes,image_mime_type) VALUES (?,?,?)')
-    .run('malt', image, 'image/jpeg');
+  before.prepare("SELECT crsql_begin_alter('supply_images')").get();
+  before.exec('ALTER TABLE supply_images ADD COLUMN image_bytes BLOB');
+  before.prepare("SELECT crsql_commit_alter('supply_images')").get();
+  before.prepare('INSERT INTO supply_images(supply_id,image_url,image_bytes) VALUES (?,?,?)')
+    .run('malt', 'https://example.com/malt.jpg', image);
   before.prepare("INSERT INTO equipment_models(id,model_name,kind) VALUES ('kettle','My kettle','kettle')").run();
-  before.pragma('user_version = 28');
+  before.pragma('user_version = 31');
   before.close();
 
   const after = openCatalogDb(dir);
   try {
     assert.equal(after.pragma('user_version', { simple: true }), catalogSchemaVersion);
     assert.equal((after.prepare("SELECT name FROM supplies WHERE id='malt'").get() as { name: string }).name, 'My malt');
-    assert.deepEqual((after.prepare("SELECT image_bytes FROM supply_images WHERE supply_id='malt'")
-      .get() as { image_bytes: Buffer }).image_bytes, image);
+    assert.equal((after.prepare("SELECT image_url FROM supply_images WHERE supply_id='malt'")
+      .get() as { image_url: string }).image_url, 'https://example.com/malt.jpg');
+    assert.equal((after.pragma('table_info(supply_images)') as { name: string }[])
+      .some(row => row.name === 'image_bytes'), false);
     assert.ok(after.prepare("SELECT id FROM equipment_models WHERE id='kettle'").get());
     assert.equal(after.prepare("SELECT 1 FROM sqlite_master WHERE name = 'supply_categories'").get(), undefined);
     assert.ok(catalogChanges(after, 0n).changes.length > 0);
+    assert.equal(after.pragma('integrity_check', { simple: true }), 'ok');
+  } finally { after.close(); }
+});
+
+test('older model and manufacturer image URLs move into media tables', () => {
+  const dir = directory();
+  const before = openCatalogDb(dir);
+  before.prepare("INSERT INTO manufacturers(name,website_url) VALUES ('Maker','https://example.com')").run();
+  before.prepare("INSERT INTO equipment_models(id,manufacturer,model_name,kind) VALUES ('kettle','Maker','Kettle','kettle')").run();
+  for (const [table, column] of [['equipment_models', 'image_url'], ['equipment_models', 'thumbnail_url'],
+    ['manufacturers', 'logo_url']] as const) {
+    before.prepare('SELECT crsql_begin_alter(?)').get(table);
+    before.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+    before.prepare('SELECT crsql_commit_alter(?)').get(table);
+  }
+  before.prepare("UPDATE equipment_models SET image_url='https://example.com/kettle.jpg', thumbnail_url='https://example.com/kettle-small.jpg' WHERE id='kettle'").run();
+  before.prepare("UPDATE manufacturers SET logo_url='https://example.com/logo.png' WHERE name='Maker'").run();
+  before.prepare("INSERT INTO model_images(model_id) VALUES ('kettle')").run();
+  before.prepare("INSERT INTO manufacturer_logos(manufacturer_name) VALUES ('Maker')").run();
+  before.pragma('user_version = 31');
+  before.close();
+  const after = openCatalogDb(dir);
+  try {
+    assert.deepEqual(after.prepare("SELECT image_url,thumbnail_url FROM model_images WHERE model_id='kettle'").get(),
+      { image_url: 'https://example.com/kettle.jpg', thumbnail_url: 'https://example.com/kettle-small.jpg' });
+    assert.deepEqual(after.prepare("SELECT logo_url FROM manufacturer_logos WHERE manufacturer_name='Maker'").get(),
+      { logo_url: 'https://example.com/logo.png' });
+    assert.equal((after.pragma('table_info(equipment_models)') as { name: string }[]).some(row => row.name === 'image_url'), false);
     assert.equal(after.pragma('integrity_check', { simple: true }), 'ok');
   } finally { after.close(); }
 });

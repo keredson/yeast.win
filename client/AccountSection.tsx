@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { DeleteOutlined, EditOutlined, PlusOutlined, SyncOutlined, UploadOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Button, Card, Form, Input, InputNumber, Modal, Select, Switch, Tag, Tooltip, Typography } from 'antd';
+import { DeleteOutlined, DownloadOutlined, EditOutlined, PlusOutlined, SyncOutlined, UploadOutlined } from '@ant-design/icons';
+import { Alert, Avatar, Button, Card, Form, Input, InputNumber, Modal, Progress, Select, Switch, Tag, Tooltip, Typography } from 'antd';
 import { api, type PreferredUnits, type Workspace } from './api.ts';
+import { downloadCatalogImages } from './catalog.ts';
 import { breweryMashEfficiency, breweryBatchSize, updateBreweryMashEfficiency, updateBreweryBatchSize,
   type LocalDb } from './db.ts';
 import { appMashEfficiencyPct } from './recipeCalculations.ts';
@@ -58,6 +59,21 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
   const [batchSizeDraft, setBatchSizeDraft] = useState<number | null>(null);
   const [batchSizeBusy, setBatchSizeBusy] = useState(false);
   const [batchSizeError, setBatchSizeError] = useState('');
+  const [imageDownloadProgress, setImageDownloadProgress] = useState<{ done: number; total: number } | null>(null);
+  const [imageDownloadMessage, setImageDownloadMessage] = useState('');
+  const [imageDownloading, setImageDownloading] = useState(false);
+  async function saveCatalogImages() {
+    setImageDownloading(true);
+    setImageDownloadMessage('');
+    try {
+      const result = await downloadCatalogImages((done, total) => setImageDownloadProgress({ done, total }));
+      setImageDownloadMessage(result.failed
+        ? `${result.downloaded} saved; ${result.failed} could not be downloaded. Try again later.`
+        : `${result.downloaded} new images saved for offline use.`);
+    } catch (cause) {
+      setImageDownloadMessage(cause instanceof Error ? cause.message : String(cause));
+    } finally { setImageDownloading(false); }
+  }
   useEffect(() => {
     let cancelled = false;
     setMashEfficiency(null);
@@ -296,6 +312,17 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
       <Typography.Paragraph type="secondary" className="setting-description">
         Changes stay on this device until they sync. Use the sync icon above to sync manually.
       </Typography.Paragraph>
+    </Card>
+    <Card title="Catalog images" className="account-card">
+      <Typography.Paragraph type="secondary" className="setting-description">
+        Images you view are saved for offline use. Download the rest to see them offline too.
+      </Typography.Paragraph>
+      <Button icon={<DownloadOutlined />} loading={imageDownloading} onClick={() => void saveCatalogImages()}>
+        Download catalog images
+      </Button>
+      {imageDownloadProgress && imageDownloading && <Progress percent={imageDownloadProgress.total
+        ? Math.round(100 * imageDownloadProgress.done / imageDownloadProgress.total) : 100} />}
+      {imageDownloadMessage && <Typography.Paragraph className="setting-description">{imageDownloadMessage}</Typography.Paragraph>}
     </Card>
     <Button onClick={onSignOut}>Sign out</Button>
   </div>;

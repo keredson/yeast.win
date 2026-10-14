@@ -43,8 +43,14 @@ export default defineConfig(({ mode }) => ({
         additionalManifestEntries: [{ url: '/app-assets.json', revision: String(Date.now()) }],
         globPatterns: ['index.html', 'registerSW.js', 'assets/index-*.js', 'assets/index-*.css'],
         maximumFileSizeToCacheInBytes: 100_000,
-        runtimeCaching: [{ urlPattern: ({ url }) => url.origin === self.location.origin && url.pathname.startsWith('/assets/'),
-          handler: 'CacheFirst', options: { cacheName: 'brewlog-app-assets-v1' } }]
+        runtimeCaching: [
+          { urlPattern: ({ url }) => url.origin === self.location.origin && url.pathname.startsWith('/assets/'),
+            handler: 'CacheFirst', options: { cacheName: 'brewlog-app-assets-v1' } },
+          { urlPattern: ({ url, request }) => url.protocol === 'https:' && url.origin !== self.location.origin
+              && request.destination === 'image',
+            handler: 'CacheFirst', options: { cacheName: 'brewlog-catalog-images-v1',
+              cacheableResponse: { statuses: [0, 200] } } }
+        ]
       }
     })
   ],
