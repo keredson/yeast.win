@@ -1,6 +1,6 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { nanoid } from 'nanoid';
@@ -9,7 +9,9 @@ import { changeColumns, nowSeconds, workspaceSchemaVersion, type SyncRequest, va
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 import { appBatchSizeLiters } from '../shared/batchSize.ts';
 
-process.env.BREWLOG_DATA_DIR = mkdtempSync(join(tmpdir(), 'brewlog-sync-'));
+const testDirectory = mkdtempSync(join(tmpdir(), 'brewlog-sync-'));
+process.env.BREWLOG_DATA_DIR = testDirectory;
+after(() => rmSync(testDirectory, { recursive: true, force: true }));
 const { openWorkspaceDb, closeWorkspaceDb } = await import('../server/db.ts');
 const { syncWorkspace } = await import('../server/sync.ts');
 

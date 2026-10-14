@@ -1,11 +1,12 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { workspaceSchemaVersion } from '../shared/schema.ts';
 
 const directory = mkdtempSync(join(tmpdir(), 'brewlog-priming-sugar-'));
+after(() => rmSync(directory, { recursive: true, force: true }));
 process.env.BREWLOG_DATA_DIR = directory;
 const { openCatalogDb } = await import('../server/catalog.ts');
 const { openWorkspaceDb, closeWorkspaceDb } = await import('../server/db.ts');

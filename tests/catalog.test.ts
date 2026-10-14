@@ -1,13 +1,19 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { catalogChanges, openCatalogDb } from '../server/catalog.ts';
 import { catalogSchemaVersion } from '../shared/catalog.ts';
 
-function directory(): string { return mkdtempSync(join(tmpdir(), 'brewlog-catalog-')); }
+const testDirectories = new Set<string>();
+function directory(): string {
+  const path = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
+  testDirectories.add(path);
+  return path;
+}
+after(() => { for (const path of testDirectories) rmSync(path, { recursive: true, force: true }); });
 
 test('a new catalog has the current schema and no bundled products', () => {
   const db = openCatalogDb(directory());

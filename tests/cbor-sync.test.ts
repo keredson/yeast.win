@@ -1,6 +1,6 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { nanoid } from 'nanoid';
@@ -9,7 +9,9 @@ import { changeTuple, decodeItem, encodeItem, maxSequence, readSequence, syncPro
   validChangeTuple } from '../shared/cborSync.ts';
 import type { SqlChangeRow } from '../shared/wire.ts';
 
-process.env.BREWLOG_DATA_DIR = mkdtempSync(join(tmpdir(), 'brewlog-cbor-sync-'));
+const testDirectory = mkdtempSync(join(tmpdir(), 'brewlog-cbor-sync-'));
+process.env.BREWLOG_DATA_DIR = testDirectory;
+after(() => rmSync(testDirectory, { recursive: true, force: true }));
 const { openWorkspaceDb, closeWorkspaceDb } = await import('../server/db.ts');
 const { receiveCborChanges, streamCborChanges } = await import('../server/sync.ts');
 const { openCatalogDb } = await import('../server/catalog.ts');

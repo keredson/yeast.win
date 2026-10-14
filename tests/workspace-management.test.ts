@@ -1,10 +1,11 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const directory = mkdtempSync(join(tmpdir(), 'brewlog-workspace-management-'));
+after(() => rmSync(directory, { recursive: true, force: true }));
 process.env.BREWLOG_DATA_DIR = directory;
 const { createWorkspace, deleteWorkspace, openAuthDb, updateWorkspace } = await import('../server/db.ts');
 
