@@ -122,6 +122,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogCategory, setCatalogCategory] = useState<string | undefined>();
   const [selectedCatalogProduct, setSelectedCatalogProduct] = useState<CatalogInventory | null>(null);
+  const [catalogProductChosen, setCatalogProductChosen] = useState(false);
   const [supplyMedia, setSupplyMedia] = useState<{ supplyId: string; row: SupplyMedia | null; imageUrl: string | null } | null>(null);
   const [mediaRevision, setMediaRevision] = useState(0);
   const [editingProductUrl, setEditingProductUrl] = useState(false);
@@ -192,6 +193,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
       default_unit: unit, location_id: activeLocationId || undefined });
     setNewStockProduct(product || null);
     setSelectedCatalogProduct(catalogProduct || null);
+    setCatalogProductChosen(false);
     setCreatingCustomProduct(false);
     setNewStockLotCode(lockLot ? lotCode || null : undefined);
     setNewItemCategory(category);
@@ -218,6 +220,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
       || supplies.find(row => row.category === product.category && row.name.toLocaleLowerCase() === product.name.toLocaleLowerCase());
     openCreate(product.category, existing, undefined, false, product);
     if (!existing) itemForm.setFieldValue('name', product.name);
+    setCatalogProductChosen(true);
   }
 
   async function saveIngredientProperties(values: IngredientProperties) {
@@ -317,7 +320,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
           } : undefined);
       }
       setNewItemCategory(null); setNewStockProduct(null); setNewStockLotCode(undefined);
-      setSelectedCatalogProduct(null); setCreatingCustomProduct(false);
+      setSelectedCatalogProduct(null); setCatalogProductChosen(false); setCreatingCustomProduct(false);
       itemForm.resetFields(); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -559,11 +562,11 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
       ? `Create ${newItemCategory.toLowerCase()} product` : newItemCategory
       ? `New ${newItemCategory.toLowerCase()} item` : 'New inventory item'} open={!!newItemCategory}
       onCancel={() => { setNewItemCategory(null); setNewStockProduct(null); setNewStockLotCode(undefined);
-        setSelectedCatalogProduct(null); setCreatingCustomProduct(false); }} footer={null} destroyOnHidden>
+        setSelectedCatalogProduct(null); setCatalogProductChosen(false); setCreatingCustomProduct(false); }} footer={null} destroyOnHidden>
       {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
       <Form form={itemForm} layout="vertical" onFinish={create}>
         <Form.Item name="category" hidden><Input /></Form.Item>
-        {newStockProduct ? <Form.Item name="name" hidden><Input /></Form.Item>
+        {newStockProduct || catalogProductChosen ? <Form.Item name="name" hidden><Input /></Form.Item>
           : <Form.Item name="name" label="Item" rules={[{ required: true, whitespace: true }]}>
           <AutoComplete placeholder={creatingCustomProduct ? 'Product name' : 'Search supplies or enter an item'} maxLength={120}
             onChange={value => { if (value !== selectedCatalogProduct?.name) setSelectedCatalogProduct(null); }}
@@ -584,10 +587,11 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
                 previousItemUnit.current = nextUnit;
                 itemForm.setFieldValue('default_unit', nextUnit); } }} />
         </Form.Item>}
-        {selectedCatalogProduct && (newStockProduct || newItemName === selectedCatalogProduct.name) &&
+        {selectedCatalogProduct && (newStockProduct || catalogProductChosen || newItemName === selectedCatalogProduct.name) &&
           <div className="inventory-catalog-source">
             {selectedCatalogProduct.image_src && <img src={selectedCatalogProduct.image_src} alt={selectedCatalogProduct.name} />}
-            <div><strong>{selectedCatalogProduct.manufacturer || 'Shared catalog'}</strong>
+            <div><strong>{selectedCatalogProduct.name}</strong>
+              {selectedCatalogProduct.manufacturer && <p>{selectedCatalogProduct.manufacturer}</p>}
               {selectedCatalogProduct.product_url && <p><a href={selectedCatalogProduct.product_url}
                 target="_blank" rel="noopener noreferrer">Product information</a></p>}
             </div>

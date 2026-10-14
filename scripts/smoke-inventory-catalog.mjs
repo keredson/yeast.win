@@ -42,9 +42,10 @@ try {
   await product.click();
 
   const form = page.getByRole('dialog', { name: 'New grain item' });
-  if (await form.getByRole('combobox', { name: 'Item' }).inputValue() !== 'Briess Caramel Malt 60L') {
-    throw new Error('Catalog choice did not fill the item name');
+  if (await form.getByRole('combobox', { name: 'Item' }).count()) {
+    throw new Error('Catalog choice still shows a redundant item picker');
   }
+  await form.getByText('Briess Caramel Malt 60L', { exact: true }).waitFor();
   const briessImage = form.locator('.inventory-catalog-source img');
   await briessImage.waitFor();
   await briessImage.evaluate(image => image.decode());

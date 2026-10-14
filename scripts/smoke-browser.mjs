@@ -1014,9 +1014,10 @@ try {
   await inventoryCatalog.getByRole('searchbox', { name: 'Search inventory products' }).fill('Briess Caramel Malt 60L');
   await inventoryCatalog.getByRole('button', { name: /Briess Caramel Malt 60L/ }).click();
   const catalogGrain = page.getByRole('dialog', { name: 'New grain item' });
-  if (await catalogGrain.getByRole('combobox', { name: 'Item' }).inputValue() !== 'Briess Caramel Malt 60L') {
-    throw new Error('Inventory catalog selection did not fill the product name');
+  if (await catalogGrain.getByRole('combobox', { name: 'Item' }).count()) {
+    throw new Error('Inventory catalog selection still shows a redundant item picker');
   }
+  await catalogGrain.getByText('Briess Caramel Malt 60L', { exact: true }).waitFor();
   await catalogGrain.getByRole('link', { name: 'Product page' }).waitFor();
   await catalogGrain.locator('.ant-modal-close').click();
   await catalogGrain.waitFor({ state: 'hidden' });
