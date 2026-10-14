@@ -264,7 +264,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, catalo
     <Form.Item name="note" label={kind === 'note' ? 'Notes' : 'Note'} rules={kind === 'note' ? [{ required: true, whitespace: true }] : []}>
       <Input.TextArea rows={kind === 'note' ? 4 : 2} placeholder={kind === 'note' ? 'What happened?' : 'Optional context'} /></Form.Item>
     <div className="event-form-actions"><Button type="primary" htmlType="submit" loading={busy}>
-      {completingPlan ? 'Mark done' : 'Save event'}</Button>
+      {completingPlan ? 'Mark done' : 'Save'}</Button>
       {initialPlan && !initialEvent && <Button onClick={() => void skipPlan()} disabled={busy}>Skip this event</Button>}</div>
   </Form>;
 }

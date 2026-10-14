@@ -208,7 +208,7 @@ try {
   await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).getByRole('button', { name: 'Edit Add nutrient dose' }).click();
   const editRecorded = page.getByRole('dialog', { name: 'Edit: Add nutrient dose' });
   await editRecorded.getByRole('spinbutton', { name: 'Quantity' }).fill('3');
-  await editRecorded.getByRole('button', { name: 'Save event' }).click();
+  await editRecorded.getByRole('button', { name: 'Save', exact: true }).click();
   await page.locator('.plan-card').filter({ hasText: 'Add nutrient dose' }).getByText('3 g Add nutrient dose').waitFor();
   await page.locator('.plan-card').filter({ hasText: 'Add yeast' }).getByRole('button', { name: 'Record Add yeast' }).click();
   await page.getByRole('dialog', { name: 'Record: Add yeast' }).getByRole('button', { name: 'Skip this event' }).click();
