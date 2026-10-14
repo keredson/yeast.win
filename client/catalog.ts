@@ -1,7 +1,7 @@
 import initWasm, { type DB } from '@vlcn.io/crsqlite-wasm';
 import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { catalogModelTables, catalogSupplyTables, catalogSchemaVersion, catalogTables,
-  type CatalogEquipment, type CatalogInventory, type CatalogMeasurementChannel } from '../shared/catalog.ts';
+  type CatalogEquipment, type CatalogInventory, type CatalogMeasurementChannel, type CatalogSupplyCategory } from '../shared/catalog.ts';
 import { changeColumns } from '../shared/schema.ts';
 import { maxSequence, readSequence, syncProtocolVersion, validChangeTuple, type ChangeTuple } from '../shared/cborSync.ts';
 import { fetchApi } from './api.ts';
@@ -264,13 +264,23 @@ export function openLocalCatalog(): Promise<DB> {
         await tx.exec('PRAGMA user_version = 29');
       });
     }
+    if ((await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version === 29) {
+      await db.tx(async tx => {
+        await tx.exec(catalogSupplyTables.supply_categories);
+        const clock = await tx.execO<{ name: string }>(
+          "SELECT name FROM sqlite_master WHERE name = 'supply_categories__crsql_clock'");
+        if (!clock.length) await tx.exec("SELECT crsql_as_crr('supply_categories')");
+        await tx.exec("DELETE FROM sync_state WHERE key = 'lastRefreshAt'");
+        await tx.exec('PRAGMA user_version = 30');
+      });
+    }
     return db;
   })().catch(error => { opened = undefined; throw error; });
   return opened;
 }
 
-export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEquipment[]; inventory: CatalogInventory[] }> {
-  const [models, liquid, pressure, heating, boil, cooling, control, channels, modelImages, logos, inventory, supplyImages] = await Promise.all([
+export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEquipment[]; inventory: CatalogInventory[]; categories: CatalogSupplyCategory[] }> {
+  const [models, liquid, pressure, heating, boil, cooling, control, channels, modelImages, logos, inventory, supplyImages, categories] = await Promise.all([
     db.execO<{ id: string; name: string; kind: string; manufacturer: string | null;
       product_url: string | null; manufacturer_website_url: string | null }>(
       `SELECT m.id, m.model_name AS name, m.kind, m.manufacturer, m.product_url,
@@ -298,7 +308,8 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
       LEFT JOIN supply_grain_classes gc ON gc.supply_id = s.id
       LEFT JOIN supply_products p ON p.supply_id = s.id ORDER BY s.name COLLATE NOCASE`),
     db.execO<{ supply_id: string; image_bytes: Uint8Array | null; image_mime_type: string | null }>(
-      'SELECT * FROM supply_images')
+      'SELECT * FROM supply_images'),
+    db.execO<CatalogSupplyCategory>('SELECT name, sort_order FROM supply_categories ORDER BY sort_order, name COLLATE NOCASE')
   ]);
   const oldMediaUrls = catalogMediaUrls;
   catalogMediaUrls = [];
@@ -352,7 +363,7 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
     return { ...model, measurement_min: primary?.measurement_min, measurement_max: primary?.measurement_max,
       measurement_unit: primary?.measurement_scale || primary?.measurement_unit };
   });
-  return { equipment, inventory };
+  return { equipment, inventory, categories };
 }
 
 export function syncLocalCatalog(db: DB, onProgress?: (applied: number, total: number) => void): Promise<boolean> {

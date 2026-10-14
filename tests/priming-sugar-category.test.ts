@@ -22,7 +22,7 @@ test('catalog upgrade preserves edited categories and unrelated rows', () => {
       .get(id) as { category: string }).category;
     assert.equal(category('inventory_priming_sugar'), 'Other');
     assert.equal(category('custom_other'), 'Other');
-    assert.equal(upgraded.pragma('user_version', { simple: true }), 29);
+    assert.equal(upgraded.pragma('user_version', { simple: true }), 30);
   } finally { upgraded.close(); }
 
   const partial = openCatalogDb(directory);

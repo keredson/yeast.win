@@ -21,7 +21,7 @@ import { breadcrumbNodes, type BreadcrumbRecords, type BreadcrumbSection } from 
 import { routeFromPath, routePath, workspaceBase, type Route, type Section } from './appRoutes.ts';
 import { AccountSection } from './AccountSection.tsx';
 import { openLocalCatalog, readLocalCatalog, syncLocalCatalog } from './catalog.ts';
-import type { CatalogEquipment, CatalogInventory } from '../shared/catalog.ts';
+import type { CatalogEquipment, CatalogInventory, CatalogSupplyCategory } from '../shared/catalog.ts';
 
 function recordPath(section: BreadcrumbSection, id: string | null, base: string, records: BreadcrumbRecords): string {
   if (!id) return routePath(section, null, base);
@@ -202,6 +202,7 @@ export function App() {
   const [catalogEquipment, setCatalogEquipment] = useState<CatalogEquipment[]>([]);
   const [catalogRevision, setCatalogRevision] = useState(0);
   const [catalogInventory, setCatalogInventory] = useState<CatalogInventory[]>([]);
+  const [catalogCategories, setCatalogCategories] = useState<CatalogSupplyCategory[]>([]);
   const [error, setError] = useState('');
   const [serverDisconnected, setServerDisconnected] = useState(false);
   const [syncPhase, setSyncPhase] = useState<'idle' | 'syncing' | 'synced' | 'failed'>('idle');
@@ -251,7 +252,7 @@ export function App() {
     const load = async () => {
       const catalogDb = await openLocalCatalog();
       const cached = await readLocalCatalog(catalogDb);
-      if (!cancelled) { setCatalogEquipment(cached.equipment); setCatalogInventory(cached.inventory); }
+      if (!cancelled) { setCatalogEquipment(cached.equipment); setCatalogInventory(cached.inventory); setCatalogCategories(cached.categories); }
       try {
         const refreshed = await syncLocalCatalog(catalogDb, (applied, total) => {
           if (!cancelled) setCatalogSyncProgress({ applied, total });
@@ -263,6 +264,7 @@ export function App() {
         if (cancelled) return;
         setCatalogEquipment(updated.equipment);
         setCatalogInventory(updated.inventory);
+        setCatalogCategories(updated.categories);
         setCatalogRevision(revision => revision + 1);
       } catch (cause) {
         if (!cancelled) setCatalogSyncProgress(null);
@@ -610,16 +612,16 @@ export function App() {
           !db ? <div className="loading-screen"><Spin description="Opening data on this device" /></div> : <>
             {section === 'home' && <DashboardSection />}
             {section === 'batches' && <BatchSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} batches={batches} recipes={recipes}
-              equipment={equipment} equipmentModels={equipmentModels} inventory={inventory} catalogInventory={catalogInventory} preferredUnits={preferredUnits}
+              equipment={equipment} equipmentModels={equipmentModels} inventory={inventory} catalogInventory={catalogInventory} catalogCategories={catalogCategories} preferredUnits={preferredUnits}
               selectedId={route.selectedId} onSelect={id => showItem('batches', id)} onChanged={changed} />}
             {section === 'recipes' && <RecipeSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} recipes={recipes}
-              equipment={equipment} equipmentModels={equipmentModels} inventory={inventory} supplies={supplies} catalogInventory={catalogInventory} preferredUnits={preferredUnits}
+              equipment={equipment} equipmentModels={equipmentModels} inventory={inventory} supplies={supplies} catalogInventory={catalogInventory} catalogCategories={catalogCategories} preferredUnits={preferredUnits}
               selectedId={route.selectedId ? recipeForPath(route.selectedId, recipes)?.id || route.selectedId : null}
               onSelect={id => showItem('recipes', id)}
               onChanged={changed} onBatchStarted={id => showItem('batches', id)} />}
             {section === 'inventory' && (inventoryWorkspaceId !== workspaceId ? <div className="loading-screen"><Spin description="Loading inventory" /></div>
               : <InventorySection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} items={inventory}
-                supplies={supplies} catalog={catalogInventory} preferredUnits={preferredUnits} selectedId={route.selectedId
+                supplies={supplies} catalog={catalogInventory} catalogCategories={catalogCategories} preferredUnits={preferredUnits} selectedId={route.selectedId
                   ? inventorySupplyForPath(route.selectedId, supplies, inventory)?.id || route.selectedId : null}
                 onSelect={id => showItem('inventory', id)} onChanged={changed} />)}
             {section === 'locations' && (inventoryWorkspaceId !== workspaceId ? <div className="loading-screen"><Spin description="Loading locations" /></div>

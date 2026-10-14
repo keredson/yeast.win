@@ -30,7 +30,7 @@ Across all modals and forms, mark required fields with Ant Design's red asterisk
 
 ### Catalog ownership
 
-`data/catalog.sqlite` is the sole source of catalog content, including equipment models, ingredient products, specifications, and images. Future catalog additions and edits go into that database. Do not add product records or image files to the repository as seeds or rebuild catalog content from source code at startup. This applies to equipment and inventory alike. Git tracks schema and migration code only. A fresh server has an empty catalog until it restores a database snapshot.
+`data/catalog.sqlite` is the sole source of catalog content, including equipment models, ingredient products, inventory categories, specifications, and images. Future catalog additions and edits go into that database. Do not add product records, category lists, or image files to the repository as seeds or rebuild catalog content from source code at startup. This applies to equipment and inventory alike. Git tracks schema and migration code only. A fresh server has an empty catalog until it restores a database snapshot.
 
 Use `yarn catalog:backup` for an integrity-checked SQLite snapshot under `data/backups/`, or pass a destination path. The backup includes committed WAL changes. Restore with the server stopped and retain the previous database as a recovery copy until the restored one passes an integrity check. Keep an off-host backup as well. A second checkout may symlink its `data/catalog.sqlite` to the authoritative file; resolve that symlink before opening or attaching SQLite so every connection uses the same WAL and shared-memory paths. Browser catalogs are read-only replicas of this database.
 
@@ -171,6 +171,7 @@ Recipe gravity estimates sum fixed post-boil wort retained by distinct equipment
 
 | Table | Main fields and role |
 | --- | --- |
+| Catalog `supply_categories` | Ordered inventory categories, replicated to devices. Inventory, recipe, and batch category menus read these rows; categories of existing brewery supplies also remain available locally. The custom “other” action lets a brewer enter a category without adding it to the shared catalog. |
 | Catalog `supplies` | Shared names, categories, and units. Grain, hop, and yeast products use manufacturer-specific identities; generic packaging, chemicals, and other commodity supplies remain available. Typed specification tables hold known defaults. |
 | Catalog `supply_products`, `supply_grain_classes`, `supply_images` | Manufacturer and one product information URL per supply, grain class for estimate fallbacks, and copied product images with MIME types. Product images sync with the catalog for offline use; an absent image means no verified matching manufacturer image was bundled. |
 | Brewery `supplies` | Brewery-owned supply definitions. An optional catalog link provides inherited defaults; custom supplies need no catalog entry. Recipes link here without choosing a physical lot. |

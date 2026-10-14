@@ -143,6 +143,10 @@ export function openCatalogDb(dataDir: string): Database.Database {
     ensureTables(db);
     migrateColumns(db);
     migrateLegacyRows(db);
+    // Preserve the categories already represented by catalog products, including
+    // when upgrading a catalog whose category table was only partly populated.
+    db.exec(`INSERT OR IGNORE INTO supply_categories(name, sort_order)
+      SELECT DISTINCT category, 1000 FROM supplies WHERE category IS NOT NULL AND trim(category) <> ''`);
     db.pragma(`user_version = ${catalogSchemaVersion}`);
   })();
   return db;

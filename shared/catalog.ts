@@ -20,9 +20,10 @@ export interface CatalogInventory { id: string; name: string; category: string; 
   hop_form?: string | null; attenuation_pct?: number | null; grain_class?: string | null;
   manufacturer?: string | null; product_url?: string | null;
   image_src?: string | null }
+export interface CatalogSupplyCategory { name: string; sort_order: number }
 
 export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
-export const catalogSchemaVersion = 29;
+export const catalogSchemaVersion = 30;
 export const catalogModelTables = {
   manufacturers: `CREATE TABLE IF NOT EXISTS manufacturers (
     name TEXT PRIMARY KEY NOT NULL, website_url TEXT)`,
@@ -51,6 +52,8 @@ export const catalogModelTables = {
     measurement_min REAL, measurement_max REAL, measurement_unit TEXT, measurement_scale TEXT)`
 } as const;
 export const catalogSupplyTables = {
+  supply_categories: `CREATE TABLE IF NOT EXISTS supply_categories (
+    name TEXT PRIMARY KEY NOT NULL, sort_order INTEGER NOT NULL DEFAULT 1000)`,
   supplies: `CREATE TABLE IF NOT EXISTS supplies (
     id TEXT PRIMARY KEY NOT NULL, name TEXT, category TEXT, unit TEXT)`,
   supply_grain_specs: `CREATE TABLE IF NOT EXISTS supply_grain_specs (
@@ -67,8 +70,6 @@ export const catalogSupplyTables = {
     supply_id TEXT PRIMARY KEY NOT NULL, image_bytes BLOB, image_mime_type TEXT)`
 } as const;
 export const catalogTables = [...Object.keys(catalogModelTables), ...Object.keys(catalogSupplyTables)] as const;
-
-export const inventoryCategories = ['Grain', 'Hops', 'Yeast', 'Nutrient', 'Adjunct', 'Chemical', 'Packaging', 'Other'] as const;
 
 export function unitForCategory(category: string, preferredMass: string): string {
   if (category === 'Grain') return 'lb + oz';

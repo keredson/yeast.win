@@ -14,6 +14,7 @@ test('a new catalog has the current schema and no bundled products', () => {
   try {
     assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
     assert.equal((db.prepare('SELECT count(*) AS n FROM supplies').get() as { n: number }).n, 0);
+    assert.equal((db.prepare('SELECT count(*) AS n FROM supply_categories').get() as { n: number }).n, 0);
     assert.equal((db.prepare('SELECT count(*) AS n FROM equipment_models').get() as { n: number }).n, 0);
   } finally { db.close(); }
 });
@@ -36,7 +37,30 @@ test('catalog content and CR-SQLite changes persist across a schema upgrade', ()
     assert.deepEqual((after.prepare("SELECT image_bytes FROM supply_images WHERE supply_id='malt'")
       .get() as { image_bytes: Buffer }).image_bytes, image);
     assert.ok(after.prepare("SELECT id FROM equipment_models WHERE id='kettle'").get());
+    assert.deepEqual(after.prepare("SELECT name,sort_order FROM supply_categories WHERE name='Grain'").get(),
+      { name: 'Grain', sort_order: 1000 });
     assert.ok(catalogChanges(after, 0n).changes.length > 0);
+    assert.equal(after.pragma('integrity_check', { simple: true }), 'ok');
+  } finally { after.close(); }
+});
+
+test('partially created categories survive upgrade and missing product categories are added', () => {
+  const dir = directory();
+  const before = openCatalogDb(dir);
+  before.prepare("INSERT INTO supplies(id,name,category,unit) VALUES ('grain','My malt','Grain','g')").run();
+  before.prepare("INSERT INTO supplies(id,name,category,unit) VALUES ('hop','My hop','Hops','g')").run();
+  before.prepare("INSERT INTO supply_categories(name,sort_order) VALUES ('Grain',4)").run();
+  before.prepare("INSERT INTO supply_categories(name,sort_order) VALUES ('Juice & must',5)").run();
+  before.pragma('user_version = 29');
+  before.close();
+
+  const after = openCatalogDb(dir);
+  try {
+    assert.deepEqual(after.prepare('SELECT name,sort_order FROM supply_categories ORDER BY sort_order,name').all(), [
+      { name: 'Grain', sort_order: 4 }, { name: 'Juice & must', sort_order: 5 },
+      { name: 'Hops', sort_order: 1000 }
+    ]);
+    assert.equal((after.prepare('SELECT count(*) AS n FROM supplies').get() as { n: number }).n, 2);
     assert.equal(after.pragma('integrity_check', { simple: true }), 'ok');
   } finally { after.close(); }
 });

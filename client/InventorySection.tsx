@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, AutoComplete, Button, Checkbox, Dropdown, Empty, Form, Input, InputNumber, Modal, Select, Table } from 'antd';
 import { EditOutlined, MoreOutlined, PlusOutlined, SettingOutlined } from '@ant-design/icons';
-import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
+import { unitForCategory, type CatalogInventory, type CatalogSupplyCategory } from '../shared/catalog.ts';
 import { addInventoryEntry, convertInventoryUnit, createInventoryItem, inventoryBalance, inventoryLocationPath,
   listInventoryBalances, listInventoryLocations, listInventoryMovements, moveInventoryStock, saveInventoryLocation, stockAtLocation,
   updateIngredientProperties, updateLotIngredientProperties, supplyIngredientProperties, lotIngredientProperties, ingredientProperties,
@@ -103,8 +103,8 @@ function PropertyFields({ category, includeClass = false }: { category: string; 
   </>;
 }
 
-export function InventorySection({ db, basePath, accountId, items, supplies, catalog, preferredUnits, selectedId, onSelect, onChanged }: {
-  db: LocalDb; basePath: string; accountId: string; items: InventoryItem[]; supplies: InventoryItem[]; catalog: CatalogInventory[]; preferredUnits: PreferredUnits;
+export function InventorySection({ db, basePath, accountId, items, supplies, catalog, catalogCategories, preferredUnits, selectedId, onSelect, onChanged }: {
+  db: LocalDb; basePath: string; accountId: string; items: InventoryItem[]; supplies: InventoryItem[]; catalog: CatalogInventory[]; catalogCategories: CatalogSupplyCategory[]; preferredUnits: PreferredUnits;
   selectedId: string | null; onSelect: (id: string | null) => void; onChanged: () => Promise<void>;
 }) {
   const [movements, setMovements] = useState<StockMovement[]>([]);
@@ -169,8 +169,9 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const moveItem = items.find(row => row.id === moveItemId) || null;
   const itemDisplayUnit = item?.default_unit === 'oz' && preferredUnits.mass === compoundMassUnit
     ? compoundMassUnit : productRows[0]?.display_unit || item?.display_unit || item?.default_unit;
-  const categories = [...inventoryCategories, ...supplies.map(row => row.category).filter(category =>
-    !inventoryCategories.some(known => known === category))].filter((category, index, all) => all.indexOf(category) === index);
+  const categories = [...new Set([...catalogCategories.map(row => row.name),
+    ...supplies.map(row => row.category)])].filter(Boolean);
+  const addCategories = categories.filter(category => category !== 'Other');
   const activeLocationId = locations.some(location => location.id === locationFilterId) ? locationFilterId : null;
   const locationFilterLabel = inventoryLocationPath(activeLocationId, locations) || 'All locations';
   const locationFilterWidth = Math.max(18, Math.min(42, locationFilterLabel.length + 5));
@@ -435,9 +436,10 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
               row.supply.default_unit === 'oz' && preferredUnits.mass === compoundMassUnit ? compoundMassUnit
                 : row.stocks[0]?.display_unit || row.supply.default_unit) }]} /></section> : null;
       })}</div>}
-      <p className="inventory-add-types">Add {categories.map((category, index) =>
-        <span key={category}>{index > 0 && (index === categories.length - 1 ? categories.length === 2 ? ' or ' : ', or ' : ', ')}
-          <a href={`${basePath}/inventory`} onClick={event => { event.preventDefault(); addCategory(category); }}>{category.toLowerCase()}</a></span>)}.</p>
+      <p className="inventory-add-types">Add {addCategories.map((category, index) =>
+        <span key={category}>{index > 0 && ', '}
+          <a href={`${basePath}/inventory`} onClick={event => { event.preventDefault(); addCategory(category); }}>{category.toLowerCase()}</a></span>)}{addCategories.length ? ', or ' : ''}
+        <a href={`${basePath}/inventory`} onClick={event => { event.preventDefault(); createOtherProduct(); }}>other</a>.</p>
     </section> : !item ? <Empty description="Inventory item not found" /> : <section className="record-detail">
         <div className="content-heading"><div><span className="eyebrow">{item.category}</span><h2>{item.name}</h2>
           <p className="muted">{balance === undefined ? 'Calculating stock' : balance === null ? 'Balance needs unit conversion'
