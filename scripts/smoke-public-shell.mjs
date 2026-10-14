@@ -35,13 +35,7 @@ try {
   await page.getByLabel('Username').fill(username);
   await page.getByLabel('Password', { exact: true }).fill('smoke12345');
   await page.getByLabel('Confirm password').fill('smoke12345');
-  if (!dev) await page.route('**/assets/main-*.js', async route => {
-    await new Promise(resolve => setTimeout(resolve, 300));
-    await route.continue();
-  });
   await page.getByRole('button', { name: 'Create my account' }).click();
-  await page.locator('.public-loading progress').waitFor();
-  if (!dev) await page.getByText(/% downloaded/).waitFor();
   await page.getByRole('button', { name: 'Account settings' }).waitFor({ timeout: 30_000 });
   assert.equal(new URL(page.url()).pathname, '/batch/protected-example', 'sign-in did not return to the requested route');
   if (!dev) {

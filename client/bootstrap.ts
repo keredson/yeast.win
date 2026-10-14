@@ -124,11 +124,23 @@ async function prefetchAssets(update: (loaded: number, total: number) => void): 
 }
 
 async function loadApp(): Promise<void> {
-  const display = loader();
-  display.stage('Downloading the app…');
+  let display: ReturnType<typeof loader> | null = null;
+  let stage = 'Downloading the app…';
+  let progress: [number, number] = [0, 0];
+  const setStage = (message: string) => { stage = message; display?.stage(message); };
+  // A cached app can start before a loading card would be useful. Keep the
+  // progress UI for cold loads and slower reloads without flashing it on each visit.
+  const showLoader = window.setTimeout(() => {
+    display = loader();
+    display.stage(stage);
+    display.update(...progress);
+  }, 250);
   try {
-    await prefetchAssets(display.update);
-    display.stage('Starting the app…');
+    await prefetchAssets((loaded, total) => {
+      progress = [loaded, total];
+      display?.update(loaded, total);
+    });
+    setStage('Starting the app…');
     await import('./main.tsx');
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
@@ -137,7 +149,7 @@ async function loadApp(): Promise<void> {
       <button class="public-primary" type="button">Try again</button></section></div></main>`;
     root.querySelector('.public-error')!.textContent = message;
     root.querySelector('button')!.addEventListener('click', () => void loadApp());
-  }
+  } finally { window.clearTimeout(showLoader); }
 }
 
 async function start(): Promise<void> {
