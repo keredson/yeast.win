@@ -22,7 +22,7 @@ function brand(): string {
 
 function splash(): void {
   root.innerHTML = `<main class="public-page"><div class="public-shell">${brand()}
-    <section class="public-hero"><p class="public-eyebrow">Your brewing record</p>
+    <section class="public-hero"><p class="public-eyebrow">Free and open source</p>
     <h1>Keep the brew process in view.</h1>
     <p>Plan a batch, record what happened, and keep your brewery data available on this device.</p>
     <div class="public-actions"><a class="public-primary" href="/login">Sign in</a>
