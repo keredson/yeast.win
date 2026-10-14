@@ -42,6 +42,29 @@ test('imported brewhouse efficiency works without selected equipment', () => {
   assert.match(imported.efficiencyLabel!, /brewhouse/);
 });
 
+test('brewery and app mash defaults are used only after recipe and equipment sources', () => {
+  const noMashEquipment = equipment.filter(item => item.id !== 'tun');
+  const inputs = { target_fermenter_volume_liters: 20 };
+  const brewery = calculateRecipe(events, [grain, yeast], noMashEquipment, inputs, {}, {}, 'beer', 68);
+  const app = calculateRecipe(events, [grain, yeast], noMashEquipment, inputs, {});
+  assert.ok(brewery.originalGravity != null && app.originalGravity != null);
+  assert.ok(brewery.originalGravity < app.originalGravity);
+  assert.ok(brewery.sources.originalGravity.some(line => line.includes('68% (brewery default)')));
+  assert.ok(app.sources.originalGravity.some(line => line.includes('75% (app default)')));
+  const imported = calculateRecipe(events, [grain, yeast], noMashEquipment,
+    { ...inputs, brewhouse_efficiency_pct: 70 }, {}, {}, 'beer', 68);
+  assert.ok(imported.sources.originalGravity.some(line => line.includes('70% (imported recipe)')));
+  const model = calculateRecipe(events, [grain, yeast], equipment, inputs, {}, {}, 'beer', 68);
+  assert.ok(model.sources.originalGravity.some(line => line.includes('75% (equipment model Tun)')));
+  const recent = calculateRecipe(events, [grain, yeast], noMashEquipment, inputs, {},
+    { tun: { value: 73, batchName: 'Autumn ale' } }, 'beer', 68);
+  assert.ok(recent.sources.originalGravity.some(line => line.includes('73% (batch Autumn ale using tun)')));
+  assert.ok(model.sources.originalGravity.some(line => line.includes('Pale malt: 5 kg')));
+  assert.ok(model.sources.finalGravity.some(line => line.includes('Ale yeast')));
+  assert.ok(model.sources.abvPct.some(line => line.includes('131.25')));
+  assert.ok(model.sources.colorSrm.some(line => line.includes('2 °L')));
+});
+
 test('missing loss attributes default to zero, while missing ingredients still block gravity', () => {
   const missingRetention = calculateRecipe(events, [grain, yeast], equipment.map(item => ({ ...item, post_boil_loss_liters: null })),
     { target_fermenter_volume_liters: 20 }, {});
