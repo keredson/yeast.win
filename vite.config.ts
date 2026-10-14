@@ -48,7 +48,7 @@ export default defineConfig(({ mode }) => ({
             handler: 'CacheFirst', options: { cacheName: 'brewlog-app-assets-v1' } },
           { urlPattern: ({ url, request }) => url.protocol === 'https:' && url.origin !== self.location.origin
               && request.destination === 'image',
-            handler: 'CacheFirst', options: { cacheName: 'brewlog-catalog-images-v1',
+            handler: 'StaleWhileRevalidate', options: { cacheName: 'brewlog-catalog-images-v1',
               cacheableResponse: { statuses: [0, 200] } } }
         ]
       }
