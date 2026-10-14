@@ -92,6 +92,24 @@ test('ingredient catalog migration adds named products and preserves catalog edi
   } finally { upgraded.close(); }
 });
 
+test('version 22 catalog adds later bundled ingredient photos without overwriting edits', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-supply-photos-'));
+  const before = openCatalogDb(dir);
+  const edited = Buffer.from([255, 216, 255, 1, 2]);
+  before.prepare('DELETE FROM supply_images WHERE supply_id = ?').run('supply_weyermann_pilsner');
+  before.prepare('UPDATE supply_images SET image_bytes = ? WHERE supply_id = ?')
+    .run(edited, 'supply_briess_pale_ale');
+  before.pragma('user_version = 22');
+  before.close();
+  const upgraded = openCatalogDb(dir);
+  try {
+    assert.ok((upgraded.prepare('SELECT length(image_bytes) AS bytes FROM supply_images WHERE supply_id = ?')
+      .get('supply_weyermann_pilsner') as { bytes: number }).bytes > 1000);
+    assert.deepEqual((upgraded.prepare('SELECT image_bytes FROM supply_images WHERE supply_id = ?')
+      .get('supply_briess_pale_ale') as { image_bytes: Buffer }).image_bytes, edited);
+  } finally { upgraded.close(); }
+});
+
 test('version 21 separates US and EU VEVOR systems without replacing catalog edits', () => {
   for (const edited of [false, true]) {
     const dir = mkdtempSync(join(tmpdir(), 'brewlog-vevor-region-'));

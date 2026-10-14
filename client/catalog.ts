@@ -194,6 +194,12 @@ export function openLocalCatalog(): Promise<DB> {
         await tx.exec('PRAGMA user_version = 22');
       });
     }
+    if ((await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version === 22) {
+      await db.tx(async tx => {
+        await tx.exec("DELETE FROM sync_state WHERE key = 'lastRefreshAt'");
+        await tx.exec('PRAGMA user_version = 23');
+      });
+    }
     return db;
   })().catch(error => { opened = undefined; throw error; });
   return opened;
