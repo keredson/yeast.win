@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateRecipe } from '../client/recipeCalculations.ts';
+import { appYeastAttenuationPct, calculateRecipe } from '../client/recipeCalculations.ts';
+import { batchGravityReadings } from '../client/batchGravity.ts';
 import type { Equipment, InventoryItem, PlanInput } from '../client/db.ts';
 
 const grain = { id: 'grain', name: 'Pale malt', category: 'Grain', default_unit: 'kg', display_unit: 'kg',
@@ -57,6 +58,42 @@ test('batch estimates use event snapshots, unit efficiency, and the batch wort l
   assert.ok(result.sources.colorSrm.some(line => line.includes('2 °L (batch event input)')));
 });
 
+test('one selected yeast without attenuation uses a labeled app estimate', () => {
+  const result = calculateRecipe(events, [grain, { ...yeast, attenuation_pct: null }], equipment,
+    { target_fermenter_volume_liters: 20 }, {});
+  assert.ok(result.originalGravity != null);
+  assert.ok(Math.abs(result.finalGravity! - (1 + (result.originalGravity - 1)
+    * (1 - appYeastAttenuationPct / 100))) < .000001);
+  assert.ok(result.abvPct != null);
+  assert.equal(result.usedAppYeastAttenuation, true);
+  assert.ok(result.sources.finalGravity.some(line => line.includes('75% (app estimate; selected yeast has no attenuation value)')));
+  assert.ok(result.sources.abvPct.some(line => line.includes('75% (app estimate; selected yeast has no attenuation value)')));
+  assert.ok(!result.missing.some(line => line.includes('yeast')));
+});
+
+test('yeast snapshot and ingredient values take precedence over the app estimate', () => {
+  const stock = [grain, { ...yeast, attenuation_pct: 81 }];
+  const recipe = calculateRecipe(events, stock, equipment,
+    { target_fermenter_volume_liters: 20 }, { pitch: { attenuation_pct: 70 } });
+  const batch = calculateRecipe(events, stock, equipment,
+    { target_fermenter_volume_liters: 20 }, { pitch: { attenuation_pct: 70 } }, {}, 'beer', null, 'batch');
+  assert.ok(recipe.sources.finalGravity.some(line => line.includes('81% (brewery or catalog ingredient')));
+  assert.ok(batch.sources.finalGravity.some(line => line.includes('70% (batch event input)')));
+  assert.equal(recipe.usedAppYeastAttenuation, false);
+  assert.equal(batch.usedAppYeastAttenuation, false);
+});
+
+test('missing or multiple yeast additions explain why FG is unavailable', () => {
+  const withoutYeast = calculateRecipe(events.filter(event => event.id !== 'pitch'), [grain], equipment,
+    { target_fermenter_volume_liters: 20 }, {});
+  assert.equal(withoutYeast.finalGravity, null);
+  assert.ok(withoutYeast.unavailable.finalGravity.some(line => line.includes('Add a yeast addition')));
+  const multipleYeasts = calculateRecipe([...events, { ...events[5], id: 'pitch-again' }], [grain, yeast], equipment,
+    { target_fermenter_volume_liters: 20 }, {});
+  assert.equal(multipleYeasts.finalGravity, null);
+  assert.ok(multipleYeasts.unavailable.finalGravity.some(line => line.includes('multiple yeast additions')));
+});
+
 test('imported brewhouse efficiency works without selected equipment', () => {
   const imported = calculateRecipe(events, [grain, yeast], [], { target_fermenter_volume_liters: 20, brewhouse_efficiency_pct: 70 }, {});
   assert.ok(imported.originalGravity! > 1.053 && imported.originalGravity! < 1.055);
@@ -109,6 +146,40 @@ test('missing grain yields use named app class estimates without filling missing
   assert.ok(result.originalGravity != null);
   assert.ok(result.sources.originalGravity.some(line => line.includes('75% (app estimate for kilned malt)')));
   assert.equal(result.colorSrm, null);
+});
+
+test('batch grain linked directly to a catalog product contributes its color', () => {
+  const catalogGrain = { id: 'briess-bonlander', name: 'Briess Bonlander Munich Malt 10L', category: 'Grain',
+    unit: 'kg', yield_pct: 78, color_lovibond: 10 };
+  const batchEvents = events.map(event => event.id === 'grain-add' ? { ...event, details: {
+    ...event.details, inventory_item_id: undefined, catalog_item_id: catalogGrain.id,
+    item_name: catalogGrain.name } } : event);
+  const result = calculateRecipe(batchEvents, [yeast], equipment,
+    { target_fermenter_volume_liters: 20 }, {}, {}, 'beer', null, 'batch', [catalogGrain]);
+  assert.ok(result.colorSrm != null && result.colorSrm > 0);
+  assert.ok(result.sources.colorSrm.some(line => line.includes('Briess Bonlander Munich Malt 10L')));
+  assert.ok(result.sources.colorSrm.some(line => line.includes('10 °L (brewery or catalog ingredient)')));
+});
+
+test('batch gravity readings replace estimates as OG and FG are recorded', () => {
+  const readings = batchGravityReadings([
+    { title: 'Measure pre-boil gravity', value: 1.063, unit: 'SG' },
+    { title: 'Measure original specific gravity', value: 1.052, unit: 'SG' },
+    { title: 'Measure final specific gravity', value: 1.012, unit: 'SG' }
+  ]);
+  assert.deepEqual(readings, { original: 1.052, final: 1.012 });
+  const ogOnly = calculateRecipe(events, [grain, yeast], equipment,
+    { target_fermenter_volume_liters: 20 }, {}, {}, 'beer', null, 'batch', [], { original: readings.original });
+  assert.equal(ogOnly.originalGravity, 1.052);
+  assert.ok(Math.abs(ogOnly.finalGravity! - 1.013) < .000001);
+  assert.equal(ogOnly.measuredOriginalGravity, true);
+  assert.equal(ogOnly.measuredFinalGravity, false);
+  const complete = calculateRecipe(events.filter(event => event.id !== 'pitch'), [grain], equipment,
+    { target_fermenter_volume_liters: 20 }, {}, {}, 'beer', null, 'batch', [], readings);
+  assert.equal(complete.finalGravity, 1.012);
+  assert.equal(complete.measuredFinalGravity, true);
+  assert.ok(Math.abs(complete.abvPct! - (1.052 - 1.012) * 131.25) < .000001);
+  assert.deepEqual(complete.unavailable.finalGravity, []);
 });
 
 test('repeated use of one unit contributes its loss only once', () => {

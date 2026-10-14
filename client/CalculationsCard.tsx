@@ -21,11 +21,15 @@ export function CalculationsCard({ estimate, volumeUnit, showColor, label }: {
       <EstimateTile label="Batch size" value={estimate.targetLiters == null ? null
         : `${Number((convertUnit(estimate.targetLiters, 'L', volumeUnit) || 0).toFixed(2))} ${volumeUnit}`}
         help={estimate.unavailable.targetLiters} sources={estimate.sources.targetLiters} />
-      <EstimateTile label="Expected OG" value={estimate.originalGravity?.toFixed(3) ?? null}
+      <EstimateTile label={estimate.measuredOriginalGravity ? 'OG' : 'Expected OG'}
+        value={estimate.originalGravity?.toFixed(3) ?? null}
         help={estimate.unavailable.originalGravity} sources={estimate.sources.originalGravity} />
-      <EstimateTile label="Expected FG" value={estimate.finalGravity?.toFixed(3) ?? null}
+      <EstimateTile label={estimate.measuredFinalGravity ? 'FG' : 'Expected FG'} value={estimate.finalGravity == null ? null
+        : estimate.finalGravity.toFixed(3)}
         help={estimate.unavailable.finalGravity} sources={estimate.sources.finalGravity} />
-      <EstimateTile label="Expected ABV" value={estimate.abvPct == null ? null : `${estimate.abvPct.toFixed(1)}%`}
+      <EstimateTile label={estimate.measuredOriginalGravity && estimate.measuredFinalGravity ? 'ABV' : 'Expected ABV'}
+        value={estimate.abvPct == null ? null
+        : `${estimate.abvPct.toFixed(1)}%`}
         help={estimate.unavailable.abvPct} sources={estimate.sources.abvPct} />
       {showColor && <EstimateTile label="Estimated color"
         value={estimate.colorSrm == null ? null : `${estimate.colorSrm.toFixed(1)} SRM`}

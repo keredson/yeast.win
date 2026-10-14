@@ -20,6 +20,7 @@ import type { ImportedRecipe } from './recipeImport.ts';
 import { mashEfficiencyPct, type MashGrain } from './mashEfficiency.ts';
 import { repeatBatchActions } from './batchRepeat.ts';
 import { appBatchSizeLiters, fillMissingRecipeBatchSizes, importedRecipeBatchSize } from '../shared/batchSize.ts';
+import { effectiveSuppliesView } from '../shared/effectiveSupplies.ts';
 
 export type LocalDb = DB;
 export interface Batch { id: string; name: string; description: string | null; status: string; created_at: number;
@@ -416,6 +417,7 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
       await db.exec("ATTACH DATABASE 'brewlog-catalog' AS catalog");
       await db.exec(effectiveEquipmentView);
       await db.exec(effectiveMeasurementChannelsView);
+      await db.exec(effectiveSuppliesView);
       return db;
     })().catch(cause => { opened.delete(workspaceId); throw cause; });
     opened.set(workspaceId, pending);
@@ -499,10 +501,11 @@ export async function releaseEquipmentUse(db: DB, useId: string): Promise<void> 
 export async function createBatch(db: DB, name: string, description: string, accountId: string): Promise<string> {
   const id = nanoid();
   const now = nowSeconds();
+  const batchSize = await breweryBatchSize(db) ?? appBatchSizeLiters;
   await db.tx(async tx => {
     await tx.exec('INSERT INTO batches(id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
       [id, name, description || null, 'active', now, now]);
-    await tx.exec('INSERT INTO batch_recipe_inputs(id) VALUES (?)', [id]);
+    await tx.exec('INSERT INTO batch_recipe_inputs(id, target_fermenter_volume_liters) VALUES (?, ?)', [id, batchSize]);
   });
   return id;
 }
@@ -512,10 +515,11 @@ export async function startBatchFromTemplate(db: DB, recipeType: RecipeType, nam
   const plans = recipeTemplatePlans(recipeType, temperatureUnit);
   const id = nanoid();
   const now = nowSeconds();
+  const batchSize = await breweryBatchSize(db) ?? appBatchSizeLiters;
   await db.tx(async tx => {
     await tx.exec('INSERT INTO batches(id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
       [id, name, description || null, 'active', now, now]);
-    await tx.exec('INSERT INTO batch_recipe_inputs(id) VALUES (?)', [id]);
+    await tx.exec('INSERT INTO batch_recipe_inputs(id, target_fermenter_volume_liters) VALUES (?, ?)', [id, batchSize]);
     for (const plan of plans) {
       await tx.exec(`INSERT INTO batch_events(id, batch_id, event_type, title, anchor_event_id,
         offset_seconds, anchor_point, duration_seconds, instructions, created_at, created_by_account_id)
@@ -557,6 +561,28 @@ export async function recipeTargetVolume(db: DB, recipeId: string): Promise<numb
   const rows = await db.execO<{ target_fermenter_volume_liters: number | null }>(
     'SELECT target_fermenter_volume_liters FROM recipe_inputs WHERE id = ?', [recipeId]);
   return rows[0]?.target_fermenter_volume_liters ?? null;
+}
+
+export async function batchTargetVolume(db: DB, batchId: string): Promise<number | null> {
+  const rows = await db.execO<{ target_fermenter_volume_liters: number | null }>(
+    'SELECT target_fermenter_volume_liters FROM batch_recipe_inputs WHERE id = ?', [batchId]);
+  return rows[0]?.target_fermenter_volume_liters ?? null;
+}
+
+export async function updateBatchSettings(db: DB, batchId: string, name: string,
+  description: string, liters: number): Promise<void> {
+  const trimmedName = name.trim();
+  if (!trimmedName) throw new Error('Enter a batch name');
+  if (!Number.isFinite(liters) || liters <= 0) throw new Error('Enter a positive batch size');
+  await db.tx(async tx => {
+    const matches = await tx.execO<{ id: string }>('SELECT id FROM batches WHERE id = ?', [batchId]);
+    if (!matches.length) throw new Error('Batch not found');
+    await tx.exec('UPDATE batches SET name = ?, description = ?, updated_at = ? WHERE id = ?',
+      [trimmedName, description.trim() || null, nowSeconds(), batchId]);
+    await tx.exec(`INSERT INTO batch_recipe_inputs(id, target_fermenter_volume_liters) VALUES (?, ?)
+      ON CONFLICT(id) DO UPDATE SET target_fermenter_volume_liters = excluded.target_fermenter_volume_liters`,
+    [batchId, liters]);
+  });
 }
 
 export async function breweryMashEfficiency(db: DB): Promise<number | null> {
@@ -2108,34 +2134,25 @@ export async function listInventory(db: Pick<DB, 'execO'>): Promise<InventoryIte
   return db.execO<InventoryItem>(`SELECT i.id, COALESCE(s.name, i.name) AS name,
     COALESCE(s.category, i.category) AS category, i.default_unit,
     i.supply_id, i.lot_id, lot.lot_code, s.catalog_supply_id,
-    COALESCE(sg.grain_class, cgclass.grain_class) AS grain_class,
+    s.grain_class,
     COALESCE(d.display_unit, i.default_unit) AS display_unit, l.location_id, places.name AS location_name,
-    COALESCE(lg.yield_pct, sg.yield_pct, cg.yield_pct, p.yield_pct) AS yield_pct,
-    COALESCE(lg.color_lovibond, sg.color_lovibond, cg.color_lovibond, p.color_lovibond) AS color_lovibond,
-    COALESCE(lh.alpha_acid_pct, sh.alpha_acid_pct, ch.alpha_acid_pct, p.alpha_acid_pct) AS alpha_acid_pct,
-    COALESCE(lh.hop_form, sh.hop_form, ch.hop_form, p.hop_form) AS hop_form,
-    COALESCE(ly.attenuation_pct, sy.attenuation_pct, cy.attenuation_pct, p.attenuation_pct) AS attenuation_pct
-    ,COALESCE(lo.typical_brix, so.typical_brix, co.typical_brix) AS typical_brix
-    ,COALESCE(lo.extract_color_value, so.extract_color_value, co.extract_color_value) AS extract_color_value
-    ,COALESCE(lo.extract_color_scale, so.extract_color_scale, co.extract_color_scale) AS extract_color_scale
-    ,COALESCE(lo.extract_color_reference_value, so.extract_color_reference_value, co.extract_color_reference_value) AS extract_color_reference_value
-    ,COALESCE(lo.extract_color_reference_unit, so.extract_color_reference_unit, co.extract_color_reference_unit) AS extract_color_reference_unit
+    COALESCE(lg.yield_pct, s.yield_pct, p.yield_pct) AS yield_pct,
+    COALESCE(lg.color_lovibond, s.color_lovibond, p.color_lovibond) AS color_lovibond,
+    COALESCE(lh.alpha_acid_pct, s.alpha_acid_pct, p.alpha_acid_pct) AS alpha_acid_pct,
+    COALESCE(lh.hop_form, s.hop_form, p.hop_form) AS hop_form,
+    COALESCE(ly.attenuation_pct, s.attenuation_pct, p.attenuation_pct) AS attenuation_pct,
+    COALESCE(lo.typical_brix, s.typical_brix) AS typical_brix,
+    COALESCE(lo.extract_color_value, s.extract_color_value) AS extract_color_value,
+    COALESCE(lo.extract_color_scale, s.extract_color_scale) AS extract_color_scale,
+    COALESCE(lo.extract_color_reference_value, s.extract_color_reference_value) AS extract_color_reference_value,
+    COALESCE(lo.extract_color_reference_unit, s.extract_color_reference_unit) AS extract_color_reference_unit
     FROM inventory_items i
-    LEFT JOIN supplies s ON s.id = i.supply_id
+    LEFT JOIN effective_supplies s ON s.id = i.supply_id
     LEFT JOIN supply_lots lot ON lot.id = i.lot_id
-    LEFT JOIN supply_grain_specs sg ON sg.supply_id = s.id
-    LEFT JOIN supply_hop_specs sh ON sh.supply_id = s.id
-    LEFT JOIN supply_yeast_specs sy ON sy.supply_id = s.id
-    LEFT JOIN supply_other_fermentable_specs so ON so.supply_id = s.id
     LEFT JOIN lot_grain_specs lg ON lg.lot_id = lot.id
     LEFT JOIN lot_hop_specs lh ON lh.lot_id = lot.id
     LEFT JOIN lot_yeast_specs ly ON ly.lot_id = lot.id
     LEFT JOIN lot_other_fermentable_specs lo ON lo.lot_id = lot.id
-    LEFT JOIN catalog.supply_grain_specs cg ON cg.supply_id = s.catalog_supply_id
-    LEFT JOIN catalog.supply_grain_classes cgclass ON cgclass.supply_id = s.catalog_supply_id
-    LEFT JOIN catalog.supply_hop_specs ch ON ch.supply_id = s.catalog_supply_id
-    LEFT JOIN catalog.supply_yeast_specs cy ON cy.supply_id = s.catalog_supply_id
-    LEFT JOIN catalog.supply_other_fermentable_specs co ON co.supply_id = s.catalog_supply_id
     LEFT JOIN inventory_ingredient_properties p ON p.id = i.id
     LEFT JOIN inventory_display_units d ON d.id = i.id
     LEFT JOIN inventory_item_locations l ON l.id = i.id
@@ -2143,30 +2160,7 @@ export async function listInventory(db: Pick<DB, 'execO'>): Promise<InventoryIte
 }
 
 export async function listSupplies(db: Pick<DB, 'execO'>): Promise<InventoryItem[]> {
-  return db.execO<InventoryItem>(`SELECT s.id, s.id AS supply_id, s.name, s.category,
-    s.default_unit, s.default_unit AS display_unit, NULL AS location_id, s.catalog_supply_id,
-    COALESCE(g.grain_class, cgclass.grain_class) AS grain_class,
-    COALESCE(g.yield_pct, cg.yield_pct) AS yield_pct,
-    COALESCE(g.color_lovibond, cg.color_lovibond) AS color_lovibond,
-    COALESCE(h.alpha_acid_pct, ch.alpha_acid_pct) AS alpha_acid_pct,
-    COALESCE(h.hop_form, ch.hop_form) AS hop_form,
-    COALESCE(y.attenuation_pct, cy.attenuation_pct) AS attenuation_pct,
-    COALESCE(o.typical_brix, co.typical_brix) AS typical_brix,
-    COALESCE(o.extract_color_value, co.extract_color_value) AS extract_color_value,
-    COALESCE(o.extract_color_scale, co.extract_color_scale) AS extract_color_scale,
-    COALESCE(o.extract_color_reference_value, co.extract_color_reference_value) AS extract_color_reference_value,
-    COALESCE(o.extract_color_reference_unit, co.extract_color_reference_unit) AS extract_color_reference_unit
-    FROM supplies s
-    LEFT JOIN supply_grain_specs g ON g.supply_id = s.id
-    LEFT JOIN supply_hop_specs h ON h.supply_id = s.id
-    LEFT JOIN supply_yeast_specs y ON y.supply_id = s.id
-    LEFT JOIN supply_other_fermentable_specs o ON o.supply_id = s.id
-    LEFT JOIN catalog.supply_grain_specs cg ON cg.supply_id = s.catalog_supply_id
-    LEFT JOIN catalog.supply_grain_classes cgclass ON cgclass.supply_id = s.catalog_supply_id
-    LEFT JOIN catalog.supply_hop_specs ch ON ch.supply_id = s.catalog_supply_id
-    LEFT JOIN catalog.supply_yeast_specs cy ON cy.supply_id = s.catalog_supply_id
-    LEFT JOIN catalog.supply_other_fermentable_specs co ON co.supply_id = s.catalog_supply_id
-    ORDER BY s.name COLLATE NOCASE`);
+  return db.execO<InventoryItem>('SELECT * FROM effective_supplies ORDER BY name COLLATE NOCASE');
 }
 
 export async function readSupplyMedia(db: DB, supplyId: string): Promise<SupplyMedia | null> {

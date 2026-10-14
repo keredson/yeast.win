@@ -19,3 +19,18 @@ This is the tracked list of pages consulted for product discovery and catalog co
 | MoreBeer | Retailer/discovery | [Grains and malts](https://morebeer.com/collections/grains-malt-and-barley), [malt extracts](https://www.morebeer.com/category/malt-extract.html), [pellet hops](https://morebeer.com/collections/pellet-hops), [brewing ingredients](https://www.morebeer.com/category/brewing-ingredients.html), [brands](https://morebeer.com/pages/shop-by-brand) | Find common homebrew products and brands missing from the catalog; confirm specs with manufacturer. |
 
 When adding a source, record the provider, its role, the exact pages consulted, and how the page informs catalog work. Record each product's own best information URL in the catalog database. Review this list when provider ranges or URLs change.
+
+## Yeast apparent attenuation reviewed 2026-10-14
+
+The catalog currently has one attenuation percentage per yeast. The values below are the midpoint of the manufacturer's published range, used as a planning default rather than a guarantee for a particular wort or fermentation. These are catalog data edits, not startup seeds.
+
+| Catalog yeast | Manufacturer range | Catalog value | Source |
+| --- | ---: | ---: | --- |
+| Fermentis SafAle K-97 | 80–84% | 82% | [Fermentis beer yeast chart](https://fermentis.com/wp-content/uploads/2021/06/Beer-Yeast-Chart.pdf) (medium attenuation) |
+| Fermentis SafAle S-04 | 80–84% | 82% | [Fermentis beer yeast chart](https://fermentis.com/wp-content/uploads/2021/06/Beer-Yeast-Chart.pdf) (medium attenuation) |
+| Fermentis SafAle US-05 | 80–84% | 82% | [Fermentis beer yeast chart](https://fermentis.com/wp-content/uploads/2021/06/Beer-Yeast-Chart.pdf) (medium attenuation) |
+| Fermentis SafLager W-34/70 | 80–84% | 82% | [Fermentis W-34/70 specifications](https://fermentis.com/en/news/testimonials/brewer-stories-highland-park-brewery-saflager-w-34-70/) |
+| Lallemand Brewing LalBrew Diamond Lager | 77–83% | 80% | [Lallemand Diamond](https://www.lallemandbrewing.com/en/global/products/diamond-lager-yeast) |
+| Lallemand Brewing LalBrew New England | 78–83% | 80.5% | [Lallemand New England](https://www.lallemandbrewing.com/en/global/products/lalbrew-new-england/) |
+| Lallemand Brewing LalBrew Nottingham | 78–84% | 81% | [Lallemand Nottingham](https://www.lallemandbrewing.com/en/united-kingdom/products/nottingham-high-performance-ale-yeast/) |
+| Lallemand Brewing LalBrew Verdant IPA | 75–82% | 78.5% | [Lallemand Verdant IPA](https://www.lallemandbrewing.com/en/continental-europe/products/lalbrew-verdant-ipa/) |

@@ -9,7 +9,7 @@ import { fetchApi } from './api.ts';
 let opened: Promise<DB> | undefined;
 let syncing: Promise<boolean> | undefined;
 let catalogMediaUrls: string[] = [];
-const catalogRefreshIntervalMs = 7 * 24 * 60 * 60_000;
+const catalogRefreshIntervalMs = 24 * 60 * 60_000;
 
 export function openLocalCatalog(): Promise<DB> {
   if (!opened) opened = (async () => {
@@ -439,7 +439,7 @@ export function syncLocalCatalog(db: DB, onProgress?: (applied: number, total: n
       await tx.exec(`INSERT INTO sync_state(key,value) VALUES ('lastRefreshAt',?)
         ON CONFLICT(key) DO UPDATE SET value=excluded.value`, [String(Date.now())]);
     });
-    return true;
+    return applied > 0;
   })().finally(() => { syncing = undefined; });
   return syncing;
 }

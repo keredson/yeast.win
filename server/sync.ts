@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import { changeColumns, nowSeconds, type SyncRequest, type SyncResponse, validateChange } from '../shared/schema.ts';
 import { decodeChange, encodeChange, type SqlChangeRow } from '../shared/wire.ts';
-import { changeTuple, decodeItem, encodeItem, syncContentType, syncProtocolVersion,
+import { changeTuple, decodeItem, encodeItem, maxSequence, syncContentType, syncProtocolVersion,
   validChangeTuple, type ChangeTuple } from '../shared/cborSync.ts';
 import type { ServerResponse } from 'node:http';
 import Sqlite from 'better-sqlite3';
@@ -73,6 +73,11 @@ export async function streamCborChanges(db: Database.Database, res: ServerRespon
   if (!decimal(version) || !decimal(seq)) throw new Error('Invalid sync cursor');
   const current = BigInt((db.prepare('SELECT crsql_db_version() AS version').get() as { version: number | bigint }).version);
   if (BigInt(version) > current) throw new Error('Server cursor is ahead of this brewery; local sync state must be reset');
+  if (BigInt(version) === current && seq === maxSequence) {
+    res.writeHead(200, { 'Content-Type': syncContentType, 'Cache-Control': 'no-store' });
+    res.end(encodeItem([syncProtocolVersion, 0, String(current)]));
+    return;
+  }
   // A separate read connection gives this stream a stable snapshot while uploads continue.
   const reader = new Sqlite(db.name, { readonly: true });
   try {
