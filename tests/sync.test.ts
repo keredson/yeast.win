@@ -515,6 +515,74 @@ test('version 27 adds model measurement removal markers while preserving channel
   } finally { closeWorkspaceDb(upgraded); }
 });
 
+test('version 28 adds equipment post-boil loss without discarding older data', () => {
+  const id = nanoid();
+  const modelId = nanoid();
+  const unitId = nanoid();
+  const recipeId = nanoid();
+  const db = openWorkspaceDb(id);
+  db.prepare('INSERT INTO equipment_models(id, name, kind, created_at) VALUES (?, ?, ?, ?)')
+    .run(modelId, 'Kettle model', 'electric_kettle', 1);
+  db.prepare('INSERT INTO equipment(id, name, model_id, created_at) VALUES (?, ?, ?, ?)')
+    .run(unitId, 'Kettle unit', modelId, 1);
+  db.prepare('INSERT INTO recipes(id, name, created_at, updated_at) VALUES (?, ?, ?, ?)')
+    .run(recipeId, 'Existing recipe', 1, 1);
+  db.prepare('INSERT INTO recipe_inputs(id, target_fermenter_volume_liters, wort_loss_liters) VALUES (?, ?, ?)')
+    .run(recipeId, 19, 1.5);
+  db.prepare("SELECT crsql_begin_alter('equipment_models')").get();
+  db.exec('ALTER TABLE equipment_models DROP COLUMN post_boil_loss_liters');
+  db.prepare("SELECT crsql_commit_alter('equipment_models')").get();
+  db.prepare("SELECT crsql_as_table('equipment_post_boil_losses')").get();
+  db.exec('DROP TABLE equipment_post_boil_losses');
+  for (const table of ['recipe_transfer_equipment', 'transfer_equipment']) {
+    db.prepare('SELECT crsql_as_table(?)').get(table);
+    db.exec(`DROP TABLE ${table}`);
+  }
+  db.pragma('user_version = 27');
+  closeWorkspaceDb(db);
+
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.equal((upgraded.prepare('SELECT name FROM equipment_models WHERE id = ?').get(modelId) as { name: string }).name,
+      'Kettle model');
+    assert.equal((upgraded.prepare('SELECT model_id FROM equipment WHERE id = ?').get(unitId) as { model_id: string }).model_id,
+      modelId);
+    assert.deepEqual(upgraded.prepare('SELECT target_fermenter_volume_liters, wort_loss_liters FROM recipe_inputs WHERE id = ?')
+      .get(recipeId), { target_fermenter_volume_liters: 19, wort_loss_liters: 1.5 });
+    upgraded.prepare('UPDATE equipment_models SET post_boil_loss_liters = ? WHERE id = ?').run(0, modelId);
+    upgraded.prepare('INSERT INTO equipment_post_boil_losses(equipment_id, post_boil_loss_liters) VALUES (?, ?)')
+      .run(unitId, 0.25);
+    assert.equal((upgraded.prepare('SELECT post_boil_loss_liters FROM equipment_post_boil_losses WHERE equipment_id = ?')
+      .get(unitId) as { post_boil_loss_liters: number }).post_boil_loss_liters, 0.25);
+    assert.ok(upgraded.prepare("SELECT name FROM sqlite_master WHERE name = 'recipe_transfer_equipment'").get());
+    assert.ok(upgraded.prepare("SELECT name FROM sqlite_master WHERE name = 'transfer_equipment'").get());
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
+test('partially upgraded post-boil loss rows survive reopening', () => {
+  const id = nanoid();
+  const modelId = nanoid();
+  const unitId = nanoid();
+  const db = openWorkspaceDb(id);
+  db.prepare('INSERT INTO equipment_models(id, name, kind, post_boil_loss_liters, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(modelId, 'Partial kettle', 'kettle', 0, 1);
+  db.prepare('INSERT INTO equipment(id, name, model_id, created_at) VALUES (?, ?, ?, ?)')
+    .run(unitId, 'Unit', modelId, 1);
+  db.prepare('INSERT INTO equipment_post_boil_losses(equipment_id, post_boil_loss_liters) VALUES (?, ?)')
+    .run(unitId, 0.4);
+  db.pragma('user_version = 27');
+  closeWorkspaceDb(db);
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.equal((upgraded.prepare('SELECT post_boil_loss_liters FROM equipment_models WHERE id = ?')
+      .get(modelId) as { post_boil_loss_liters: number }).post_boil_loss_liters, 0);
+    assert.equal((upgraded.prepare('SELECT post_boil_loss_liters FROM equipment_post_boil_losses WHERE equipment_id = ?')
+      .get(unitId) as { post_boil_loss_liters: number }).post_boil_loss_liters, 0.4);
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
 test('version 21 workspace adds brewery model boil defaults and keeps unit calibrations', () => {
   const id = nanoid();
   const modelId = nanoid();
@@ -585,6 +653,10 @@ test('version 22 workspace moves unambiguous wort loss to brewery and batch inpu
       .get() as { wort_loss_liters: number }).wort_loss_liters, 2);
     assert.equal((upgraded.prepare('SELECT wort_loss_liters FROM batch_recipe_inputs WHERE id = ?')
       .get(batchId) as { wort_loss_liters: number }).wort_loss_liters, 1.5);
+    assert.equal((upgraded.prepare('SELECT post_boil_loss_liters FROM equipment_models WHERE id = ?')
+      .get(modelId) as { post_boil_loss_liters: number }).post_boil_loss_liters, 2);
+    assert.equal((upgraded.prepare('SELECT post_boil_loss_liters FROM equipment_post_boil_losses WHERE equipment_id = ?')
+      .get(unitId) as { post_boil_loss_liters: number }).post_boil_loss_liters, 2);
     assert.equal((upgraded.prepare('SELECT name FROM batches WHERE id = ?')
       .get(batchId) as { name: string }).name, 'Existing batch');
     for (const table of ['equipment_models', 'equipment_mash_assumptions', 'batch_event_inputs']) {

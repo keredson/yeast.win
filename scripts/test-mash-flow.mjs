@@ -92,5 +92,5 @@ try {
   await page.getByRole('button', { name: 'Edit planned event Drain grain' }).click();
   await page.getByText('Mash equipment').waitFor();
   await page.getByText('Collecting vessel').waitFor();
-  console.log('Mash transfer, brewery wort loss, ingredient properties, snapshots, and recent efficiency passed');
+  console.log('Mash transfer, ingredient properties, snapshots, and recent efficiency passed');
 } finally { await browser.close(); }

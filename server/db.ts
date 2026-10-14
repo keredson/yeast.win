@@ -156,12 +156,18 @@ export function openWorkspaceDb(id: string): Database.Database {
   const hasWorkspaceTables = [...existingTables].some(name => replicatedTables.includes(name));
   const legacyLossValues: number[] = [];
   const legacyBatchLosses: { batch_id: string; wort_loss_liters: number }[] = [];
+  const legacyModelLosses = new Map<string, number>();
+  const legacyUnitLosses = new Map<string, number>();
   if (version < 23 && hasWorkspaceTables) {
     for (const table of ['equipment_models', 'equipment_mash_assumptions', 'equipment']) {
       if (!existingTables.has(table) || !(db.pragma(`table_info("${table}")`) as { name: string }[])
         .some(column => column.name === 'kettle_retention_liters')) continue;
-      legacyLossValues.push(...(db.prepare(`SELECT DISTINCT kettle_retention_liters AS value FROM "${table}"
-        WHERE kettle_retention_liters IS NOT NULL`).all() as { value: number }[]).map(row => row.value));
+      const idColumn = table === 'equipment_mash_assumptions' ? 'equipment_id' : 'id';
+      const rows = db.prepare(`SELECT ${idColumn} AS id, kettle_retention_liters AS value FROM "${table}"
+        WHERE kettle_retention_liters IS NOT NULL`).all() as { id: string; value: number }[];
+      legacyLossValues.push(...rows.map(row => row.value));
+      for (const row of rows) (table === 'equipment_models' ? legacyModelLosses : legacyUnitLosses)
+        .set(row.id, row.value);
     }
     if (existingTables.has('batch_event_inputs') && existingTables.has('batch_events')
       && (db.pragma('table_info(batch_event_inputs)') as { name: string }[])
@@ -269,6 +275,16 @@ export function openWorkspaceDb(id: string): Database.Database {
     const copyBatch = db.prepare(`INSERT INTO batch_recipe_inputs(id, wort_loss_liters) VALUES (?, ?)
       ON CONFLICT(id) DO UPDATE SET wort_loss_liters = COALESCE(batch_recipe_inputs.wort_loss_liters, excluded.wort_loss_liters)`);
     for (const row of legacyBatchLosses) copyBatch.run(row.batch_id, row.wort_loss_liters);
+  })();
+  if (legacyModelLosses.size || legacyUnitLosses.size) db.transaction(() => {
+    const updateModel = db.prepare(`UPDATE equipment_models
+      SET post_boil_loss_liters = COALESCE(post_boil_loss_liters, ?) WHERE id = ?`);
+    const updateUnit = db.prepare(`INSERT INTO equipment_post_boil_losses
+      (equipment_id, post_boil_loss_liters) VALUES (?, ?)
+      ON CONFLICT(equipment_id) DO UPDATE SET post_boil_loss_liters =
+        COALESCE(equipment_post_boil_losses.post_boil_loss_liters, excluded.post_boil_loss_liters)`);
+    for (const [id, liters] of legacyModelLosses) updateModel.run(liters, id);
+    for (const [id, liters] of legacyUnitLosses) updateUnit.run(id, liters);
   })();
   db.exec(`UPDATE equipment SET added_at = COALESCE(added_at, created_at) WHERE added_at IS NULL;
     UPDATE equipment SET removed_at =

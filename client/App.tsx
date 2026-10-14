@@ -596,7 +596,7 @@ export function App() {
               }}>{crumb.section === 'home' ? <HomeOutlined aria-hidden="true" /> : crumb.label}</a>
         }))} />}
         {section === 'me' ? <AccountSection username={session.account.username} avatarSrc={avatarSrc}
-          workspaces={session.workspaces} activeWorkspaceId={workspaceId} db={db} onWorkspaceDataChanged={changed}
+          workspaces={session.workspaces} activeWorkspaceId={workspaceId}
           onCreateWorkspace={createWorkspace} onUpdateWorkspace={renameWorkspace} onDeleteWorkspace={removeWorkspace}
           onAvatarUploaded={() => { const updated = { ...session, account: { ...session.account, has_avatar: true } };
             rememberSession(updated); setSession(updated); setAvatarVersion(Date.now()); }}
