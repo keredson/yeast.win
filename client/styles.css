@@ -83,7 +83,6 @@ button, input, textarea { font: inherit; }
 .equipment-model-product-image > .muted { min-height: 130px; }
 .equipment-model-product-details { grid-area: details; display: flex; align-items: flex-start; flex-direction: column; gap: 6px;
   margin-bottom: 12px; }
-.equipment-model-product-details p { margin: 0; }
 .equipment-model-product-details .ant-btn { padding-left: 0; }
 .equipment-model-parameters { grid-area: parameters; }
 .equipment-unit-section > h3 { margin: 0 0 8px; }

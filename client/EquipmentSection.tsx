@@ -680,7 +680,6 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
             onClick={() => { setImageEdit(undefined); setEditModelImage(true); }}>Edit image</Button>
         </div>
         <div className="equipment-model-product-details">
-          {catalogParent?.manufacturer && <p className="muted">{catalogParent.manufacturer}</p>}
           <div className="equipment-parameter"><span>{modelProductUrl
             ? <a href={modelProductUrl} target="_blank" rel="noopener noreferrer">Product details</a>
             : 'Product URL: Not set'}</span>
