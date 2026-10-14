@@ -70,7 +70,7 @@ export function openLocalCatalog(): Promise<DB> {
     if ((await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version === 14) {
       await db.tx(async tx => {
         const columns = await tx.execO<{ name: string }>('PRAGMA table_info(equipment_models)');
-        const missingColumns = ['product_url', 'image_url', 'thumbnail_url'].filter(column =>
+        const missingColumns = ['product_url'].filter(column =>
           !columns.some(row => row.name === column));
         if (missingColumns.length) {
           await tx.exec("SELECT crsql_begin_alter('equipment_models')");
@@ -103,6 +103,27 @@ export function openLocalCatalog(): Promise<DB> {
         await tx.exec(`PRAGMA user_version = ${catalogSchemaVersion}`);
       });
     }
+    if ((await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version === 16) {
+      for (const [table, columns] of [
+        ['equipment_models', ['image_url', 'thumbnail_url']],
+        ['manufacturers', ['logo_url']]
+      ] as const) {
+        await db.tx(async tx => {
+          const present = new Set((await tx.execO<{ name: string }>(`PRAGMA table_info(${table})`))
+            .map(row => row.name));
+          if (!columns.some(column => present.has(column))) return;
+          await tx.exec('SELECT crsql_begin_alter(?)', [table]);
+          for (const column of columns) if (present.has(column)) await tx.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+          await tx.exec('SELECT crsql_commit_alter(?)', [table]);
+        });
+      }
+      await db.tx(async tx => {
+        const syncState = await tx.execO<{ name: string }>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sync_state'");
+        if (syncState.length) await tx.exec("DELETE FROM sync_state WHERE key = 'lastRefreshAt'");
+        await tx.exec(`PRAGMA user_version = ${catalogSchemaVersion}`);
+      });
+    }
     return db;
   })().catch(error => { opened = undefined; throw error; });
   return opened;
@@ -111,10 +132,9 @@ export function openLocalCatalog(): Promise<DB> {
 export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEquipment[]; inventory: CatalogInventory[] }> {
   const [models, liquid, pressure, heating, boil, cooling, control, channels, modelImages, logos, inventory] = await Promise.all([
     db.execO<{ id: string; name: string; kind: string; manufacturer: string | null;
-      product_url: string | null; image_url: string | null; thumbnail_url: string | null;
-      manufacturer_website_url: string | null; manufacturer_logo_url: string | null }>(
-      `SELECT m.id, m.model_name AS name, m.kind, m.manufacturer, m.product_url, m.image_url, m.thumbnail_url,
-        maker.website_url AS manufacturer_website_url, maker.logo_url AS manufacturer_logo_url
+      product_url: string | null; manufacturer_website_url: string | null }>(
+      `SELECT m.id, m.model_name AS name, m.kind, m.manufacturer, m.product_url,
+        maker.website_url AS manufacturer_website_url
         FROM equipment_models m LEFT JOIN manufacturers maker ON maker.name = m.manufacturer
         ORDER BY m.model_name COLLATE NOCASE`),
     db.execO<{ model_id: string; capacity_liters: number | null }>('SELECT * FROM model_liquid_containment'),

@@ -6,31 +6,22 @@ export const catalogManufacturers = [
   { name: 'Anton Paar', website_url: 'https://www.anton-paar.com/' },
   { name: 'Anvil Brewing', website_url: 'https://anvilbrewing.com/' },
   { name: 'Apera Instruments', website_url: 'https://aperainst.com/' },
-  { name: 'Baron Brew Equipment', website_url: 'https://tilthydrometer.com/',
-    logo_url: 'https://tilthydrometer.com/cdn/shop/files/tilt-logo_32x32.png?v=1613503240' },
+  { name: 'Baron Brew Equipment', website_url: 'https://tilthydrometer.com/' },
   { name: 'Blichmann Engineering', website_url: 'https://www.blichmannengineering.com/' },
-  { name: 'BrewBuilt', website_url: 'https://brewbuilt.com/',
-    logo_url: 'https://brewbuilt.com/cdn/shop/files/BrewBuilt_Full_Logo_Black_49d93f87-4e74-46c3-96bc-b5bca620b5c2.png?crop=center&height=32&v=1767988859&width=32' },
+  { name: 'BrewBuilt', website_url: 'https://brewbuilt.com/' },
   { name: 'Brewtools', website_url: 'https://www.brewtools.com/' },
-  { name: 'Clawhammer Supply', website_url: 'https://www.clawhammersupply.com/',
-    logo_url: 'https://www.clawhammersupply.com/cdn/shop/files/favicon.png?crop=center&height=32&v=1723832723&width=32' },
+  { name: 'Clawhammer Supply', website_url: 'https://www.clawhammersupply.com/' },
   { name: 'Escali', website_url: 'https://escali.com/' },
   { name: 'Grainfather', website_url: 'https://grainfather.com/' },
   { name: 'Hanna Instruments', website_url: 'https://hannainst.com/' },
-  { name: 'Inkbird', website_url: 'https://www.inkbird.com/',
-    logo_url: 'https://www.inkbird.com/cdn/shop/files/logo_icon_ink.png?crop=center&height=32&v=1705477109&width=32' },
-  { name: 'KegLand', website_url: 'https://kegland.com.au/',
-    logo_url: 'https://kegland.com.au/cdn/shop/files/favicon.png?crop=center&height=32&v=1674426047&width=32' },
-  { name: 'Kegco', website_url: 'https://kegco.com/',
-    logo_url: 'https://kegco.com/cdn/shop/files/favicon_96x96.png?v=1711484858' },
+  { name: 'Inkbird', website_url: 'https://www.inkbird.com/' },
+  { name: 'KegLand', website_url: 'https://kegland.com.au/' },
+  { name: 'Kegco', website_url: 'https://kegco.com/' },
   { name: 'Milwaukee Instruments', website_url: 'https://milwaukeeinstruments.com/' },
   { name: 'Northern Brewer', website_url: 'https://www.northernbrewer.com/' },
-  { name: 'Speidel', website_url: 'https://www.speidels-braumeister.de/',
-    logo_url: 'https://www.speidels-braumeister.de/files/share/favicon-32x32.png' },
-  { name: 'Spike Brewing', website_url: 'https://spikebrewing.com/',
-    logo_url: 'https://spikebrewing.com/cdn/shop/files/favicon.png?v=1644277722' },
-  { name: 'Ss Brewtech', website_url: 'https://www.ssbrewtech.com/',
-    logo_url: 'https://www.ssbrewtech.com/cdn/shop/files/FB_2019_LOGO_180x180.jpg?v=1614286535' },
+  { name: 'Speidel', website_url: 'https://www.speidels-braumeister.de/' },
+  { name: 'Spike Brewing', website_url: 'https://spikebrewing.com/' },
+  { name: 'Ss Brewtech', website_url: 'https://www.ssbrewtech.com/' },
   { name: 'ThermoWorks', website_url: 'https://www.thermoworks.com/' },
   { name: 'VEVOR', website_url: 'https://www.vevor.com/' }
 ] as const;
@@ -94,65 +85,6 @@ export const expandedCatalogEquipment: CatalogEquipment[] = [
     measurement_min: -2, measurement_max: 16, measurement_unit: 'pH',
     product_url: 'https://milwaukeeinstruments.com/milwaukee-MW102-pro-ph-meter-with-temperature-probe/' }
 ];
-
-// These image URLs come from the product pages' image metadata. Keep them separate
-// from capability data so a missing or changed photo never affects the model specs.
-export const catalogModelImages: Record<string, { image_url: string; thumbnail_url: string }> = {
-  equipment_clawhammer_10_5_120v: {
-    image_url: 'https://www.clawhammersupply.com/cdn/shop/files/10_Gallon_120_Transparent.png?crop=center&height=630&v=1731513286&width=1200',
-    thumbnail_url: 'https://www.clawhammersupply.com/cdn/shop/files/10_Gallon_120_Transparent.png?crop=center&height=160&v=1731513286&width=160' },
-  equipment_speidel_braumeister_plus_20: {
-    image_url: 'https://shop.speidels-braumeister.de/media/images/info/BM20_Vorteile.jpg',
-    thumbnail_url: 'https://shop.speidels-braumeister.de/media/images/info/BM20_Vorteile.jpg' },
-  equipment_digiboil_35l_240v: {
-    image_url: 'https://kegland.com.au/cdn/shop/files/KL07252_-_35L_DigiBoil_-01.jpg?v=1755839833',
-    thumbnail_url: 'https://kegland.com.au/cdn/shop/files/KL07252_-_35L_DigiBoil_-01.jpg?v=1755839833&width=160' },
-  equipment_spike_flex_plus_7gal: {
-    image_url: 'https://cdn.shopify.com/s/files/1/0152/1071/products/FLEX_3-port-Front_1500x1500_SE.jpg?v=1614972300',
-    thumbnail_url: 'https://cdn.shopify.com/s/files/1/0152/1071/products/FLEX_3-port-Front_1500x1500_SE.jpg?v=1614972300&width=160' },
-  equipment_spike_og_kettle_10gal: {
-    image_url: 'https://cdn.shopify.com/s/files/1/0152/1071/products/10GSpike_Kettle_1cde49bd-5b97-4cfd-8db9-84cebec27419.jpg?v=1666716668',
-    thumbnail_url: 'https://cdn.shopify.com/s/files/1/0152/1071/products/10GSpike_Kettle_1cde49bd-5b97-4cfd-8db9-84cebec27419.jpg?v=1666716668&width=160' },
-  equipment_ss_brew_bucket_7gal: {
-    image_url: 'https://www.ssbrewtech.com/cdn/shop/files/BrewBucket_hero2_update_600x.jpg?v=1731694093',
-    thumbnail_url: 'https://www.ssbrewtech.com/cdn/shop/files/BrewBucket_hero2_update_600x.jpg?v=1731694093&width=160' },
-  equipment_ss_brew_kettle_10gal: {
-    image_url: 'https://www.ssbrewtech.com/cdn/shop/products/A7R9966_9ffa304f-4ef1-4c50-84ed-07bff65ce6db_600x.jpg?v=1587576717',
-    thumbnail_url: 'https://www.ssbrewtech.com/cdn/shop/products/A7R9966_9ffa304f-4ef1-4c50-84ed-07bff65ce6db_600x.jpg?v=1587576717&width=160' },
-  equipment_brewbuilt_x3_uni_7gal: {
-    image_url: 'https://brewbuilt.com/cdn/shop/files/58873.png?v=1766514754',
-    thumbnail_url: 'https://brewbuilt.com/cdn/shop/files/58873.png?v=1766514754&width=160' },
-  equipment_brewbuilt_electric_kettle_10gal: {
-    image_url: 'https://brewbuilt.com/cdn/shop/files/45793.png?v=1777652567',
-    thumbnail_url: 'https://brewbuilt.com/cdn/shop/files/45793.png?v=1777652567&width=160' },
-  equipment_kegco_km5g_sth: {
-    image_url: 'https://kegco.com/cdn/shop/files/KM5G-STH-1500.jpg?v=1790886241',
-    thumbnail_url: 'https://kegco.com/cdn/shop/files/KM5G-STH-1500.jpg?v=1790886241&width=160' },
-  equipment_big_mouth_bubbler_evo2_6_5gal: {
-    image_url: 'https://www.northernbrewer.com/cdn/shop/products/41326-Big-Mouth-Bubbler-EVO2-6.5-Gallon-Fermentor_cdc1cc77-dbd4-4529-ad58-880eb2497bb2.jpg?v=1756920482',
-    thumbnail_url: 'https://www.northernbrewer.com/cdn/shop/products/41326-Big-Mouth-Bubbler-EVO2-6.5-Gallon-Fermentor_cdc1cc77-dbd4-4529-ad58-880eb2497bb2.jpg?v=1756920482&width=160' },
-  equipment_hanna_hi981031: {
-    image_url: 'https://cdn11.bigcommerce.com/s-l8qlnhq2eh/products/5594/images/10352/beer-ph-tester-720-hi981031__19677.1574433300.386.513.jpg?c=2',
-    thumbnail_url: 'https://cdn11.bigcommerce.com/s-l8qlnhq2eh/products/5594/images/10352/beer-ph-tester-720-hi981031__19677.1574433300.386.513.jpg?c=2' },
-  equipment_milwaukee_mw102: {
-    image_url: 'https://cdn11.bigcommerce.com/s-m1jiibmpmc/products/125/images/1249/MW102__84826.1608135308.386.513.jpg?c=2',
-    thumbnail_url: 'https://cdn11.bigcommerce.com/s-m1jiibmpmc/products/125/images/1249/MW102__84826.1608135308.386.513.jpg?c=2' },
-  equipment_rapt_pill: {
-    image_url: 'https://kegland.com.au/cdn/shop/files/KL20596-YELLOWBaseModel-RAPTPill-00.jpg?v=1759890866',
-    thumbnail_url: 'https://kegland.com.au/cdn/shop/files/KL20596-YELLOWBaseModel-RAPTPill-00.jpg?v=1759890866&width=160' },
-  equipment_inkbird_itc_308: {
-    image_url: 'https://www.inkbird.com/cdn/shop/files/temperature-controller-itc-308-series-659693.png?v=1745376388',
-    thumbnail_url: 'https://www.inkbird.com/cdn/shop/files/temperature-controller-itc-308-series-659693.png?v=1745376388&width=160' },
-  equipment_thermapen_one: {
-    image_url: 'https://www.thermoworks.com/cdn/shop/files/Thermapen_ONE_-_RED_-_Angle_2-1.webp?v=1773247034',
-    thumbnail_url: 'https://www.thermoworks.com/cdn/shop/files/Thermapen_ONE_-_RED_-_Angle_2-1.webp?v=1773247034&width=160' },
-  equipment_brewzilla_35l_g4: {
-    image_url: 'https://kegland.com.au/cdn/shop/files/KL27434_-_Gen4.1_BrewZilla_35L_-_01-01.jpg?v=1722301795',
-    thumbnail_url: 'https://kegland.com.au/cdn/shop/files/KL27434_-_Gen4.1_BrewZilla_35L_-_01-01.jpg?v=1722301795&width=160' },
-  equipment_vevor_35l: {
-    image_url: 'https://img.vevorstatic.com/us%2FPJNJQBXGO220V0G5NV2%2Fgoods_grid-v9%2Fbeer-brewer-m100-1.2.jpg?timestamp=1658110399000&format=webp',
-    thumbnail_url: 'https://img.vevorstatic.com/us%2FPJNJQBXGO220V0G5NV2%2Fgoods_grid-v9%2Fbeer-brewer-m100-1.2.jpg?timestamp=1658110399000&format=webp&width=160' }
-};
 
 // Existing model IDs retain their names and user edits; these source fields fill only missing values.
 export const existingModelSources: Record<string, Pick<CatalogEquipment,

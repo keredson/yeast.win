@@ -1,12 +1,12 @@
 import Database from 'better-sqlite3';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { catalogModelTables, catalogSupplyTables, catalogSchemaVersion,
   catalogTables, initialCatalogEquipment, initialCatalogInventory,
   antonPaarEquipment, vevorModelName,
   type CatalogChanges, type CatalogEquipment, type CatalogInventory } from '../shared/catalog.ts';
 import { boilOffKinds, vesselKinds } from '../shared/equipment.ts';
-import { catalogManufacturers, catalogModelImages, expandedCatalogEquipment,
+import { catalogManufacturers, expandedCatalogEquipment,
   existingModelSources } from '../shared/catalogEquipmentExpansion.ts';
 import { encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 import { projectRoot } from './db.ts';
@@ -14,6 +14,21 @@ import { projectRoot } from './db.ts';
 const selectChanges = `SELECT "table", pk, cid, val, col_version, db_version,
   COALESCE(site_id, crsql_site_id()) AS site_id, cl, seq
   FROM crsql_changes WHERE db_version > ? ORDER BY db_version, seq`;
+
+function bundledModelIds(): string[] {
+  return readdirSync(join(projectRoot, 'assets/catalog/models'))
+    .filter(name => name.endsWith('.webp') && !name.endsWith('-thumb.webp'))
+    .map(name => name.slice(0, -'.webp'.length));
+}
+
+function seedModelImages(db: Database.Database): void {
+  const insert = db.prepare(`INSERT OR IGNORE INTO model_images
+    (model_id, image_webp, thumbnail_webp) VALUES (?, ?, ?)`);
+  for (const id of bundledModelIds()) {
+    const path = join(projectRoot, 'assets/catalog/models', id);
+    insert.run(id, readFileSync(`${path}.webp`), readFileSync(`${path}-thumb.webp`));
+  }
+}
 
 export function openCatalogDb(dataDir: string): Database.Database {
   const db = new Database(join(dataDir, 'catalog.sqlite'));
@@ -149,7 +164,7 @@ export function openCatalogDb(dataDir: string): Database.Database {
     // CR-SQLite refreshes the altered table's triggers on commit. Creating and
     // writing a second CRR in that same transaction leaves its schema cache stale.
     db.transaction(() => {
-      const missingColumns = ['product_url', 'image_url', 'thumbnail_url'].filter(column =>
+      const missingColumns = ['product_url'].filter(column =>
         !(db.pragma('table_info(equipment_models)') as { name: string }[]).some(row => row.name === column));
       if (missingColumns.length) {
         db.prepare("SELECT crsql_begin_alter('equipment_models')").get();
@@ -162,22 +177,18 @@ export function openCatalogDb(dataDir: string): Database.Database {
       if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'manufacturers__crsql_clock'").get()) {
         db.prepare("SELECT crsql_as_crr('manufacturers')").get();
       }
-      const addManufacturer = db.prepare(`INSERT INTO manufacturers(name, website_url, logo_url) VALUES (?, ?, ?)
-        ON CONFLICT(name) DO UPDATE SET website_url = COALESCE(manufacturers.website_url, excluded.website_url),
-        logo_url = COALESCE(manufacturers.logo_url, excluded.logo_url)`);
-      for (const maker of catalogManufacturers) addManufacturer.run(maker.name, maker.website_url,
-        'logo_url' in maker ? maker.logo_url : null);
+      const addManufacturer = db.prepare(`INSERT INTO manufacturers(name, website_url) VALUES (?, ?)
+        ON CONFLICT(name) DO UPDATE SET website_url = COALESCE(manufacturers.website_url, excluded.website_url)`);
+      for (const maker of catalogManufacturers) addManufacturer.run(maker.name, maker.website_url);
       for (const row of db.prepare('SELECT DISTINCT manufacturer FROM equipment_models WHERE manufacturer IS NOT NULL').all() as { manufacturer: string }[]) {
-        addManufacturer.run(row.manufacturer, null, null);
+        addManufacturer.run(row.manufacturer, null);
       }
       const updateModel = db.prepare(`UPDATE equipment_models SET
         manufacturer = COALESCE(manufacturer, @manufacturer),
-        product_url = COALESCE(product_url, @product_url),
-        image_url = COALESCE(image_url, @image_url),
-        thumbnail_url = COALESCE(thumbnail_url, @thumbnail_url) WHERE id = @id`);
+        product_url = COALESCE(product_url, @product_url) WHERE id = @id`);
       const insertModel = db.prepare(`INSERT OR IGNORE INTO equipment_models
-        (id, manufacturer, model_name, kind, product_url, image_url, thumbnail_url)
-        VALUES (@id, @manufacturer, @name, @kind, @product_url, @image_url, @thumbnail_url)`);
+        (id, manufacturer, model_name, kind, product_url)
+        VALUES (@id, @manufacturer, @name, @kind, @product_url)`);
       const fill = (table: string, column: string, id: string, value: number | undefined) => {
         if (value == null) return;
         db.prepare(`INSERT INTO ${table}(model_id, ${column}) VALUES (?, ?)
@@ -210,15 +221,13 @@ export function openCatalogDb(dataDir: string): Database.Database {
           channel.measurement_unit ?? null, channel.measurement_scale ?? null);
       };
       for (const item of expandedCatalogEquipment) {
-        const params = { ...item, manufacturer: item.manufacturer ?? null, product_url: item.product_url ?? null,
-          image_url: item.image_url ?? null, thumbnail_url: item.thumbnail_url ?? null };
+        const params = { ...item, manufacturer: item.manufacturer ?? null, product_url: item.product_url ?? null };
         insertModel.run(params);
         updateModel.run(params);
         addModelValues(item);
       }
       for (const [id, source] of Object.entries(existingModelSources)) {
-        updateModel.run({ id, manufacturer: source.manufacturer ?? null, product_url: source.product_url ?? null,
-          image_url: null, thumbnail_url: null });
+        updateModel.run({ id, manufacturer: source.manufacturer ?? null, product_url: source.product_url ?? null });
         if (source.capacity_liters != null) fill('model_liquid_containment', 'capacity_liters', id, source.capacity_liters);
         if (source.rated_power_watts != null) fill('model_heating', 'rated_power_watts', id, source.rated_power_watts);
         if (source.measurement_min != null || source.measurement_max != null) {
@@ -242,9 +251,6 @@ export function openCatalogDb(dataDir: string): Database.Database {
         const maker = inferredManufacturers.find(([prefix]) => id.startsWith(prefix))?.[1];
         if (maker) assignManufacturer.run(maker, id);
       }
-      for (const [id, images] of Object.entries(catalogModelImages)) {
-        updateModel.run({ id, manufacturer: null, product_url: null, ...images });
-      }
       db.pragma('user_version = 15');
     })();
   }
@@ -256,20 +262,33 @@ export function openCatalogDb(dataDir: string): Database.Database {
           db.prepare('SELECT crsql_as_crr(?)').get(table);
         }
       }
-      const insertModelImage = db.prepare(`INSERT OR IGNORE INTO model_images
-        (model_id, image_webp, thumbnail_webp) VALUES (?, ?, ?)`);
-      for (const id of Object.keys(catalogModelImages)) {
-        const path = join(projectRoot, 'assets/catalog/models', id);
-        insertModelImage.run(id, readFileSync(`${path}.webp`), readFileSync(`${path}-thumb.webp`));
-      }
+      seedModelImages(db);
       const insertLogo = db.prepare(`INSERT OR IGNORE INTO manufacturer_logos
         (manufacturer_name, image_webp) VALUES (?, ?)`);
       for (const maker of catalogManufacturers) {
-        if (!('logo_url' in maker)) continue;
         const slug = maker.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-        insertLogo.run(maker.name, readFileSync(join(projectRoot, 'assets/catalog/manufacturers', `${slug}.webp`)));
+        const path = join(projectRoot, 'assets/catalog/manufacturers', `${slug}.webp`);
+        if (existsSync(path)) insertLogo.run(maker.name, readFileSync(path));
       }
       db.pragma('user_version = 16');
+    })();
+  }
+  if ((db.pragma('user_version', { simple: true }) as number) === 16) {
+    for (const [table, columns] of [
+      ['equipment_models', ['image_url', 'thumbnail_url']],
+      ['manufacturers', ['logo_url']]
+    ] as const) {
+      db.transaction(() => {
+        const present = new Set((db.pragma(`table_info(${table})`) as { name: string }[]).map(row => row.name));
+        if (!columns.some(column => present.has(column))) return;
+        db.prepare('SELECT crsql_begin_alter(?)').get(table);
+        for (const column of columns) if (present.has(column)) db.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+        db.prepare('SELECT crsql_commit_alter(?)').get(table);
+      })();
+    }
+    db.transaction(() => {
+      seedModelImages(db);
+      db.pragma('user_version = 17');
     })();
   }
   db.prepare(`UPDATE equipment_models SET model_name = ?

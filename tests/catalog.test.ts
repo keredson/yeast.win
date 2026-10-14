@@ -154,35 +154,50 @@ test('version 14 catalog gains manufacturers, product media, and models without 
   const db = openCatalogDb(dir);
   try {
     assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
-    const vevor = db.prepare(`SELECT manufacturer, model_name, product_url, image_url, thumbnail_url
+    const vevor = db.prepare(`SELECT manufacturer, model_name, product_url
       FROM equipment_models WHERE id = 'equipment_vevor_35l'`).get() as Record<string, string>;
     assert.equal(vevor.model_name, 'My renamed VEVOR');
     assert.equal(vevor.manufacturer, 'VEVOR');
     assert.match(vevor.product_url, /vevor\.com/);
-    assert.match(vevor.image_url, /vevorstatic\.com/);
-    assert.ok(vevor.thumbnail_url);
+    assert.ok(db.prepare("SELECT image_webp FROM model_images WHERE model_id = 'equipment_vevor_35l'").get());
     assert.equal((db.prepare("SELECT rated_power_watts FROM model_heating WHERE model_id = 'equipment_vevor_35l'")
       .get() as { rated_power_watts: number }).rated_power_watts, 2100);
     assert.equal((db.prepare("SELECT name FROM supplies WHERE id = 'my_hop'").get() as { name: string }).name, 'My hop');
     assert.equal((db.prepare("SELECT capacity_liters FROM model_liquid_containment WHERE model_id = 'equipment_spike_flex_plus_7gal'")
       .get() as { capacity_liters: number }).capacity_liters, 26.4979);
-    assert.equal((db.prepare("SELECT website_url, logo_url FROM manufacturers WHERE name = 'Spike Brewing'")
-      .get() as { website_url: string; logo_url: string }).website_url, 'https://spikebrewing.com/');
+    assert.equal((db.prepare("SELECT website_url FROM manufacturers WHERE name = 'Spike Brewing'")
+      .get() as { website_url: string }).website_url, 'https://spikebrewing.com/');
     assert.ok(catalogChanges(db, 0n).changes.some(change => change.table === 'manufacturers'));
   } finally { db.close(); }
 });
 
-test('partially upgraded version 14 catalog preserves manufacturer metadata', () => {
+test('version 16 catalog removes obsolete media URLs and preserves stored media and unrelated rows', () => {
   const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-'));
   const old = openCatalogDb(dir);
-  old.prepare("SELECT crsql_as_table('manufacturers')").get();
-  old.prepare("UPDATE manufacturers SET logo_url = 'https://example.test/my-logo.png' WHERE name = 'Spike Brewing'").run();
-  old.pragma('user_version = 14');
+  old.prepare("SELECT crsql_begin_alter('equipment_models')").get();
+  old.exec('ALTER TABLE equipment_models ADD COLUMN image_url TEXT; ALTER TABLE equipment_models ADD COLUMN thumbnail_url TEXT');
+  old.prepare("SELECT crsql_commit_alter('equipment_models')").get();
+  old.prepare("SELECT crsql_begin_alter('manufacturers')").get();
+  old.exec('ALTER TABLE manufacturers ADD COLUMN logo_url TEXT');
+  old.prepare("SELECT crsql_commit_alter('manufacturers')").get();
+  old.prepare("UPDATE equipment_models SET image_url = 'https://example.test/old.png' WHERE id = 'equipment_vevor_35l'").run();
+  old.prepare("UPDATE manufacturers SET logo_url = 'https://example.test/old-logo.png' WHERE name = 'Spike Brewing'").run();
+  old.prepare("INSERT INTO supplies(id, name, category, unit) VALUES ('my_supply', 'My supply', 'Grain', 'g')").run();
+  old.prepare("DELETE FROM model_images WHERE model_id = 'equipment_tilt'").run();
+  old.pragma('user_version = 16');
   old.close();
   const db = openCatalogDb(dir);
   try {
-    assert.equal((db.prepare("SELECT logo_url FROM manufacturers WHERE name = 'Spike Brewing'")
-      .get() as { logo_url: string }).logo_url, 'https://example.test/my-logo.png');
+    assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
+    assert.equal((db.prepare("SELECT website_url FROM manufacturers WHERE name = 'Spike Brewing'")
+      .get() as { website_url: string }).website_url, 'https://spikebrewing.com/');
+    assert.equal((db.prepare("SELECT name FROM supplies WHERE id = 'my_supply'")
+      .get() as { name: string }).name, 'My supply');
+    assert.ok(db.prepare("SELECT image_webp FROM model_images WHERE model_id = 'equipment_tilt'").get());
+    assert.equal((db.pragma('table_info(equipment_models)') as { name: string }[])
+      .some(column => column.name === 'image_url' || column.name === 'thumbnail_url'), false);
+    assert.equal((db.pragma('table_info(manufacturers)') as { name: string }[])
+      .some(column => column.name === 'logo_url'), false);
     assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'manufacturers__crsql_clock'").get());
   } finally { db.close(); }
 });
