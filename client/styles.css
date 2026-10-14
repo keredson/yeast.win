@@ -223,7 +223,7 @@ button, input, textarea { font: inherit; }
 .file-button { display: inline-flex; align-items: center; padding: 5px 12px; border: 1px solid #c4d7cc; border-radius: 8px; color: #1f6b5b; background: white; cursor: pointer; font-size: 13px; font-weight: 600; }
 .file-button input { display: none; }
 .form-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.form-triple { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.form-triple { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; gap: 12px; }
 .full-width { width: 100%; }
 .calibration-data { background: #f4f6f1; border-radius: 8px; padding: 10px; margin: 10px 0 0; overflow-x: auto; font-size: 12px; }
 .loading-screen { min-height: 60vh; display: grid; place-items: center; }
