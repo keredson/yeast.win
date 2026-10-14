@@ -186,6 +186,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogKind, setCatalogKind] = useState<string | undefined>();
   const [selectedCatalogModel, setSelectedCatalogModel] = useState<CatalogEquipment | null>(null);
+  const [catalogUnitModelId, setCatalogUnitModelId] = useState<string | null>(null);
   const [editCalibration, setEditCalibration] = useState(false);
   const [newBoilCalibration, setNewBoilCalibration] = useState(false);
   const [editModelBoilHeatLoss, setEditModelBoilHeatLoss] = useState(false);
@@ -238,6 +239,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           channel.measurement_scale || channel.measurement_unit || undefined) : 'Available' }))
   ] : [];
   const selectedModel = models.find(row => row.id === selectedId) || null;
+  const unitFormModel = models.find(row => row.id === catalogUnitModelId) || selectedModel;
   const catalogParent = selectedModel ? catalog.find(row => row.id === selectedModel.catalog_model_id) : undefined;
   const activeModel = selectedModel || itemModel;
   const activeCatalogModel = selectedModel ? catalogParent : itemCatalogModel;
@@ -448,7 +450,10 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       }
       const id = await createEquipment(db, values.name.trim(), creatingKind,
         selectedCatalogModel || undefined, overrides, channelRanges, values.stock_id, values.location_id);
-      setCreatingKind(null); setSelectedCatalogModel(null); onSelect(id); await onChanged();
+      const fromCatalog = !!selectedCatalogModel;
+      setCreatingKind(null); setSelectedCatalogModel(null);
+      if (!fromCatalog) onSelect(id);
+      await onChanged();
     }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -654,7 +659,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     setCatalogPickerOpen(false);
     const existing = models.find(row => row.catalog_model_id === model.id);
     if (existing) {
-      onSelect(existing.id);
+      setCatalogUnitModelId(existing.id);
       setAddingUnit(true);
       return;
     }
@@ -671,7 +676,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     {!selectedId ? <section className="record-index equipment-index"><div className="section-heading"><div><span className="eyebrow">Your gear</span><h1>Equipment</h1></div></div>
       <p className="muted">Measurements, control settings, and transfers can reference your equipment.</p>
       <div className="equipment-add-actions">
-        {models.length > 0 && <Button icon={<PlusOutlined />} onClick={() => setAddingUnit(true)}>Add unit</Button>}
+        {models.length > 0 && <Button icon={<PlusOutlined />} onClick={() => { setCatalogUnitModelId(null); setAddingUnit(true); }}>Add unit</Button>}
         <Button icon={<PlusOutlined />} onClick={() => { setCatalogQuery(''); setCatalogKind(undefined); setCatalogPickerOpen(true); }}>Add from catalog</Button>
         <Dropdown trigger={['click']} menu={addMenu} placement="bottomLeft">
           <Button icon={<PlusOutlined />}>Define equipment</Button>
@@ -696,7 +701,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     </section> : selectedModel ? <section className="record-detail">
       <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(selectedModel.kind)}</span>
         <h2>{selectedModel.name}</h2></div>
-        <Button icon={<PlusOutlined />} onClick={() => setAddingUnit(true)}>Add unit</Button></div>
+        <Button icon={<PlusOutlined />} onClick={() => { setCatalogUnitModelId(null); setAddingUnit(true); }}>Add unit</Button></div>
       <div className="equipment-model-overview">
         <div className="equipment-model-product-image">
           {modelImageSrc ? <img src={modelImageSrc} alt={selectedModel.name} /> : <span className="muted">No product image</span>}
@@ -924,15 +929,19 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching equipment' : 'No catalog equipment available'} />}
     </Modal>
-    <Modal title="Add equipment unit" open={addingUnit} onCancel={() => setAddingUnit(false)} footer={null} destroyOnHidden>
-      <Form key={selectedModel?.id || 'all'} form={unitForm} layout="vertical" preserve={false} initialValues={{ model_id: selectedModel?.id }}
+    <Modal title="Add equipment unit" open={addingUnit}
+      onCancel={() => { setAddingUnit(false); setCatalogUnitModelId(null); }} footer={null} destroyOnHidden>
+      <Form key={unitFormModel?.id || 'all'} form={unitForm} layout="vertical" preserve={false} initialValues={{ model_id: unitFormModel?.id }}
         onFinish={async (values: { model_id: string; stock_id?: string; location_id?: string }) => {
         try {
-          const id = await createEquipmentUnit(db, selectedModel?.id || values.model_id, values.stock_id, values.location_id);
-          setAddingUnit(false); await onChanged(); onSelect(id);
+          const id = await createEquipmentUnit(db, unitFormModel?.id || values.model_id, values.stock_id, values.location_id);
+          const fromCatalog = !!catalogUnitModelId;
+          setAddingUnit(false); setCatalogUnitModelId(null);
+          await onChanged();
+          if (!fromCatalog) onSelect(id);
         } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
       }}>
-        {!selectedModel && <Form.Item name="model_id" label="Model" rules={[{ required: true }]}>
+        {!unitFormModel && <Form.Item name="model_id" label="Model" rules={[{ required: true }]}>
           <Select showSearch optionFilterProp="label" options={models.map(model => ({ value: model.id, label: model.name }))} />
         </Form.Item>}
         <Form.Item name="stock_id" label="Stock ID"><Input maxLength={80} /></Form.Item>
