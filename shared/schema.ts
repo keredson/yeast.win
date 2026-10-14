@@ -45,7 +45,7 @@ const definitions: Record<string, string> = {
     created_at INTEGER NOT NULL`,
   equipment_model_media: `id TEXT PRIMARY KEY NOT NULL, product_url TEXT,
     image_bytes BLOB, image_mime_type TEXT`,
-  brewery_process_defaults: `id TEXT PRIMARY KEY NOT NULL, wort_loss_liters REAL`,
+  brewery_process_defaults: `id TEXT PRIMARY KEY NOT NULL, wort_loss_liters REAL, mash_efficiency_pct REAL`,
   equipment: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, model_id TEXT NOT NULL,
     slug TEXT, stock_id TEXT, added_at INTEGER, removed_at INTEGER, created_at INTEGER NOT NULL`,
   equipment_locations: `id TEXT PRIMARY KEY NOT NULL, location_id TEXT`,
@@ -327,7 +327,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 29;
+export const workspaceSchemaVersion = 30;
 export const retiredReplicatedTables = ['equipment_calibrations', 'equipment_characterization_observations'] as const;
 
 export function isValidId(value: unknown): value is string {

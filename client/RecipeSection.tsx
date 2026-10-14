@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Tooltip } from 'antd';
 import { DeleteOutlined, DownloadOutlined, QuestionCircleOutlined, PlusOutlined, SettingOutlined, UploadOutlined } from '@ant-design/icons';
 import { addRecipePlan, createRecipe, deleteRecipe, deleteRecipePlan, hasRecipeImport, listRecipePlans, startBatchFromRecipe, updateRecipe, updateRecipePlan,
-  recipeImportSource, recipeTargetVolume, updateRecipeTargetVolume, latestMeasuredMashEfficiency,
+  recipeImportSource, recipeTargetVolume, updateRecipeTargetVolume,
+  breweryMashEfficiency, latestMeasuredMashEfficiencySource,
   type Equipment, type InventoryItem, type LocalDb, type PlanInput, type Recipe, type RecipeType } from './db.ts';
 import { RecipeImportModal } from './RecipeImportModal.tsx';
 import { PlanForm, repeatPreset, type PlanPreset } from './PlanForm.tsx';
@@ -22,12 +23,13 @@ const recipeTypeOptions = [
   { value: 'mead', label: 'Mead' }, { value: 'cider', label: 'Cider' }
 ];
 
-function EstimateTile({ label, value, help }: { label: string; value: string | null; help: string[] }) {
+function EstimateTile({ label, value, help, sources }: { label: string; value: string | null; help: string[]; sources: string[] }) {
   return <div><span className="recipe-estimate-label">{label}
-    {value == null && <Tooltip title={help.join(' ')} trigger={['hover', 'focus', 'click']}>
-      <button type="button" className="recipe-estimate-help" aria-label={`Why ${label} is unavailable`}>
+    <Tooltip title={<div>{[...sources, ...help].map((line, index) => <div key={index}>{line}</div>)}</div>}
+      trigger={['hover', 'focus', 'click']}>
+      <button type="button" className="recipe-estimate-help" aria-label={`${label} calculation sources`}>
         <QuestionCircleOutlined /></button>
-    </Tooltip>}</span><strong>{value ?? '—'}</strong></div>;
+    </Tooltip></span><strong>{value ?? '—'}</strong></div>;
 }
 
 export function RecipeSection({ db, basePath, accountId, recipes, equipment, equipmentModels, inventory, supplies, catalogInventory, preferredUnits, selectedId, onSelect, onChanged, onBatchStarted }: {
@@ -67,13 +69,14 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
     let cancelled = false;
     setEstimate(null);
     void (async () => {
-      const [recipeRows, eventRows] = await Promise.all([
+      const [recipeRows, eventRows, breweryEfficiency] = await Promise.all([
         db.execO<{ target_fermenter_volume_liters: number | null; brewhouse_efficiency_pct: number | null }>(
           'SELECT target_fermenter_volume_liters, brewhouse_efficiency_pct FROM recipe_inputs WHERE id = ?', [selectedId]),
         db.execO<{ id: string; yield_pct: number | null; color_lovibond: number | null; attenuation_pct: number | null }>(`SELECT i.id, i.yield_pct, i.color_lovibond, i.attenuation_pct FROM recipe_event_inputs i
-          JOIN recipe_events e ON e.id = i.id WHERE e.recipe_id = ?`, [selectedId])
+          JOIN recipe_events e ON e.id = i.id WHERE e.recipe_id = ?`, [selectedId]),
+        breweryMashEfficiency(db)
       ]);
-      const recent: Record<string, number> = {};
+      const recent: Record<string, { value: number; batchName: string }> = {};
       const equipmentIds = new Set(plans.filter(plan => plan.event_type === 'transfer')
         .filter(plan => plan.details.purpose === 'drain_grain')
         .map(plan => String(plan.details.mash_equipment_id
@@ -81,14 +84,14 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
       for (const id of equipmentIds) {
         if (id) {
           const unit = equipment.find(item => item.model_id === id);
-          const value = unit ? await latestMeasuredMashEfficiency(db, unit.id) : null;
+          const value = unit ? await latestMeasuredMashEfficiencySource(db, unit.id) : null;
           if (value != null) recent[id] = value;
         }
       }
       const recipeInputs = recipeRows[0] || {};
       const eventInputs = Object.fromEntries(eventRows.map(row => [row.id, row]));
       if (!cancelled) setEstimate(calculateRecipe(plans, supplies, equipmentModels, recipeInputs, eventInputs, recent,
-        recipe?.recipe_type || 'beer'));
+        recipe?.recipe_type || 'beer', breweryEfficiency));
     })();
     return () => { cancelled = true; };
   }, [db, selectedId, plans, supplies, equipment, equipmentModels, settingsOpen, recipe?.recipe_type]);
@@ -202,20 +205,19 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
         {estimate && <section className="recipe-estimates" aria-label="Recipe details">
           <h3>Details</h3>
           <div className="recipe-estimate-grid">
-            <EstimateTile label="Into fermenter" value={estimate.targetLiters == null ? null
+            <EstimateTile label="Batch size" value={estimate.targetLiters == null ? null
               : `${Number((convertUnit(estimate.targetLiters, 'L', preferredUnits.volume) || 0).toFixed(2))} ${preferredUnits.volume}`}
-              help={estimate.unavailable.targetLiters} />
+              help={estimate.unavailable.targetLiters} sources={estimate.sources.targetLiters} />
             <EstimateTile label="Expected OG" value={estimate.originalGravity?.toFixed(3) ?? null}
-              help={estimate.unavailable.originalGravity} />
+              help={estimate.unavailable.originalGravity} sources={estimate.sources.originalGravity} />
             <EstimateTile label="Expected FG" value={estimate.finalGravity?.toFixed(3) ?? null}
-              help={estimate.unavailable.finalGravity} />
+              help={estimate.unavailable.finalGravity} sources={estimate.sources.finalGravity} />
             <EstimateTile label="Expected ABV" value={estimate.abvPct == null ? null : `${estimate.abvPct.toFixed(1)}%`}
-              help={estimate.unavailable.abvPct} />
+              help={estimate.unavailable.abvPct} sources={estimate.sources.abvPct} />
             {recipe.recipe_type === 'beer' && <EstimateTile label="Estimated color"
               value={estimate.colorSrm == null ? null : `${estimate.colorSrm.toFixed(1)} SRM`}
-              help={estimate.unavailable.colorSrm} />}
+              help={estimate.unavailable.colorSrm} sources={estimate.sources.colorSrm} />}
           </div>
-          {estimate.efficiencyLabel && <p className="muted">Using {estimate.efficiencyLabel}.</p>}
         </section>}
         <EventTimeline events={plans} equipment={equipmentModels} onEdit={plan => { setPlanDeleteError(''); setEditingPlan(plan); }}
           onAdd={(kind, settings) => { setEditingPlan(null); setPreset(settings); setCreatingKind(kind); }} />

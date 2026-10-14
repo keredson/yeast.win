@@ -1,12 +1,15 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DeleteOutlined, EditOutlined, PlusOutlined, SyncOutlined, UploadOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Button, Card, Form, Input, Modal, Select, Switch, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Avatar, Button, Card, Form, Input, InputNumber, Modal, Select, Switch, Tag, Tooltip, Typography } from 'antd';
 import { api, type PreferredUnits, type Workspace } from './api.ts';
+import { breweryMashEfficiency, updateBreweryMashEfficiency, type LocalDb } from './db.ts';
+import { appMashEfficiencyPct } from './recipeCalculations.ts';
 
 interface Props {
   username: string;
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
+  db: LocalDb | null;
   onCreateWorkspace: (name: string) => Promise<void>;
   onUpdateWorkspace: (id: string, name: string, slug: string | null) => Promise<void>;
   onDeleteWorkspace: (id: string) => Promise<void>;
@@ -25,7 +28,7 @@ interface Props {
 
 interface PasswordValues { currentPassword: string; newPassword: string; confirmPassword: string }
 
-export function AccountSection({ username, workspaces, activeWorkspaceId,
+export function AccountSection({ username, workspaces, activeWorkspaceId, db,
   onCreateWorkspace, onUpdateWorkspace, onDeleteWorkspace,
   avatarSrc, onAvatarUploaded, preferredUnits, onPreferredUnitsChange,
   syncPhase, syncStatus, canSync, onManualSync, autoSync, onAutoSyncChange, onSignOut }: Props) {
@@ -44,6 +47,25 @@ export function AccountSection({ username, workspaces, activeWorkspaceId,
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [unitsBusy, setUnitsBusy] = useState(false);
   const [unitsError, setUnitsError] = useState('');
+  const [mashEfficiency, setMashEfficiency] = useState<number | null>(null);
+  const [mashEfficiencyDraft, setMashEfficiencyDraft] = useState<number | null>(null);
+  const [efficiencyBusy, setEfficiencyBusy] = useState(false);
+  const [efficiencyError, setEfficiencyError] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    setMashEfficiency(null);
+    setMashEfficiencyDraft(null);
+    if (db) void breweryMashEfficiency(db).then(value => { if (!cancelled) { setMashEfficiency(value); setMashEfficiencyDraft(value); } })
+      .catch(cause => { if (!cancelled) setEfficiencyError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => { cancelled = true; };
+  }, [db]);
+  async function saveMashEfficiency(value: number | null) {
+    if (!db) return;
+    setEfficiencyBusy(true); setEfficiencyError('');
+    try { await updateBreweryMashEfficiency(db, value); setMashEfficiency(value); }
+    catch (cause) { setMashEfficiencyDraft(mashEfficiency); setEfficiencyError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setEfficiencyBusy(false); }
+  }
   async function uploadAvatar(file: File) {
     setAvatarBusy(true);
     setAvatarError('');
@@ -169,6 +191,16 @@ export function AccountSection({ username, workspaces, activeWorkspaceId,
       <Typography.Paragraph>This permanently deletes this brewery’s batches, recipes, inventory, equipment, and photos from the server and this device.</Typography.Paragraph>
       {breweryError && <Alert type="error" message={breweryError} />}
     </Modal>
+    {db && <Card title="Recipe calculations" className="account-card">
+      <div className="setting-row"><div><strong>Default mash efficiency</strong>
+        <div className="muted">Used for recipes in {workspaces.find(item => item.id === activeWorkspaceId)?.name || 'this brewery'}
+          {' '}when no equipment, recent batch, or imported efficiency is available. Clear to use the {appMashEfficiencyPct}% app default.</div></div>
+        <InputNumber aria-label="Brewery default mash efficiency" min={1} max={100} precision={1}
+          addonAfter="%" value={mashEfficiencyDraft} placeholder={String(appMashEfficiencyPct)}
+          disabled={efficiencyBusy} onChange={setMashEfficiencyDraft}
+          onBlur={() => { if (mashEfficiencyDraft !== mashEfficiency) void saveMashEfficiency(mashEfficiencyDraft); }} /></div>
+      {efficiencyError && <Alert type="error" message={efficiencyError} showIcon />}
+    </Card>}
     <Card title="Security" className="account-card">
       {passwordChanged && <Alert type="success" message="Password changed. Other sessions have been signed out." showIcon />}
       <Button onClick={() => { setPasswordError(''); setPasswordOpen(true); }}>Change password</Button>

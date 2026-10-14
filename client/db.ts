@@ -528,6 +528,20 @@ export async function recipeTargetVolume(db: DB, recipeId: string): Promise<numb
   return rows[0]?.target_fermenter_volume_liters ?? null;
 }
 
+export async function breweryMashEfficiency(db: DB): Promise<number | null> {
+  const rows = await db.execO<{ mash_efficiency_pct: number | null }>(
+    "SELECT mash_efficiency_pct FROM brewery_process_defaults WHERE id = 'brewery'");
+  return rows[0]?.mash_efficiency_pct ?? null;
+}
+
+export async function updateBreweryMashEfficiency(db: DB, value: number | null): Promise<void> {
+  if (value != null && (!Number.isFinite(value) || value <= 0 || value > 100)) {
+    throw new Error('Enter an efficiency between 0 and 100%');
+  }
+  await db.exec(`INSERT INTO brewery_process_defaults(id, mash_efficiency_pct) VALUES ('brewery', ?)
+    ON CONFLICT(id) DO UPDATE SET mash_efficiency_pct = excluded.mash_efficiency_pct`, [value]);
+}
+
 export async function updateRecipeTargetVolume(db: DB, recipeId: string, liters: number | null): Promise<void> {
   if (liters != null && (!Number.isFinite(liters) || liters <= 0)) throw new Error('Enter a positive batch size');
   await db.exec(`INSERT INTO recipe_inputs(id, target_fermenter_volume_liters) VALUES (?, ?)
@@ -1542,9 +1556,11 @@ export async function updateBrewingLosses(db: DB, item: Equipment, values: Pick<
     ? null : values[column])]);
 }
 
-export async function latestMeasuredMashEfficiency(db: DB, equipmentId: string): Promise<number | null> {
-  const drains = await db.execO<{ id: string; batch_id: string; actual_at: number }>(`SELECT d.id, d.batch_id, d.actual_at FROM batch_events d
+export async function latestMeasuredMashEfficiencySource(db: DB, equipmentId: string): Promise<{
+  value: number; batchName: string } | null> {
+  const drains = await db.execO<{ id: string; batch_id: string; batch_name: string; actual_at: number }>(`SELECT d.id, d.batch_id, b.name AS batch_name, d.actual_at FROM batch_events d
     JOIN transfers t ON t.event_id = d.id
+    JOIN batches b ON b.id = d.batch_id
     LEFT JOIN batch_events m ON m.id = d.anchor_event_id
     LEFT JOIN temperature_control_events mc ON mc.event_id = m.id
     WHERE d.event_type = 'transfer' AND d.actual_at IS NOT NULL
@@ -1573,9 +1589,13 @@ export async function latestMeasuredMashEfficiency(db: DB, equipmentId: string):
       yieldPct: Number(row.yield_pct) }));
     if (!grains.length) continue;
     const result = mashEfficiencyPct(grains, volume.value, volume.unit, gravities[0].value, gravities[0].unit);
-    if (result != null) return result;
+    if (result != null) return { value: result, batchName: drain.batch_name };
   }
   return null;
+}
+
+export async function latestMeasuredMashEfficiency(db: DB, equipmentId: string): Promise<number | null> {
+  return (await latestMeasuredMashEfficiencySource(db, equipmentId))?.value ?? null;
 }
 
 export async function updateEquipmentStockId(db: DB, item: Equipment, stockId: string | undefined,

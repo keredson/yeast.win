@@ -37,6 +37,7 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
       .run(modelId, 'Shared kettle model', 'electric_kettle', timestamp);
     first.prepare('INSERT INTO equipment_model_media(id, product_url, image_bytes, image_mime_type) VALUES (?, ?, ?, ?)')
       .run(modelId, 'https://example.com/kettle', Buffer.from([255, 216, 255]), 'image/jpeg');
+    first.prepare("INSERT INTO brewery_process_defaults(id, mash_efficiency_pct) VALUES ('brewery', 72)").run();
     first.prepare('INSERT INTO equipment(id, name, model_id, added_at, created_at) VALUES (?, ?, ?, ?, ?)')
       .run(equipmentId, 'Shared kettle', modelId, timestamp, timestamp);
     first.prepare('INSERT INTO batch_events(id, batch_id, event_type, title, actual_at, created_at) VALUES (?, ?, ?, ?, ?, ?)')
@@ -82,6 +83,8 @@ test('two offline peers merge batches, child rows and image BLOBs', () => {
     assert.deepEqual(second.prepare('SELECT product_url, image_bytes, image_mime_type FROM equipment_model_media WHERE id = ?')
       .get(modelId), { product_url: 'https://example.com/kettle', image_bytes: Buffer.from([255, 216, 255]),
       image_mime_type: 'image/jpeg' });
+    assert.equal((second.prepare("SELECT mash_efficiency_pct FROM brewery_process_defaults WHERE id = 'brewery'")
+      .get() as { mash_efficiency_pct: number }).mash_efficiency_pct, 72);
     assert.equal((second.prepare('SELECT quantity FROM inventory_discards WHERE inventory_item_id = ?').get(discardedItem) as { quantity: number }).quantity, 5);
     assert.equal((second.prepare('SELECT parent_id FROM inventory_locations WHERE id = ?').get(shelfId) as { parent_id: string }).parent_id, roomId);
     assert.equal((second.prepare('SELECT address FROM inventory_location_addresses WHERE id = ?').get(roomId) as { address: string }).address, '123 Brew Street');
@@ -705,6 +708,43 @@ test('version 21 workspace adds brewery model boil defaults and keeps unit calib
       .run(modelId, 0);
     assert.equal((upgraded.prepare('SELECT heat_loss_watts FROM equipment_model_boil_characterization WHERE model_id = ?')
       .get(modelId) as { heat_loss_watts: number }).heat_loss_watts, 0);
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
+test('version 29 workspace preserves brewery settings and unrelated records when adding mash default', () => {
+  const id = nanoid();
+  const db = openWorkspaceDb(id);
+  db.prepare("INSERT INTO brewery_process_defaults(id, wort_loss_liters) VALUES ('brewery', 1.25)").run();
+  db.prepare("INSERT INTO recipes(id, name, created_at, updated_at) VALUES ('recipe', 'Existing recipe', 1, 1)").run();
+  db.prepare('SELECT crsql_as_table(?)').get('brewery_process_defaults');
+  db.exec('CREATE TABLE old_brewery_defaults(id TEXT PRIMARY KEY NOT NULL, wort_loss_liters REAL)');
+  db.exec('INSERT INTO old_brewery_defaults SELECT id, wort_loss_liters FROM brewery_process_defaults');
+  db.exec('DROP TABLE brewery_process_defaults');
+  db.exec('ALTER TABLE old_brewery_defaults RENAME TO brewery_process_defaults');
+  db.prepare('SELECT crsql_as_crr(?)').get('brewery_process_defaults');
+  db.pragma('user_version = 29');
+  closeWorkspaceDb(db);
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.deepEqual(upgraded.prepare("SELECT wort_loss_liters, mash_efficiency_pct FROM brewery_process_defaults WHERE id = 'brewery'").get(),
+      { wort_loss_liters: 1.25, mash_efficiency_pct: null });
+    assert.equal((upgraded.prepare("SELECT name FROM recipes WHERE id = 'recipe'").get() as { name: string }).name,
+      'Existing recipe');
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
+test('partially upgraded brewery mash default survives reopening', () => {
+  const id = nanoid();
+  const db = openWorkspaceDb(id);
+  db.prepare("INSERT INTO brewery_process_defaults(id, wort_loss_liters, mash_efficiency_pct) VALUES ('brewery', 0.5, 68)").run();
+  db.pragma('user_version = 29');
+  closeWorkspaceDb(db);
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+    assert.deepEqual(upgraded.prepare("SELECT wort_loss_liters, mash_efficiency_pct FROM brewery_process_defaults WHERE id = 'brewery'").get(),
+      { wort_loss_liters: 0.5, mash_efficiency_pct: 68 });
   } finally { closeWorkspaceDb(upgraded); }
 });
 
