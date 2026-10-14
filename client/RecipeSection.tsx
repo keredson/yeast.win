@@ -249,7 +249,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
         <Form.Item name="recipe_type" label="Type" rules={[{ required: true }]}>
           <Select options={recipeTypeOptions} /></Form.Item>
         <Form.Item name="description" label="Description"><Input.TextArea rows={3} /></Form.Item>
-        <div className="form-pair"><Form.Item name="target_volume" label="Target volume into fermenter (optional)">
+        <div className="form-pair recipe-volume-fields"><Form.Item name="target_volume" label="Target volume into fermenter (optional)">
           <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
           <Form.Item name="target_volume_unit" label="Unit"><Select options={unitOptions(unitGroups.volume)}
             onChange={unit => { changeNumberUnit(settingsForm, ['target_volume'], targetVolumeUnit.current, unit);
