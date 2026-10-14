@@ -20,6 +20,24 @@ import { CatalogImage, useCatalogMedia } from './CatalogImage.tsx';
 import { findCatalogSupply, queryCatalogSupplies } from './catalog.ts';
 import { WorkspaceThumbnail } from './WorkspaceThumbnail.tsx';
 
+function catalogCharacteristics(product: CatalogInventory): string {
+  const details: string[] = [product.category];
+  if (product.category === 'Grain' || product.category === 'Adjunct') {
+    if (product.grain_class) details.push(product.grain_class);
+    if (product.color_lovibond != null) details.push(`${product.color_lovibond} °L`);
+    if (product.yield_pct != null) details.push(`${product.yield_pct}% yield`);
+  } else if (product.category === 'Other fermentables') {
+    if (product.typical_brix != null) details.push(`Typical ${product.typical_brix} °Brix`);
+    if (product.extract_color_value != null) details.push(`Color ${product.extract_color_value} ${product.extract_color_scale || ''}`.trim());
+  } else if (product.category === 'Hops') {
+    if (product.alpha_acid_pct != null) details.push(`${product.alpha_acid_pct}% alpha acid`);
+    if (product.hop_form) details.push(product.hop_form);
+  } else if (product.category === 'Yeast' && product.attenuation_pct != null) {
+    details.push(`${product.attenuation_pct}% attenuation`);
+  }
+  return details.join(' · ');
+}
+
 function stockTotal(rows: InventoryItem[], balances: Record<string, number | null>, unit: string): number | null | undefined {
   let total = 0;
   for (const row of rows) {
@@ -595,10 +613,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
         {matchingCatalog.map(product => <div key={product.id} role="listitem">
           <button type="button" className="catalog-explorer-option" onClick={() => chooseCatalogProduct(product)}>
             <span className="catalog-explorer-option-name"><strong>{product.name}</strong>
-              <small>{product.category}{product.yield_pct != null ? ` · ${product.yield_pct}% yield` : ''}
-                {product.color_lovibond != null ? ` · ${product.color_lovibond} °L` : ''}
-                {product.typical_brix != null ? ` · ${product.typical_brix} °Brix` : ''}
-                {product.extract_color_value != null ? ` · ${product.extract_color_value} ${product.extract_color_scale || ''}` : ''}</small></span>
+              <small>{catalogCharacteristics(product)}</small></span>
             {!!product.has_image && <CatalogImage kind="supply" id={product.id}
               className={`catalog-explorer-thumbnail${product.manufacturer === 'Briess'
                 && product.category === 'Grain' ? ' catalog-grain-banner' : ''}`} />}
@@ -664,6 +679,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
             {!!selectedCatalogProduct.has_image && <CatalogImage kind="supply" id={selectedCatalogProduct.id}
               alt={selectedCatalogProduct.name} immediate />}
             <div><strong>{selectedCatalogProduct.name}</strong>
+              <p>{catalogCharacteristics(selectedCatalogProduct)}</p>
               {selectedCatalogProduct.manufacturer && <p>{selectedCatalogProduct.manufacturer}</p>}
               {selectedCatalogProduct.product_url && <p><a href={selectedCatalogProduct.product_url}
                 target="_blank" rel="noopener noreferrer">Product information</a></p>}
