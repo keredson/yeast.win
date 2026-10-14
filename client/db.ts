@@ -559,6 +559,21 @@ export async function recipeTargetVolume(db: DB, recipeId: string): Promise<numb
   return rows[0]?.target_fermenter_volume_liters ?? null;
 }
 
+export async function batchTargetVolume(db: DB, batchId: string): Promise<number | null> {
+  const rows = await db.execO<{ target_fermenter_volume_liters: number | null }>(
+    'SELECT target_fermenter_volume_liters FROM batch_recipe_inputs WHERE id = ?', [batchId]);
+  return rows[0]?.target_fermenter_volume_liters ?? null;
+}
+
+export async function updateBatchTargetVolume(db: DB, batchId: string, liters: number): Promise<void> {
+  if (!Number.isFinite(liters) || liters <= 0) throw new Error('Enter a positive batch size');
+  const batches = await db.execO<{ id: string }>('SELECT id FROM batches WHERE id = ?', [batchId]);
+  if (!batches.length) throw new Error('Batch not found');
+  await db.exec(`INSERT INTO batch_recipe_inputs(id, target_fermenter_volume_liters) VALUES (?, ?)
+    ON CONFLICT(id) DO UPDATE SET target_fermenter_volume_liters = excluded.target_fermenter_volume_liters`,
+  [batchId, liters]);
+}
+
 export async function breweryMashEfficiency(db: DB): Promise<number | null> {
   const rows = await db.execO<{ mash_efficiency_pct: number | null }>(
     "SELECT mash_efficiency_pct FROM brewery_process_defaults WHERE id = 'brewery'");

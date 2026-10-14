@@ -138,7 +138,14 @@ try {
   const batchName = await page.getByLabel('Batch name').inputValue();
   await page.getByRole('button', { name: 'Create batch' }).click();
   await page.getByRole('heading', { name: batchName }).waitFor();
-  await page.getByRole('region', { name: 'Batch details' }).getByText('Expected OG').waitFor();
+  const batchDetails = page.getByRole('region', { name: 'Batch details' });
+  await batchDetails.getByText('Expected OG').waitFor();
+  await page.getByRole('button', { name: 'Batch settings' }).click();
+  const batchSizeDialog = page.getByRole('dialog', { name: 'Batch settings' });
+  await batchSizeDialog.getByRole('spinbutton', { name: 'Batch size' }).fill('20');
+  await batchSizeDialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await batchSizeDialog.waitFor({ state: 'hidden' });
+  await batchDetails.getByText(/^20(?:\.0+)?\s/).waitFor();
   if (!/^\/batch\/[A-Za-z0-9_-]{10,32}$/.test(new URL(page.url()).pathname) || new URL(page.url()).search) {
     throw new Error('Default brewery batch should use a clean root URL');
   }

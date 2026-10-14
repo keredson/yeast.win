@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
-import { Alert, Button, Empty, Form, Input, Modal, Select } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Select } from 'antd';
+import { PlusOutlined, SettingOutlined } from '@ant-design/icons';
 import { addBatchPlan, createBatch, eventDetails, eventFormData, listEvents, listPhotos, releaseEquipmentUse,
   startBatchFromRecipe, startBatchFromTemplate, startBatchFromPrevious, updateBatchPlan,
-  breweryMashEfficiency, latestMeasuredMashEfficiencySource,
+  batchTargetVolume, breweryMashEfficiency, latestMeasuredMashEfficiencySource, updateBatchTargetVolume,
   type ActualEvent, type Batch, type Equipment, type InventoryItem,
   type LocalDb, type MeasurementKind, type PlanInput, type Recipe, type RecipeType } from './db.ts';
 import { kindLabel } from './constants.ts';
@@ -16,6 +16,8 @@ import type { PreferredUnits } from './api.ts';
 import type { CatalogInventory } from '../shared/catalog.ts';
 import { calculateRecipe, type RecipeEstimate } from './recipeCalculations.ts';
 import { CalculationsCard } from './CalculationsCard.tsx';
+import { convertUnit, unitGroups, unitOptions } from '../shared/units.ts';
+import { changeNumberUnit } from './unitFields.ts';
 
 export function BatchSection({ db, basePath, accountId, batches, recipes, equipment, equipmentModels, inventory, catalogInventory, preferredUnits, selectedId, onSelect, onChanged }: {
   db: LocalDb; basePath: string; accountId: string; batches: Batch[]; recipes: Recipe[]; equipment: Equipment[]; equipmentModels: Equipment[]; inventory: InventoryItem[];
@@ -27,6 +29,12 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   const [photos, setPhotos] = useState<{ id: string; url: string; batch_event_id: string | null; created_at: number }[]>([]);
   const [estimate, setEstimate] = useState<RecipeEstimate | null>(null);
   const [estimateType, setEstimateType] = useState<RecipeType>('beer');
+  const [batchSizeOpen, setBatchSizeOpen] = useState(false);
+  const [batchSizeBusy, setBatchSizeBusy] = useState(false);
+  const [batchSizeError, setBatchSizeError] = useState('');
+  const [batchSizeForm] = Form.useForm<{ batch_size: number; unit: string }>();
+  const batchSizeUnit = useRef<string>(preferredUnits.volume);
+  const originalBatchSize = useRef<{ liters: number; display: number; unit: string } | null>(null);
   const [newBatch, setNewBatch] = useState(false);
   const [newBatchForm] = Form.useForm();
   const startFrom = Form.useWatch('start_from', newBatchForm) as string | undefined;
@@ -96,6 +104,35 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
 
   async function changed() { await refreshDetail(); await onChanged(); }
 
+  async function openBatchSize() {
+    if (!batch) return;
+    try {
+      const liters = await batchTargetVolume(db, batch.id);
+      const unit = preferredUnits.volume;
+      const display = liters == null ? null : Number((convertUnit(liters, 'L', unit) ?? liters).toFixed(2));
+      batchSizeUnit.current = unit;
+      originalBatchSize.current = liters == null || display == null ? null : { liters, display, unit };
+      batchSizeForm.setFieldsValue({ batch_size: display ?? undefined, unit });
+      setBatchSizeError('');
+      setBatchSizeOpen(true);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
+  async function saveBatchSize(values: { batch_size: number; unit: string }) {
+    if (!batch) return;
+    setBatchSizeBusy(true); setBatchSizeError('');
+    try {
+      const original = originalBatchSize.current;
+      const liters = original && values.batch_size === original.display && values.unit === original.unit
+        ? original.liters : convertUnit(values.batch_size, values.unit, 'L');
+      if (liters == null) throw new Error('Choose a batch size unit');
+      await updateBatchTargetVolume(db, batch.id, liters);
+      setBatchSizeOpen(false);
+      await changed();
+    } catch (cause) { setBatchSizeError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setBatchSizeBusy(false); }
+  }
+
   async function create(values: { name: string; description?: string; start_from: string; recipe_id?: string;
     source_batch_id?: string; unit_ids?: Record<string, string>; stock_ids?: Record<string, string> }) {
     try {
@@ -159,7 +196,8 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
           ? <a href={`${basePath}/batch/${batch.source_batch_id}`}
             onClick={event => { event.preventDefault(); onSelect(batch.source_batch_id!); }}>{batch.source_batch_name}</a>
           : 'a previous batch'}</p>}
-        </div></div>
+        </div><div className="heading-actions"><Button type="text" shape="circle" icon={<SettingOutlined />}
+          aria-label="Batch settings" title="Batch settings" onClick={() => void openBatchSize()} /></div></div>
       {estimate && <CalculationsCard estimate={estimate} volumeUnit={preferredUnits.volume}
         showColor={estimateType === 'beer'} label="Batch details" />}
       <EventTimeline events={events} batchStartAt={batch.created_at} equipment={equipment} details={details} photos={photos}
@@ -169,6 +207,21 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
           setError(cause instanceof Error ? cause.message : String(cause))); }}
         onAdd={(kind, settings) => { setEditingPlan(null); setPreset(settings); setCreatingKind(kind); }} />
     </section>}
+    <Modal title="Batch settings" open={batchSizeOpen} onCancel={() => setBatchSizeOpen(false)}
+      footer={null} destroyOnHidden>
+      {batchSizeError && <Alert type="error" message={batchSizeError} className="form-alert" />}
+      <Form form={batchSizeForm} layout="vertical" onFinish={saveBatchSize}>
+        <div className="form-pair recipe-volume-fields"><Form.Item name="batch_size" label="Batch size"
+          rules={[{ required: true, message: 'Enter a batch size' }]}>
+          <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
+          <Form.Item name="unit" label="Unit" rules={[{ required: true }]}>
+            <Select options={unitOptions(unitGroups.volume)} onChange={unit => {
+              changeNumberUnit(batchSizeForm, ['batch_size'], batchSizeUnit.current, unit);
+              batchSizeUnit.current = unit;
+            }} /></Form.Item></div>
+        <Button type="primary" htmlType="submit" loading={batchSizeBusy}>Save</Button>
+      </Form>
+    </Modal>
     <Modal title="New batch" open={newBatch} onCancel={() => setNewBatch(false)} afterClose={() => newBatchForm.resetFields()}
       footer={null} destroyOnHidden>
       <Form form={newBatchForm} layout="vertical" onFinish={create} initialValues={{ start_from: 'empty' }}>
