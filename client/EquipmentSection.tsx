@@ -712,15 +712,18 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       </div>
       {indexRows.length > 0 && <Table<EquipmentIndexRow> key={indexRows.filter(row => row.children).map(row => row.key).join(',')}
         className="equipment-table" dataSource={indexRows}
-        rowKey="key" pagination={false} size="small" tableLayout="fixed" defaultExpandAllRows scroll={{ x: 650 }} columns={[
-          { title: 'Model', key: 'model', width: 290, render: (_, row) => {
+        rowKey="key" pagination={false} size="small" tableLayout="fixed" defaultExpandAllRows scroll={{ x: 765 }} columns={[
+          { title: '', key: 'image', width: 70, render: (_, row) => {
             if (row.child) return null;
             const catalogImage = catalog.find(model => model.id === row.model.catalog_model_id);
             const thumbnail = modelThumbnails[row.model.id] || catalogImage?.thumbnail_src || catalogImage?.image_src;
+            return thumbnail ? <img className="equipment-table-thumbnail" src={thumbnail} alt="" loading="lazy" /> : null;
+          } },
+          { title: 'Model', key: 'model', width: 240, render: (_, row) => {
+            if (row.child) return null;
             return <a className="equipment-model-table-name"
               href={`${basePath}/equipment/${equipmentModelPathSegment(row.model, models)}`}
               onClick={event => { event.preventDefault(); onSelect(row.model.id); }}>
-              {thumbnail && <img src={thumbnail} alt="" loading="lazy" />}
               {row.model.name}
             </a>;
           } },
@@ -737,7 +740,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
             onConfirm={() => void removeIndexRow()} onCancel={() => setIndexDeleteRow(null)}>
             <Dropdown trigger={['click']} menu={{ items: [
               ...(!row.child ? [{ key: 'add', label: 'Add unit' }] : []),
-              ...(row.units.length ? [{ key: 'delete', label: row.child ? 'Delete units at location' : 'Delete all units', danger: true }] : [])
+              ...(row.units.length ? [{ key: 'delete', label: row.child ? 'Delete' : 'Delete all', danger: true }] : [])
             ], onClick: ({ key }) => {
               if (key === 'add') { setCatalogUnitModelId(row.model.id); setAddingUnit(true); }
               if (key === 'delete') setIndexDeleteRow(row);
