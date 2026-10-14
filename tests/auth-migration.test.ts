@@ -1,11 +1,12 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 
 const directory = mkdtempSync(join(tmpdir(), 'brewlog-auth-migration-'));
+after(() => rmSync(directory, { recursive: true, force: true }));
 process.env.BREWLOG_DATA_DIR = directory;
 const file = join(directory, 'auth.sqlite');
 const legacy = new Database(file);
