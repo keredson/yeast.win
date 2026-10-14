@@ -45,6 +45,26 @@ function formatStockQuantity(quantity: number, unit: string, displayUnit: string
 type StockMovement = InventoryMovement & { stock_id: string; lot_code: string | null; location_id: string | null };
 type StockTreeRow = { key: string; lotLabel: string; locationLabel: string; rows: InventoryItem[];
   lotItem?: InventoryItem; stockItem?: InventoryItem; children?: StockTreeRow[] };
+type InventoryIndexRow = { key: string; supply: InventoryItem; stocks: InventoryItem[];
+  locationId?: string | null; child?: boolean; children?: InventoryIndexRow[] };
+
+function inventoryIndexRows(supplies: InventoryItem[], stocks: InventoryItem[], locations: InventoryLocation[]): InventoryIndexRow[] {
+  return supplies.map(supply => {
+    const productStocks = stocks.filter(stock => stock.supply_id === supply.id);
+    const byLocation = new Map<string | null, InventoryItem[]>();
+    for (const stock of productStocks) {
+      const locationId = stock.location_id || null;
+      byLocation.set(locationId, [...(byLocation.get(locationId) || []), stock]);
+    }
+    const locationRows = [...byLocation.entries()].sort(([a], [b]) =>
+      (inventoryLocationPath(a, locations) || 'No location').localeCompare(
+        inventoryLocationPath(b, locations) || 'No location'));
+    return { key: `supply:${supply.id}`, supply, stocks: productStocks,
+      ...(locationRows.length === 1 ? { locationId: locationRows[0][0] } : {}),
+      ...(locationRows.length > 1 ? { children: locationRows.map(([locationId, group]) => ({
+        key: `location:${supply.id}:${locationId || 'none'}`, supply, stocks: group, locationId, child: true })) } : {}) };
+  });
+}
 
 function stockTree(rows: InventoryItem[]): StockTreeRow[] {
   const lots = new Map<string, InventoryItem[]>();
@@ -152,6 +172,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const visibleLocationIds = activeLocationId ? locationDescendantIds(activeLocationId, locations) : null;
   const visibleItems = visibleLocationIds ? items.filter(row => row.location_id && visibleLocationIds.has(row.location_id)) : items;
   const visibleSupplies = supplies.filter(row => visibleItems.some(stock => stock.supply_id === row.id));
+  const indexRows = inventoryIndexRows(visibleSupplies, visibleItems, locations);
   const normalizedCatalogQuery = catalogQuery.trim().toLocaleLowerCase();
   const matchingCatalog = catalog.filter(row => (!catalogCategory || row.category === catalogCategory)
     && (!normalizedCatalogQuery || `${row.name} ${row.manufacturer || ''} ${row.category}`
@@ -354,19 +375,24 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
           onChange={value => setLocationFilterId(typeof value === 'string' ? value : null)} allowClear placeholder="All locations" />
       </div>}
       {visibleSupplies.length > 0 && <div className="group-tables">{categories.map(category => {
-        const rows = visibleSupplies.filter(row => row.category === category);
+        const rows = indexRows.filter(row => row.supply.category === category);
         return rows.length ? <section key={category} className="group-table"><div className="group-table-heading"><h2>{category}</h2>
           <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label={`Add ${category.toLowerCase()}`} title={`Add ${category.toLowerCase()}`}
             onClick={() => openCatalog(category)} /></div>
-          <Table<InventoryItem> dataSource={rows} rowKey="id" pagination={false} size="small" scroll={{ x: 520 }}
-            columns={[{ title: 'Item', dataIndex: 'name', render: (_, row) =>
-              <a href={`${basePath}/inventory/${inventoryPathSegment(row, supplies)}`} onClick={event => { event.preventDefault(); onSelect(row.id); }}>{row.name}</a> },
-            { title: 'Lots', key: 'lots', width: 90, render: (_, row) => new Set(visibleItems.filter(stock => stock.supply_id === row.id)
+          <Table<InventoryIndexRow> key={rows.filter(row => row.children).map(row => row.key).join(',')}
+            dataSource={rows} rowKey="key" pagination={false} size="small"
+            expandable={{ defaultExpandAllRows: true, expandIconColumnIndex: 0 }} scroll={{ x: 640 }}
+            columns={[{ title: 'Item', key: 'name', render: (_, row) => row.child ? null
+              : <a href={`${basePath}/inventory/${inventoryPathSegment(row.supply, supplies)}`}
+                onClick={event => { event.preventDefault(); onSelect(row.supply.id); }}>{row.supply.name}</a> },
+            { title: 'Location', key: 'location', width: 180, render: (_, row) => row.locationId !== undefined
+              ? inventoryLocationPath(row.locationId, locations) || 'No location' : '' },
+            { title: 'Lots', key: 'lots', width: 90, render: (_, row) => new Set(row.stocks
               .map(stock => stock.lot_id || stock.id)).size },
             { title: 'On hand', key: 'on_hand', width: 170, align: 'right', render: (_, row) => stockQuantity(
-              visibleItems.filter(stock => stock.supply_id === row.id), onHand, row.default_unit,
-              row.default_unit === 'oz' && preferredUnits.mass === compoundMassUnit ? compoundMassUnit
-                : visibleItems.find(stock => stock.supply_id === row.id)?.display_unit || row.default_unit) }]} /></section> : null;
+              row.stocks, onHand, row.supply.default_unit,
+              row.supply.default_unit === 'oz' && preferredUnits.mass === compoundMassUnit ? compoundMassUnit
+                : row.stocks[0]?.display_unit || row.supply.default_unit) }]} /></section> : null;
       })}</div>}
       <p className="inventory-add-types">Add {categories.map((category, index) =>
         <span key={category}>{index > 0 && (index === categories.length - 1 ? categories.length === 2 ? ' or ' : ', or ' : ', ')}

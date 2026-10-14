@@ -2453,8 +2453,9 @@ export async function moveInventoryStock(db: DB, source: InventoryItem, destinat
       if (destinationId) await tx.exec('INSERT INTO inventory_item_locations(id, location_id) VALUES (?, ?)', [target.id, destinationId]);
       if (target.display_unit !== target.default_unit) await tx.exec('INSERT INTO inventory_display_units(id, display_unit) VALUES (?, ?)',
         [target.id, target.display_unit]);
-      await tx.exec(`INSERT INTO inventory_ingredient_properties(id, ${ingredientPropertyColumns.join(', ')})
-        SELECT ?, ${ingredientPropertyColumns.join(', ')} FROM inventory_ingredient_properties WHERE id = ?`, [target.id, source.id]);
+      const stockPropertyColumns = ingredientPropertyColumns.filter(column => column !== 'grain_class');
+      await tx.exec(`INSERT INTO inventory_ingredient_properties(id, ${stockPropertyColumns.join(', ')})
+        SELECT ?, ${stockPropertyColumns.join(', ')} FROM inventory_ingredient_properties WHERE id = ?`, [target.id, source.id]);
     }
     await tx.exec('INSERT INTO inventory_moves(id, from_item_id, to_item_id, quantity, unit, moved_at) VALUES (?, ?, ?, ?, ?, ?)',
       [nanoid(), source.id, target.id, quantity, unit, Math.max(nowSeconds(), (latest[0]?.at ?? 0) + 1)]);

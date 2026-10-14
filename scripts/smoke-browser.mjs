@@ -1181,6 +1181,9 @@ try {
   await shelfRow.getByText('2 lb').waitFor();
   await page.getByText('Moved in', { exact: true }).waitFor();
   await navigateSection(page, 'Inventory');
+  await page.locator('.group-table').getByRole('columnheader', { name: 'Location' }).first().waitFor();
+  await page.locator('.group-table').getByRole('cell', { name: 'Back room / Shelf A' }).waitFor();
+  await page.locator('.group-table').getByRole('cell', { name: 'No location' }).first().waitFor();
   await page.getByRole('button', { name: 'Add grain' }).click();
   const shelvedGrain = page.getByRole('dialog', { name: 'New grain item' });
   await shelvedGrain.waitFor();
