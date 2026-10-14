@@ -135,8 +135,6 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const [catalogPickerPurpose, setCatalogPickerPurpose] = useState<'add' | 'link'>('add');
   const [catalogQuery, setCatalogQuery] = useState('');
   const [catalogCategory, setCatalogCategory] = useState<string | undefined>();
-  const [catalogLimit, setCatalogLimit] = useState(80);
-  const [catalogHasMore, setCatalogHasMore] = useState(false);
   const [catalogForOwned, setCatalogForOwned] = useState<CatalogInventory[]>([]);
   const [matchingCatalog, setMatchingCatalog] = useState<CatalogInventory[]>([]);
   const [catalogSuggestions, setCatalogSuggestions] = useState<CatalogInventory[]>([]);
@@ -190,11 +188,11 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   useEffect(() => {
     if (!catalogPickerOpen) { setMatchingCatalog([]); return; }
     let cancelled = false;
-    void queryCatalogSupplies({ category: catalogCategory, query: catalogQuery, limit: catalogLimit + 1 })
-      .then(rows => { if (!cancelled) { setMatchingCatalog(rows.slice(0, catalogLimit)); setCatalogHasMore(rows.length > catalogLimit); } })
+    void queryCatalogSupplies({ category: catalogCategory, query: catalogQuery, limit: null })
+      .then(rows => { if (!cancelled) setMatchingCatalog(rows); })
       .catch(cause => { if (!cancelled) setError(String(cause)); });
     return () => { cancelled = true; };
-  }, [catalogPickerOpen, catalogCategory, catalogQuery, catalogLimit, catalogRevision]);
+  }, [catalogPickerOpen, catalogCategory, catalogQuery, catalogRevision]);
   useEffect(() => {
     if (!newItemCategory) { setCatalogSuggestions([]); return; }
     let cancelled = false;
@@ -244,7 +242,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   }
 
   function openCatalog(category?: string, purpose: 'add' | 'link' = 'add') {
-    setCatalogQuery(''); setCatalogCategory(category); setCatalogLimit(80); setCatalogHasMore(false);
+    setCatalogQuery(''); setCatalogCategory(category);
     setCatalogPickerPurpose(purpose); setCatalogPickerOpen(true);
   }
 
@@ -588,9 +586,9 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
       {catalogPickerPurpose === 'link' && <p className="muted">Catalog specs apply where this supply has no override.</p>}
       <div className="catalog-explorer-filters">
         <Input.Search aria-label="Search inventory products" placeholder="Search inventory products" allowClear value={catalogQuery}
-          onChange={event => { setCatalogQuery(event.target.value); setCatalogLimit(80); }} />
+          onChange={event => setCatalogQuery(event.target.value)} />
         <Select aria-label="Filter inventory type" placeholder="All inventory types" allowClear
-          value={catalogCategory} onChange={value => { setCatalogCategory(value); setCatalogLimit(80); }}
+          value={catalogCategory} onChange={setCatalogCategory}
           options={categories.map(category => ({ value: category, label: category }))} />
       </div>
       {matchingCatalog.length ? <div className="catalog-explorer-list" role="list">
@@ -607,7 +605,6 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
           </button>
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching products' : 'No catalog products available'} />}
-      {catalogHasMore && <Button type="link" onClick={() => setCatalogLimit(limit => limit + 80)}>Show more products</Button>}
       {catalogPickerPurpose === 'link' ? null : catalogCategory ? <Button type="link" className="catalog-create-custom"
         onClick={() => createCustomProduct(catalogCategory)}>Specify {catalogCategory.toLowerCase()} not in catalog</Button>
         : <Dropdown trigger={['click']} menu={{ items: categories.map(category => ({ key: category, label: category })),
