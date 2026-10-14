@@ -16,6 +16,10 @@ The app should work for a homebrewer with one operation and for an account that 
 - **Exposure:** `cloudflared` publishes the app and API on a stable HTTPS hostname through Cloudflare Tunnel. Prefer one origin for the PWA and API. No Cloudflare Worker is required for each sync request. If the machine or tunnel is down, the installed PWA remains usable locally, but sync, sensor ingestion, and server-triggered reminders pause.
 - **Replication:** Evaluate `cr-sqlite` CRRs for mergeable tables and implement the browser/server transport over HTTPS, with WebSockets if useful. Start with whole-workspace sync. The transport belongs to Brewlog; CR-SQLite does not provide application authorization policies.
 
+### Form conventions
+
+Across all modals and forms, mark required fields with Ant Design's red asterisk. Leave optional field labels plain; do not append “(optional)” or include “optional” in a unit label. The absence of the asterisk already communicates that a field can be left blank. Keep the same labels in accessible field names and browser checks.
+
 ### Database boundaries
 
 | Database | Location | Sync | Purpose |

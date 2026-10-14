@@ -249,12 +249,12 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
         <Form.Item name="recipe_type" label="Type" rules={[{ required: true }]}>
           <Select options={recipeTypeOptions} /></Form.Item>
         <Form.Item name="description" label="Description"><Input.TextArea rows={3} /></Form.Item>
-        <div className="form-pair recipe-volume-fields"><Form.Item name="target_volume" label="Target volume into fermenter (optional)">
+        <div className="form-pair recipe-volume-fields"><Form.Item name="target_volume" label="Target volume into fermenter">
           <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
           <Form.Item name="target_volume_unit" label="Unit"><Select options={unitOptions(unitGroups.volume)}
             onChange={unit => { changeNumberUnit(settingsForm, ['target_volume'], targetVolumeUnit.current, unit);
               targetVolumeUnit.current = unit; }} /></Form.Item></div>
-        <Form.Item name="wort_loss" label={`Wort loss to fermenter (${preferredUnits.volume}, optional)`}>
+        <Form.Item name="wort_loss" label={`Wort loss to fermenter (${preferredUnits.volume})`}>
           <InputNumber className="full-width" min={0} step="any" /></Form.Item>
         <p className="muted">Leave blank to use the brewery default{breweryDefaultWortLoss == null ? ' (not set).' :
           ` (${Number((convertUnit(breweryDefaultWortLoss, 'L', preferredUnits.volume) || 0).toFixed(2))} ${preferredUnits.volume}).`}</p>
@@ -292,7 +292,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
       <Form layout="vertical" onFinish={start} initialValues={{ name: recipe ? `${recipe.name} batch` : '' }}>
         <Form.Item name="name" label="Batch name" rules={[{ required: true }]}><Input maxLength={100} /></Form.Item>
         <RecipeEquipmentFields db={db} recipeId={recipe?.id} equipment={equipment} models={equipmentModels} />
-        <Form.Item name="wort_loss" label={`Wort loss override (${preferredUnits.volume}, optional)`}>
+        <Form.Item name="wort_loss" label={`Wort loss override (${preferredUnits.volume})`}>
           <InputNumber className="full-width" min={0} step="any" /></Form.Item>
         <Button type="primary" htmlType="submit">Create batch</Button>
       </Form>

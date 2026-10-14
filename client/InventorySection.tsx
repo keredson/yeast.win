@@ -395,13 +395,13 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
                 previousItemUnit.current = nextUnit;
                 itemForm.setFieldValue('default_unit', nextUnit); } }} />
         </Form.Item>}
-        <Form.Item name="location_id" label="Location (optional)" normalize={(value, previousValue) => {
+        <Form.Item name="location_id" label="Location" normalize={(value, previousValue) => {
           if (value === newLocationOption) { openLocationCreate('item'); return previousValue; }
           return value;
         }}>
           <LocationTreeSelect locations={locations} includeCreate allowClear placeholder="Choose a location" />
         </Form.Item>
-        <Form.Item name="lot_code" label="Lot code (optional)"><Input maxLength={80} disabled={newStockLotCode !== undefined} /></Form.Item>
+        <Form.Item name="lot_code" label="Lot code"><Input maxLength={80} disabled={newStockLotCode !== undefined} /></Form.Item>
         <Form.Item name="default_unit" label="Unit" rules={[{ required: true }]}>
           <Select showSearch options={unitOptions(quantityUnitsForCategory(newItemCategory || 'Other'))}
             onChange={unit => { changeQuantityUnit(itemForm, previousItemUnit.current, unit, 'starting_quantity'); previousItemUnit.current = unit; }} /></Form.Item>
@@ -416,7 +416,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
       <Form form={moveForm} layout="vertical" onFinish={move} initialValues={{ unit: moveItem?.display_unit || moveItem?.default_unit }}>
         <p className="muted">From {inventoryLocationPath(moveItem?.location_id || null, locations) || 'no location'}.
           {moveItem && onHand[moveItem.id] != null ? ` ${formatQuantity(onHand[moveItem.id]!, moveItem.default_unit, moveItem.display_unit)} available.` : ''}</p>
-        <Form.Item name="location_id" label="To location (optional)" normalize={(value, previousValue) => {
+        <Form.Item name="location_id" label="To location" normalize={(value, previousValue) => {
           if (value === newLocationOption) { openLocationCreate('move'); return previousValue; }
           return value;
         }}>

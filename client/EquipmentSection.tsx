@@ -795,7 +795,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       }}>
         <Form.Item name="model_id" label="Model" rules={[{ required: true }]}><Select showSearch optionFilterProp="label"
           options={models.map(model => ({ value: model.id, label: model.name }))} /></Form.Item>
-        <Form.Item name="stock_id" label="Stock ID (optional)"><Input maxLength={80} /></Form.Item>
+        <Form.Item name="stock_id" label="Stock ID"><Input maxLength={80} /></Form.Item>
         <Button type="primary" htmlType="submit">Add unit</Button>
       </Form>
     </Modal>
@@ -820,10 +820,10 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <Form.Item name="name" label="Name" rules={[{ required: true, whitespace: true }]}>
           <Input placeholder="Equipment name" maxLength={120} />
         </Form.Item>
-        <Form.Item name="stock_id" label="Stock ID (optional)"><Input maxLength={80} /></Form.Item>
+        <Form.Item name="stock_id" label="Stock ID"><Input maxLength={80} /></Form.Item>
         {selectedCatalogModel && (selectedCatalogModel.measurement_channels?.length || 0) > 1 &&
           <p className="muted">Measures {channelSummary(selectedCatalogModel.measurement_channels)}.</p>}
-        {createCapacity && <div className="capacity-fields"><Form.Item name="capacity" label="Capacity (optional)"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
+        {createCapacity && <div className="capacity-fields"><Form.Item name="capacity" label="Capacity"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
           <Form.Item name="capacity_unit" label="Unit"><Select options={[...capacityUnits]}
             onChange={unit => changeNumberUnit(equipmentForm, ['capacity'], newCapacityUnit || 'L', unit)} /></Form.Item></div>}
         {creatingKind === 'fermenter' && (!selectedCatalogModel || selectedCatalogModel.has_temperature_control) && <>
@@ -831,21 +831,21 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
             disabled={!!selectedCatalogModel?.has_temperature_control}>Built-in temperature control</Checkbox></Form.Item>
         </>}
         {(!selectedCatalogModel && creatingKind === 'fermenter' || selectedCatalogModel?.has_pressure_rating) &&
-          <div className="form-pair"><Form.Item name="max_pressure" label="Maximum working pressure (optional)">
+          <div className="form-pair"><Form.Item name="max_pressure" label="Maximum working pressure">
             <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
             <Form.Item name="pressure_unit" label="Unit"><Select options={unitOptions(unitGroups.pressure)}
               onChange={unit => changeNumberUnit(equipmentForm, ['max_pressure'], newPressureUnit || preferredUnits.pressure, unit)} /></Form.Item></div>
         }
-        {boilOffKinds.has(creatingKind) && createHeating && <Form.Item name="rated_power_watts" label="Rated power (W, optional)">
+        {boilOffKinds.has(creatingKind) && createHeating && <Form.Item name="rated_power_watts" label="Rated power (W)">
           <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
         {createHeating && !boilOffKinds.has(creatingKind) && <>
           <Form.Item name="has_heating" valuePropName="checked"><Checkbox disabled={!!selectedCatalogModel?.has_heating}>Heating</Checkbox></Form.Item>
-          {newHeating && <Form.Item name="rated_power_watts" label="Rated heating power (W, optional)">
+          {newHeating && <Form.Item name="rated_power_watts" label="Rated heating power (W)">
             <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
         </>}
         {newThermal && <>
           {createCooling && <Form.Item name="has_cooling" valuePropName="checked"><Checkbox disabled={!!selectedCatalogModel?.has_cooling}>Cooling</Checkbox></Form.Item>}
-          {createCooling && newCooling && <Form.Item name="rated_heat_removal_watts" label="Rated heat removal (W, optional)">
+          {createCooling && newCooling && <Form.Item name="rated_heat_removal_watts" label="Rated heat removal (W)">
             <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
           {(newTemperatureControl || creatingKind === 'fermenter' && newFermenterControl) && <div className="form-pair">
             <Form.Item name="min_temperature_c" label="Minimum temperature (°C)"><InputNumber className="full-width" step="any" /></Form.Item>
@@ -898,13 +898,13 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       <Form key={`${selectedModel?.id}:${addingCapability}`} form={capabilityForm} layout="vertical" onFinish={saveAddedCapability}
         initialValues={{ measurement_unit: addingCapability?.startsWith('measurement:')
           ? channelUnits(addingCapability.slice('measurement:'.length))[0] : undefined }}>
-        {addingCapability === 'liquid_containment' && <Form.Item name="capacity_liters" label="Capacity (L, optional)">
+        {addingCapability === 'liquid_containment' && <Form.Item name="capacity_liters" label="Capacity (L)">
           <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
-        {addingCapability === 'pressure_rating' && <Form.Item name="max_pressure_kpa" label="Maximum working pressure (kPa, optional)">
+        {addingCapability === 'pressure_rating' && <Form.Item name="max_pressure_kpa" label="Maximum working pressure (kPa)">
           <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
-        {addingCapability === 'heating' && <Form.Item name="rated_power_watts" label="Rated heating power (W, optional)">
+        {addingCapability === 'heating' && <Form.Item name="rated_power_watts" label="Rated heating power (W)">
           <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
-        {addingCapability === 'cooling' && <Form.Item name="rated_heat_removal_watts" label="Rated heat removal (W, optional)">
+        {addingCapability === 'cooling' && <Form.Item name="rated_heat_removal_watts" label="Rated heat removal (W)">
           <InputNumber className="full-width" min={0.001} step="any" /></Form.Item>}
         {addingCapability === 'temperature_control' && <div className="form-pair">
           <Form.Item name="min_temperature_c" label="Minimum temperature (°C)">
@@ -989,7 +989,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     </Modal>
     <Modal title="Edit Stock ID" open={editIdentity} onCancel={() => setEditIdentity(false)} footer={null} destroyOnHidden>
       <Form key={item?.id} layout="vertical" onFinish={saveIdentity} initialValues={{ stock_id: item?.stock_id }}>
-        <Form.Item name="stock_id" label="Stock ID (optional)"><Input maxLength={80} /></Form.Item>
+        <Form.Item name="stock_id" label="Stock ID"><Input maxLength={80} /></Form.Item>
         <Button type="primary" htmlType="submit">Save unit</Button>
       </Form>
     </Modal>

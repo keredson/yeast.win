@@ -83,7 +83,7 @@ try {
   const color = await details.locator('.recipe-estimate-grid > div').filter({ hasText: 'Estimated color' }).locator('strong').textContent();
   if (!og || Number(og) <= 1.04 || !color?.includes('SRM')) throw new Error('Recipe estimates did not render');
   await page.getByRole('button', { name: 'Recipe settings' }).click();
-  const target = page.getByRole('spinbutton', { name: 'Target volume into fermenter (optional)' });
+  const target = page.getByRole('spinbutton', { name: 'Target volume into fermenter' });
   if (Number(await target.inputValue()) !== 19) throw new Error('Recipe target volume is missing from settings');
   await page.getByRole('dialog', { name: 'Recipe settings' }).getByRole('combobox', { name: 'Unit' }).click();
   await page.locator('.ant-select-dropdown:visible').getByText('US gal').click();
@@ -91,6 +91,6 @@ try {
   await page.getByRole('dialog', { name: 'Recipe settings' }).locator('.ant-modal-close').click();
   await page.getByRole('button', { name: 'Edit planned event Drain grain' }).click();
   await page.getByText('Mash equipment').waitFor();
-  await page.getByText('Collecting vessel (optional)').waitFor();
+  await page.getByText('Collecting vessel').waitFor();
   console.log('Mash transfer, brewery wort loss, ingredient properties, snapshots, and recent efficiency passed');
 } finally { await browser.close(); }

@@ -166,7 +166,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
           <Select showSearch optionFilterProp="label" placeholder="Choose a batch"
             options={batches.map(previous => ({ value: previous.id, label: previous.name }))} /></Form.Item>
           <PreviousBatchFields db={db} batchId={selectedPreviousId} equipment={equipment} inventory={inventory} /></>}
-        <Form.Item name="wort_loss" label={`Wort loss override (${preferredUnits.volume}, optional)`}>
+        <Form.Item name="wort_loss" label={`Wort loss override (${preferredUnits.volume})`}>
           <InputNumber className="full-width" min={0} step="any" /></Form.Item>
         <Form.Item name="description" label="Description"><Input.TextArea rows={2} /></Form.Item>
         <Button type="primary" htmlType="submit">Create batch</Button>

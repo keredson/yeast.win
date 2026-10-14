@@ -300,11 +300,11 @@ try {
   const catalogEquipmentDialog = page.getByRole('dialog', { name: 'Add all-in-one brewing system' });
   if (await catalogEquipmentDialog.getByRole('textbox', { name: 'Name' }).inputValue()
     !== 'VEVOR Electric Brewing System 9.2 Gal/35 L') throw new Error('Catalog model name was not copied');
-  if (await catalogEquipmentDialog.getByRole('spinbutton', { name: 'Capacity (optional)' }).inputValue() !== '35') {
+  if (await catalogEquipmentDialog.getByRole('spinbutton', { name: 'Capacity' }).inputValue() !== '35') {
     throw new Error('Catalog capacity was not copied');
   }
   if (await catalogEquipmentDialog.getByRole('checkbox', { name: 'Cooling' }).count()
-    || await catalogEquipmentDialog.getByRole('spinbutton', { name: 'Rated heat removal (W, optional)' }).count()) {
+    || await catalogEquipmentDialog.getByRole('spinbutton', { name: 'Rated heat removal (W)' }).count()) {
     throw new Error('VEVOR import offered cooling without a model cooling capability');
   }
   await catalogEquipmentDialog.getByRole('button', { name: 'Create equipment' }).click();
@@ -369,7 +369,7 @@ try {
   if (await addVevorUnit.getByRole('textbox', { name: 'Unit name' }).count()) {
     throw new Error('A stock unit should not ask for a separate name');
   }
-  await addVevorUnit.getByRole('textbox', { name: 'Stock ID (optional)' }).fill('Second VEVOR');
+  await addVevorUnit.getByRole('textbox', { name: 'Stock ID' }).fill('Second VEVOR');
   await addVevorUnit.getByRole('button', { name: 'Add unit' }).click();
   await page.waitForURL('**/equipment/vevor-electric-brewing-system-9-2-gal-35-l/second-vevor');
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
@@ -464,14 +464,14 @@ try {
   await navigateSection(page, 'Equipment');
   await chooseEquipmentType(page, 'Define equipment', 'Control', 'Electric kettle');
   const kettleDialog = page.getByRole('dialog', { name: 'Add electric kettle' });
-  await kettleDialog.getByLabel('Capacity (optional)').waitFor();
+  await kettleDialog.getByLabel('Capacity').waitFor();
   if (await kettleDialog.getByLabel('Range minimum').count()) throw new Error('Kettle was offered a measurement range');
   if (await kettleDialog.getByRole('checkbox', { name: 'Cooling' }).count()) {
     throw new Error('An electric kettle was offered cooling controls');
   }
   await kettleDialog.getByRole('textbox', { name: 'Name' }).fill('Smoke electric kettle');
-  await kettleDialog.getByRole('spinbutton', { name: 'Capacity (optional)' }).fill('35');
-  await kettleDialog.getByRole('spinbutton', { name: 'Rated power (W, optional)' }).fill('1800');
+  await kettleDialog.getByRole('spinbutton', { name: 'Capacity' }).fill('35');
+  await kettleDialog.getByRole('spinbutton', { name: 'Rated power (W)' }).fill('1800');
   await kettleDialog.getByRole('button', { name: 'Create equipment' }).click();
   await page.getByRole('heading', { name: 'Smoke electric kettle' }).waitFor();
   await page.getByText('Rated power: 1800 W').waitFor();
@@ -520,7 +520,7 @@ try {
   await page.getByText('Temperature offset: +2 °C').waitFor();
   await page.getByRole('button', { name: 'Edit Stock ID' }).click();
   const identityDialog = page.getByRole('dialog', { name: 'Edit Stock ID' });
-  await identityDialog.getByRole('textbox', { name: 'Stock ID (optional)' }).fill('My smoke kettle');
+  await identityDialog.getByRole('textbox', { name: 'Stock ID' }).fill('My smoke kettle');
   await identityDialog.getByRole('button', { name: 'Save unit' }).click();
   await page.getByText('Stock ID: My smoke kettle').waitFor();
   await page.waitForURL('**/equipment/smoke-electric-kettle/my-smoke-kettle');
@@ -530,11 +530,11 @@ try {
   await navigateSection(page, 'Equipment');
   await chooseEquipmentType(page, 'Define equipment', 'Passive vessels', 'Mash tun');
   const mashTunDialog = page.getByRole('dialog', { name: 'Add mash tun' });
-  await mashTunDialog.getByLabel('Capacity (optional)').waitFor();
+  await mashTunDialog.getByLabel('Capacity').waitFor();
   await mashTunDialog.locator('.ant-modal-close').click();
   await chooseEquipmentType(page, 'Define equipment', 'Control', 'Fermentation temperature control');
   const fermentationControlDialog = page.getByRole('dialog', { name: 'Add fermentation temperature control' });
-  if (await fermentationControlDialog.getByLabel('Capacity (optional)').count()) {
+  if (await fermentationControlDialog.getByLabel('Capacity').count()) {
     throw new Error('Fermentation temperature control was offered vessel capacity');
   }
   if (!await fermentationControlDialog.getByRole('checkbox', { name: 'Cooling' }).count()) {
@@ -543,7 +543,7 @@ try {
   await fermentationControlDialog.locator('.ant-modal-close').click();
   await chooseEquipmentType(page, 'Define equipment', 'Measurement', 'pH meter');
   const phDialog = page.getByRole('dialog', { name: 'Add pH meter' });
-  if (await phDialog.getByLabel('Capacity (optional)').count()) {
+  if (await phDialog.getByLabel('Capacity').count()) {
     throw new Error('Measurement equipment was offered vessel capacity');
   }
   const phName = phDialog.getByRole('textbox', { name: 'Name' });
@@ -720,7 +720,7 @@ try {
   }
   await page.getByRole('button', { name: 'Edit planned event Chill' }).click();
   const chillPlan = page.getByRole('dialog', { name: 'Edit Chill' });
-  if (await chillPlan.getByRole('spinbutton', { name: 'Duration (optional)' }).count()) {
+  if (await chillPlan.getByRole('spinbutton', { name: 'Duration' }).count()) {
     throw new Error('Chill plan still asks for a duration');
   }
   if (await chillPlan.getByRole('spinbutton', { name: 'Target temperature' }).inputValue() !== '68') {
@@ -732,13 +732,13 @@ try {
   const transferPlan = page.getByRole('dialog', { name: 'Edit Transfer to fermenter' });
   await transferPlan.waitFor();
   if (await transferPlan.getByRole('combobox', { name: /From vessel/ }).count()
-    || await transferPlan.getByRole('spinbutton', { name: 'Duration (optional)' }).count()) {
+    || await transferPlan.getByRole('spinbutton', { name: 'Duration' }).count()) {
     throw new Error('Transfer plan still asks for a source vessel or duration');
   }
   if (!await transferPlan.getByRole('combobox', { name: 'Timing' }).locator('..').getByText('After Chill').count()) {
     throw new Error('Transfer timing should display its Chill anchor');
   }
-  await transferPlan.getByRole('combobox', { name: 'To vessel (optional)' }).click();
+  await transferPlan.getByRole('combobox', { name: 'To vessel' }).click();
   if (await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke chiller' }).count()) {
     throw new Error('Transfer plan offered a chiller as a vessel');
   }
@@ -795,7 +795,7 @@ try {
   if (await beerPackaging.getByRole('textbox', { name: 'Container' }).inputValue()) {
     throw new Error('New recipe chose a packaging container in advance');
   }
-  if (await beerPackaging.getByRole('spinbutton', { name: 'Duration (optional)' }).count()) {
+  if (await beerPackaging.getByRole('spinbutton', { name: 'Duration' }).count()) {
     throw new Error('Packaging plan still has a duration');
   }
   if (Number(await beerPackaging.getByRole('spinbutton', { name: 'Time offset' }).inputValue()) !== 21
@@ -809,7 +809,7 @@ try {
   }
   await page.getByRole('button', { name: 'Edit planned event Boil' }).click();
   const boilPlan = page.getByRole('dialog', { name: 'Edit Boil' });
-  if (!await boilPlan.getByRole('spinbutton', { name: 'Duration (optional)' }).inputValue().then(value => Number(value) === 1)) {
+  if (!await boilPlan.getByRole('spinbutton', { name: 'Duration' }).inputValue().then(value => Number(value) === 1)) {
     throw new Error('Seeded boil did not have a one-hour duration');
   }
   if (Number(await boilPlan.getByRole('spinbutton', { name: 'Target temperature' }).inputValue()) !== 212) {
@@ -881,7 +881,7 @@ try {
   await page.getByRole('button', { name: 'Record Transfer to fermenter' }).click();
   const recordTransfer = page.getByRole('dialog', { name: 'Record: Transfer to fermenter' });
   if (await recordTransfer.getByRole('combobox', { name: 'From vessel' }).count()
-    || await recordTransfer.getByLabel('Ended (optional)').count()) {
+    || await recordTransfer.getByLabel('Ended').count()) {
     throw new Error('Transfer recording still asks for a source vessel or end time');
   }
   await recordTransfer.getByRole('combobox', { name: 'To vessel' }).locator('..').getByText('Smoke fermenter').waitFor();
@@ -927,7 +927,7 @@ try {
   const recipeSettings = page.getByRole('dialog', { name: 'Recipe settings' });
   await recipeSettings.getByRole('textbox', { name: 'Recipe name' }).fill('Smoke recipe revised');
   await recipeSettings.getByRole('textbox', { name: 'Description' }).fill('Edited recipe description');
-  await recipeSettings.getByRole('spinbutton', { name: 'Wort loss to fermenter (L, optional)' }).fill('3');
+  await recipeSettings.getByRole('spinbutton', { name: 'Wort loss to fermenter (L)' }).fill('3');
   await recipeSettings.getByRole('combobox', { name: 'Type' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Wine' }).click();
   await recipeSettings.getByRole('button', { name: 'Save changes' }).click();
@@ -936,7 +936,7 @@ try {
   await page.getByText('Edited recipe description').waitFor();
   await page.getByRole('button', { name: 'Recipe settings' }).click();
   await page.getByRole('dialog', { name: 'Recipe settings' })
-    .getByRole('spinbutton', { name: 'Wort loss to fermenter (L, optional)' }).inputValue()
+    .getByRole('spinbutton', { name: 'Wort loss to fermenter (L)' }).inputValue()
     .then(value => { if (value !== '3') throw new Error(`Recipe wort loss override was ${value}`); });
   await page.getByRole('dialog', { name: 'Recipe settings' }).locator('.ant-modal-close').click();
   await recipeSettings.waitFor({ state: 'hidden' });
@@ -1066,12 +1066,12 @@ try {
   }
   await page.getByRole('button', { name: 'Add location' }).click();
   const locationsDialog = page.getByRole('dialog', { name: 'New location' });
-  if (await locationsDialog.getByRole('combobox', { name: 'Inside (optional)' }).count()
+  if (await locationsDialog.getByRole('combobox', { name: 'Inside' }).count()
     || await locationsDialog.getByText('A parent is optional.').count()) {
     throw new Error('Empty location list should not show the parent selector or optional-parent note');
   }
   await locationsDialog.getByRole('textbox', { name: 'Name' }).fill('Back room');
-  await locationsDialog.getByRole('textbox', { name: 'Address (optional)' }).fill('123 Brew Street');
+  await locationsDialog.getByRole('textbox', { name: 'Address' }).fill('123 Brew Street');
   await locationsDialog.getByRole('button', { name: 'Add location' }).click();
   await locationsDialog.waitFor({ state: 'hidden' });
   await page.locator('.location-card').filter({ hasText: 'Back room' }).getByText('123 Brew Street').waitFor();
@@ -1106,13 +1106,13 @@ try {
   if (await moveDialog.getByRole('button', { name: 'Create or manage locations' }).count()) {
     throw new Error('Move stock still has a separate location management link');
   }
-  await moveDialog.getByRole('combobox', { name: 'To location (optional)' }).click();
+  await moveDialog.getByRole('combobox', { name: 'To location' }).click();
   await page.locator('.ant-select-tree:visible').getByText('New location…').click();
   const moveLocationDialog = page.getByRole('dialog', { name: 'New location' });
   await moveLocationDialog.getByRole('textbox', { name: 'Name' }).fill('Spare shelf');
   await moveLocationDialog.getByRole('button', { name: 'Add location' }).click();
   await moveLocationDialog.waitFor({ state: 'hidden' });
-  if (!await moveDialog.getByRole('combobox', { name: 'To location (optional)' }).locator('..').getByText('Spare shelf').count()) {
+  if (!await moveDialog.getByRole('combobox', { name: 'To location' }).locator('..').getByText('Spare shelf').count()) {
     throw new Error('New location was not selected for the stock move');
   }
   await moveDialog.getByRole('combobox', { name: 'To location' }).click();
@@ -1141,7 +1141,7 @@ try {
   await itemLocationDialog.getByRole('textbox', { name: 'Name' }).fill('Stock cabinet');
   await itemLocationDialog.getByRole('button', { name: 'Add location' }).click();
   await itemLocationDialog.waitFor({ state: 'hidden' });
-  if (!await shelvedGrain.getByRole('combobox', { name: 'Location (optional)' }).locator('..').getByText('Stock cabinet').count()) {
+  if (!await shelvedGrain.getByRole('combobox', { name: 'Location' }).locator('..').getByText('Stock cabinet').count()) {
     throw new Error('New location was not selected for the inventory item');
   }
   await shelvedGrain.locator('input#location_id').click();
@@ -1178,7 +1178,7 @@ try {
   await page.getByRole('button', { name: 'Add grain' }).click();
   const filteredItemDialog = page.getByRole('dialog', { name: 'New grain item' });
   await filteredItemDialog.waitFor();
-  await filteredItemDialog.getByRole('combobox', { name: 'Location (optional)' }).locator('..')
+  await filteredItemDialog.getByRole('combobox', { name: 'Location' }).locator('..')
     .getByText('Back room', { exact: true }).waitFor();
   await filteredItemDialog.locator('.ant-modal-close').click();
   await filteredItemDialog.waitFor({ state: 'hidden' });
@@ -1203,7 +1203,7 @@ try {
   });
   await choosePlanKind(page, 'Add action', 'Photo');
   const photoPlan = page.getByRole('dialog', { name: 'Add photo' });
-  await photoPlan.getByLabel('Description (optional)').fill('Brew photo');
+  await photoPlan.getByLabel('Description').fill('Brew photo');
   await photoPlan.getByRole('checkbox', { name: 'Record this now' }).check();
   await photoPlan.getByRole('button', { name: 'Add photo' }).click();
   const photoDialog = page.getByRole('dialog', { name: 'Record: Brew photo' });

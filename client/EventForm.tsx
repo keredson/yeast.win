@@ -192,7 +192,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
       <Form.Item name="actual_at" label={chillToTarget ? 'Reached target' : timedControl ? 'Started' : 'When'} rules={[{ required: true }]}><Input type="datetime-local" /></Form.Item>
     </div>
     {timedControl &&
-      <Form.Item name="ended_at" label="Ended (optional)"><Input type="datetime-local" /></Form.Item>}
+      <Form.Item name="ended_at" label="Ended"><Input type="datetime-local" /></Form.Item>}
     {kind === 'measurement' && <>
       <Form.Item name="measurement_kind" label="Measurement" rules={[{ required: true }]}>
         <Select disabled={!!initialEvent} options={measurementKinds.map(item => ({ value: item.value, label: item.label }))}
@@ -257,7 +257,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
           onChange={unit => changeNumberUnit(form, ['container_size'], selectedContainerUnit, unit)} /></Form.Item>
         <Form.Item name="container_count" label="Count" rules={[{ required: true }]}><InputNumber className="full-width" min={1} precision={0} /></Form.Item></div>
     </>}
-    {kind === 'photo' && <Form.Item label={initialEvent ? 'Replace photo (optional)' : 'Photo'} required={!initialEvent}>
+    {kind === 'photo' && <Form.Item label={initialEvent ? 'Replace photo' : 'Photo'} required={!initialEvent}>
       <Input type="file" accept="image/*" onChange={event => setPhoto(event.target.files?.[0] || null)} />
     </Form.Item>}
     <Form.Item name="note" label={kind === 'note' ? 'Notes' : 'Note'} rules={kind === 'note' ? [{ required: true, whitespace: true }] : []}>
