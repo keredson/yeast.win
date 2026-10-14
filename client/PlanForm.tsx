@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Alert, AutoComplete, Button, Checkbox, Form, Input, InputNumber, Select } from 'antd';
+import { Alert, Button, Checkbox, Form, Input, InputNumber, Select } from 'antd';
 import { kindLabel, measurementKinds } from './constants.ts';
 import type { Equipment, InventoryItem, PlanDetails, PlanInput } from './db.ts';
 import { vesselKinds } from '../shared/equipment.ts';
 import { compoundMassUnit, convertUnit, gravityScales, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions } from '../shared/units.ts';
 import { planDuration, supportsDuration, timeUnits } from './planTiming.ts';
-import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
+import { inventoryCategories, unitForCategory } from '../shared/catalog.ts';
 import { QuantityFields } from './QuantityFields.tsx';
 import type { PreferredUnits } from './api.ts';
 import { changeNumberUnit, changeQuantityUnit } from './unitFields.ts';
 import { findCatalogSupply, queryCatalogSupplies } from './catalog.ts';
+import { ProductPicker } from './ProductPicker.tsx';
 
 interface Anchor { id: string; title: string; event_type: string; details?: PlanDetails }
 export interface PlanPreset { phase?: 'mash' | 'boil' | 'chill'; measurementKind?: string; itemCategory?: string; title?: string;
@@ -36,6 +37,7 @@ interface Values {
   title: string; timing_key: string; offset_value?: number;
   offset_unit?: typeof timeUnits[number]['value']; details?: string;
   item_category?: string; quantity?: number; unit?: string; pounds?: number; ounces?: number;
+  inventory_item_id?: string; supply_id?: string; catalog_item_id?: string;
   measurement_kind?: string; target_value?: number; target_unit?: string; gravity_role?: 'og' | 'fg' | '';
   mode?: string; container_name?: string; container_size?: number; container_count?: number;
   to_vessel_id?: string; transfer_equipment_ids?: string[];
@@ -83,18 +85,8 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
   const timedControl = supportsDuration(kind, phase);
   const duration = initialPlan ? planDuration(initialPlan) : preset?.phase === 'boil' ? 3600 : preset?.phase === 'mash' ? 1800 : 0;
   const [itemCategory, setItemCategory] = useState(initialCategory);
-  const [catalogQuery, setCatalogQuery] = useState('');
-  const [catalogCandidates, setCatalogCandidates] = useState<CatalogInventory[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  useEffect(() => {
-    if (kind !== 'addition' || !itemCategory) { setCatalogCandidates([]); return; }
-    let cancelled = false;
-    void queryCatalogSupplies({ category: itemCategory, query: catalogQuery, limit: 80 })
-      .then(rows => { if (!cancelled) setCatalogCandidates(rows); })
-      .catch(cause => { if (!cancelled) setError(String(cause)); });
-    return () => { cancelled = true; };
-  }, [kind, itemCategory, catalogQuery, catalogRevision]);
   useEffect(() => {
     if (!initialDetails.catalog_item_id || initialCategory) return;
     let cancelled = false;
@@ -113,6 +105,11 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
   const selectedOffsetUnit = Form.useWatch('offset_unit', form) as string | undefined;
   const selectedOffsetValue = Form.useWatch('offset_value', form) as number | undefined;
   const selectedDurationUnit = Form.useWatch('duration_unit', form) as string | undefined;
+  const selectedInventoryId = Form.useWatch(recipeMode ? 'supply_id' : 'inventory_item_id', form) as string | undefined;
+  const selectedCatalogId = Form.useWatch('catalog_item_id', form) as string | undefined;
+  const selectedInventory = inventory.find(item => item.id === selectedInventoryId);
+  const productSource = selectedInventory ? recipeMode ? 'Your brewery product' : 'Your inventory'
+    : selectedCatalogId ? 'Catalog product' : undefined;
   const vesselOptions = equipment.filter(item => vesselKinds.has(item.kind)).map(item => ({ value: item.id, label: item.name }));
   const destinationId = initialDetails.to_vessel_id;
   if (typeof destinationId === 'string' && !vesselOptions.some(item => item.value === destinationId)) {
@@ -171,6 +168,19 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
         }
       }
       if (kind === 'packaging' && values.unit) details.container_unit = values.unit;
+      if (kind === 'packaging') {
+        const name = values.container_name?.trim();
+        const unchanged = name === initialDetails.container_name;
+        const owned = inventory.find(item => item.id === (recipeMode ? values.supply_id : values.inventory_item_id));
+        if (owned) {
+          if (recipeMode) details.supply_id = owned.id;
+          else { details.inventory_item_id = owned.id; details.supply_id = owned.supply_id || undefined; }
+        } else if (values.catalog_item_id) details.catalog_item_id = values.catalog_item_id;
+        else if (unchanged) {
+          details.catalog_item_id = initialDetails.catalog_item_id;
+          details.supply_id = initialDetails.supply_id;
+        } else if (name) details.catalog_item_id = (await findCatalogSupply('Packaging', name))?.id || undefined;
+      }
       if (kind === 'measurement' && measurementKind === 'gravity' && values.gravity_role)
         details.gravity_role = values.gravity_role;
       if (kind === 'transfer') {
@@ -192,13 +202,13 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
           details.unit = amount.unit;
           if (values.unit === compoundMassUnit) details.display_unit = compoundMassUnit;
         }
-        const owned = inventory.find(item => item.category === values.item_category && item.name.toLowerCase() === itemName.toLowerCase());
-        const known = itemName ? await findCatalogSupply(values.item_category || '', itemName) : null;
+        const owned = inventory.find(item => item.id === (recipeMode ? values.supply_id : values.inventory_item_id));
+        const known = !owned && itemName ? await findCatalogSupply(values.item_category || '', itemName) : null;
         if (owned) {
           if (recipeMode) details.supply_id = owned.id;
           else { details.inventory_item_id = owned.id; details.supply_id = owned.supply_id || undefined; }
         }
-        else if (known) details.catalog_item_id = known.id;
+        else if (values.catalog_item_id || known) details.catalog_item_id = values.catalog_item_id || known!.id;
       }
       await submit({
         title, event_type: kind,
@@ -228,6 +238,8 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
           : measurementKind === 'volume' ? preferredUnits.volume : measurementKind === 'pressure' ? preferredUnits.pressure
             : measurementKinds.find(item => item.value === measurementKind)?.unit : undefined),
     details: initialDetails.note, item_category: initialCategory,
+    inventory_item_id: initialDetails.inventory_item_id, supply_id: initialDetails.supply_id,
+    catalog_item_id: initialDetails.catalog_item_id,
     quantity: initialUnit === compoundMassUnit ? undefined : initialDetails.quantity,
     pounds: initialSplit?.pounds, ounces: initialSplit?.ounces,
     target_value: initialDetails.target_value ?? (phase === 'mash' ? convertUnit(67, '°C', preferredUnits.temperature)
@@ -239,27 +251,27 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
     equipment_id: initialDetails.equipment_id
   }}>
     {error && <Alert type="error" message={error} className="form-alert" />}
+    <Form.Item name="inventory_item_id" hidden><Input /></Form.Item>
+    <Form.Item name="supply_id" hidden><Input /></Form.Item>
+    <Form.Item name="catalog_item_id" hidden><Input /></Form.Item>
     {kind === 'addition' && <>
       <Form.Item name="item_category" label="Type" rules={[{ required: true }]}><Select options={categoryNames.map(value => ({ value, label: value }))}
         onChange={(value: string) => { setItemCategory(value); form.setFieldsValue({ title: undefined,
+          inventory_item_id: undefined, supply_id: undefined, catalog_item_id: undefined,
           unit: unitForCategory(value, preferredUnits.mass), quantity: undefined, pounds: undefined, ounces: undefined }); }} /></Form.Item>
-      <Form.Item name="title" label="What will be added?">
-        <AutoComplete placeholder="Search inventory or enter an item" maxLength={120} options={[
-          ...inventory.filter((item, index) => item.category === itemCategory &&
-            item.name.toLowerCase().includes(catalogQuery.toLowerCase()) &&
-            inventory.findIndex(other => other.category === item.category && other.name.toLowerCase() === item.name.toLowerCase()) === index)
-            .map(item => ({ value: item.name, label: `${item.name} · Your inventory` })),
-          ...catalogCandidates.filter(item => !inventory.some(owned => owned.category === itemCategory && owned.name.toLowerCase() === item.name.toLowerCase()))
-            .map(item => ({ value: item.name, label: `${item.name} · Shared catalog` }))
-        ]} filterOption={false} onSearch={setCatalogQuery}
-          onSelect={(value: string) => {
-            const owned = inventory.find(item => item.category === itemCategory && item.name === value);
-            const known = catalogCandidates.find(item => item.category === itemCategory && item.name === value);
-            const knownUnit = known?.unit && unitGroups.mass.includes(known.unit as typeof unitGroups.mass[number])
-              ? unitForCategory(itemCategory, preferredUnits.mass) : known?.unit;
-            const nextUnit = owned?.display_unit || knownUnit || unitForCategory(itemCategory, preferredUnits.mass);
+      <Form.Item name="title" label="What will be added?" extra={productSource}>
+        <ProductPicker category={itemCategory} inventory={inventory} catalogRevision={catalogRevision}
+          inventoryLabel={recipeMode ? 'Your brewery' : 'Your inventory'} onError={setError}
+          onEdited={() => form.setFieldsValue({ inventory_item_id: undefined, supply_id: undefined, catalog_item_id: undefined })}
+          onChoose={choice => {
+            const nextUnit = choice.source === 'inventory' ? choice.item.display_unit
+              : unitGroups.mass.includes(choice.item.unit as typeof unitGroups.mass[number])
+                ? unitForCategory(itemCategory, preferredUnits.mass) : choice.item.unit;
             changeQuantityUnit(form, selectedUnit || initialUnit, nextUnit);
-            form.setFieldValue('unit', nextUnit);
+            form.setFieldsValue({ title: choice.item.name, unit: nextUnit,
+              inventory_item_id: !recipeMode && choice.source === 'inventory' ? choice.item.id : undefined,
+              supply_id: recipeMode && choice.source === 'inventory' ? choice.item.id : undefined,
+              catalog_item_id: choice.source === 'catalog' ? choice.item.id : undefined });
           }} />
       </Form.Item>
       <Form.Item name="unit" label="Unit"><Select showSearch options={unitOptions(quantityUnitsForCategory(itemCategory))}
@@ -321,7 +333,15 @@ export function PlanForm({ anchors, eventType, initialPlan, equipment, inventory
         <Form.Item name="unit" label="Unit"><Select options={unitOptions(unitGroups.volume)} onChange={changeMainUnit} /></Form.Item></div>
     </>}
     {kind === 'packaging' && <>
-      <Form.Item name="container_name" label="Container"><Input placeholder="Bottle, keg…" /></Form.Item>
+      <Form.Item name="container_name" label="Container" extra={productSource}>
+        <ProductPicker category="Packaging" inventory={inventory} catalogRevision={catalogRevision}
+          inventoryLabel={recipeMode ? 'Your brewery' : 'Your inventory'} onError={setError}
+          onEdited={() => form.setFieldsValue({ inventory_item_id: undefined, supply_id: undefined, catalog_item_id: undefined })}
+          onChoose={choice => form.setFieldsValue({ container_name: choice.item.name,
+            inventory_item_id: !recipeMode && choice.source === 'inventory' ? choice.item.id : undefined,
+            supply_id: recipeMode && choice.source === 'inventory' ? choice.item.id : undefined,
+            catalog_item_id: choice.source === 'catalog' ? choice.item.id : undefined })} />
+      </Form.Item>
       <div className="form-triple"><Form.Item name="container_size" label="Container size"><InputNumber className="full-width" min={0} step="any" /></Form.Item>
         <Form.Item name="unit" label="Unit"><Select options={unitOptions(unitGroups.volume)} onChange={changeMainUnit} /></Form.Item>
         <Form.Item name="container_count" label="Count"><InputNumber className="full-width" min={1} precision={0} /></Form.Item></div>

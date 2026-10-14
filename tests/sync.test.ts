@@ -20,6 +20,42 @@ const selectChanges = `SELECT "table", pk, cid, val, col_version, db_version,
   WHERE db_version > ? ORDER BY db_version, seq`;
 const insertChange = `INSERT INTO crsql_changes (${changeColumns.map(name => `"${name}"`).join(',')}) VALUES (${changeColumns.map(() => '?').join(',')})`;
 
+test('version 38 packaging links upgrade without losing containers or unrelated rows', () => {
+  for (const partial of [false, true]) {
+    const id = nanoid();
+    const db = openWorkspaceDb(id);
+    db.prepare("INSERT INTO recipes(id, name, created_at, updated_at) VALUES ('recipe', 'Old recipe', 1, 1)").run();
+    db.prepare("INSERT INTO batches(id, name, status, created_at, updated_at) VALUES ('batch', 'Old batch', 'active', 1, 1)").run();
+    db.prepare("INSERT INTO recipe_events(id, recipe_id, event_type, title, sort_order) VALUES ('recipe-package', 'recipe', 'packaging', 'Package', 1)").run();
+    db.prepare("INSERT INTO batch_events(id, batch_id, event_type, title, created_at) VALUES ('batch-package', 'batch', 'packaging', 'Package', 1)").run();
+    db.prepare("INSERT INTO recipe_packaging(event_id, container_name, container_size, container_count, container_unit) VALUES ('recipe-package', 'Bottle', 12, 24, 'US fl oz')").run();
+    db.prepare("INSERT INTO packaging(event_id, container_name, container_size, container_count, container_unit, inventory_item_id) VALUES ('batch-package', 'Bottle', 12, 24, 'US fl oz', 'stock')").run();
+    for (const table of ['recipe_packaging', 'packaging']) {
+      db.prepare('SELECT crsql_as_table(?)').get(table);
+      db.exec(`ALTER TABLE ${table} DROP COLUMN supply_id`);
+      if (!partial) db.exec(`ALTER TABLE ${table} DROP COLUMN catalog_item_id`);
+      db.prepare('SELECT crsql_as_crr(?)').get(table);
+    }
+    if (partial) db.prepare("UPDATE packaging SET catalog_item_id = 'catalog-bottle' WHERE event_id = 'batch-package'").run();
+    db.pragma('user_version = 38');
+    closeWorkspaceDb(db);
+
+    const upgraded = openWorkspaceDb(id);
+    try {
+      assert.equal(upgraded.pragma('user_version', { simple: true }), workspaceSchemaVersion);
+      assert.deepEqual(upgraded.prepare('SELECT container_name, container_size, container_count, container_unit, catalog_item_id, supply_id FROM recipe_packaging WHERE event_id = ?').get('recipe-package'),
+        { container_name: 'Bottle', container_size: 12, container_count: 24, container_unit: 'US fl oz', catalog_item_id: null, supply_id: null });
+      assert.deepEqual(upgraded.prepare('SELECT container_name, container_size, container_count, container_unit, inventory_item_id, catalog_item_id, supply_id FROM packaging WHERE event_id = ?').get('batch-package'),
+        { container_name: 'Bottle', container_size: 12, container_count: 24, container_unit: 'US fl oz', inventory_item_id: 'stock',
+          catalog_item_id: partial ? 'catalog-bottle' : null, supply_id: null });
+      upgraded.prepare("INSERT INTO packaging(event_id, container_name, catalog_item_id) VALUES ('pending-package', '12 oz bottle', 'catalog-bottle')").run();
+      assert.deepEqual(upgraded.prepare('SELECT container_name, container_size, catalog_item_id FROM packaging WHERE event_id = ?').get('pending-package'),
+        { container_name: '12 oz bottle', container_size: null, catalog_item_id: 'catalog-bottle' });
+      assert.equal((upgraded.prepare("SELECT name FROM batches WHERE id = 'batch'").get() as { name: string }).name, 'Old batch');
+    } finally { closeWorkspaceDb(upgraded); }
+  }
+});
+
 test('version 37 assigns legacy gravity roles and preserves partial assignments and unrelated rows', () => {
   for (const partial of [false, true]) {
     const workspaceId = nanoid();

@@ -305,7 +305,7 @@ function PreviousBatchFields({ db, batchId, equipment, inventory }: {
   const equipmentIds = [...new Set(events.flatMap(event =>
     [event.details.equipment_id, event.details.mash_equipment_id, event.details.to_vessel_id]
       .filter((id): id is string => typeof id === 'string' && !!id)))];
-  const ingredients = [...new Map(events.filter(event => event.event_type === 'addition'
+  const products = [...new Map(events.filter(event => (event.event_type === 'addition' || event.event_type === 'packaging')
     && (event.actual_at != null || event.skipped_at == null))
     .map(event => [event.details.inventory_item_id || event.details.supply_id, event.details] as const)
     .filter(([key]) => !!key)).values()];
@@ -322,13 +322,13 @@ function PreviousBatchFields({ db, batchId, equipment, inventory }: {
         }))]} />
       </Form.Item>;
     })}
-    {ingredients.map(details => {
+    {products.map(details => {
       const key = details.inventory_item_id || details.supply_id!;
       const choices = details.supply_id ? inventory.filter(item => item.supply_id === details.supply_id)
         : inventory.filter(item => item.id === details.inventory_item_id);
       return <Form.Item key={key} name={['stock_ids', key]}
         initialValue={choices.length === 1 ? choices[0].id : 'unlinked'}
-        label={`Stock for ${details.item_name || choices[0]?.name || 'ingredient'}`}>
+        label={`Stock for ${details.item_name || details.container_name || choices[0]?.name || 'item'}`}>
         <Select options={[{ value: 'unlinked', label: 'Choose later' }, ...choices.map(item => ({
           value: item.id, label: item.lot_code ? `${item.name} · Lot ${item.lot_code}` : item.name
         }))]} />

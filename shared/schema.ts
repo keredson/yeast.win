@@ -14,7 +14,7 @@ const definitions: Record<string, string> = {
   recipe_gravity_roles: `id TEXT PRIMARY KEY NOT NULL, recipe_id TEXT NOT NULL, role TEXT NOT NULL, event_id TEXT NOT NULL`,
   recipe_transfers: `event_id TEXT PRIMARY KEY NOT NULL, purpose TEXT, mash_equipment_id TEXT, to_vessel_id TEXT, to_vessel_name TEXT, quantity REAL, unit TEXT`,
   recipe_transfer_equipment: `id TEXT PRIMARY KEY NOT NULL, event_id TEXT NOT NULL, equipment_id TEXT NOT NULL`,
-  recipe_packaging: `event_id TEXT PRIMARY KEY NOT NULL, container_name TEXT, container_size REAL, container_count INTEGER, container_unit TEXT`,
+  recipe_packaging: `event_id TEXT PRIMARY KEY NOT NULL, container_name TEXT, container_size REAL, container_count INTEGER, container_unit TEXT, catalog_item_id TEXT, supply_id TEXT`,
   recipe_import_sources: `id TEXT PRIMARY KEY NOT NULL, filename TEXT NOT NULL, format TEXT NOT NULL, sha256 TEXT NOT NULL, byte_count INTEGER NOT NULL, content BLOB NOT NULL, imported_at INTEGER NOT NULL`,
   recipe_import_links: `id TEXT PRIMARY KEY NOT NULL, source_id TEXT NOT NULL, source_index INTEGER NOT NULL, external_id TEXT`,
   recipe_inputs: `id TEXT PRIMARY KEY NOT NULL, target_fermenter_volume_liters REAL, brewhouse_efficiency_pct REAL, wort_loss_liters REAL, batch_size_source TEXT`,
@@ -37,7 +37,7 @@ const definitions: Record<string, string> = {
   pressure_control_events: `event_id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL, target_value REAL NOT NULL, target_unit TEXT NOT NULL`,
   transfers: `event_id TEXT PRIMARY KEY NOT NULL, purpose TEXT, mash_equipment_id TEXT, from_vessel_id TEXT, to_vessel_id TEXT, to_vessel_name TEXT, quantity REAL, unit TEXT`,
   transfer_equipment: `id TEXT PRIMARY KEY NOT NULL, event_id TEXT NOT NULL, equipment_id TEXT NOT NULL`,
-  packaging: `event_id TEXT PRIMARY KEY NOT NULL, container_name TEXT NOT NULL, container_size REAL NOT NULL, container_unit TEXT NOT NULL, container_count INTEGER NOT NULL, inventory_item_id TEXT`,
+  packaging: `event_id TEXT PRIMARY KEY NOT NULL, container_name TEXT, container_size REAL, container_unit TEXT, container_count INTEGER, inventory_item_id TEXT, catalog_item_id TEXT, supply_id TEXT`,
   equipment_models: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL,
     catalog_model_id TEXT, has_liquid_containment INTEGER, capacity_liters REAL,
     has_pressure_rating INTEGER, max_pressure_kpa REAL, has_heating INTEGER, rated_power_watts REAL,
@@ -341,7 +341,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 38;
+export const workspaceSchemaVersion = 39;
 // Earlier builds identified OG and FG by title. Assign the matching gravity
 // steps once during upgrade so titles can subsequently change without changing
 // the meaning of a measurement. Existing explicit assignments always win.

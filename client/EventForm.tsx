@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react';
-import { Alert, AutoComplete, Button, Form, Input, InputNumber, Select } from 'antd';
+import { useState } from 'react';
+import { Alert, Button, Form, Input, InputNumber, Select } from 'antd';
 import { kindLabel, measurementKinds, planKinds } from './constants.ts';
 import { fromDatetimeLocal, toDatetimeLocal } from './time.ts';
 import { addPhoto, recordEvent, skipBatchEvent, updateEvent, updatePhotoEvent, type ActualEvent, type Equipment, type EventInput, type InventoryItem, type LocalDb, type MeasurementKind, type Plan, type PlanDetails } from './db.ts';
 import type { PreferredUnits } from './api.ts';
 import { compoundMassUnit, gravityScales, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions } from '../shared/units.ts';
 import { supportsDuration, timeUnits } from './planTiming.ts';
-import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
-import { findCatalogSupply, queryCatalogSupplies } from './catalog.ts';
+import { inventoryCategories, unitForCategory } from '../shared/catalog.ts';
+import { findCatalogSupply } from './catalog.ts';
+import { ProductPicker } from './ProductPicker.tsx';
 import { QuantityFields } from './QuantityFields.tsx';
 import { changeNumberUnit, changeQuantityUnit } from './unitFields.ts';
 import { vesselKinds } from '../shared/equipment.ts';
@@ -72,8 +73,6 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, catalo
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [photo, setPhoto] = useState<File | null>(null);
-  const [productQuery, setProductQuery] = useState('');
-  const [catalogProducts, setCatalogProducts] = useState<CatalogInventory[]>([]);
   const initialQuantity = typeof initialData?.payload.quantity === 'number' ? initialData.payload.quantity : plannedNumber('quantity');
   const storedUnit = String(initialData?.payload.unit || plannedString('unit') || (kind === 'measurement'
     ? measurementUnit(initialMeasurement || 'temperature', preferredUnits) : eventUnit(kind, preferredUnits)) || '');
@@ -84,14 +83,6 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, catalo
   const initialCategory = plannedString('item_category')
     || inventory.find(item => item.id === (initialData?.payload.inventory_item_id || plannedString('inventory_item_id')))?.category || 'Other';
   const selectedCategory = Form.useWatch('item_category', form) as string | undefined;
-  useEffect(() => {
-    if (kind !== 'addition') return;
-    let cancelled = false;
-    void queryCatalogSupplies({ category: selectedCategory || initialCategory, query: productQuery, limit: 80 })
-      .then(rows => { if (!cancelled) setCatalogProducts(rows); })
-      .catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
-    return () => { cancelled = true; };
-  }, [kind, selectedCategory, initialCategory, productQuery, catalogRevision]);
   const selectedUnit = Form.useWatch('unit', form) as string | undefined;
   const selectedTargetUnit = Form.useWatch('target_unit', form) as string | undefined;
   const selectedContainerUnit = Form.useWatch('container_unit', form) as string | undefined;
@@ -99,7 +90,6 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, catalo
   const selectedInventoryId = Form.useWatch('inventory_item_id', form) as string | undefined;
   const selectedCatalogId = Form.useWatch('catalog_item_id', form) as string | undefined;
   const selectedStock = inventory.find(item => item.id === selectedInventoryId);
-  const selectedProduct = catalogProducts.find(item => item.id === selectedCatalogId);
   const genericPitch = initialPlan?.title === 'Pitch yeast' && kind === 'addition';
   const quantityOptional = kind === 'addition' && (selectedCategory || initialCategory) === 'Yeast' && !selectedInventoryId;
   const vesselOptions = equipment.filter(item => vesselKinds.has(item.kind)).map(item => ({ value: item.id, label: item.name }));
@@ -189,9 +179,15 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, catalo
         if (!values.container_name || values.container_size == null || !values.container_unit || values.container_count == null) {
           throw new Error('Enter container, size, unit, and count');
         }
+        const stock = inventory.find(item => item.id === values.inventory_item_id);
+        const unchanged = values.container_name === plannedString('container_name');
+        const catalogId = stock ? null : values.catalog_item_id || (unchanged ? plannedString('catalog_item_id') : null)
+          || (await findCatalogSupply('Packaging', values.container_name))?.id || null;
         payload = { container_name: values.container_name, container_size: values.container_size,
           container_unit: values.container_unit, container_count: values.container_count,
-          inventory_item_id: values.inventory_item_id || null };
+          inventory_item_id: values.inventory_item_id || null, catalog_item_id: catalogId,
+          supply_id: stock ? stock.supply_id || null : unchanged && (!values.catalog_item_id
+            || values.catalog_item_id === plannedString('catalog_item_id')) ? plannedString('supply_id') || null : null };
       }
       input.payload = payload;
       if (initialEvent) await updateEvent(db, initialEvent, input);
@@ -276,44 +272,32 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, catalo
       <Form.Item name="equipment_id" label="Instrument"><Select allowClear placeholder="Choose equipment"
         options={equipment.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
     </>}
+    <Form.Item name="inventory_item_id" hidden><Input /></Form.Item>
+    <Form.Item name="catalog_item_id" hidden><Input /></Form.Item>
     {kind === 'addition' && <>
       <>
         <Form.Item name="item_category" label="Type"><Select options={[...new Set([...inventoryCategories,
           ...inventory.map(row => row.category), ...(initialCategory ? [initialCategory] : [])])].map(value => ({ value, label: value }))}
-          onChange={value => { setProductQuery(''); form.setFieldsValue({ inventory_item_id: undefined, catalog_item_id: undefined,
+          onChange={value => { form.setFieldsValue({ inventory_item_id: undefined, catalog_item_id: undefined,
             item_name: undefined, unit: unitForCategory(value, preferredUnits.mass),
             quantity: undefined, pounds: undefined, ounces: undefined }); }} /></Form.Item>
-        <Form.Item name="inventory_item_id" hidden><Input /></Form.Item>
-        <Form.Item name="catalog_item_id" hidden><Input /></Form.Item>
         <Form.Item name="item_name" label="What was added?" rules={genericPitch ? [] : [{ required: true }]}
           extra={selectedStock ? ['From inventory', selectedStock.lot_code && `Lot ${selectedStock.lot_code}`,
             selectedStock.location_name].filter(Boolean).join(' · ')
-            : selectedCatalogId ? ['Catalog product', selectedProduct?.manufacturer].filter(Boolean).join(' · ') : undefined}>
-          <AutoComplete placeholder="Search your inventory or the catalog, or enter a name" maxLength={120}
-            options={[
-              ...inventory.filter(item => item.category === (selectedCategory || initialCategory)
-                && item.name.toLowerCase().includes(productQuery.toLowerCase()))
-                .map(item => ({ value: `stock:${item.id}`, label: [item.name, item.lot_code && `Lot ${item.lot_code}`,
-                  item.location_name, 'Your inventory'].filter(Boolean).join(' · ') })),
-              ...catalogProducts.map(item => ({ value: `catalog:${item.id}`,
-                label: [item.name, item.manufacturer, 'Catalog'].filter(Boolean).join(' · ') }))
-            ]}
-            filterOption={false} onSearch={setProductQuery}
-            onChange={() => form.setFieldsValue({ inventory_item_id: undefined, catalog_item_id: undefined })}
-            onSelect={value => {
-              if (value.startsWith('stock:')) {
-                const item = inventory.find(row => row.id === value.slice(6));
-                if (!item) return;
-                changeQuantityUnit(form, selectedUnit || initialUnit, item.display_unit);
-                form.setFieldsValue({ item_name: item.name, inventory_item_id: item.id,
-                  catalog_item_id: undefined, unit: item.display_unit });
-              } else if (value.startsWith('catalog:')) {
-                const item = catalogProducts.find(row => row.id === value.slice(8));
-                if (!item) return;
-                const nextUnit = unitGroups.mass.includes(item.unit as typeof unitGroups.mass[number])
-                  ? unitForCategory(item.category, preferredUnits.mass) : item.unit;
+            : selectedCatalogId ? 'Catalog product' : undefined}>
+          <ProductPicker category={selectedCategory || initialCategory} inventory={inventory}
+            catalogRevision={catalogRevision} onError={setError}
+            onEdited={() => form.setFieldsValue({ inventory_item_id: undefined, catalog_item_id: undefined })}
+            onChoose={choice => {
+              if (choice.source === 'inventory') {
+                changeQuantityUnit(form, selectedUnit || initialUnit, choice.item.display_unit);
+                form.setFieldsValue({ item_name: choice.item.name, inventory_item_id: choice.item.id,
+                  catalog_item_id: undefined, unit: choice.item.display_unit });
+              } else {
+                const nextUnit = unitGroups.mass.includes(choice.item.unit as typeof unitGroups.mass[number])
+                  ? unitForCategory(choice.item.category, preferredUnits.mass) : choice.item.unit;
                 changeQuantityUnit(form, selectedUnit || initialUnit, nextUnit);
-                form.setFieldsValue({ item_name: item.name, catalog_item_id: item.id,
+                form.setFieldsValue({ item_name: choice.item.name, catalog_item_id: choice.item.id,
                   inventory_item_id: undefined, unit: nextUnit });
               }
             }} />
@@ -344,8 +328,16 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, catalo
         <Form.Item name="unit" label="Unit"><Select options={unitOptions(unitGroups.volume)} onChange={changeMainUnit} /></Form.Item></div>
     </>}
     {kind === 'packaging' && <>
-      <Form.Item name="inventory_item_id" label="Container inventory item"><Select allowClear options={inventory.map(item => ({ value: item.id, label: item.name }))} /></Form.Item>
-      <Form.Item name="container_name" label="Container" rules={[{ required: true }]}><Input placeholder="Bottle, keg…" /></Form.Item>
+      <Form.Item name="container_name" label="Container" rules={[{ required: true }]}
+        extra={selectedStock ? ['From inventory', selectedStock.lot_code && `Lot ${selectedStock.lot_code}`,
+          selectedStock.location_name].filter(Boolean).join(' · ')
+          : selectedCatalogId ? 'Catalog product' : undefined}>
+        <ProductPicker category="Packaging" inventory={inventory} catalogRevision={catalogRevision} onError={setError}
+          onEdited={() => form.setFieldsValue({ inventory_item_id: undefined, catalog_item_id: undefined })}
+          onChoose={choice => form.setFieldsValue({ container_name: choice.item.name,
+            inventory_item_id: choice.source === 'inventory' ? choice.item.id : undefined,
+            catalog_item_id: choice.source === 'catalog' ? choice.item.id : undefined })} />
+      </Form.Item>
       <div className="form-triple"><Form.Item name="container_size" label="Size" rules={[{ required: true }]}><InputNumber className="full-width" step="any" /></Form.Item>
         <Form.Item name="container_unit" label="Unit" rules={[{ required: true }]}><Select options={unitOptions(unitGroups.volume)}
           onChange={unit => changeNumberUnit(form, ['container_size'], selectedContainerUnit, unit)} /></Form.Item>

@@ -699,7 +699,7 @@ const planPayloads = {
     pressure_control: ['recipe_pressure_control_events', ['target_value', 'target_unit', 'equipment_id']],
     measurement: ['recipe_measurement_targets', ['measurement_kind', 'target_value', 'target_unit']],
     transfer: ['recipe_transfers', ['purpose', 'mash_equipment_id', 'to_vessel_id', 'to_vessel_name', 'quantity', 'unit']],
-    packaging: ['recipe_packaging', ['container_name', 'container_size', 'container_count', 'container_unit']]
+    packaging: ['recipe_packaging', ['container_name', 'container_size', 'container_count', 'container_unit', 'catalog_item_id', 'supply_id']]
   },
   batch: {
     addition: ['additions', ['item_category', 'item_name', 'catalog_item_id', 'inventory_item_id', 'supply_id', 'quantity', 'unit', 'display_unit']],
@@ -707,7 +707,7 @@ const planPayloads = {
     pressure_control: ['pressure_control_events', ['target_value', 'target_unit', 'equipment_id']],
     measurement: ['batch_measurement_targets', ['measurement_kind', 'target_value', 'target_unit']],
     transfer: ['transfers', ['purpose', 'mash_equipment_id', 'to_vessel_id', 'to_vessel_name', 'quantity', 'unit']],
-    packaging: ['packaging', ['container_name', 'container_size', 'container_count', 'container_unit']],
+    packaging: ['packaging', ['container_name', 'container_size', 'container_count', 'container_unit', 'inventory_item_id', 'catalog_item_id', 'supply_id']],
     equipment_use: ['equipment_use_events', ['equipment_id']]
   }
 } as const;
@@ -730,13 +730,6 @@ async function writePlanPayload(db: Pick<DB, 'exec'>, scope: PlanScope, id: stri
   }
   if (!payload) return;
   const [table, columns] = payload;
-  // A package reminder may exist before its container details are chosen.
-  if (scope === 'batch' && eventType === 'packaging' &&
-    ['container_name', 'container_size', 'container_unit', 'container_count']
-      .some(column => details[column as keyof PlanDetails] == null)) {
-    await db.exec('DELETE FROM packaging WHERE event_id = ?', [id]);
-    return;
-  }
   const values = columns.map(column => {
     const value = details[column as keyof PlanDetails];
     return typeof value === 'string' || typeof value === 'number' ? value : null;
@@ -1284,7 +1277,8 @@ export async function startBatchFromPrevious(db: DB, sourceBatchId: string, name
     await tx.exec('INSERT OR IGNORE INTO batch_recipe_inputs(id) VALUES (?)', [batchId]);
     for (const plan of plans) {
       const details: PlanDetails = { ...plan.details,
-        inventory_item_id: plan.event_type === 'addition' ? mapStock(plan.details) : undefined,
+        inventory_item_id: plan.event_type === 'addition' || plan.event_type === 'packaging'
+          ? mapStock(plan.details) : undefined,
         equipment_id: mapEquipment(plan.details.equipment_id),
         mash_equipment_id: mapEquipment(plan.details.mash_equipment_id),
         to_vessel_id: mapEquipment(plan.details.to_vessel_id),
@@ -2483,7 +2477,11 @@ export async function listInventoryMovements(db: DB, itemId: string): Promise<In
     UNION ALL SELECT id, 'Moved out' AS kind, quantity, unit, moved_at AS at FROM inventory_moves WHERE from_item_id = ?
     UNION ALL SELECT a.event_id AS id, 'Used' AS kind, a.quantity, a.unit, e.actual_at AS at
       FROM additions a JOIN batch_events e ON e.id = a.event_id WHERE a.inventory_item_id = ? AND e.actual_at IS NOT NULL
-    ORDER BY at DESC, id DESC`, [itemId, itemId, itemId, itemId, itemId, itemId]);
+    UNION ALL SELECT p.event_id AS id, 'Used' AS kind, p.container_count AS quantity, i.default_unit AS unit, e.actual_at AS at
+      FROM packaging p JOIN batch_events e ON e.id = p.event_id
+      JOIN inventory_items i ON i.id = p.inventory_item_id
+      WHERE p.inventory_item_id = ? AND e.actual_at IS NOT NULL
+    ORDER BY at DESC, id DESC`, [itemId, itemId, itemId, itemId, itemId, itemId, itemId]);
 }
 
 export async function listInventoryBalances(db: DB, items: InventoryItem[]): Promise<Record<string, number | null>> {
@@ -2496,6 +2494,10 @@ export async function listInventoryBalances(db: DB, items: InventoryItem[]): Pro
     UNION ALL SELECT id, from_item_id AS inventory_item_id, 'Moved out' AS kind, quantity, unit, moved_at AS at FROM inventory_moves
     UNION ALL SELECT a.event_id AS id, a.inventory_item_id, 'Used' AS kind, a.quantity, a.unit, e.actual_at AS at
       FROM additions a JOIN batch_events e ON e.id = a.event_id WHERE a.inventory_item_id IS NOT NULL AND e.actual_at IS NOT NULL
+    UNION ALL SELECT p.event_id AS id, p.inventory_item_id, 'Used' AS kind, p.container_count AS quantity,
+      i.default_unit AS unit, e.actual_at AS at FROM packaging p JOIN batch_events e ON e.id = p.event_id
+      JOIN inventory_items i ON i.id = p.inventory_item_id
+      WHERE p.inventory_item_id IS NOT NULL AND e.actual_at IS NOT NULL
     ORDER BY inventory_item_id, at DESC, id DESC`);
   const byItem = new Map<string, InventoryMovement[]>();
   for (const row of rows) {
@@ -2582,8 +2584,10 @@ export async function moveInventoryStock(db: DB, source: InventoryItem, destinat
     UNION ALL SELECT discarded_at FROM inventory_discards WHERE inventory_item_id IN (?, ?)
     UNION ALL SELECT moved_at FROM inventory_moves WHERE from_item_id IN (?, ?) OR to_item_id IN (?, ?)
     UNION ALL SELECT e.actual_at FROM additions a JOIN batch_events e ON e.id = a.event_id
-      WHERE a.inventory_item_id IN (?, ?) AND e.actual_at IS NOT NULL)`,
-  [source.id, target.id, source.id, target.id, source.id, target.id, source.id, target.id, source.id, target.id, source.id, target.id]);
+      WHERE a.inventory_item_id IN (?, ?) AND e.actual_at IS NOT NULL
+    UNION ALL SELECT e.actual_at FROM packaging p JOIN batch_events e ON e.id = p.event_id
+      WHERE p.inventory_item_id IN (?, ?) AND e.actual_at IS NOT NULL)`,
+  [source.id, target.id, source.id, target.id, source.id, target.id, source.id, target.id, source.id, target.id, source.id, target.id, source.id, target.id]);
   await db.tx(async tx => {
     if (!(await tx.execO('SELECT id FROM inventory_items WHERE id = ?', [target.id])).length) {
       await tx.exec(`INSERT INTO inventory_items(id, name, category, default_unit, supply_id, lot_id, created_at)
@@ -2610,7 +2614,9 @@ export async function addInventoryEntry(db: DB, itemId: string, kind: 'purchase'
     UNION ALL SELECT discarded_at AS at FROM inventory_discards WHERE inventory_item_id = ?
     UNION ALL SELECT moved_at AS at FROM inventory_moves WHERE from_item_id = ? OR to_item_id = ?
     UNION ALL SELECT e.actual_at AS at FROM additions a JOIN batch_events e ON e.id = a.event_id
-      WHERE a.inventory_item_id = ? AND e.actual_at IS NOT NULL)`, [itemId, itemId, itemId, itemId, itemId, itemId]);
+      WHERE a.inventory_item_id = ? AND e.actual_at IS NOT NULL
+    UNION ALL SELECT e.actual_at AS at FROM packaging p JOIN batch_events e ON e.id = p.event_id
+      WHERE p.inventory_item_id = ? AND e.actual_at IS NOT NULL)`, [itemId, itemId, itemId, itemId, itemId, itemId, itemId]);
   const now = Math.max(nowSeconds(), (latest[0]?.at ?? 0) + 1);
   if (kind === 'purchase') {
     await db.exec('INSERT INTO inventory_purchases(id, inventory_item_id, quantity, unit, purchased_at) VALUES (?, ?, ?, ?, ?)',
