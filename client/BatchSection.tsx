@@ -29,8 +29,8 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   const [events, setEvents] = useState<ActualEvent[]>([]);
   const [details, setDetails] = useState<Record<string, string>>({});
   const [photos, setPhotos] = useState<{ id: string; url: string; batch_event_id: string | null; created_at: number }[]>([]);
-  const [estimate, setEstimate] = useState<RecipeEstimate | null>(null);
-  const [estimateType, setEstimateType] = useState<RecipeType>('beer');
+  const [calculation, setCalculation] = useState<{ batchId: string; estimate: RecipeEstimate;
+    recipeType: RecipeType } | null>(null);
   const [batchSizeOpen, setBatchSizeOpen] = useState(false);
   const [batchSizeBusy, setBatchSizeBusy] = useState(false);
   const [batchSizeError, setBatchSizeError] = useState('');
@@ -69,9 +69,8 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   useEffect(() => { void refreshDetail(); }, [db, selectedId, batches]);
   useEffect(() => () => { for (const photo of photos) URL.revokeObjectURL(photo.url); }, [photos]);
   useEffect(() => {
-    if (!selectedId) { setEstimate(null); return; }
+    if (!selectedId) return;
     let cancelled = false;
-    setEstimate(null);
     void (async () => {
       const supplyIds = [...new Set(events.map(event => event.details.supply_id).filter((id): id is string => !!id))];
       const [batchRows, eventRows, typeRows, breweryEfficiency, supplies, gravityRows, defaultBatchSize] = await Promise.all([
@@ -108,10 +107,10 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
           batch_size_source: defaultBatchSize == null ? 'assumed_app' : 'assumed_brewery' };
       const catalogInventory = await queryCatalogSupplies({ ids: referencedCatalogSupplyIds(events, [...inventory, ...supplies]) });
       if (!cancelled) {
-        setEstimateType(recipeType);
-        setEstimate(calculateRecipe(events.filter(event => event.skipped_at == null), [...inventory, ...supplies], equipment, batchInputs,
-          Object.fromEntries(eventRows.map(row => [row.id, row])), recent, recipeType, breweryEfficiency, 'batch',
-          catalogInventory, batchGravityReadings(gravityRows)));
+        setCalculation({ batchId: selectedId, recipeType,
+          estimate: calculateRecipe(events.filter(event => event.skipped_at == null), [...inventory, ...supplies], equipment,
+            batchInputs, Object.fromEntries(eventRows.map(row => [row.id, row])), recent, recipeType,
+            breweryEfficiency, 'batch', catalogInventory, batchGravityReadings(gravityRows)) });
       }
     })().catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => { cancelled = true; };
@@ -214,8 +213,8 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
           : 'a previous batch'}</p>}
         </div><div className="heading-actions"><Button type="text" shape="circle" icon={<SettingOutlined />}
           aria-label="Batch settings" title="Batch settings" onClick={() => void openBatchSize()} /></div></div>
-      {estimate && <CalculationsCard estimate={estimate} volumeUnit={preferredUnits.volume}
-        showColor={estimateType === 'beer'} label="Batch details" />}
+      {calculation?.batchId === selectedId && <CalculationsCard estimate={calculation.estimate}
+        volumeUnit={preferredUnits.volume} showColor={calculation.recipeType === 'beer'} label="Batch details" />}
       <EventTimeline events={events} batchStartAt={batch.created_at} equipment={equipment} details={details} photos={photos}
         onEdit={event => event.actual_at != null ? void recordOrEdit(event as ActualEvent) : setEditingPlan(event as ActualEvent)}
         onRecord={event => void recordOrEdit(event)}
