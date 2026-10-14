@@ -19,7 +19,18 @@ try {
   await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Inventory' }).first().click();
   await page.getByRole('heading', { name: 'Inventory', exact: true }).waitFor();
 
-  await page.getByRole('button', { name: 'Add from catalog' }).click();
+  if (await page.getByRole('button', { name: 'Add from catalog' }).count()) {
+    throw new Error('Inventory index still has a top-level catalog button');
+  }
+  await page.locator('.inventory-add-types').getByRole('link', { name: 'other' }).click();
+  const other = page.getByRole('dialog', { name: 'Specify product' });
+  await other.getByRole('combobox', { name: 'Category' }).fill('Spices');
+  await other.getByRole('combobox', { name: 'Product name' }).fill('Smoke spice');
+  await other.getByRole('button', { name: 'Save product' }).click();
+  await other.waitFor({ state: 'hidden' });
+  await page.getByRole('heading', { name: 'Spices' }).waitFor();
+
+  await page.locator('.inventory-add-types').getByRole('link', { name: 'nutrient' }).click();
   const explorer = page.getByRole('dialog', { name: 'Add from catalog' });
   await explorer.getByRole('searchbox', { name: 'Search inventory products' }).fill('Fermaid');
   for (const name of ['Fermaid O', 'Fermaid K', 'Fermaid A', 'Fermaid Performens M']) {
@@ -59,6 +70,9 @@ try {
   await form.getByRole('button', { name: 'Create item' }).click();
   await form.waitFor({ state: 'hidden' });
   await page.getByRole('link', { name: 'Briess Caramel Malt 60L' }).waitFor();
+  await page.locator('.inventory-table').getByRole('row')
+    .filter({ has: page.getByRole('link', { name: 'Briess Caramel Malt 60L' }) })
+    .locator('img.inventory-table-thumbnail').waitFor();
   await page.locator('.inventory-add-types').getByRole('link', { name: 'grain' }).click();
   const grainExplorer = page.getByRole('dialog', { name: 'Add from catalog' });
   await grainExplorer.getByRole('button', { name: 'Specify grain not in catalog' }).click();

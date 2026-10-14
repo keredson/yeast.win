@@ -864,7 +864,8 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           <div className="equipment-parameter"><span>Location: {inventoryLocationPath(item.location_id || null, locations) || 'Not set'}</span>
             <Button type="text" size="small" icon={<EditOutlined />}
               aria-label="Edit equipment location" onClick={() => setEditLocation(true)} /></div>
-          {item.has_liquid_containment && <div className="equipment-parameter">Capacity: {capacityLabel(specs.capacity_liters ?? undefined) || 'Not set'}</div>}
+          {item.has_liquid_containment && (!itemModel || specs.capacity_liters !== itemModel.capacity_liters)
+            && <div className="equipment-parameter">Capacity: {capacityLabel(specs.capacity_liters ?? undefined) || 'Not set'}</div>}
           {item.has_pressure_rating && <div className="equipment-parameter">
             Pressure rating: {pressureLabel(specs.max_pressure_kpa, preferredUnits.pressure)}</div>}
           {item.has_heating && <div className="equipment-parameter">Rated power: {specs.rated_power_watts != null

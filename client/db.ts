@@ -2153,6 +2153,11 @@ export async function readSupplyMedia(db: DB, supplyId: string): Promise<SupplyM
     [supplyId]))[0] || null;
 }
 
+export async function listSupplyImages(db: DB): Promise<Pick<SupplyMedia, 'id' | 'image_bytes' | 'image_mime_type'>[]> {
+  return db.execO<Pick<SupplyMedia, 'id' | 'image_bytes' | 'image_mime_type'>>(
+    'SELECT id, image_bytes, image_mime_type FROM supply_media WHERE image_bytes IS NOT NULL');
+}
+
 export async function saveSupplyMedia(db: DB, supplyId: string,
   changes: { productUrl?: string | null;
     image?: { bytes: Uint8Array; mimeType: string } | null }): Promise<void> {

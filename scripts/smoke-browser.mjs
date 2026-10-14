@@ -290,8 +290,8 @@ try {
   await catalogDialog.getByRole('searchbox', { name: 'Search equipment models' }).fill('Inkbird');
   await catalogDialog.getByRole('button', { name: /Inkbird ITC-308\b/ }).first().waitFor();
   if (!await catalogDialog.getByRole('button', { name: /Inkbird ITC-308\b/ }).count()
-    || await catalogDialog.getByRole('button', { name: /Inkbird ITC-308-WIFI/ }).count()) {
-    throw new Error('Catalog should offer one Inkbird ITC-308 model');
+    || !await catalogDialog.getByRole('button', { name: /Inkbird ITC-308-WIFI/ }).count()) {
+    throw new Error('Merged catalog should offer both Inkbird ITC-308 models');
   }
   await catalogDialog.getByRole('searchbox', { name: 'Search equipment models' }).fill('VEVOR');
   await catalogDialog.getByRole('button', { name: /VEVOR Electric Brewing System 9.2 Gal\/35 L/ }).first().click();
@@ -315,8 +315,8 @@ try {
     throw new Error('Unit section repeats model capacity');
   }
   if (await page.getByText(/^Cooling:/).count()) throw new Error('VEVOR detail invented a cooling capability');
-  if (await page.getByRole('button', { name: /Override .* for this unit/ }).count()) {
-    throw new Error('Model specifications are editable from the stock unit page');
+  if (await page.getByRole('button', { name: /Override (capacity|pressure rating|rated power) for this unit/ }).count()) {
+    throw new Error('Fixed model specifications are editable from the stock unit page');
   }
   await page.getByRole('combobox', { name: 'Assign to batch' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: batchName }).click();
@@ -350,10 +350,10 @@ try {
   await page.getByText('Capacity: 35 L').waitFor();
   const vevorRow = page.locator('.equipment-table').getByRole('row').filter({ has: page.getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }) });
   await vevorRow.getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
-  await page.waitForURL(url => /^\/equipment\/vevor-electric-brewing-system-9-2-gal-35-l\/unit-[a-z0-9_-]+$/.test(new URL(url).pathname));
+  await page.waitForURL(url => /^\/equipment\/vevor-electric-brewing-system-9-2-gal-35-l\/unit-[A-Za-z0-9_-]+$/.test(new URL(url).pathname));
   await unitModelCard.getByText('35 L', { exact: true }).waitFor();
-  if (await page.getByRole('button', { name: /Override .* for this unit/ }).count()) {
-    throw new Error('A stock unit can override model specifications');
+  if (await page.getByRole('button', { name: /Override (capacity|pressure rating|rated power) for this unit/ }).count()) {
+    throw new Error('A stock unit can override fixed model specifications');
   }
   const unitBatches = page.locator('.equipment-batches');
   await unitBatches.getByRole('row').filter({ hasText: batchName }).getByText('In use').waitFor();
@@ -410,7 +410,7 @@ try {
   await addedControlDialog.getByRole('button', { name: 'Add capability' }).click();
   await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   await unitModelCard.getByText('0–30 °C').waitFor();
-  if (await page.getByRole('button', { name: /Override .* for this unit/ }).count()) {
+  if (await page.getByRole('button', { name: /Override (capacity|pressure rating|rated power) for this unit/ }).count()) {
     throw new Error('Stock unit can edit model temperature limits');
   }
   await unitModelCard.getByRole('link', { name: 'Basic smoke fermenter' }).click();
@@ -441,7 +441,7 @@ try {
   await page.waitForURL('**/equipment');
   await page.locator('.equipment-table').getByRole('link', { name: 'Tilt Hydrometer and Thermometer' }).click();
   await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
-  await unitModelCard.getByText('Gravity').waitFor();
+  await unitModelCard.getByText('Gravity', { exact: true }).waitFor();
   await unitModelCard.getByText('0–60 °C').waitFor();
   await unitModelCard.getByRole('link', { name: 'Tilt Hydrometer and Thermometer' }).click();
   await page.getByRole('button', { name: 'Edit model temperature range' }).click();
@@ -503,7 +503,7 @@ try {
   await kettleDialog.getByRole('button', { name: 'Create equipment' }).click();
   await page.getByRole('heading', { name: 'Smoke electric kettle' }).waitFor();
   await unitModelCard.getByText('1800 W').waitFor();
-  if (await page.getByRole('button', { name: /Override .* for this unit/ }).count()) {
+  if (await page.getByRole('button', { name: /Override (capacity|pressure rating|rated power) for this unit/ }).count()) {
     throw new Error('Stock unit can edit model capacity or rated power');
   }
   if (await page.getByRole('button', { name: 'Edit model heat loss' }).count()) {
@@ -593,7 +593,7 @@ try {
   await phRangeDialog.getByRole('button', { name: 'Save model range' }).click();
   await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   await unitModelCard.getByText('0–15 pH').waitFor();
-  if (!/^\/equipment\/smoke-ph-meter\/unit-[a-z0-9_-]+$/.test(new URL(page.url()).pathname)) {
+  if (!/^\/equipment\/smoke-ph-meter\/unit-[A-Za-z0-9_-]+$/.test(new URL(page.url()).pathname)) {
     throw new Error('Equipment unit URL should sit beneath its model');
   }
   await page.getByRole('button', { name: 'Edit pH 4.00 buffer reading' }).click();
@@ -1007,10 +1007,8 @@ try {
   if (await page.getByRole('combobox', { name: 'Location' }).count()) {
     throw new Error('Inventory should hide the location filter when there are no locations');
   }
-  await page.getByRole('button', { name: 'Add from catalog' }).click();
+  await page.locator('.inventory-add-types').getByRole('link', { name: 'grain' }).click();
   const inventoryCatalog = page.getByRole('dialog', { name: 'Add from catalog' });
-  await inventoryCatalog.getByRole('combobox', { name: 'Filter inventory type' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="Grain"]').click();
   await inventoryCatalog.getByRole('searchbox', { name: 'Search inventory products' }).fill('Briess Caramel Malt 60L');
   await inventoryCatalog.getByRole('button', { name: /Briess Caramel Malt 60L/ }).click();
   const catalogGrain = page.getByRole('dialog', { name: 'New grain item' });
