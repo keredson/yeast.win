@@ -104,9 +104,8 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const [selectedCatalogProduct, setSelectedCatalogProduct] = useState<CatalogInventory | null>(null);
   const [supplyMedia, setSupplyMedia] = useState<{ supplyId: string; row: SupplyMedia | null; imageUrl: string | null } | null>(null);
   const [mediaRevision, setMediaRevision] = useState(0);
-  const [editingProductLinks, setEditingProductLinks] = useState(false);
+  const [editingProductUrl, setEditingProductUrl] = useState(false);
   const [productUrlDraft, setProductUrlDraft] = useState('');
-  const [specUrlDraft, setSpecUrlDraft] = useState('');
   const [editingProductImage, setEditingProductImage] = useState(false);
   const [imageEdit, setImageEdit] = useState<File | null | undefined>();
   const [creatingCustomProduct, setCreatingCustomProduct] = useState(false);
@@ -130,7 +129,6 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const activeMedia = supplyMedia?.supplyId === item?.id ? supplyMedia : null;
   const productImageUrl = activeMedia?.imageUrl || catalogProduct?.image_src;
   const productUrl = activeMedia?.row?.product_url || catalogProduct?.product_url;
-  const specSourceUrl = activeMedia?.row?.spec_source_url || catalogProduct?.spec_source_url;
   const productRows = items.filter(row => row.supply_id === item?.id);
   const stockTreeRows = stockTree(productRows);
   const currentIngredientProperties = ingredientProperties(item);
@@ -387,18 +385,15 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
         <div className="supply-product-overview">
           <div className="supply-product-links">
             {catalogProduct?.manufacturer && <p><strong>{catalogProduct.manufacturer}</strong></p>}
-            <div><span>Product page: </span>{productUrl
+            <div><span>Product: </span>{productUrl
               ? <a href={productUrl} target="_blank" rel="noopener noreferrer">{productUrl}</a> : <span>Not set</span>}</div>
-            {specSourceUrl && specSourceUrl !== productUrl && <div><span>Specification: </span>
-              <a href={specSourceUrl} target="_blank" rel="noopener noreferrer">{specSourceUrl}</a></div>}
             <Button type="text" size="small" icon={<EditOutlined />} onClick={() => {
               setProductUrlDraft(activeMedia?.row?.product_url || productUrl || '');
-              setSpecUrlDraft(activeMedia?.row?.spec_source_url || specSourceUrl || '');
-              setEditingProductLinks(true);
-            }}>Edit links</Button>
-            <Button type="link" className="supply-catalog-link" onClick={() => openCatalog(item.category, 'link')}>
-              {catalogProduct ? 'Change catalog product' : 'Link catalog product'}
-            </Button>
+              setEditingProductUrl(true);
+            }}>Edit product URL</Button>
+            {!catalogProduct && <Button type="link" className="supply-catalog-link" onClick={() => openCatalog(item.category, 'link')}>
+              Link catalog product
+            </Button>}
           </div>
           <div className="supply-product-image">
             {productImageUrl ? <img src={productImageUrl} alt={item.name} /> : <span className="muted">No product image</span>}
@@ -454,25 +449,22 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
             { title: 'Quantity', key: 'quantity', align: 'right', render: (_, row) =>
               `${row.kind === 'Purchased' || row.kind === 'Moved in' ? '+' : row.kind === 'Used' || row.kind === 'Discarded' || row.kind === 'Moved out' ? '−' : 'Set to '}${formatStockQuantity(row.quantity, row.unit, itemDisplayUnit || row.unit)}` }]} /></>}
       </section>}
-    <Modal title="Edit product links" open={editingProductLinks} onCancel={() => setEditingProductLinks(false)} footer={null} destroyOnHidden>
+    <Modal title="Edit product URL" open={editingProductUrl} onCancel={() => setEditingProductUrl(false)} footer={null} destroyOnHidden>
       <Form layout="vertical" onFinish={async () => {
         if (!item) return;
         try {
           await saveSupplyMedia(db, item.id, {
-            productUrl: productUrlDraft.trim() === (catalogProduct?.product_url || '') ? null : productUrlDraft,
-            specSourceUrl: specUrlDraft.trim() === (catalogProduct?.spec_source_url || '') ? null : specUrlDraft
+            productUrl: productUrlDraft.trim() === (catalogProduct?.product_url || '') ? null : productUrlDraft
           });
-          setEditingProductLinks(false); setMediaRevision(value => value + 1); await onChanged();
+          setEditingProductUrl(false); setMediaRevision(value => value + 1); await onChanged();
         } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
       }}>
         <Form.Item label="Product URL"><Input type="url" aria-label="Product URL" value={productUrlDraft}
           onChange={event => setProductUrlDraft(event.target.value)} placeholder="https://manufacturer.example/product" /></Form.Item>
-        <Form.Item label="Specification URL"><Input type="url" aria-label="Specification URL" value={specUrlDraft}
-          onChange={event => setSpecUrlDraft(event.target.value)} placeholder="https://manufacturer.example/specification" /></Form.Item>
         {catalogProduct && <Button type="text" onClick={() => {
-          setProductUrlDraft(catalogProduct.product_url || ''); setSpecUrlDraft(catalogProduct.spec_source_url || '');
-        }}>Restore catalog links</Button>}
-        <Button type="primary" htmlType="submit">Save links</Button>
+          setProductUrlDraft(catalogProduct.product_url || '');
+        }}>Restore catalog URL</Button>}
+        <Button type="primary" htmlType="submit">Save URL</Button>
       </Form>
     </Modal>
     <Modal title="Edit product image" open={editingProductImage} onCancel={() => setEditingProductImage(false)} footer={null} destroyOnHidden>
@@ -514,11 +506,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
           </button>
         </div>)}
       </div> : <Empty description={catalog.length ? 'No matching products' : 'No catalog products available'} />}
-      {catalogPickerPurpose === 'link' ? catalogProduct && <Button type="link" className="catalog-create-custom"
-        onClick={() => { void linkSupplyCatalogProduct(db, item!.id, null).then(async () => {
-          setCatalogPickerOpen(false); await onChanged();
-        }).catch(cause => setError(cause instanceof Error ? cause.message : String(cause))); }}>
-        Remove catalog link</Button> : catalogCategory ? <Button type="link" className="catalog-create-custom"
+      {catalogPickerPurpose === 'link' ? null : catalogCategory ? <Button type="link" className="catalog-create-custom"
         onClick={() => createCustomProduct(catalogCategory)}>Create your own product spec</Button>
         : <Dropdown trigger={['click']} menu={{ items: categories.map(category => ({ key: category, label: category })),
           onClick: ({ key }) => createCustomProduct(key) }}>
@@ -575,9 +563,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
             {selectedCatalogProduct.image_src && <img src={selectedCatalogProduct.image_src} alt={selectedCatalogProduct.name} />}
             <div><strong>{selectedCatalogProduct.manufacturer || 'Shared catalog'}</strong>
               {selectedCatalogProduct.product_url && <p><a href={selectedCatalogProduct.product_url}
-                target="_blank" rel="noopener noreferrer">Product page</a></p>}
-              {selectedCatalogProduct.spec_source_url && selectedCatalogProduct.spec_source_url !== selectedCatalogProduct.product_url &&
-                <p><a href={selectedCatalogProduct.spec_source_url} target="_blank" rel="noopener noreferrer">Specification source</a></p>}
+                target="_blank" rel="noopener noreferrer">Product information</a></p>}
             </div>
           </div>}
         <Form.Item name="location_id" label="Location" normalize={(value, previousValue) => {

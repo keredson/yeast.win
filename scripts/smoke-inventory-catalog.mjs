@@ -40,7 +40,11 @@ try {
   if (await form.getByRole('combobox', { name: 'Item' }).inputValue() !== 'Briess Caramel Malt 60L') {
     throw new Error('Catalog choice did not fill the item name');
   }
-  await form.getByRole('link', { name: 'Product page' }).waitFor();
+  const briessLink = form.getByRole('link', { name: 'Product information' });
+  await briessLink.waitFor();
+  if (!(await briessLink.getAttribute('href'))?.endsWith('/Briess-PISB-Caramel-Malt-60L.pdf')) {
+    throw new Error('Briess product information does not link to its own PDF');
+  }
   await form.getByRole('button', { name: 'Create item' }).click();
   await form.waitFor({ state: 'hidden' });
   await page.getByRole('link', { name: 'Briess Caramel Malt 60L' }).waitFor();
@@ -60,10 +64,10 @@ try {
     throw new Error('Custom product specification was not saved');
   }
   await savedSpec.locator('.ant-modal-close').click();
-  await page.getByRole('button', { name: 'Edit links' }).click();
-  const links = page.getByRole('dialog', { name: 'Edit product links' });
+  await page.getByRole('button', { name: 'Edit product URL' }).click();
+  const links = page.getByRole('dialog', { name: 'Edit product URL' });
   await links.getByRole('textbox', { name: 'Product URL' }).fill('https://example.com/house-malt');
-  await links.getByRole('button', { name: 'Save links' }).click();
+  await links.getByRole('button', { name: 'Save URL' }).click();
   await links.waitFor({ state: 'hidden' });
   await page.getByRole('link', { name: 'https://example.com/house-malt' }).waitFor();
   await page.getByRole('button', { name: 'Edit image' }).click();
@@ -77,9 +81,12 @@ try {
   await linkCatalog.getByRole('searchbox', { name: 'Search inventory products' }).fill('Crisp Malt Finest Maris Otter');
   await linkCatalog.getByRole('button', { name: /Crisp Malt Finest Maris Otter/ }).click();
   await page.getByText('Crisp Malt', { exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Edit links' }).click();
-  await page.getByRole('dialog', { name: 'Edit product links' }).getByRole('button', { name: 'Restore catalog links' }).click();
-  await page.getByRole('dialog', { name: 'Edit product links' }).getByRole('button', { name: 'Save links' }).click();
+  if (await page.getByRole('button', { name: 'Change catalog product' }).count()) {
+    throw new Error('Linked product can be reassigned from its detail page');
+  }
+  await page.getByRole('button', { name: 'Edit product URL' }).click();
+  await page.getByRole('dialog', { name: 'Edit product URL' }).getByRole('button', { name: 'Restore catalog URL' }).click();
+  await page.getByRole('dialog', { name: 'Edit product URL' }).getByRole('button', { name: 'Save URL' }).click();
   await page.getByRole('link', { name: /crispmalt.com\/malts\/finest-maris-otter-ale-malt/ }).waitFor();
   await page.setViewportSize({ width: 320, height: 720 });
   if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) {

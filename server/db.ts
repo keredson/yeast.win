@@ -216,7 +216,9 @@ export function openWorkspaceDb(id: string): Database.Database {
             && !existing.has('equipment_legacy_migration')) {
             db.exec('CREATE TABLE equipment_legacy_migration AS SELECT * FROM equipment');
           }
-          if (common.length) db.exec(`CREATE TEMP TABLE "${snapshot}" AS SELECT ${common.join(', ')} FROM "${table}"`);
+          if (common.length) db.exec(`CREATE TEMP TABLE "${snapshot}" AS SELECT ${common.map(column =>
+            table === 'supply_media' && column === 'product_url' && actual.includes('spec_source_url')
+              ? 'COALESCE(NULLIF(product_url, \'\'), spec_source_url) AS product_url' : column).join(', ')} FROM "${table}"`);
           if (existing.has(`${table}__crsql_clock`)) db.prepare('SELECT crsql_as_table(?)').get(table);
           db.exec(`DROP TABLE "${table}"`);
           db.exec(schemaStatements[index]);

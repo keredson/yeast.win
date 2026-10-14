@@ -218,6 +218,28 @@ export function openLocalCatalog(): Promise<DB> {
         await tx.exec('PRAGMA user_version = 26');
       });
     }
+    if ((await db.execO<{ user_version: number }>('PRAGMA user_version'))[0].user_version === 26) {
+      await db.tx(async tx => {
+        const columns = new Set((await tx.execO<{ name: string }>('PRAGMA table_info(supply_products)'))
+          .map(row => row.name));
+        if (columns.has('spec_source_url')) {
+          await tx.exec(`CREATE TEMP TABLE migration_supply_products AS
+            SELECT supply_id, manufacturer, COALESCE(NULLIF(product_url, ''), spec_source_url) AS product_url
+            FROM supply_products`);
+          const clock = await tx.execO<{ name: string }>(
+            "SELECT name FROM sqlite_master WHERE name = 'supply_products__crsql_clock'");
+          if (clock.length) await tx.exec("SELECT crsql_as_table('supply_products')");
+          await tx.exec('DROP TABLE supply_products');
+          await tx.exec(catalogSupplyTables.supply_products);
+          await tx.exec("SELECT crsql_as_crr('supply_products')");
+          await tx.exec(`INSERT INTO supply_products(supply_id, manufacturer, product_url)
+            SELECT supply_id, manufacturer, product_url FROM migration_supply_products`);
+          await tx.exec('DROP TABLE migration_supply_products');
+        }
+        await tx.exec('DELETE FROM sync_state');
+        await tx.exec('PRAGMA user_version = 27');
+      });
+    }
     return db;
   })().catch(error => { opened = undefined; throw error; });
   return opened;
@@ -245,7 +267,7 @@ export async function readLocalCatalog(db: DB): Promise<{ equipment: CatalogEqui
       mime_type: string | null }>('SELECT * FROM manufacturer_logos'),
     db.execO<CatalogInventory>(`SELECT s.id, s.name, s.category, s.unit,
       g.yield_pct, g.color_lovibond, h.alpha_acid_pct, h.hop_form, y.attenuation_pct,
-      gc.grain_class, p.manufacturer, p.product_url, p.spec_source_url
+      gc.grain_class, p.manufacturer, p.product_url
       FROM supplies s LEFT JOIN supply_grain_specs g ON g.supply_id = s.id
       LEFT JOIN supply_hop_specs h ON h.supply_id = s.id
       LEFT JOIN supply_yeast_specs y ON y.supply_id = s.id

@@ -18,6 +18,40 @@ const selectChanges = `SELECT "table", pk, cid, val, col_version, db_version,
   WHERE db_version > ? ORDER BY db_version, seq`;
 const insertChange = `INSERT INTO crsql_changes (${changeColumns.map(name => `"${name}"`).join(',')}) VALUES (${changeColumns.map(() => '?').join(',')})`;
 
+test('supply media upgrade keeps product URLs, former spec-only URLs, images, and other rows', () => {
+  const id = nanoid();
+  const before = openWorkspaceDb(id);
+  const specOnly = nanoid();
+  const product = nanoid();
+  try {
+    before.prepare("SELECT crsql_begin_alter('supply_media')").get();
+    before.exec('ALTER TABLE supply_media ADD COLUMN spec_source_url TEXT');
+    before.prepare("SELECT crsql_commit_alter('supply_media')").get();
+    for (const supplyId of [specOnly, product]) before.prepare(
+      'INSERT INTO supplies(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(supplyId, 'Grain', 'Grain', 'oz', 1);
+    before.prepare('INSERT INTO supply_media(id, spec_source_url, image_bytes, image_mime_type) VALUES (?, ?, ?, ?)')
+      .run(specOnly, 'https://example.com/spec.pdf', Buffer.from([1, 2]), 'image/png');
+    before.prepare('INSERT INTO supply_media(id, product_url, spec_source_url) VALUES (?, ?, ?)')
+      .run(product, 'https://example.com/product', 'https://example.com/old-spec.pdf');
+    before.prepare('INSERT INTO batches(id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+      .run(nanoid(), 'Unrelated batch', 'active', 1, 1);
+    before.pragma('user_version = 33');
+  } finally { closeWorkspaceDb(before); }
+
+  const upgraded = openWorkspaceDb(id);
+  try {
+    const rows = upgraded.prepare('SELECT id, product_url, image_bytes FROM supply_media ORDER BY id')
+      .all() as { id: string; product_url: string; image_bytes: Buffer | null }[];
+    assert.equal(rows.find(row => row.id === specOnly)?.product_url, 'https://example.com/spec.pdf');
+    assert.deepEqual(rows.find(row => row.id === specOnly)?.image_bytes, Buffer.from([1, 2]));
+    assert.equal(rows.find(row => row.id === product)?.product_url, 'https://example.com/product');
+    assert.equal((upgraded.prepare('SELECT count(*) AS count FROM batches').get() as { count: number }).count, 1);
+    assert.equal((upgraded.pragma('table_info(supply_media)') as { name: string }[])
+      .some(column => column.name === 'spec_source_url'), false);
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
 test('supply media upgrade preserves existing supplies and partially created media', () => {
   for (const partial of [false, true]) {
     const id = nanoid();

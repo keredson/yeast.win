@@ -488,13 +488,13 @@ export function openCatalogDb(dataDir: string): Database.Database {
       for (const maker of catalogSupplyManufacturers) addManufacturer.run(maker.name, maker.website_url);
       const addSupply = db.prepare('INSERT OR IGNORE INTO supplies(id, name, category, unit) VALUES (?, ?, ?, ?)');
       const addProduct = db.prepare(`INSERT OR IGNORE INTO supply_products
-        (supply_id, manufacturer, product_url, spec_source_url) VALUES (?, ?, ?, ?)`);
+        (supply_id, manufacturer, product_url) VALUES (?, ?, ?)`);
       const addClass = db.prepare('INSERT OR IGNORE INTO supply_grain_classes(supply_id, grain_class) VALUES (?, ?)');
       const addGrain = db.prepare(`INSERT OR IGNORE INTO supply_grain_specs
         (supply_id, yield_pct, color_lovibond) VALUES (?, ?, ?)`);
       for (const product of expandedCatalogSupplies) {
         addSupply.run(product.id, product.name, product.category, product.unit);
-        addProduct.run(product.id, product.manufacturer, product.product_url, product.spec_source_url ?? null);
+        addProduct.run(product.id, product.manufacturer, product.product_url);
         if (product.grain_class) {
           addClass.run(product.id, product.grain_class);
           if (product.yield_pct != null || product.color_lovibond != null) {
@@ -547,7 +547,7 @@ export function openCatalogDb(dataDir: string): Database.Database {
       for (const maker of catalogSupplyManufacturers) addManufacturer.run(maker.name, maker.website_url);
       const addSupply = db.prepare('INSERT OR IGNORE INTO supplies(id, name, category, unit) VALUES (?, ?, ?, ?)');
       const addProduct = db.prepare(`INSERT OR IGNORE INTO supply_products
-        (supply_id, manufacturer, product_url, spec_source_url) VALUES (?, ?, ?, ?)`);
+        (supply_id, manufacturer, product_url) VALUES (?, ?, ?)`);
       const addClass = db.prepare('INSERT OR IGNORE INTO supply_grain_classes(supply_id, grain_class) VALUES (?, ?)');
       const addGrain = db.prepare(`INSERT OR IGNORE INTO supply_grain_specs
         (supply_id, yield_pct, color_lovibond) VALUES (?, ?, ?)`);
@@ -555,7 +555,7 @@ export function openCatalogDb(dataDir: string): Database.Database {
         item.id.startsWith('supply_fermaid_') || item.id.startsWith('supply_crisp_')
         || item.id.startsWith('supply_simpsons_'))) {
         addSupply.run(product.id, product.name, product.category, product.unit);
-        addProduct.run(product.id, product.manufacturer, product.product_url, product.spec_source_url ?? null);
+        addProduct.run(product.id, product.manufacturer, product.product_url);
         if (product.grain_class) {
           addClass.run(product.id, product.grain_class);
           if (product.yield_pct != null || product.color_lovibond != null) {
@@ -565,6 +565,30 @@ export function openCatalogDb(dataDir: string): Database.Database {
       }
       seedSupplyImages(db);
       db.pragma('user_version = 26');
+    })();
+  }
+  if ((db.pragma('user_version', { simple: true }) as number) === 26) {
+    db.transaction(() => {
+      const columns = new Set((db.pragma('table_info(supply_products)') as { name: string }[]).map(row => row.name));
+      if (columns.has('spec_source_url')) {
+        db.exec(`CREATE TEMP TABLE migration_supply_products AS
+          SELECT supply_id, manufacturer, COALESCE(NULLIF(product_url, ''), spec_source_url) AS product_url
+          FROM supply_products`);
+        db.prepare("SELECT crsql_as_table('supply_products')").get();
+        db.exec('DROP TABLE supply_products');
+        db.exec(catalogSupplyTables.supply_products);
+        db.prepare("SELECT crsql_as_crr('supply_products')").get();
+        db.exec(`INSERT INTO supply_products(supply_id, manufacturer, product_url)
+          SELECT supply_id, manufacturer, product_url FROM migration_supply_products`);
+        db.exec('DROP TABLE migration_supply_products');
+      }
+      const updateBriess = db.prepare(`UPDATE supply_products SET product_url = ?
+        WHERE supply_id = ? AND (product_url LIKE 'https://brewingwithbriess.com/products/%'
+          OR product_url LIKE 'https://www.brewingwithbriess.com/products/%')`);
+      for (const product of expandedCatalogSupplies.filter(item => item.manufacturer === 'Briess')) {
+        updateBriess.run(product.product_url, product.id);
+      }
+      db.pragma('user_version = 27');
     })();
   }
   db.prepare(`UPDATE equipment_models SET model_name = ?

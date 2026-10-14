@@ -85,7 +85,7 @@ export interface Equipment extends EquipmentSpecifications { id: string; name: s
   measurement_channels?: EquipmentMeasurementChannel[] }
 export interface EquipmentModelMedia { id: string; product_url: string | null;
   image_bytes: Uint8Array | null; image_mime_type: string | null }
-export interface SupplyMedia { id: string; product_url: string | null; spec_source_url: string | null;
+export interface SupplyMedia { id: string; product_url: string | null;
   image_bytes: Uint8Array | null; image_mime_type: string | null }
 export interface EquipmentUse { id: string; equipment_id: string; batch_id: string; batch_name: string;
   assigned_at: number; ended_at: number | null }
@@ -327,7 +327,9 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
                 && !existing.has('equipment_legacy_migration')) {
                 await tx.exec('CREATE TABLE equipment_legacy_migration AS SELECT * FROM equipment');
               }
-              if (common.length) await tx.exec(`CREATE TEMP TABLE "${snapshot}" AS SELECT ${common.join(', ')} FROM "${table}"`);
+              if (common.length) await tx.exec(`CREATE TEMP TABLE "${snapshot}" AS SELECT ${common.map(column =>
+                table === 'supply_media' && column === 'product_url' && actual.includes('spec_source_url')
+                  ? 'COALESCE(NULLIF(product_url, \'\'), spec_source_url) AS product_url' : column).join(', ')} FROM "${table}"`);
               if (existing.has(`${table}__crsql_clock`)) await tx.exec('SELECT crsql_as_table(?)', [table]);
               await tx.exec(`DROP TABLE "${table}"`);
               await tx.exec(schemaStatements[index]);
@@ -2142,16 +2144,16 @@ export async function listSupplies(db: Pick<DB, 'execO'>): Promise<InventoryItem
 
 export async function readSupplyMedia(db: DB, supplyId: string): Promise<SupplyMedia | null> {
   return (await db.execO<SupplyMedia>(
-    'SELECT id, product_url, spec_source_url, image_bytes, image_mime_type FROM supply_media WHERE id = ?',
+    'SELECT id, product_url, image_bytes, image_mime_type FROM supply_media WHERE id = ?',
     [supplyId]))[0] || null;
 }
 
 export async function saveSupplyMedia(db: DB, supplyId: string,
-  changes: { productUrl?: string | null; specSourceUrl?: string | null;
+  changes: { productUrl?: string | null;
     image?: { bytes: Uint8Array; mimeType: string } | null }): Promise<void> {
   const supply = await db.execO<{ id: string }>('SELECT id FROM supplies WHERE id = ?', [supplyId]);
   if (!supply.length) throw new Error('Supply not found');
-  for (const url of [changes.productUrl, changes.specSourceUrl]) if (url?.trim()) {
+  for (const url of [changes.productUrl]) if (url?.trim()) {
     const parsed = new URL(url.trim());
     if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Enter an HTTP or HTTPS product URL');
   }
@@ -2161,8 +2163,6 @@ export async function saveSupplyMedia(db: DB, supplyId: string,
     await tx.exec('INSERT OR IGNORE INTO supply_media(id) VALUES (?)', [supplyId]);
     if (changes.productUrl !== undefined) await tx.exec('UPDATE supply_media SET product_url = ? WHERE id = ?',
       [changes.productUrl?.trim() || null, supplyId]);
-    if (changes.specSourceUrl !== undefined) await tx.exec('UPDATE supply_media SET spec_source_url = ? WHERE id = ?',
-      [changes.specSourceUrl?.trim() || null, supplyId]);
     if (changes.image !== undefined) await tx.exec(
       'UPDATE supply_media SET image_bytes = ?, image_mime_type = ? WHERE id = ?',
       [changes.image?.bytes || null, changes.image?.mimeType || null, supplyId]);

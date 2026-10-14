@@ -12,6 +12,34 @@ import { catalogModelTables, catalogSupplyTables, catalogTables, catalogSchemaVe
 const legacyInventoryTable = `CREATE TABLE inventory(id TEXT PRIMARY KEY NOT NULL, name TEXT, category TEXT, unit TEXT)`;
 const legacyCatalogTables = [...Object.keys(catalogModelTables).filter(table => table !== 'model_boil_characterization'), 'inventory'];
 
+test('catalog upgrade replaces Briess listing links with product PDFs and keeps custom URLs', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-catalog-links-'));
+  const before = openCatalogDb(dir);
+  before.prepare("INSERT INTO supplies(id, name, category, unit) VALUES ('custom_sheet', 'Custom grain', 'Grain', 'g')").run();
+  before.prepare("INSERT INTO supply_products(supply_id, manufacturer, product_url) VALUES ('custom_sheet', 'Custom', NULL)").run();
+  before.prepare("UPDATE supply_products SET product_url = 'https://example.com/custom-sheet' WHERE supply_id = 'supply_briess_pale_ale'").run();
+  before.prepare("UPDATE supply_products SET product_url = 'https://brewingwithbriess.com/products/#caramel-malt-60l' WHERE supply_id = 'supply_briess_caramel_60'").run();
+  before.prepare("SELECT crsql_begin_alter('supply_products')").get();
+  before.exec('ALTER TABLE supply_products ADD COLUMN spec_source_url TEXT');
+  before.prepare("SELECT crsql_commit_alter('supply_products')").get();
+  before.prepare("UPDATE supply_products SET spec_source_url = 'https://example.com/custom-spec' WHERE supply_id = 'custom_sheet'").run();
+  before.pragma('user_version = 26');
+  before.close();
+
+  const upgraded = openCatalogDb(dir);
+  try {
+    const url = (id: string) => (upgraded.prepare('SELECT product_url FROM supply_products WHERE supply_id = ?')
+      .get(id) as { product_url: string }).product_url;
+    assert.equal(url('custom_sheet'), 'https://example.com/custom-spec');
+    assert.equal(url('supply_briess_pale_ale'), 'https://example.com/custom-sheet');
+    assert.equal(url('supply_briess_caramel_60'),
+      'https://brewingwithbriess.com/wp-content/uploads/documents/Briess-PISB-Caramel-Malt-60L.pdf');
+    assert.ok(upgraded.prepare('SELECT 1 FROM supplies WHERE id = ?').get('custom_sheet'));
+    assert.equal((upgraded.pragma('table_info(supply_products)') as { name: string }[])
+      .some(column => column.name === 'spec_source_url'), false);
+  } finally { upgraded.close(); }
+});
+
 function rows(db: Database.Database) {
   return {
     equipment: db.prepare(`SELECT m.id, m.model_name AS name, m.kind,
