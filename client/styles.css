@@ -121,6 +121,9 @@ button, input, textarea { font: inherit; }
   .equipment-catalog-filters { grid-template-columns: 1fr; }
 }
 .record-detail { max-width: 1050px; }
+.supply-source { display: flex; align-items: center; gap: 18px; margin: -10px 0 22px; }
+.supply-source img { width: min(260px, 45%); max-height: 160px; object-fit: contain; }
+.supply-source p { margin: 3px 0; }
 .record-list, .card-stack, .group-tables { display: flex; flex-direction: column; gap: 12px; }
 .record-list { margin-top: 22px; }
 .record-link { display: block; padding: 18px 20px; background: white; border: 1px solid #dce4d9; border-radius: 12px; color: #263c36; text-decoration: none; }

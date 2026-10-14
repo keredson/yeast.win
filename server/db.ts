@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { nanoid } from 'nanoid';
 import { recordSlug } from '../shared/recordSlug.ts';
 import { fillMissingRecipeBatchSizes } from '../shared/batchSize.ts';
+import { retiredGenericSupplies } from '../shared/catalogSupplyExpansion.ts';
 import { indexStatements, legacyEquipmentCopyStatements, nowSeconds, replicatedTables, retiredReplicatedTables, schemaStatements,
   workspaceSchemaVersion, workspaceTableColumns, legacyEquipmentModelStatements, supplyMigrationStatements } from '../shared/schema.ts';
 
@@ -243,6 +244,15 @@ export function openWorkspaceDb(id: string): Database.Database {
       throw error;
     }
   }
+  if (version > 0 && version < 32) db.transaction(() => {
+    db.exec(`INSERT OR IGNORE INTO supply_grain_specs(supply_id, color_lovibond)
+      SELECT id, 60 FROM supplies WHERE catalog_supply_id = 'inventory_crystal_60'`);
+    db.exec(`UPDATE supply_grain_specs SET color_lovibond = 60
+      WHERE color_lovibond IS NULL AND supply_id IN
+      (SELECT id FROM supplies WHERE catalog_supply_id = 'inventory_crystal_60')`);
+    const unlink = db.prepare('UPDATE supplies SET catalog_supply_id = NULL WHERE catalog_supply_id = ?');
+    for (const id of retiredGenericSupplies) unlink.run(id);
+  })();
   db.transaction(() => { for (const statement of fillMissingRecipeBatchSizes) db.exec(statement); })();
   if (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'equipment_legacy_migration'").get()) {
     db.transaction(() => {

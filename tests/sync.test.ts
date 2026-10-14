@@ -18,6 +18,29 @@ const selectChanges = `SELECT "table", pk, cid, val, col_version, db_version,
   WHERE db_version > ? ORDER BY db_version, seq`;
 const insertChange = `INSERT INTO crsql_changes (${changeColumns.map(name => `"${name}"`).join(',')}) VALUES (${changeColumns.map(() => '?').join(',')})`;
 
+test('retiring generic catalog grains preserves brewery supplies and Crystal 60 color', () => {
+  const id = nanoid();
+  const db = openWorkspaceDb(id);
+  const crystal = nanoid();
+  const custom = nanoid();
+  try {
+    db.prepare('INSERT INTO supplies(id, name, category, default_unit, catalog_supply_id, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(crystal, 'My Crystal 60', 'Grain', 'oz', 'inventory_crystal_60', 1);
+    db.prepare('INSERT INTO supplies(id, name, category, default_unit, catalog_supply_id, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(custom, 'My custom ingredient', 'Grain', 'oz', null, 1);
+    db.pragma('user_version = 31');
+  } finally { closeWorkspaceDb(db); }
+  const upgraded = openWorkspaceDb(id);
+  try {
+    assert.equal((upgraded.prepare('SELECT catalog_supply_id FROM supplies WHERE id = ?')
+      .get(crystal) as { catalog_supply_id: string | null }).catalog_supply_id, null);
+    assert.equal((upgraded.prepare('SELECT color_lovibond FROM supply_grain_specs WHERE supply_id = ?')
+      .get(crystal) as { color_lovibond: number }).color_lovibond, 60);
+    assert.equal((upgraded.prepare('SELECT name FROM supplies WHERE id = ?')
+      .get(custom) as { name: string }).name, 'My custom ingredient');
+  } finally { closeWorkspaceDb(upgraded); }
+});
+
 test('two offline peers merge batches, child rows and image BLOBs', () => {
   const first = openWorkspaceDb(nanoid());
   const second = openWorkspaceDb(nanoid());

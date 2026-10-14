@@ -63,8 +63,11 @@ function stockTree(rows: InventoryItem[]): StockTreeRow[] {
   }).sort((a, b) => a.lotLabel.localeCompare(b.lotLabel));
 }
 
-function PropertyFields({ category }: { category: string }) {
+function PropertyFields({ category, includeClass = false }: { category: string; includeClass?: boolean }) {
   return <>
+    {category === 'Grain' && includeClass && <Form.Item name="grain_class" label="Grain class">
+      <Select allowClear options={['base', 'kilned', 'caramel', 'roasted', 'flaked', 'other']
+        .map(value => ({ value, label: value[0].toUpperCase() + value.slice(1) }))} /></Form.Item>}
     {['Grain', 'Adjunct'].includes(category) && <><Form.Item name="yield_pct" label="Extract yield (%)">
       <InputNumber className="full-width" min={0} max={100} step="any" /></Form.Item>
       <Form.Item name="color_lovibond" label="Color (°L)"><InputNumber className="full-width" min={0} step="any" /></Form.Item></>}
@@ -108,6 +111,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const previousItemUnit = useRef<string | undefined>(undefined);
   const previousEntryUnit = useRef<string | undefined>(undefined);
   const item = supplies.find(row => row.id === selectedId) || null;
+  const catalogProduct = catalog.find(row => row.id === item?.catalog_supply_id);
   const productRows = items.filter(row => row.supply_id === item?.id);
   const stockTreeRows = stockTree(productRows);
   const currentIngredientProperties = ingredientProperties(item);
@@ -308,12 +312,21 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
                 }).catch(cause => setError(String(cause)));
               }}>Supply properties</Button>}
             <Button type="primary" onClick={() => openCreate(item.category, item)}>Add stock</Button></div></div>
+        {catalogProduct && <div className="supply-source">
+          {catalogProduct.image_src && <img src={catalogProduct.image_src} alt={catalogProduct.name} />}
+          <div>{catalogProduct.manufacturer && <strong>{catalogProduct.manufacturer}</strong>}
+            {catalogProduct.product_url && <p><a href={catalogProduct.product_url} target="_blank" rel="noopener noreferrer">Product page</a></p>}
+            {catalogProduct.spec_source_url && catalogProduct.spec_source_url !== catalogProduct.product_url &&
+              <p><a href={catalogProduct.spec_source_url} target="_blank" rel="noopener noreferrer">Specification source</a></p>}
+          </div>
+        </div>}
         {Object.keys(currentIngredientProperties).length > 0 && <p className="muted">{[
           currentIngredientProperties.yield_pct != null && `Yield ${currentIngredientProperties.yield_pct}%`,
           currentIngredientProperties.color_lovibond != null && `Color ${currentIngredientProperties.color_lovibond} °L`,
           currentIngredientProperties.alpha_acid_pct != null && `Alpha acid ${currentIngredientProperties.alpha_acid_pct}%`,
           currentIngredientProperties.hop_form && `${currentIngredientProperties.hop_form} hops`,
-          currentIngredientProperties.attenuation_pct != null && `Attenuation ${currentIngredientProperties.attenuation_pct}%`
+          currentIngredientProperties.attenuation_pct != null && `Attenuation ${currentIngredientProperties.attenuation_pct}%`,
+          item.grain_class && `${item.grain_class} grain class`
         ].filter(Boolean).join(' · ')}</p>}
         <h3>Lots and locations</h3>
         <Table<StockTreeRow> key={`${item.id}:${stockTreeRows.filter(row => row.children).map(row => row.key).join(',')}`}
@@ -358,7 +371,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
       onCancel={() => setIngredientSettingsOpen(false)} footer={null} destroyOnHidden>
       {error && <Alert type="error" message={error} className="form-alert" />}
       <Form key={`${item?.supply_id}:${ingredientSettingsOpen}`} layout="vertical" initialValues={supplyProperties} onFinish={saveIngredientProperties}>
-        <PropertyFields category={item?.category || ''} />
+        <PropertyFields category={item?.category || ''} includeClass />
         <Button type="primary" htmlType="submit">Save properties</Button>
       </Form>
     </Modal>
@@ -383,7 +396,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
               ...supplies.filter(row => row.category === newItemCategory).map(row => ({ value: row.name, label: `${row.name} · Your supplies` })),
               ...catalog.filter(row => row.category === newItemCategory && !supplies.some(owned =>
                 owned.category === row.category && owned.name.toLowerCase() === row.name.toLowerCase()))
-                .map(row => ({ value: row.name, label: `${row.name} · Shared catalog` }))
+                .map(row => ({ value: row.name, label: `${row.name} · Catalog` }))
             ]}
             filterOption={(input, option) => String(option?.value || '').toLowerCase().includes(input.toLowerCase())}
             onSelect={value => { const entry = supplies.find(row => row.category === newItemCategory && row.name === value)

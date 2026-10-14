@@ -73,7 +73,7 @@ const definitions: Record<string, string> = {
   equipment_use_events: `event_id TEXT PRIMARY KEY NOT NULL, equipment_id TEXT NOT NULL`,
   supplies: `id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL,
     default_unit TEXT NOT NULL, catalog_supply_id TEXT, created_at INTEGER NOT NULL`,
-  supply_grain_specs: `supply_id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL`,
+  supply_grain_specs: `supply_id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL, grain_class TEXT`,
   supply_hop_specs: `supply_id TEXT PRIMARY KEY NOT NULL, alpha_acid_pct REAL, hop_form TEXT`,
   supply_yeast_specs: `supply_id TEXT PRIMARY KEY NOT NULL, attenuation_pct REAL`,
   supply_lots: `id TEXT PRIMARY KEY NOT NULL, supply_id TEXT NOT NULL, lot_code TEXT,
@@ -327,7 +327,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 31;
+export const workspaceSchemaVersion = 32;
 export const retiredReplicatedTables = ['equipment_calibrations', 'equipment_characterization_observations'] as const;
 
 export function isValidId(value: unknown): value is string {

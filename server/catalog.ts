@@ -9,6 +9,7 @@ import { catalogModelTables, catalogSupplyTables, catalogSchemaVersion,
 import { boilOffKinds, vesselKinds } from '../shared/equipment.ts';
 import { catalogManufacturers, expandedCatalogEquipment,
   existingModelSources, catalogMeasurementUpdates } from '../shared/catalogEquipmentExpansion.ts';
+import { catalogSupplyManufacturers, expandedCatalogSupplies, retiredGenericSupplies } from '../shared/catalogSupplyExpansion.ts';
 import { encodeChange, type SqlChangeRow } from '../shared/wire.ts';
 import { projectRoot } from './db.ts';
 
@@ -39,6 +40,19 @@ function seedManufacturerLogos(db: Database.Database): void {
     const slug = maker.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     const path = join(projectRoot, 'assets/catalog/manufacturers', `${slug}.png`);
     if (existsSync(path)) insert.run(maker.name, readFileSync(path), 'image/png');
+  }
+}
+
+function seedSupplyImages(db: Database.Database): void {
+  const directory = join(projectRoot, 'assets/catalog/supplies');
+  if (!existsSync(directory)) return;
+  const insert = db.prepare(`INSERT OR IGNORE INTO supply_images
+    (supply_id, image_bytes, image_mime_type) VALUES (?, ?, ?)`);
+  for (const name of readdirSync(directory)) {
+    const match = /^(supply_[a-z0-9_]+)\.(jpe?g|png|webp)$/.exec(name);
+    if (!match) continue;
+    const mime = match[2] === 'png' ? 'image/png' : match[2] === 'webp' ? 'image/webp' : 'image/jpeg';
+    insert.run(match[1], readFileSync(join(directory, name)), mime);
   }
 }
 
@@ -459,6 +473,43 @@ export function openCatalogDb(dataDir: string): Database.Database {
           WHERE model_id = 'equipment_vevor_35l'`).run(readFileSync(file));
       }
       db.pragma('user_version = 21');
+    })();
+  }
+  if ((db.pragma('user_version', { simple: true }) as number) === 21) {
+    db.transaction(() => {
+      for (const table of ['supply_grain_classes', 'supply_products', 'supply_images'] as const) {
+        db.exec(catalogSupplyTables[table]);
+        if (!db.prepare('SELECT 1 FROM sqlite_master WHERE name = ?').get(`${table}__crsql_clock`)) {
+          db.prepare('SELECT crsql_as_crr(?)').get(table);
+        }
+      }
+      const addManufacturer = db.prepare(`INSERT INTO manufacturers(name, website_url) VALUES (?, ?)
+        ON CONFLICT(name) DO UPDATE SET website_url = COALESCE(manufacturers.website_url, excluded.website_url)`);
+      for (const maker of catalogSupplyManufacturers) addManufacturer.run(maker.name, maker.website_url);
+      const addSupply = db.prepare('INSERT OR IGNORE INTO supplies(id, name, category, unit) VALUES (?, ?, ?, ?)');
+      const addProduct = db.prepare(`INSERT OR IGNORE INTO supply_products
+        (supply_id, manufacturer, product_url, spec_source_url) VALUES (?, ?, ?, ?)`);
+      const addClass = db.prepare('INSERT OR IGNORE INTO supply_grain_classes(supply_id, grain_class) VALUES (?, ?)');
+      const addGrain = db.prepare(`INSERT OR IGNORE INTO supply_grain_specs
+        (supply_id, yield_pct, color_lovibond) VALUES (?, ?, ?)`);
+      for (const product of expandedCatalogSupplies) {
+        addSupply.run(product.id, product.name, product.category, product.unit);
+        addProduct.run(product.id, product.manufacturer, product.product_url, product.spec_source_url ?? null);
+        if (product.grain_class) {
+          addClass.run(product.id, product.grain_class);
+          if (product.yield_pct != null || product.color_lovibond != null) {
+            addGrain.run(product.id, product.yield_pct ?? null, product.color_lovibond ?? null);
+          }
+        }
+      }
+      for (const id of retiredGenericSupplies) {
+        db.prepare('DELETE FROM supply_grain_specs WHERE supply_id = ?').run(id);
+        db.prepare('DELETE FROM supply_hop_specs WHERE supply_id = ?').run(id);
+        db.prepare('DELETE FROM supply_yeast_specs WHERE supply_id = ?').run(id);
+        db.prepare('DELETE FROM supplies WHERE id = ?').run(id);
+      }
+      seedSupplyImages(db);
+      db.pragma('user_version = 22');
     })();
   }
   db.prepare(`UPDATE equipment_models SET model_name = ?

@@ -17,10 +17,12 @@ export interface CatalogEquipment { id: string; name: string; kind: string; manu
   measurement_unit?: string | null; measurement_channels?: CatalogMeasurementChannel[] }
 export interface CatalogInventory { id: string; name: string; category: string; unit: string;
   yield_pct?: number | null; color_lovibond?: number | null; alpha_acid_pct?: number | null;
-  hop_form?: string | null; attenuation_pct?: number | null }
+  hop_form?: string | null; attenuation_pct?: number | null; grain_class?: string | null;
+  manufacturer?: string | null; product_url?: string | null; spec_source_url?: string | null;
+  image_src?: string | null }
 
 export interface CatalogChanges { serverCursor: string; changes: WireChange[] }
-export const catalogSchemaVersion = 21;
+export const catalogSchemaVersion = 22;
 export const vevorModelName = 'VEVOR Electric Brewing System 9.2 Gal/35 L';
 export const catalogModelTables = {
   manufacturers: `CREATE TABLE IF NOT EXISTS manufacturers (
@@ -57,7 +59,13 @@ export const catalogSupplyTables = {
   supply_hop_specs: `CREATE TABLE IF NOT EXISTS supply_hop_specs (
     supply_id TEXT PRIMARY KEY NOT NULL, alpha_acid_pct REAL, hop_form TEXT)`,
   supply_yeast_specs: `CREATE TABLE IF NOT EXISTS supply_yeast_specs (
-    supply_id TEXT PRIMARY KEY NOT NULL, attenuation_pct REAL)`
+    supply_id TEXT PRIMARY KEY NOT NULL, attenuation_pct REAL)`,
+  supply_grain_classes: `CREATE TABLE IF NOT EXISTS supply_grain_classes (
+    supply_id TEXT PRIMARY KEY NOT NULL, grain_class TEXT)`,
+  supply_products: `CREATE TABLE IF NOT EXISTS supply_products (
+    supply_id TEXT PRIMARY KEY NOT NULL, manufacturer TEXT, product_url TEXT, spec_source_url TEXT)`,
+  supply_images: `CREATE TABLE IF NOT EXISTS supply_images (
+    supply_id TEXT PRIMARY KEY NOT NULL, image_bytes BLOB, image_mime_type TEXT)`
 } as const;
 export const catalogTables = [...Object.keys(catalogModelTables), ...Object.keys(catalogSupplyTables)] as const;
 

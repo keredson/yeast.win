@@ -4,6 +4,7 @@ import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { nanoid } from 'nanoid';
 import { boilOffKinds, capacityKinds, equipmentKinds, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import { openLocalCatalog } from './catalog.ts';
+import { retiredGenericSupplies } from '../shared/catalogSupplyExpansion.ts';
 import { hasGeneratedLocationSuffix, locationSlug } from './locationSlug.ts';
 import { recordSlug } from './recordSlug.ts';
 import type { CatalogEquipment, MeasurementChannel } from '../shared/catalog.ts';
@@ -96,8 +97,9 @@ export interface InventoryItem { id: string; name: string; category: string; def
   yield_pct?: number | null; color_lovibond?: number | null; alpha_acid_pct?: number | null;
   hop_form?: IngredientProperties['hop_form'] | null; attenuation_pct?: number | null }
 export interface IngredientProperties { yield_pct?: number; color_lovibond?: number; alpha_acid_pct?: number;
-  hop_form?: 'pellet' | 'whole' | 'plug'; attenuation_pct?: number }
-const ingredientPropertyColumns = ['yield_pct', 'color_lovibond', 'alpha_acid_pct', 'hop_form', 'attenuation_pct'] as const;
+  hop_form?: 'pellet' | 'whole' | 'plug'; attenuation_pct?: number;
+  grain_class?: 'base' | 'kilned' | 'caramel' | 'roasted' | 'flaked' | 'other' }
+const ingredientPropertyColumns = ['yield_pct', 'color_lovibond', 'alpha_acid_pct', 'hop_form', 'attenuation_pct', 'grain_class'] as const;
 const equipmentAssumptionColumns = ['mash_efficiency_pct', 'grain_absorption_l_per_kg'] as const;
 
 function measurementKindForEquipment(kind: string): string | null {
@@ -350,6 +352,16 @@ export async function openLocalDb(workspaceId: string): Promise<DB> {
           await tx.exec(`PRAGMA user_version = ${workspaceSchemaVersion}`);
         });
       }
+      if (version > 0 && version < 32) await db.tx(async tx => {
+        await tx.exec(`INSERT OR IGNORE INTO supply_grain_specs(supply_id, color_lovibond)
+          SELECT id, 60 FROM supplies WHERE catalog_supply_id = 'inventory_crystal_60'`);
+        await tx.exec(`UPDATE supply_grain_specs SET color_lovibond = 60
+          WHERE color_lovibond IS NULL AND supply_id IN
+          (SELECT id FROM supplies WHERE catalog_supply_id = 'inventory_crystal_60')`);
+        for (const id of retiredGenericSupplies) {
+          await tx.exec('UPDATE supplies SET catalog_supply_id = NULL WHERE catalog_supply_id = ?', [id]);
+        }
+      });
       await db.tx(async tx => { for (const statement of fillMissingRecipeBatchSizes) await tx.exec(statement); });
       const legacyEquipment = await db.execO<{ name: string }>(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'equipment_legacy_migration'");
@@ -2065,6 +2077,7 @@ export async function listInventory(db: Pick<DB, 'execO'>): Promise<InventoryIte
   return db.execO<InventoryItem>(`SELECT i.id, COALESCE(s.name, i.name) AS name,
     COALESCE(s.category, i.category) AS category, i.default_unit,
     i.supply_id, i.lot_id, lot.lot_code, s.catalog_supply_id,
+    COALESCE(sg.grain_class, cgclass.grain_class) AS grain_class,
     COALESCE(d.display_unit, i.default_unit) AS display_unit, l.location_id, places.name AS location_name,
     COALESCE(lg.yield_pct, sg.yield_pct, cg.yield_pct, p.yield_pct) AS yield_pct,
     COALESCE(lg.color_lovibond, sg.color_lovibond, cg.color_lovibond, p.color_lovibond) AS color_lovibond,
@@ -2081,6 +2094,7 @@ export async function listInventory(db: Pick<DB, 'execO'>): Promise<InventoryIte
     LEFT JOIN lot_hop_specs lh ON lh.lot_id = lot.id
     LEFT JOIN lot_yeast_specs ly ON ly.lot_id = lot.id
     LEFT JOIN catalog.supply_grain_specs cg ON cg.supply_id = s.catalog_supply_id
+    LEFT JOIN catalog.supply_grain_classes cgclass ON cgclass.supply_id = s.catalog_supply_id
     LEFT JOIN catalog.supply_hop_specs ch ON ch.supply_id = s.catalog_supply_id
     LEFT JOIN catalog.supply_yeast_specs cy ON cy.supply_id = s.catalog_supply_id
     LEFT JOIN inventory_ingredient_properties p ON p.id = i.id
@@ -2092,6 +2106,7 @@ export async function listInventory(db: Pick<DB, 'execO'>): Promise<InventoryIte
 export async function listSupplies(db: Pick<DB, 'execO'>): Promise<InventoryItem[]> {
   return db.execO<InventoryItem>(`SELECT s.id, s.id AS supply_id, s.name, s.category,
     s.default_unit, s.default_unit AS display_unit, NULL AS location_id, s.catalog_supply_id,
+    COALESCE(g.grain_class, cgclass.grain_class) AS grain_class,
     COALESCE(g.yield_pct, cg.yield_pct) AS yield_pct,
     COALESCE(g.color_lovibond, cg.color_lovibond) AS color_lovibond,
     COALESCE(h.alpha_acid_pct, ch.alpha_acid_pct) AS alpha_acid_pct,
@@ -2102,6 +2117,7 @@ export async function listSupplies(db: Pick<DB, 'execO'>): Promise<InventoryItem
     LEFT JOIN supply_hop_specs h ON h.supply_id = s.id
     LEFT JOIN supply_yeast_specs y ON y.supply_id = s.id
     LEFT JOIN catalog.supply_grain_specs cg ON cg.supply_id = s.catalog_supply_id
+    LEFT JOIN catalog.supply_grain_classes cgclass ON cgclass.supply_id = s.catalog_supply_id
     LEFT JOIN catalog.supply_hop_specs ch ON ch.supply_id = s.catalog_supply_id
     LEFT JOIN catalog.supply_yeast_specs cy ON cy.supply_id = s.catalog_supply_id
     ORDER BY s.name COLLATE NOCASE`);
@@ -2109,14 +2125,16 @@ export async function listSupplies(db: Pick<DB, 'execO'>): Promise<InventoryItem
 
 export async function updateIngredientProperties(db: DB, item: InventoryItem, properties: IngredientProperties): Promise<void> {
   const allowed: Record<string, (keyof IngredientProperties)[]> = {
-    Grain: ['yield_pct', 'color_lovibond'], Adjunct: ['yield_pct', 'color_lovibond'],
+    Grain: ['yield_pct', 'color_lovibond', 'grain_class'], Adjunct: ['yield_pct', 'color_lovibond'],
     Hops: ['alpha_acid_pct', 'hop_form'], Yeast: ['attenuation_pct']
   };
   if (!allowed[item.category]) throw new Error('This inventory category has no calculation properties');
   const values = Object.fromEntries(allowed[item.category].filter(key => properties[key] != null)
     .map(key => [key, properties[key]])) as IngredientProperties;
   for (const [key, value] of Object.entries(values)) {
-    if (key === 'hop_form') {
+    if (key === 'grain_class') {
+      if (!['base', 'kilned', 'caramel', 'roasted', 'flaked', 'other'].includes(String(value))) throw new Error('Choose a grain class');
+    } else if (key === 'hop_form') {
       if (!['pellet', 'whole', 'plug'].includes(String(value))) throw new Error('Choose a hop form');
     } else if (typeof value !== 'number' || !Number.isFinite(value) || value < 0
       || key !== 'color_lovibond' && value > 100) throw new Error(`Enter a valid ${key.replaceAll('_', ' ')}`);

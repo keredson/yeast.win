@@ -20,7 +20,7 @@ export const appMashEfficiencyPct = 75;
 
 // Estimated as-is extract potential for grains without a recorded specification.
 // Product and brewery values always take precedence over these broad defaults.
-export const appGrainYields = { base: 78, kilned: 75, caramel: 70, roasted: 65, flaked: 70 } as const;
+export const appGrainYields = { base: 78, kilned: 75, caramel: 70, roasted: 65, flaked: 70, other: 75 } as const;
 
 export function grainClassForName(name: string): keyof typeof appGrainYields {
   const text = name.toLowerCase();
@@ -28,7 +28,8 @@ export function grainClassForName(name: string): keyof typeof appGrainYields {
   if (/crystal|caramel|cara(?!fa)/.test(text)) return 'caramel';
   if (/flak|torrif|rolled/.test(text)) return 'flaked';
   if (/munich|vienna|biscuit|aromatic|melanoidin|amber|brown malt/.test(text)) return 'kilned';
-  return 'base';
+  if (/pale|pils|wheat malt|maris otter|two.row|2.row/.test(text)) return 'base';
+  return 'other';
 }
 
 function positive(value: unknown): number | null {

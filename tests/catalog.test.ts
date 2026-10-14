@@ -66,6 +66,32 @@ test('existing catalog gains new equipment and inventory without item capacity',
   } finally { db.close(); }
 });
 
+test('ingredient catalog migration adds named products and preserves catalog edits', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brewlog-supply-products-'));
+  const before = openCatalogDb(dir);
+  before.prepare('INSERT INTO supplies(id, name, category, unit) VALUES (?, ?, ?, ?)')
+    .run('custom_supply', 'Custom orange peel', 'Adjunct', 'g');
+  before.prepare('UPDATE supply_products SET product_url = ? WHERE supply_id = ?')
+    .run('https://example.com/my-malt', 'supply_briess_pale_ale');
+  before.pragma('user_version = 21');
+  before.close();
+  const upgraded = openCatalogDb(dir);
+  try {
+    assert.equal(upgraded.pragma('user_version', { simple: true }), catalogSchemaVersion);
+    assert.ok(upgraded.prepare('SELECT 1 FROM supplies WHERE id = ?').get('custom_supply'));
+    assert.equal((upgraded.prepare('SELECT product_url FROM supply_products WHERE supply_id = ?')
+      .get('supply_briess_pale_ale') as { product_url: string }).product_url, 'https://example.com/my-malt');
+    assert.equal((upgraded.prepare('SELECT grain_class FROM supply_grain_classes WHERE supply_id = ?')
+      .get('supply_weyermann_munich_type_2') as { grain_class: string }).grain_class, 'kilned');
+    assert.equal((upgraded.prepare('SELECT yield_pct FROM supply_grain_specs WHERE supply_id = ?')
+      .get('supply_briess_caramel_60') as { yield_pct: number }).yield_pct, 77);
+    assert.equal(upgraded.prepare('SELECT 1 FROM supplies WHERE id = ?').get('inventory_munich_malt'), undefined);
+    assert.ok(upgraded.prepare('SELECT 1 FROM supplies WHERE id = ?').get('inventory_bottle_12oz'));
+    assert.ok((upgraded.prepare('SELECT length(image_bytes) AS bytes FROM supply_images WHERE supply_id = ?')
+      .get('supply_briess_caramel_60') as { bytes: number }).bytes > 1000);
+  } finally { upgraded.close(); }
+});
+
 test('version 21 separates US and EU VEVOR systems without replacing catalog edits', () => {
   for (const edited of [false, true]) {
     const dir = mkdtempSync(join(tmpdir(), 'brewlog-vevor-region-'));
@@ -538,8 +564,7 @@ test('version 9 CRR catalog keeps direct server edits when removing prefixes', (
   try {
     assert.equal(db.pragma('user_version', { simple: true }), catalogSchemaVersion);
     assert.deepEqual(db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'catalog_%'").all(), []);
-    assert.equal((db.prepare('SELECT name FROM supplies WHERE id = ?').get('inventory_maris_otter') as { name: string }).name,
-      'My edited malt');
+    assert.equal(db.prepare('SELECT name FROM supplies WHERE id = ?').get('inventory_maris_otter'), undefined);
     assert.equal((db.prepare('SELECT name FROM supplies WHERE id = ?').get('custom_ingredient') as { name: string }).name,
       'My custom grain');
     assert.ok(catalogChanges(db, 0n).changes.some(change => change.table === 'supplies'));
@@ -573,13 +598,13 @@ test('catalog sends only CR-SQLite changes after the client cursor', () => {
     replica.prepare('INSERT INTO supplies(id, name, category, unit) VALUES (?, ?, ?, ?)')
       .run('personal_ingredient', 'My grain', 'Grain', 'g');
     db.prepare('UPDATE supplies SET name = ? WHERE id = ?')
-      .run('Updated Maris Otter', 'inventory_maris_otter');
+      .run('Updated Briess pale malt', 'supply_briess_pale_ale');
     const delta = catalogChanges(db, BigInt(initial.serverCursor));
     assert.equal(delta.changes.length, 1);
     assert.equal(delta.changes[0].table, 'supplies');
     for (const change of delta.changes) apply.run(...decodeChange(change));
     assert.equal((replica.prepare('SELECT name FROM supplies WHERE id = ?')
-      .get('inventory_maris_otter') as { name: string }).name, 'Updated Maris Otter');
+      .get('supply_briess_pale_ale') as { name: string }).name, 'Updated Briess pale malt');
     assert.equal((replica.prepare('SELECT name FROM supplies WHERE id = ?')
       .get('personal_ingredient') as { name: string }).name, 'My grain');
     assert.deepEqual(catalogChanges(db, BigInt(delta.serverCursor)).changes, []);
@@ -601,11 +626,11 @@ test('catalog sends only CR-SQLite changes after the client cursor', () => {
     assert.equal((replica.prepare('SELECT heat_loss_watts FROM model_boil_characterization WHERE model_id = ?')
       .get('equipment_vevor_35l') as { heat_loss_watts: number }).heat_loss_watts, 320);
 
-    db.prepare('DELETE FROM supplies WHERE id = ?').run('inventory_maris_otter');
+    db.prepare('DELETE FROM supplies WHERE id = ?').run('inventory_dap');
     const deletion = catalogChanges(db, BigInt(boilDelta.serverCursor));
     assert.ok(deletion.changes.length > 0);
     for (const change of deletion.changes) apply.run(...decodeChange(change));
-    assert.equal(replica.prepare('SELECT id FROM supplies WHERE id = ?').get('inventory_maris_otter'), undefined);
+    assert.equal(replica.prepare('SELECT id FROM supplies WHERE id = ?').get('inventory_dap'), undefined);
     assert.equal((replica.prepare('SELECT name FROM supplies WHERE id = ?')
       .get('personal_ingredient') as { name: string }).name, 'My grain');
   } finally { replica.close(); db.close(); }
