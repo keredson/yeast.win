@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateRecipe } from '../client/recipeCalculations.ts';
+import { appYeastAttenuationPct, calculateRecipe } from '../client/recipeCalculations.ts';
 import type { Equipment, InventoryItem, PlanInput } from '../client/db.ts';
 
 const grain = { id: 'grain', name: 'Pale malt', category: 'Grain', default_unit: 'kg', display_unit: 'kg',
@@ -55,6 +55,42 @@ test('batch estimates use event snapshots, unit efficiency, and the batch wort l
   assert.ok(result.sources.originalGravity.some(line => line.includes('3 L (batch input)')));
   assert.ok(result.sources.finalGravity.some(line => line.includes('75% (batch event input)')));
   assert.ok(result.sources.colorSrm.some(line => line.includes('2 °L (batch event input)')));
+});
+
+test('one selected yeast without attenuation uses a labeled app estimate', () => {
+  const result = calculateRecipe(events, [grain, { ...yeast, attenuation_pct: null }], equipment,
+    { target_fermenter_volume_liters: 20 }, {});
+  assert.ok(result.originalGravity != null);
+  assert.ok(Math.abs(result.finalGravity! - (1 + (result.originalGravity - 1)
+    * (1 - appYeastAttenuationPct / 100))) < .000001);
+  assert.ok(result.abvPct != null);
+  assert.equal(result.usedAppYeastAttenuation, true);
+  assert.ok(result.sources.finalGravity.some(line => line.includes('75% (app estimate; selected yeast has no attenuation value)')));
+  assert.ok(result.sources.abvPct.some(line => line.includes('75% (app estimate; selected yeast has no attenuation value)')));
+  assert.ok(!result.missing.some(line => line.includes('yeast')));
+});
+
+test('yeast snapshot and ingredient values take precedence over the app estimate', () => {
+  const stock = [grain, { ...yeast, attenuation_pct: 81 }];
+  const recipe = calculateRecipe(events, stock, equipment,
+    { target_fermenter_volume_liters: 20 }, { pitch: { attenuation_pct: 70 } });
+  const batch = calculateRecipe(events, stock, equipment,
+    { target_fermenter_volume_liters: 20 }, { pitch: { attenuation_pct: 70 } }, {}, 'beer', null, 'batch');
+  assert.ok(recipe.sources.finalGravity.some(line => line.includes('81% (brewery or catalog ingredient')));
+  assert.ok(batch.sources.finalGravity.some(line => line.includes('70% (batch event input)')));
+  assert.equal(recipe.usedAppYeastAttenuation, false);
+  assert.equal(batch.usedAppYeastAttenuation, false);
+});
+
+test('missing or multiple yeast additions explain why FG is unavailable', () => {
+  const withoutYeast = calculateRecipe(events.filter(event => event.id !== 'pitch'), [grain], equipment,
+    { target_fermenter_volume_liters: 20 }, {});
+  assert.equal(withoutYeast.finalGravity, null);
+  assert.ok(withoutYeast.unavailable.finalGravity.some(line => line.includes('Add a yeast addition')));
+  const multipleYeasts = calculateRecipe([...events, { ...events[5], id: 'pitch-again' }], [grain, yeast], equipment,
+    { target_fermenter_volume_liters: 20 }, {});
+  assert.equal(multipleYeasts.finalGravity, null);
+  assert.ok(multipleYeasts.unavailable.finalGravity.some(line => line.includes('multiple yeast additions')));
 });
 
 test('imported brewhouse efficiency works without selected equipment', () => {

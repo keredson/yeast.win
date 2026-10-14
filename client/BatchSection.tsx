@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Select } from 'antd';
 import { PlusOutlined, SettingOutlined } from '@ant-design/icons';
-import { addBatchPlan, createBatch, eventDetails, eventFormData, listEvents, listPhotos, releaseEquipmentUse,
+import { addBatchPlan, createBatch, eventDetails, eventFormData, listEvents, listPhotos, listSupplies, releaseEquipmentUse,
   startBatchFromRecipe, startBatchFromTemplate, startBatchFromPrevious, updateBatchPlan,
   batchTargetVolume, breweryMashEfficiency, latestMeasuredMashEfficiencySource, updateBatchTargetVolume,
   type ActualEvent, type Batch, type Equipment, type InventoryItem,
@@ -71,7 +71,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
     let cancelled = false;
     setEstimate(null);
     void (async () => {
-      const [batchRows, eventRows, typeRows, breweryEfficiency] = await Promise.all([
+      const [batchRows, eventRows, typeRows, breweryEfficiency, supplies] = await Promise.all([
         db.execO<{ target_fermenter_volume_liters: number | null; brewhouse_efficiency_pct: number | null;
           wort_loss_liters: number | null }>(
           'SELECT target_fermenter_volume_liters, brewhouse_efficiency_pct, wort_loss_liters FROM batch_recipe_inputs WHERE id = ?', [selectedId]),
@@ -80,7 +80,8 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
         db.execO<{ recipe_type: RecipeType }>(`SELECT rt.recipe_type FROM batch_events e
           JOIN recipe_events re ON re.id = e.recipe_event_id
           JOIN recipe_types rt ON rt.id = re.recipe_id WHERE e.batch_id = ? LIMIT 1`, [selectedId]),
-        breweryMashEfficiency(db)
+        breweryMashEfficiency(db),
+        listSupplies(db)
       ]);
       const recent: Record<string, { value: number; batchName: string }> = {};
       const equipmentIds = new Set(events.filter(event => event.event_type === 'transfer'
@@ -95,12 +96,12 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
       const recipeType = typeRows[0]?.recipe_type || 'beer';
       if (!cancelled) {
         setEstimateType(recipeType);
-        setEstimate(calculateRecipe(events.filter(event => event.skipped_at == null), inventory, equipment, batchRows[0] || {},
+        setEstimate(calculateRecipe(events.filter(event => event.skipped_at == null), [...inventory, ...supplies], equipment, batchRows[0] || {},
           Object.fromEntries(eventRows.map(row => [row.id, row])), recent, recipeType, breweryEfficiency, 'batch'));
       }
     })().catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => { cancelled = true; };
-  }, [db, selectedId, events, inventory, equipment]);
+  }, [db, selectedId, events, inventory, equipment, catalogInventory]);
 
   async function changed() { await refreshDetail(); await onChanged(); }
 

@@ -7,6 +7,7 @@ export interface RecipeEstimate {
   originalGravity: number | null;
   finalGravity: number | null;
   abvPct: number | null;
+  usedAppYeastAttenuation: boolean;
   colorSrm: number | null;
   efficiencyLabel: string | null;
   missing: string[];
@@ -17,6 +18,7 @@ export interface RecipeEstimate {
 }
 
 export const appMashEfficiencyPct = 75;
+export const appYeastAttenuationPct = 75;
 
 // Estimated as-is extract potential for grains without a recorded specification.
 // Product and brewery values always take precedence over these broad defaults.
@@ -67,7 +69,8 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
     ? 'batch inputs' : assumedSize ? `assumed from ${assumedSize} because the recipe had no size` : 'recipe settings'}).`] : [];
   const targetHelp = batch ? 'Batch size is not set for this batch.' : 'Set Batch size in recipe settings.';
   if (!targetLiters) { missing.push(targetHelp); gravityMissing.push(targetHelp); colorMissing.push(targetHelp); }
-  if (recipeType !== 'beer') return { targetLiters, originalGravity: null, finalGravity: null, abvPct: null, colorSrm: null,
+  if (recipeType !== 'beer') return { targetLiters, originalGravity: null, finalGravity: null, abvPct: null,
+    usedAppYeastAttenuation: false, colorSrm: null,
     efficiencyLabel: null, missing: [...missing, `Gravity and alcohol estimates for this ${context} type need fermentable sugar inputs.`],
     sources: { targetLiters: targetSources, originalGravity: [], finalGravity: [], abvPct: [], colorSrm: [] },
     unavailable: { targetLiters: targetLiters ? [] : [targetHelp],
@@ -204,37 +207,38 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
     ? 1 + potentialPointGallons * efficiency! / 100 / gallons / 1000 : null;
 
   const yeasts = events.filter(event => event.event_type === 'addition' && event.details.item_category === 'Yeast');
-  const attenuations = yeasts.map(event => {
-    const details = event.details;
-    const item = inventory.find(row => row.id === details.inventory_item_id)
-      || (details.supply_id ? inventory.find(row => row.id === details.supply_id
-        || row.supply_id === details.supply_id) : undefined);
-    const snapshot = positive(eventInputs[event.id]?.attenuation_pct);
-    return batch ? snapshot ?? positive(item?.attenuation_pct) : positive(item?.attenuation_pct) ?? snapshot;
-  });
-  const attenuation = attenuations.length === 1 && attenuations[0] != null && attenuations[0] <= 100 ? attenuations[0] : null;
   const yeast = yeasts[0];
   const yeastItem = inventory.find(row => row.id === yeast?.details.inventory_item_id)
     || (yeast?.details.supply_id ? inventory.find(row => row.id === yeast.details.supply_id
       || row.supply_id === yeast.details.supply_id) : undefined);
+  const validAttenuation = (value: unknown) => { const parsed = positive(value); return parsed != null && parsed <= 100 ? parsed : null; };
+  const snapshotAttenuation = validAttenuation(eventInputs[yeast?.id || '']?.attenuation_pct);
+  const itemAttenuation = validAttenuation(yeastItem?.attenuation_pct);
+  const recordedAttenuation = batch ? snapshotAttenuation ?? itemAttenuation : itemAttenuation ?? snapshotAttenuation;
+  const usedAppYeastAttenuation = yeasts.length === 1 && recordedAttenuation == null;
+  const attenuation = yeasts.length === 1 ? recordedAttenuation ?? appYeastAttenuationPct : null;
   const finalSources = [originalGravity == null ? 'Expected OG is unavailable.' : `Expected OG: ${originalGravity.toFixed(3)} (calculated above).`];
-  if (attenuation != null) finalSources.push(`Yeast attenuation: ${attenuation}% (${batch && yeast && positive(eventInputs[yeast.id]?.attenuation_pct) != null
-    ? 'batch event input' : yeastItem ? `brewery ingredient ${yeastItem.name}` : `imported recipe ${yeast?.details.item_name || yeast?.title || 'yeast'}`}).`);
-  const attenuationHelp = 'Select one yeast with an attenuation value.';
-  if (!attenuation) missing.push(attenuationHelp);
+  if (attenuation != null) finalSources.push(`Yeast apparent attenuation: ${attenuation}% (${recordedAttenuation == null
+    ? 'app estimate; selected yeast has no attenuation value'
+    : batch && snapshotAttenuation != null ? 'batch event input'
+      : yeastItem && itemAttenuation != null ? `brewery or catalog ingredient ${yeastItem.name}`
+        : `imported recipe ${yeast?.details.item_name || yeast?.title || 'yeast'}`}).`);
+  const attenuationHelp = yeasts.length === 0 ? 'Add a yeast addition to estimate final gravity.'
+    : yeasts.length > 1 ? 'Final gravity with multiple yeast additions needs a blend calculation.' : null;
+  if (attenuationHelp) missing.push(attenuationHelp);
   const finalGravity = originalGravity != null && attenuation != null
     ? 1 + (originalGravity - 1) * (1 - attenuation / 100) : null;
   const abvPct = finalGravity != null && originalGravity != null ? (originalGravity - finalGravity) * 131.25 : null;
   const abvSources = originalGravity != null && finalGravity != null
     ? [`Expected OG: ${originalGravity.toFixed(3)}.`, `Expected FG: ${finalGravity.toFixed(3)}.`,
-      'ABV = (OG − FG) × 131.25.'] : [];
+      ...finalSources.slice(1), 'ABV = (OG − FG) × 131.25.'] : [];
   if (colorSrm != null) colorSources.push('Color uses grain amounts, color values, batch size, and the Morey approximation.');
 
-  return { targetLiters, originalGravity, finalGravity, abvPct, colorSrm,
+  return { targetLiters, originalGravity, finalGravity, abvPct, usedAppYeastAttenuation, colorSrm,
     efficiencyLabel, missing: [...new Set(missing)],
     sources: { targetLiters: targetSources, originalGravity: gravitySources, finalGravity: finalSources,
       abvPct: abvSources, colorSrm: colorSources },
     unavailable: { targetLiters: targetLiters ? [] : [targetHelp], originalGravity: gravityMissing,
-      finalGravity: [...gravityMissing, ...(!attenuation ? [attenuationHelp] : [])],
-      abvPct: [...gravityMissing, ...(!attenuation ? [attenuationHelp] : [])], colorSrm: colorMissing } };
+      finalGravity: [...gravityMissing, ...(attenuationHelp ? [attenuationHelp] : [])],
+      abvPct: [...gravityMissing, ...(attenuationHelp ? [attenuationHelp] : [])], colorSrm: colorMissing } };
 }
