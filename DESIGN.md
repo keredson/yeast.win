@@ -51,7 +51,7 @@ Keep IDs, provenance, and batch ownership explicit from the start so the later p
 
 ## Data conventions
 
-- Use client-generated NanoIDs for distributed row identities. IDs are opaque; no meaning or ordering is inferred from them.
+- Use client-generated NanoIDs for distributed row identities. New IDs use a 21-character alphanumeric alphabet without underscores; existing NanoIDs containing underscores or hyphens remain valid. IDs are opaque; no meaning or ordering is inferred from them.
 - Store timestamps as UTC Unix **seconds**. `actual_at` is when something happened according to its source or user; `received_at` is when the server first accepted it. Neither timestamp is the CR-SQLite sync cursor.
 - Record `created_by_account_id` for human actions and an integration/source identity for machine actions. Keep the raw external reading ID where available for deduplication. A manual measurement records its instrument as well as its human creator.
 - Preserve a quantity's entered numeric value and **unit**. The app converts compatible quantities to canonical values for calculations and display. This preserves distinctions such as `5 US gal`, `19 L`, `1 tablet`, and `2 packets`, and avoids forcing additions or inventory into an inappropriate universal unit. Canonical calculation units include seconds, liters, and degrees Celsius. Unit conversion and precision rules belong in shared client logic.

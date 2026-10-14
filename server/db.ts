@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, realpathSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { nanoid } from 'nanoid';
+import { createId } from '../shared/id.ts';
 import { recordSlug } from '../shared/recordSlug.ts';
 import { fillMissingRecipeBatchSizes } from '../shared/batchSize.ts';
 import { retiredGenericSupplies } from '../shared/retiredGenericSupplies.ts';
@@ -116,7 +116,7 @@ function uniqueSlug(name: string, used: Set<string>): string {
 }
 
 export function createWorkspace(auth: Database.Database, ownerId: string, name: string) {
-  const id = nanoid();
+  const id = createId();
   const existing = auth.prepare('SELECT slug FROM workspaces WHERE owner_account_id = ?').all(ownerId) as { slug: string | null }[];
   const slug = existing.length ? uniqueSlug(name, new Set(existing.map(row => row.slug).filter((value): value is string => value !== null))) : null;
   const db = openWorkspaceDb(id);

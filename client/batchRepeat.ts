@@ -1,4 +1,4 @@
-import { nanoid } from 'nanoid';
+import { createId } from '../shared/id.ts';
 import type { ActualEvent, PlanDetails } from './db.ts';
 import { anchorPoint, effectivePlanTime, supportsDuration } from './planTiming.ts';
 
@@ -19,7 +19,7 @@ export function repeatBatchActions(events: ActualEvent[], sourceStartedAt: numbe
   const included = events.filter(event => repeatableTypes.has(event.event_type)
     && (event.actual_at != null || event.skipped_at == null)
     && (event.event_type !== 'measurement' || !!event.details.measurement_kind));
-  const ids = new Map(included.map(event => [event.id, nanoid()]));
+  const ids = new Map(included.map(event => [event.id, createId()]));
   const sourceAt = (event: ActualEvent) => event.actual_at
     ?? effectivePlanTime(event, events, events, sourceStartedAt);
   return included.map(event => {

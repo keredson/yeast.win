@@ -1,6 +1,6 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import type Database from 'better-sqlite3';
-import { nanoid } from 'nanoid';
+import { createId } from '../shared/id.ts';
 import { createWorkspace } from './db.ts';
 import { nowSeconds } from '../shared/schema.ts';
 import { defaultPreferredUnits, type PreferredUnits } from '../shared/units.ts';
@@ -36,7 +36,7 @@ export function register(db: Database.Database, username: string, password: stri
   const normalized = username.trim().toLowerCase();
   return db.transaction(() => {
     if (db.prepare('SELECT 1 FROM accounts WHERE lower(username) = ?').get(normalized)) return null;
-    const id = nanoid();
+    const id = createId();
     db.prepare('INSERT INTO accounts(id, username, password_hash, created_at) VALUES (?, ?, ?, ?)')
       .run(id, normalized, passwordHash(password), nowSeconds());
     createWorkspace(db, id, 'Homebrew');

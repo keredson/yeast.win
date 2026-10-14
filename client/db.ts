@@ -1,7 +1,7 @@
 import initWasm, { type DB } from '@vlcn.io/crsqlite-wasm';
 import { fetchApi } from './api.ts';
 import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
-import { nanoid } from 'nanoid';
+import { createId } from '../shared/id.ts';
 import { boilOffKinds, capacityKinds, equipmentKinds, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import { openLocalCatalog } from './catalog.ts';
 import { retiredGenericSupplies } from '../shared/retiredGenericSupplies.ts';
@@ -482,7 +482,7 @@ export async function assignEquipmentToBatch(db: DB, equipmentId: string, batchI
       JOIN equipment_use_events u ON u.event_id = e.id LEFT JOIN event_ends x ON x.id = e.id
       WHERE u.equipment_id = ? AND e.batch_id = ? AND e.actual_at IS NOT NULL AND x.id IS NULL LIMIT 1`, [equipmentId, batchId]);
     if (!existing.length) {
-      const id = nanoid();
+      const id = createId();
       const now = nowSeconds();
       await tx.exec(`INSERT INTO batch_events(id, batch_id, event_type, title, actual_at, created_at,
         created_by_account_id, recorded_by_account_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -499,7 +499,7 @@ export async function releaseEquipmentUse(db: DB, useId: string): Promise<void> 
 }
 
 export async function createBatch(db: DB, name: string, description: string, accountId: string): Promise<string> {
-  const id = nanoid();
+  const id = createId();
   const now = nowSeconds();
   const batchSize = await breweryBatchSize(db) ?? appBatchSizeLiters;
   await db.tx(async tx => {
@@ -513,7 +513,7 @@ export async function createBatch(db: DB, name: string, description: string, acc
 export async function startBatchFromTemplate(db: DB, recipeType: RecipeType, name: string,
   description: string, accountId: string, temperatureUnit: '°C' | '°F'): Promise<string> {
   const plans = recipeTemplatePlans(recipeType, temperatureUnit);
-  const id = nanoid();
+  const id = createId();
   const now = nowSeconds();
   const batchSize = await breweryBatchSize(db) ?? appBatchSizeLiters;
   await db.tx(async tx => {
@@ -767,7 +767,7 @@ export async function importRecipes(db: DB, source: {
   if (!selected.length) throw new Error('Choose at least one recipe');
   if (source.bytes.byteLength > 10 * 1024 * 1024) throw new Error('Import file exceeds 10 MB');
   if (!/^[a-f0-9]{64}$/.test(source.sha256)) throw new Error('Invalid import hash');
-  const sourceId = nanoid();
+  const sourceId = createId();
   const now = nowSeconds();
   const ids: string[] = [];
   await db.tx(async tx => {
@@ -784,9 +784,9 @@ export async function importRecipes(db: DB, source: {
         if (!rows.length) throw new Error(`Choose an inventory item for ${ingredient.name}`);
         ingredientIds.set(ingredient.key, choice.inventoryItemId);
       } else {
-        const id = nanoid();
-        const supplyId = nanoid();
-        const lotId = nanoid();
+        const id = createId();
+        const supplyId = createId();
+        const lotId = createId();
         if (!choice.unit) throw new Error(`Choose a unit for ${ingredient.name}`);
         await tx.exec('INSERT INTO supplies(id, name, category, default_unit, created_at) VALUES (?, ?, ?, ?, ?)',
           [supplyId, ingredient.name, ingredient.category, storageUnit(choice.unit), now]);
@@ -820,7 +820,7 @@ export async function importRecipes(db: DB, source: {
     }
     const importBreweryBatchSize = await breweryBatchSize(tx);
     for (const recipe of selected) {
-      const recipeId = nanoid();
+      const recipeId = createId();
       ids.push(recipeId);
       const slug = await nextRecipeSlug(tx, recipe.name);
       await tx.exec('INSERT INTO recipes(id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
@@ -834,7 +834,7 @@ export async function importRecipes(db: DB, source: {
       const batchSize = importedRecipeBatchSize(targetLiters, importBreweryBatchSize);
       await tx.exec(`INSERT INTO recipe_inputs(id, target_fermenter_volume_liters, brewhouse_efficiency_pct, batch_size_source)
         VALUES (?, ?, ?, ?)`, [recipeId, batchSize.liters, brewhouseEfficiency, batchSize.source]);
-      const eventIds = new Map(recipe.actions.map(action => [action.key, nanoid()]));
+      const eventIds = new Map(recipe.actions.map(action => [action.key, createId()]));
       for (const [order, action] of recipe.actions.entries()) {
         const eventId = eventIds.get(action.key)!;
         const details = { ...action.details };
@@ -875,11 +875,11 @@ export function recipeTemplatePlans(recipeType: RecipeType, temperatureUnit: '°
   (PlanInput & { id: string; sort_order: number })[] {
   if (!['beer', 'wine', 'mead', 'cider'].includes(recipeType)) throw new Error('Choose a recipe type');
   const plans: (PlanInput & { id: string; sort_order: number })[] = [];
-    const mashId = nanoid();
-    const drainId = nanoid();
-    const boilId = nanoid();
-    const chillId = nanoid();
-    const transferId = nanoid();
+    const mashId = createId();
+    const drainId = createId();
+    const boilId = createId();
+    const chillId = createId();
+    const transferId = createId();
     const insert = (eventId: string, eventType: string, title: string, anchorId: string | null,
       details: PlanDetails, order: number, offsetSeconds = 0) => {
       plans.push({ id: eventId, event_type: eventType, title, anchor_event_id: anchorId,
@@ -888,11 +888,11 @@ export function recipeTemplatePlans(recipeType: RecipeType, temperatureUnit: '°
     if (recipeType === 'beer') {
       insert(mashId, 'temperature_control', 'Mash', null,
         { phase: 'mash', mode: 'hold', target_value: convertUnit(67, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 1800 }, 2);
-      insert(nanoid(), 'addition', 'Add fermentable', mashId,
+      insert(createId(), 'addition', 'Add fermentable', mashId,
         { item_category: 'Grain', anchor_point: 'start' }, 1);
       insert(drainId, 'transfer', 'Drain grain', mashId,
         { purpose: 'drain_grain', anchor_point: 'end' }, 3);
-      insert(nanoid(), 'measurement', 'Measure pre-boil gravity', drainId,
+      insert(createId(), 'measurement', 'Measure pre-boil gravity', drainId,
         { measurement_kind: 'gravity', target_unit: 'SG' }, 4);
       insert(boilId, 'temperature_control', 'Boil', drainId,
         { phase: 'boil', mode: 'heat', target_value: convertUnit(100, '°C', temperatureUnit)!, target_unit: temperatureUnit, duration_seconds: 3600 }, 5);
@@ -902,14 +902,14 @@ export function recipeTemplatePlans(recipeType: RecipeType, temperatureUnit: '°
       insert(transferId, 'transfer', 'Transfer to fermenter', chillId,
         { anchor_point: 'end', purpose: 'to_fermenter' }, 7);
     }
-    const gravityId = nanoid();
+    const gravityId = createId();
     insert(gravityId, 'measurement', 'Measure original specific gravity', recipeType === 'beer' ? transferId : null,
       { measurement_kind: 'gravity', target_unit: 'SG' }, recipeType === 'beer' ? 8 : 1);
-    const pitchId = nanoid();
+    const pitchId = createId();
     insert(pitchId, 'addition', 'Pitch yeast', recipeType === 'beer' ? chillId : gravityId,
       { item_category: 'Yeast', ...(recipeType === 'beer' ? { anchor_point: 'end' } : {}) }, recipeType === 'beer' ? 9 : 2);
     const packagingDays: Record<RecipeType, number> = { beer: 21, cider: 28, wine: 60, mead: 60 };
-    insert(nanoid(), 'packaging', 'Package batch', pitchId,
+    insert(createId(), 'packaging', 'Package batch', pitchId,
       {}, recipeType === 'beer' ? 10 : 3, packagingDays[recipeType] * 86400);
   return plans.sort((a, b) => a.sort_order - b.sort_order);
 }
@@ -917,7 +917,7 @@ export function recipeTemplatePlans(recipeType: RecipeType, temperatureUnit: '°
 export async function createRecipe(db: DB, name: string, description: string, recipeType: RecipeType,
   temperatureUnit: '°C' | '°F', batchSizeLiters: number): Promise<string> {
   if (!Number.isFinite(batchSizeLiters) || batchSizeLiters <= 0) throw new Error('Enter a positive batch size');
-  const id = nanoid();
+  const id = createId();
   const now = nowSeconds();
   const plans = recipeTemplatePlans(recipeType, temperatureUnit);
   await db.tx(async tx => {
@@ -959,7 +959,7 @@ async function resolveRecipeSupply(db: Pick<DB, 'exec' | 'execO'>, input: PlanIn
   const existing = catalogId && known.length ? await db.execO<{ id: string }>(
     'SELECT id FROM supplies WHERE catalog_supply_id = ?', [catalogId]) : await db.execO<{ id: string }>(
     'SELECT id FROM supplies WHERE category = ? AND lower(trim(name)) = lower(trim(?)) LIMIT 1', [category, name]);
-  const supplyId = existing[0]?.id || nanoid();
+  const supplyId = existing[0]?.id || createId();
   if (!existing.length) await db.exec(`INSERT INTO supplies(id, name, category, default_unit, catalog_supply_id, created_at)
     VALUES (?, ?, ?, ?, ?, ?)`, [supplyId, name, category, known[0]?.unit || storageUnit(input.details.unit || 'each'),
       known.length ? catalogId || null : null, nowSeconds()]);
@@ -967,7 +967,7 @@ async function resolveRecipeSupply(db: Pick<DB, 'exec' | 'execO'>, input: PlanIn
 }
 
 export async function addRecipePlan(db: DB, recipeId: string, input: PlanInput): Promise<string> {
-  const id = nanoid();
+  const id = createId();
   const order = await db.execO<{ next_order: number }>(
     'SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_order FROM recipe_events WHERE recipe_id = ?', [recipeId]);
   await db.tx(async tx => {
@@ -1044,7 +1044,7 @@ export async function deleteRecipePlan(db: DB, recipeId: string, planId: string)
 }
 
 export async function addBatchPlan(db: DB, batchId: string, input: PlanInput, accountId: string): Promise<string> {
-  const id = nanoid();
+  const id = createId();
   await db.tx(async tx => {
     await tx.exec(`INSERT INTO batch_events(id, batch_id, event_type, title, planned_at, anchor_event_id,
       offset_seconds, anchor_point, duration_seconds, instructions, created_at, created_by_account_id)
@@ -1107,9 +1107,9 @@ export async function startBatchFromRecipe(db: DB, recipe: Recipe, name: string,
       latestEfficiencies.set(mashEquipmentId, await latestMeasuredMashEfficiency(db, mashEquipmentId));
     }
   }
-  const batchId = nanoid();
+  const batchId = createId();
   const now = nowSeconds();
-  const ids = new Map(plans.map(plan => [plan.id, nanoid()]));
+  const ids = new Map(plans.map(plan => [plan.id, createId()]));
   await db.tx(async tx => {
     await tx.exec('INSERT INTO batches(id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
       [batchId, name, description, 'active', now, now]);
@@ -1203,7 +1203,7 @@ export async function startBatchFromPrevious(db: DB, sourceBatchId: string, name
       : stock.filter(item => item.id === details.inventory_item_id);
     return matches.length === 1 ? matches[0].id : undefined;
   };
-  const batchId = nanoid();
+  const batchId = createId();
   const now = nowSeconds();
   await db.tx(async tx => {
     await tx.exec('INSERT INTO batches(id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
@@ -1264,7 +1264,7 @@ export interface EventInput {
 }
 
 export async function recordEvent(db: DB, input: EventInput): Promise<string> {
-  const id = input.eventId || nanoid();
+  const id = input.eventId || createId();
   if (input.endedAt != null && input.endedAt < input.actualAt) throw new Error('End must be after start');
   await db.tx(async tx => {
     if (input.eventId) {
@@ -1603,7 +1603,7 @@ export async function createEquipmentUnit(db: DB, modelId: string, stockId?: str
     if (used.length) throw new Error('Stock ID is already in use');
   }
   if (locationId && !(await listInventoryLocations(db)).some(location => location.id === locationId)) throw new Error('Location not found');
-  const id = nanoid();
+  const id = createId();
   const now = nowSeconds();
   await db.tx(async tx => {
     await tx.exec('INSERT INTO equipment(id, name, model_id, stock_id, added_at, created_at) VALUES (?, ?, ?, ?, ?, ?)',
@@ -1700,7 +1700,7 @@ export async function createEquipment(db: DB, name: string, kind: string, catalo
   locationId?: string | null): Promise<string> {
   if (!equipmentKinds.some(item => item.value === kind)) throw new Error('Choose a valid equipment kind');
   if (catalogModel && catalogModel.kind !== kind) throw new Error('Catalog kind does not match equipment kind');
-  const id = nanoid();
+  const id = createId();
   if (!name.trim()) throw new Error('Enter an equipment name');
   if (stockId?.trim() && (await db.execO<{ id: string }>(
     'SELECT id FROM equipment WHERE stock_id = ? AND removed_at IS NULL', [stockId.trim()])).length) {
@@ -1710,7 +1710,7 @@ export async function createEquipment(db: DB, name: string, kind: string, catalo
   const changed = (column: keyof EquipmentSpecifications) => overrides[column] != null
     && (!catalogModel || overrides[column] !== catalogModel[column as keyof CatalogEquipment]);
   await db.tx(async tx => {
-    const modelId = catalogModel?.id || nanoid();
+    const modelId = catalogModel?.id || createId();
     const now = nowSeconds();
     await tx.exec(`INSERT OR IGNORE INTO equipment_models(id, name, kind, catalog_model_id,
       has_liquid_containment, capacity_liters, has_pressure_rating, max_pressure_kpa,
@@ -2335,7 +2335,7 @@ export async function saveInventoryLocation(db: DB, name: string, parentId: stri
     });
     return id;
   }
-  const nextId = nanoid();
+  const nextId = createId();
   await db.tx(async tx => {
     await tx.exec('INSERT INTO inventory_locations(id, name, parent_id, created_at) VALUES (?, ?, ?, ?)', [nextId, clean, parentId, nowSeconds()]);
     await tx.exec('INSERT INTO inventory_location_slugs(id, slug) VALUES (?, ?)', [nextId, chosenSlug]);
@@ -2427,12 +2427,12 @@ export async function createInventoryItem(db: DB, name: string, category: string
   if (items.some(item => sameInventoryProduct(item, name, category)) && (!startingQuantity || startingQuantity <= 0))
     throw new Error('Enter a positive quantity to add this existing item');
   if (locationId && !(await listInventoryLocations(db)).some(location => location.id === locationId)) throw new Error('Location not found');
-  const id = nanoid();
+  const id = createId();
   const now = nowSeconds();
   await db.tx(async tx => {
     const existingSupply = await tx.execO<{ id: string }>(
       'SELECT id FROM supplies WHERE category = ? AND lower(trim(name)) = lower(trim(?)) LIMIT 1', [category, name]);
-    const supplyId = existingSupply[0]?.id || nanoid();
+    const supplyId = existingSupply[0]?.id || createId();
     if (!existingSupply.length) await tx.exec(`INSERT INTO supplies(id, name, category, default_unit, catalog_supply_id, created_at)
       VALUES (?, ?, ?, ?, ?, ?)`, [supplyId, name, category, defaultUnit, catalogSupplyId, now]);
     else if (catalogSupplyId) await tx.exec('UPDATE supplies SET catalog_supply_id = COALESCE(catalog_supply_id, ?) WHERE id = ?',
@@ -2444,7 +2444,7 @@ export async function createInventoryItem(db: DB, name: string, category: string
     const existingLot = await tx.execO<{ id: string }>(`SELECT id FROM supply_lots WHERE supply_id = ?
       AND (lot_code = ? OR lot_code IS NULL AND ? IS NULL) ORDER BY created_at, id LIMIT 1`,
     [supplyId, cleanLot, cleanLot]);
-    const lotId = existingLot[0]?.id || nanoid();
+    const lotId = existingLot[0]?.id || createId();
     if (!existingLot.length) await tx.exec('INSERT INTO supply_lots(id, supply_id, lot_code, created_at) VALUES (?, ?, ?, ?)',
       [lotId, supplyId, cleanLot, now]);
     await tx.exec(`INSERT INTO inventory_items(id, name, category, default_unit, supply_id, lot_id, created_at)
@@ -2453,7 +2453,7 @@ export async function createInventoryItem(db: DB, name: string, category: string
     if (displayUnit !== defaultUnit) await tx.exec('INSERT INTO inventory_display_units(id, display_unit) VALUES (?, ?)',
       [id, displayUnit]);
     if (startingQuantity != null) await tx.exec(`INSERT INTO inventory_counts(id, inventory_item_id, quantity, unit, counted_at, created_by_account_id)
-      VALUES (?, ?, ?, ?, ?, ?)`, [nanoid(), id, startingQuantity, defaultUnit, now, accountId]);
+      VALUES (?, ?, ?, ?, ?, ?)`, [createId(), id, startingQuantity, defaultUnit, now, accountId]);
   });
   return id;
 }
@@ -2469,7 +2469,7 @@ export async function moveInventoryStock(db: DB, source: InventoryItem, destinat
   if (available == null || converted > available + 1e-9) throw new Error('Cannot move more than the available stock');
   let target = (await listInventory(db)).find(item => item.lot_id === source.lot_id && item.location_id === destinationId);
   if (target && convertInventoryUnit(quantity, unit, target.default_unit) == null) throw new Error('Destination uses an incompatible unit');
-  if (!target) target = { ...source, id: nanoid(), location_id: destinationId };
+  if (!target) target = { ...source, id: createId(), location_id: destinationId };
   const latest = await db.execO<{ at: number | null }>(`SELECT MAX(at) AS at FROM (
     SELECT purchased_at AS at FROM inventory_purchases WHERE inventory_item_id IN (?, ?)
     UNION ALL SELECT counted_at FROM inventory_counts WHERE inventory_item_id IN (?, ?)
@@ -2491,7 +2491,7 @@ export async function moveInventoryStock(db: DB, source: InventoryItem, destinat
         SELECT ?, ${stockPropertyColumns.join(', ')} FROM inventory_ingredient_properties WHERE id = ?`, [target.id, source.id]);
     }
     await tx.exec('INSERT INTO inventory_moves(id, from_item_id, to_item_id, quantity, unit, moved_at) VALUES (?, ?, ?, ?, ?, ?)',
-      [nanoid(), source.id, target.id, quantity, unit, Math.max(nowSeconds(), (latest[0]?.at ?? 0) + 1)]);
+      [createId(), source.id, target.id, quantity, unit, Math.max(nowSeconds(), (latest[0]?.at ?? 0) + 1)]);
   });
   return target.id;
 }
@@ -2508,13 +2508,13 @@ export async function addInventoryEntry(db: DB, itemId: string, kind: 'purchase'
   const now = Math.max(nowSeconds(), (latest[0]?.at ?? 0) + 1);
   if (kind === 'purchase') {
     await db.exec('INSERT INTO inventory_purchases(id, inventory_item_id, quantity, unit, purchased_at) VALUES (?, ?, ?, ?, ?)',
-      [nanoid(), itemId, quantity, unit, now]);
+      [createId(), itemId, quantity, unit, now]);
   } else if (kind === 'discard') {
     await db.exec('INSERT INTO inventory_discards(id, inventory_item_id, quantity, unit, discarded_at, created_by_account_id) VALUES (?, ?, ?, ?, ?, ?)',
-      [nanoid(), itemId, quantity, unit, now, accountId]);
+      [createId(), itemId, quantity, unit, now, accountId]);
   } else {
     await db.exec('INSERT INTO inventory_counts(id, inventory_item_id, quantity, unit, counted_at, created_by_account_id) VALUES (?, ?, ?, ?, ?, ?)',
-      [nanoid(), itemId, quantity, unit, now, accountId]);
+      [createId(), itemId, quantity, unit, now, accountId]);
   }
 }
 
@@ -2523,7 +2523,7 @@ export async function addPhoto(db: DB, batchId: string, file: File, accountId: s
   if (!file.type.startsWith('image/')) throw new Error('Choose an image');
   if (file.size > 5 * 1024 * 1024) throw new Error('Image exceeds 5 MB');
   const bytes = new Uint8Array(await file.arrayBuffer());
-  eventId ||= nanoid();
+  eventId ||= createId();
   await db.tx(async tx => {
     const existing = await tx.execO<{ id: string }>('SELECT id FROM batch_events WHERE id = ?', [eventId]);
     if (existing.length) await tx.exec('UPDATE batch_events SET actual_at = ?, note = ?, recorded_by_account_id = ? WHERE id = ?',
@@ -2531,7 +2531,7 @@ export async function addPhoto(db: DB, batchId: string, file: File, accountId: s
     else await tx.exec(`INSERT INTO batch_events(id, batch_id, event_type, title, actual_at, note, created_at, created_by_account_id, recorded_by_account_id)
       VALUES (?, ?, 'photo', 'Photo', ?, ?, ?, ?, ?)`, [eventId, batchId, actualAt, note || file.name, actualAt, accountId, accountId]);
     await tx.exec(`INSERT INTO photos(id, batch_id, batch_event_id, mime_type, byte_count, image, created_at, created_by_account_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [nanoid(), batchId, eventId, file.type, bytes.length, bytes, actualAt, accountId]);
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [createId(), batchId, eventId, file.type, bytes.length, bytes, actualAt, accountId]);
   });
 }
 
