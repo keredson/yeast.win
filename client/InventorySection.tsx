@@ -147,7 +147,9 @@ function PackagingFields({ defaults }: { defaults?: ContainerSpecs }) {
   const kind = Form.useWatch('container_kind', form) || defaults?.container_kind;
   const material = Form.useWatch('material', form) || defaults?.material;
   return <>
-    <Form.Item name="container_kind" label="Container type"><Select allowClear options={[
+    <Form.Item name="container_kind" label="Container type"><Select allowClear onChange={value => {
+      if (value === 'barrel' && !form.getFieldValue('material')) form.setFieldValue('material', 'wood');
+    }} options={[
       { value: 'keg', label: 'Keg' }, { value: 'barrel', label: 'Barrel' }, { value: 'bottle', label: 'Bottle' }
     ]} /></Form.Item>
     {kind && <Form.Item name="capacity_liters" label="Capacity (L)" preserve={false}>
