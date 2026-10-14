@@ -14,6 +14,7 @@ roles, and any preset capacity. Brewers can enter any other model by name.
 | Anvil Foundry | [Anvil all-in-one systems](https://anvilbrewing.com/all-in-one-systems/) |
 | VEVOR electric brewing system | [VEVOR 9.2 gal / 35 L vessel, 2500 W model](https://eur.vevor.com/beer-brewing-system-c_11816/vevor-all-in-one-grain-brewing-system-home-beer-brewer-w-circulating-pump-30-l-p_010108577563) |
 | Controlled fermentation | [Grainfather GF30](https://us.grainfather.com/products/gf30-conical-fermenter), [KegLand RAPT Fermentation Chamber](https://kegland.com.au/products/rapt-temperature-controlled-fermentation-chamber) |
+| FermZilla fermenters | [30 L All Rounder](https://kegland.com.au/products/fermzilla-30l-all-rounder-pressure-rated-keg-fermenter-now-with-stainless-handle), [60 L All Rounder](https://kegland.com.au/products/fermzilla-60l-all-rounder-pressure-rated-keg-fermenter), [27 L Gen3 Tri-Conical](https://kegland.com.au/products/fermzilla-27l-tri-conical-uni-tank-fermenter-gen3), [55 L Gen3 Tri-Conical](https://kegland.com.au/products/55l-fermzilla-tri-conical-pressure-brewing-kit), [30 L Flat Bottom](https://kegland.com.au/products/fermzilla-flat-bottom-with-tap-30l-fermenter-includes-volume-sticker-and-temperature-sticker) |
 | Temperature controllers | [Inkbird ITC-308 series](https://www.inkbird.com/collections/smart-appliances/products/temperature-controller-itc-308), [KegLand RAPT Controller](https://kegland.com.au/products/rapt-temperature-controller-standard-10amp-socket) |
 | Glycol chillers | [Grainfather GC4](https://us.grainfather.com/products/gc4-glycol-chiller), [KegLand RAPT Glycol Chiller](https://kegland.com.au/products/rapt-bluetooth-glycol-chiller) |
 | Gravity instruments | [Tilt hydrometer](https://tilthydrometer.com/), [KegLand RAPT Pill](https://kegland.com.au/products/yellow-rapt-pill-hydrometer-thermometer-wifi-bluetooth) |
@@ -51,3 +52,17 @@ fermenter's liquid capacity. Manufacturer sites often omit controller setpoint
 limits for brewing systems, so reaching boiling temperature is not used as a
 substitute for a documented controller range. Local equipment can override the
 catalog defaults for its specific unit.
+
+## FermZilla additions
+
+Catalog version 23 adds the 60 L All Rounder, Gen3 Tri-Conical 27 L and 55 L,
+and Flat Bottom 30 L alongside the existing 30 L All Rounder. KegLand's
+[All Rounder instructions](https://docs.kegland.com.au/products/fermentation-equipment/fermzilla-all-rounder-30l-and-60l-or-user-guide/important-information-and-warnings)
+specify a 2.5 bar limit for the 60 L vessel. The [27 L](https://kegland.com.au/products/27l-fermzilla-tri-conical-pressure-brewing-kit)
+and [55 L](https://kegland.com.au/products/55l-fermzilla-tri-conical-pressure-brewing-kit-1)
+Tri-Conical listings specify 2.4 bar. KegLand explicitly says the
+[Flat Bottom](https://kegland.com.au/products/fermzilla-flat-bottom-with-tap-30l-fermenter-includes-volume-sticker-and-temperature-sticker)
+is not pressure rated, so it has no pressure capability row. None of these
+vessels has built-in temperature control. Their product photos and 128 px
+thumbnails are bundled as JPEGs from the linked KegLand product pages for
+offline catalog use.

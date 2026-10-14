@@ -512,6 +512,23 @@ export function openCatalogDb(dataDir: string): Database.Database {
       db.pragma('user_version = 22');
     })();
   }
+  if ((db.pragma('user_version', { simple: true }) as number) === 22) {
+    db.transaction(() => {
+      const addModel = db.prepare(`INSERT OR IGNORE INTO equipment_models
+        (id, manufacturer, model_name, kind, product_url) VALUES (?, ?, ?, ?, ?)`);
+      const addLiquid = db.prepare(`INSERT OR IGNORE INTO model_liquid_containment
+        (model_id, capacity_liters) VALUES (?, ?)`);
+      const addPressure = db.prepare(`INSERT OR IGNORE INTO model_pressure_rating
+        (model_id, max_pressure_kpa) VALUES (?, ?)`);
+      for (const item of expandedCatalogEquipment.filter(model => model.id.startsWith('equipment_fermzilla_'))) {
+        addModel.run(item.id, item.manufacturer, item.name, item.kind, item.product_url);
+        addLiquid.run(item.id, item.capacity_liters);
+        if (item.max_pressure_kpa != null) addPressure.run(item.id, item.max_pressure_kpa);
+      }
+      seedModelImages(db);
+      db.pragma('user_version = 23');
+    })();
+  }
   db.prepare(`UPDATE equipment_models SET model_name = ?
     WHERE id = ? AND model_name IN (?, ?)`).run(vevorModelName, 'equipment_vevor_35l',
     'VEVOR Electric Brewing System 9.2 Gal/35 L Brewing Pot', 'VEVOR 35 L');
