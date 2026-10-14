@@ -78,8 +78,7 @@ function inventoryIndexRows(supplies: InventoryItem[], stocks: InventoryItem[], 
       byLocation.set(locationId, [...(byLocation.get(locationId) || []), stock]);
     }
     const locationRows = [...byLocation.entries()].sort(([a], [b]) =>
-      (inventoryLocationPath(a, locations) || 'No location').localeCompare(
-        inventoryLocationPath(b, locations) || 'No location'));
+      inventoryLocationPath(a, locations).localeCompare(inventoryLocationPath(b, locations)));
     return { key: `supply:${supply.id}`, supply, stocks: productStocks,
       ...(locationRows.length === 1 ? { locationId: locationRows[0][0] } : {}),
       ...(locationRows.length > 1 ? { children: locationRows.map(([locationId, group]) => ({
@@ -98,11 +97,11 @@ function stockTree(rows: InventoryItem[]): StockTreeRow[] {
   return [...lots.entries()].map(([lotId, stockRows]) => {
     const lotLabel = stockRows[0].lot_code ? `Lot ${stockRows[0].lot_code}` : 'Unspecified lot';
     if (stockRows.length === 1) return { key: `stock:${stockRows[0].id}`, lotLabel,
-      locationLabel: stockRows[0].location_name || 'No location', rows: stockRows,
+      locationLabel: stockRows[0].location_name || '', rows: stockRows,
       lotItem: stockRows[0], stockItem: stockRows[0] };
     return { key: `lot:${lotId}`, lotLabel, locationLabel: '', rows: stockRows, lotItem: stockRows[0],
       children: stockRows.map(row => ({ key: `stock:${row.id}`, lotLabel: '',
-        locationLabel: row.location_name || 'No location', rows: [row], stockItem: row })) };
+        locationLabel: row.location_name || '', rows: [row], stockItem: row })) };
   }).sort((a, b) => a.lotLabel.localeCompare(b.lotLabel));
 }
 
@@ -469,7 +468,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
               : <a href={`${basePath}/inventory/${inventoryPathSegment(row.supply, supplies)}`}
                 onClick={event => { event.preventDefault(); onSelect(row.supply.id); }}>{row.supply.name}</a> },
             { title: 'Location', key: 'location', width: 180, render: (_, row) => row.locationId !== undefined
-              ? inventoryLocationPath(row.locationId, locations) || 'No location' : '' },
+              ? inventoryLocationPath(row.locationId, locations) : '' },
             { title: 'Lots', key: 'lots', width: 90, render: (_, row) => new Set(row.stocks
               .map(stock => stock.lot_id || stock.id)).size },
             { title: 'On hand', key: 'on_hand', width: 170, align: 'right', render: (_, row) => stockQuantity(
@@ -529,7 +528,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
           defaultExpandAllRows scroll={{ x: 620 }}
           columns={[{ title: 'Lot', dataIndex: 'lotLabel' },
           { title: 'Location', key: 'location', render: (_, row) => row.stockItem
-            ? inventoryLocationPath(row.stockItem.location_id, locations) || 'No location' : '' },
+            ? inventoryLocationPath(row.stockItem.location_id, locations) : '' },
           { title: 'On hand', key: 'on_hand', width: 170, align: 'right', render: (_, row) =>
             stockQuantity(row.rows, onHand, item.default_unit, itemDisplayUnit || item.default_unit) },
           { title: '', key: 'actions', width: 60, align: 'right', render: (_, row) => <Dropdown trigger={['click']}
@@ -550,7 +549,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
               else if (row.stockItem) void openEntry(row.stockItem, key as 'purchase' | 'count' | 'discard');
             } }}>
             <Button type="text" shape="circle" icon={<MoreOutlined />}
-              aria-label={`Actions for ${row.lotLabel || row.locationLabel}`} />
+              aria-label={`Actions for ${row.lotLabel || row.locationLabel || item.name}`} />
           </Dropdown> }]} />
         {movements.length > 0 && <><h3>Stock history</h3>
         <Table<StockMovement> className="inventory-history" dataSource={movements} rowKey={row => `${row.stock_id}-${row.kind}-${row.id}`}
@@ -558,7 +557,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
           columns={[{ title: 'When', dataIndex: 'at', width: 190, render: at => formatTime(at) },
             { title: 'Activity', dataIndex: 'kind', width: 120 },
             { title: 'Lot', key: 'lot', render: (_, row) => row.lot_code || 'Unspecified' },
-            { title: 'Location', key: 'location', render: (_, row) => inventoryLocationPath(row.location_id, locations) || 'No location' },
+            { title: 'Location', key: 'location', render: (_, row) => inventoryLocationPath(row.location_id, locations) },
             { title: 'Quantity', key: 'quantity', align: 'right', render: (_, row) =>
               `${row.kind === 'Purchased' || row.kind === 'Moved in' ? '+' : row.kind === 'Used' || row.kind === 'Discarded' || row.kind === 'Moved out' ? '−' : 'Set to '}${formatStockQuantity(row.quantity, row.unit, itemDisplayUnit || row.unit)}` }]} /></>}
       </section>}
@@ -705,7 +704,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
     <Modal title="Move stock" open={!!moveItem} onCancel={() => setMoveItemId(null)} footer={null} destroyOnHidden>
       {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
       <Form form={moveForm} layout="vertical" onFinish={move} initialValues={{ unit: moveItem?.display_unit || moveItem?.default_unit }}>
-        <p className="muted">From {inventoryLocationPath(moveItem?.location_id || null, locations) || 'no location'}.
+        <p className="muted">{moveItem?.location_id && `From ${inventoryLocationPath(moveItem.location_id, locations)}. `}
           {moveItem && onHand[moveItem.id] != null ? ` ${formatQuantity(onHand[moveItem.id]!, moveItem.default_unit, moveItem.display_unit)} available.` : ''}</p>
         <Form.Item name="location_id" label="To location" normalize={(value, previousValue) => {
           if (value === newLocationOption) { openLocationCreate('move'); return previousValue; }

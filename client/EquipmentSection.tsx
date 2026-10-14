@@ -277,7 +277,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       byLocation.set(locationId, [...(byLocation.get(locationId) || []), unit]);
     }
     const locationsRows = [...byLocation.entries()].sort(([a], [b]) =>
-      (inventoryLocationPath(a, locations) || 'No location').localeCompare(inventoryLocationPath(b, locations) || 'No location'));
+      inventoryLocationPath(a, locations).localeCompare(inventoryLocationPath(b, locations)));
     return { key: `model:${model.id}`, model, units,
       ...(locationsRows.length === 1 ? { locationId: locationsRows[0][0] } : {}),
       ...(locationsRows.length > 1 ? { children: locationsRows.map(([locationId, group]) => ({
@@ -738,11 +738,11 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
             </a>;
           } },
           { title: 'Location', key: 'location', width: 175, render: (_, row) => row.locationId !== undefined
-            ? inventoryLocationPath(row.locationId, locations) || 'No location' : '' },
+            ? inventoryLocationPath(row.locationId, locations) : '' },
           { title: 'Units', key: 'units', width: 85, align: 'right', render: (_, row) => row.units.length },
           { title: 'Capabilities', key: 'capabilities', width: 140, render: (_, row) => row.child ? null : equipmentCapabilities(row.model) },
           { title: '', key: 'actions', width: 55, align: 'right', render: (_, row) => <Popconfirm
-            title={row.child ? `Delete ${row.units.length} ${row.units.length === 1 ? 'unit' : 'units'} of ${row.model.name} at ${inventoryLocationPath(row.locationId || null, locations) || 'No location'}?`
+            title={row.child ? `Delete ${row.units.length} ${row.units.length === 1 ? 'unit' : 'units'} of ${row.model.name}${row.locationId ? ` at ${inventoryLocationPath(row.locationId, locations)}` : ''}?`
               : `Delete all units of ${row.model.name}?`}
             description="The units are removed from your equipment list. Their batch history and calibrations remain."
             okText="Delete" okButtonProps={{ danger: true }} trigger={[]}
@@ -756,7 +756,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
               if (key === 'delete') setIndexDeleteRow(row);
             } }}>
               <Button type="text" shape="circle" icon={<MoreOutlined />}
-                aria-label={`Actions for ${row.child ? `${row.model.name} at ${inventoryLocationPath(row.locationId || null, locations) || 'No location'}` : row.model.name}`} />
+                aria-label={`Actions for ${row.model.name}${row.child && row.locationId ? ` at ${inventoryLocationPath(row.locationId, locations)}` : ''}`} />
             </Dropdown>
           </Popconfirm> }
         ]} />}
@@ -843,7 +843,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
             <a href={`${basePath}/equipment/${equipmentUnitPathSegment(row, equipment, models)}`}
               onClick={event => { event.preventDefault(); onSelect(row.id); }}>{value || `Unit ${row.id.slice(0, 6)}`}</a> },
           { title: 'Location', key: 'location', width: '30%', render: (_: unknown, row: Equipment) =>
-            inventoryLocationPath(row.location_id || null, locations) || '—' },
+            inventoryLocationPath(row.location_id || null, locations) },
           { title: 'Current batch', key: 'current-batch', width: '30%', render: (_: unknown, row: Equipment) => {
             const current = currentUses.filter(use => use.equipment_id === row.id);
             return current.length ? <div className="equipment-current-batches">{current.map(use =>
@@ -870,7 +870,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <div className="equipment-parameters">
           <div className="equipment-parameter"><span>Stock ID: {item.stock_id || 'Not set'}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit Stock ID" onClick={() => setEditIdentity(true)} /></div>
-          <div className="equipment-parameter"><span>Location: {inventoryLocationPath(item.location_id || null, locations) || 'Not set'}</span>
+          <div className="equipment-parameter"><span>Location: {inventoryLocationPath(item.location_id || null, locations)}</span>
             <Button type="text" size="small" icon={<EditOutlined />}
               aria-label="Edit equipment location" onClick={() => setEditLocation(true)} /></div>
           {item.has_liquid_containment && (!itemModel || specs.capacity_liters !== itemModel.capacity_liters)
@@ -1182,7 +1182,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <Form.Item name="location_id" label="Location" normalize={(value, previousValue) => {
           if (value === newLocationOption) { openLocationCreate('edit'); return previousValue; }
           return value;
-        }}><LocationTreeSelect locations={locations} includeCreate allowClear placeholder="No location" /></Form.Item>
+        }}><LocationTreeSelect locations={locations} includeCreate allowClear /></Form.Item>
         <Button type="primary" htmlType="submit">Save location</Button>
       </Form>
     </Modal>
