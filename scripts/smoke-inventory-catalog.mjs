@@ -30,6 +30,11 @@ try {
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="Grain"]').click();
   await explorer.getByRole('searchbox', { name: 'Search inventory products' }).fill('Crisp Malt Finest Maris Otter');
   await explorer.getByRole('button', { name: /Crisp Malt Finest Maris Otter/ }).waitFor({ timeout: 60_000 });
+  await explorer.getByRole('searchbox', { name: 'Search inventory products' }).fill('Weyermann Munich Malt Type 1');
+  const weyermann = explorer.getByRole('button', { name: /Weyermann Munich Malt Type 1/ });
+  await weyermann.waitFor({ timeout: 60_000 });
+  if (!await weyermann.locator('img').count()) throw new Error('Weyermann product has no catalog image');
+  await weyermann.locator('img').evaluate(image => image.decode());
   await explorer.getByRole('searchbox', { name: 'Search inventory products' }).fill('Briess Caramel Malt 60L');
   const product = explorer.getByRole('button', { name: /Briess Caramel Malt 60L/ });
   await product.waitFor({ timeout: 60_000 });
@@ -41,6 +46,11 @@ try {
     throw new Error('Catalog choice still shows a redundant item picker');
   }
   await form.getByText('Briess Caramel Malt 60L', { exact: true }).waitFor();
+  const briessImage = form.locator('.inventory-catalog-source img');
+  await briessImage.waitFor();
+  await briessImage.evaluate(image => image.decode());
+  const briessDimensions = await briessImage.evaluate(image => [image.naturalWidth, image.naturalHeight]);
+  if (briessDimensions[0] !== briessDimensions[1]) throw new Error(`Briess image is not square: ${briessDimensions}`);
   const briessLink = form.getByRole('link', { name: 'Product information' });
   await briessLink.waitFor();
   if (!(await briessLink.getAttribute('href'))?.endsWith('/Briess-PISB-Caramel-Malt-60L.pdf')) {

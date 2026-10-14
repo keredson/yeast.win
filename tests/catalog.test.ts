@@ -138,6 +138,50 @@ test('version 22 catalog adds later bundled ingredient photos without overwritin
   } finally { upgraded.close(); }
 });
 
+test('version 27 crops old Briess banners and adds Weyermann photos without overwriting edits', () => {
+  for (const partial of [false, true]) {
+    const dir = mkdtempSync(join(tmpdir(), 'brewlog-square-grain-'));
+    const before = openCatalogDb(dir);
+    const edited = Buffer.from([255, 216, 255, 1, 2]);
+    before.prepare('INSERT INTO supplies(id, name, category, unit) VALUES (?, ?, ?, ?)')
+      .run('custom_grain', 'Custom grain', 'Grain', 'g');
+    before.prepare('UPDATE supply_images SET image_bytes = ? WHERE supply_id = ?')
+      .run(readFileSync(join(process.cwd(), 'tests/fixtures/old-briess-caramel-60.jpg')),
+        'supply_briess_caramel_60');
+    before.prepare('UPDATE supply_images SET image_bytes = ? WHERE supply_id = ?')
+      .run(edited, 'supply_briess_pale_ale');
+    before.prepare('DELETE FROM supply_images WHERE supply_id = ?')
+      .run('supply_weyermann_munich_type_1');
+    if (!partial) before.prepare('DELETE FROM supply_images WHERE supply_id = ?')
+      .run('supply_weyermann_carapils');
+    before.prepare('UPDATE supply_products SET product_url = ? WHERE supply_id = ?')
+      .run('https://www.weyermann.de/en-gb/products/brewing-malting/', 'supply_weyermann_vienna');
+    before.prepare('UPDATE supply_products SET product_url = ? WHERE supply_id = ?')
+      .run('https://example.com/custom-carahell', 'supply_weyermann_carahell');
+    before.pragma('user_version = 27');
+    before.close();
+
+    const upgraded = openCatalogDb(dir);
+    try {
+      const image = (id: string) => (upgraded.prepare('SELECT image_bytes FROM supply_images WHERE supply_id = ?')
+        .get(id) as { image_bytes: Buffer }).image_bytes;
+      assert.deepEqual(image('supply_briess_caramel_60'),
+        readFileSync(join(process.cwd(), 'assets/catalog/supplies/supply_briess_caramel_60.jpg')));
+      assert.deepEqual(image('supply_briess_pale_ale'), edited);
+      assert.ok(image('supply_weyermann_munich_type_1').length > 1000);
+      assert.ok(image('supply_weyermann_carapils').length > 1000);
+      assert.equal((upgraded.prepare('SELECT product_url FROM supply_products WHERE supply_id = ?')
+        .get('supply_weyermann_vienna') as { product_url: string }).product_url,
+      'https://www.weyermann.de/en-gb/product/weyermann-vienna-malt/');
+      assert.equal((upgraded.prepare('SELECT product_url FROM supply_products WHERE supply_id = ?')
+        .get('supply_weyermann_carahell') as { product_url: string }).product_url,
+      'https://example.com/custom-carahell');
+      assert.ok(upgraded.prepare('SELECT 1 FROM supplies WHERE id = ?').get('custom_grain'));
+      assert.equal(upgraded.pragma('user_version', { simple: true }), catalogSchemaVersion);
+    } finally { upgraded.close(); }
+  }
+});
+
 test('version 23 catalog adds Lallemand package photos', () => {
   const dir = mkdtempSync(join(tmpdir(), 'brewlog-lallemand-photos-'));
   const before = openCatalogDb(dir);
