@@ -691,7 +691,8 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit temperature offset" onClick={() => setNewTemperatureCalibration(true)} /></div>}
           {item.has_heating && boilOffKinds.has(item.kind) && <div className="equipment-parameter"><span>Heat loss at boil: {specs.boil_heat_loss_watts == null
             ? 'Not calibrated' : `${Math.round(specs.boil_heat_loss_watts)} W (${boilHeatLossSource})`}</span>
-            <Button type="text" size="small" onClick={() => setNewBoilCalibration(true)}>Calibrate unit</Button></div>}
+            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit heat loss at boil"
+              onClick={() => setNewBoilCalibration(true)} /></div>}
           {ratedEstimate != null && <div className="equipment-parameter">Estimated boil-off at rated power: {Number(ratedEstimate.toFixed(2))} L/h</div>}
           {postBoilLossKinds.has(item.kind) && <div className="equipment-parameter"><span>
             Post-boil wort retained: {item.post_boil_loss_liters == null ? 'Not set (assume 0 L)'
