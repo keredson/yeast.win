@@ -162,7 +162,7 @@ button, input, textarea { font: inherit; }
 .inventory-add-types a { color: #1d604f; text-decoration: underline; text-underline-offset: 2px; }
 .capacity-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(110px, 1fr); gap: 12px; }
 .equipment-parameters { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-bottom: 24px; }
-.equipment-parameter { display: flex; align-items: center; gap: 4px; min-height: 34px; color: #455c52; }
+.equipment-parameter { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-height: 34px; color: #455c52; }
 .equipment-calibration { margin-top: 24px; }
 .equipment-calibration-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .equipment-calibration-heading h3 { margin: 0; }

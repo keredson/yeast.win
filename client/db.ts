@@ -57,11 +57,26 @@ export interface EquipmentSpecifications {
   reference_kpa?: number | null; observed_kpa?: number | null;
   reference_volumes?: number | null; observed_volumes?: number | null;
   reference_mg_l?: number | null; observed_mg_l?: number | null;
+  unit_capacity_liters?: number | null; unit_max_pressure_kpa?: number | null;
+  unit_rated_power_watts?: number | null; unit_rated_heat_removal_watts?: number | null;
+  unit_min_temperature_c?: number | null; unit_max_temperature_c?: number | null;
+  unit_mash_efficiency_pct?: number | null; unit_grain_absorption_l_per_kg?: number | null;
+  workspace_model_capacity_liters?: number | null; workspace_model_max_pressure_kpa?: number | null;
+  workspace_model_rated_power_watts?: number | null; workspace_model_rated_heat_removal_watts?: number | null;
+  workspace_model_min_temperature_c?: number | null; workspace_model_max_temperature_c?: number | null;
+  workspace_model_mash_efficiency_pct?: number | null;
+  workspace_model_grain_absorption_l_per_kg?: number | null;
+}
+export interface EquipmentMeasurementChannel extends MeasurementChannel {
+  unit_measurement_min?: number | null; unit_measurement_max?: number | null;
+  unit_measurement_unit?: string | null; unit_measurement_scale?: string | null;
+  workspace_model_measurement_min?: number | null; workspace_model_measurement_max?: number | null;
+  workspace_model_measurement_unit?: string | null; workspace_model_measurement_scale?: string | null;
 }
 export interface Equipment extends EquipmentSpecifications { id: string; name: string; kind: string;
   model_id?: string; model_name?: string; stock_id?: string | null; added_at?: number | null; removed_at?: number | null;
   catalog_model_id?: string | null; catalog_model?: CatalogEquipment;
-  measurement_channels?: MeasurementChannel[] }
+  measurement_channels?: EquipmentMeasurementChannel[] }
 export interface EquipmentUse { id: string; equipment_id: string; batch_id: string; batch_name: string; assigned_at: number }
 const equipmentCalibrationColumns = ['buffer_4_observed', 'buffer_7_observed', 'reference_sg', 'observed_sg',
   'reference_brix', 'observed_brix', 'reference_g', 'observed_g', 'reference_kpa', 'observed_kpa',
@@ -128,6 +143,14 @@ const opened = new Map<string, Promise<DB>>();
 // workspace schema. SQLite reevaluates inherited values after catalog sync.
 const effectiveEquipmentView = `CREATE TEMP VIEW effective_equipment AS
   SELECT e.*, workspace_model.kind, workspace_model.catalog_model_id, workspace_model.name AS model_name,
+    liquid.capacity_liters AS unit_capacity_liters,
+    pressure.max_pressure_kpa AS unit_max_pressure_kpa,
+    heat.rated_power_watts AS unit_rated_power_watts,
+    cool.rated_heat_removal_watts AS unit_rated_heat_removal_watts,
+    control.min_temperature_c AS unit_min_temperature_c,
+    control.max_temperature_c AS unit_max_temperature_c,
+    mash.mash_efficiency_pct AS unit_mash_efficiency_pct,
+    mash.grain_absorption_l_per_kg AS unit_grain_absorption_l_per_kg,
     COALESCE(liquid.capacity_liters, workspace_model.capacity_liters, model_liquid.capacity_liters) AS capacity_liters,
     COALESCE(pressure.max_pressure_kpa, workspace_model.max_pressure_kpa, model_pressure.max_pressure_kpa) AS max_pressure_kpa,
     COALESCE(heat.rated_power_watts, workspace_model.rated_power_watts, model_heat.rated_power_watts) AS rated_power_watts,
@@ -188,6 +211,8 @@ const effectiveMeasurementChannelsView = `CREATE TEMP VIEW effective_measurement
   )
   SELECT k.equipment_id, COALESCE(unit.id, workspace_model.id, catalog_model.id) AS id,
     k.measurement_kind,
+    unit.measurement_min AS unit_measurement_min, unit.measurement_max AS unit_measurement_max,
+    unit.measurement_unit AS unit_measurement_unit, unit.measurement_scale AS unit_measurement_scale,
     COALESCE(unit.measurement_min, workspace_model.measurement_min, catalog_model.measurement_min) AS measurement_min,
     COALESCE(unit.measurement_max, workspace_model.measurement_max, catalog_model.measurement_max) AS measurement_max,
     COALESCE(unit.measurement_unit, workspace_model.measurement_unit, catalog_model.measurement_unit) AS measurement_unit,
@@ -1373,6 +1398,14 @@ export async function listEquipment(db: DB): Promise<Equipment[]> {
 
 export async function listEquipmentModels(db: DB): Promise<Equipment[]> {
   const [models, channels] = await Promise.all([db.execO<Equipment>(`SELECT m.id, m.name, m.kind, m.catalog_model_id,
+    m.capacity_liters AS workspace_model_capacity_liters,
+    m.max_pressure_kpa AS workspace_model_max_pressure_kpa,
+    m.rated_power_watts AS workspace_model_rated_power_watts,
+    m.rated_heat_removal_watts AS workspace_model_rated_heat_removal_watts,
+    m.min_temperature_c AS workspace_model_min_temperature_c,
+    m.max_temperature_c AS workspace_model_max_temperature_c,
+    m.mash_efficiency_pct AS workspace_model_mash_efficiency_pct,
+    m.grain_absorption_l_per_kg AS workspace_model_grain_absorption_l_per_kg,
     COALESCE(m.has_liquid_containment, CASE WHEN cl.model_id IS NOT NULL THEN 1 END) AS has_liquid_containment,
     COALESCE(m.capacity_liters, cl.capacity_liters) AS capacity_liters,
     COALESCE(m.has_pressure_rating, CASE WHEN cp.model_id IS NOT NULL THEN 1 END) AS has_pressure_rating,
@@ -1403,6 +1436,10 @@ export async function listEquipmentModels(db: DB): Promise<Equipment[]> {
       JOIN catalog.model_measurement_channels c ON c.model_id = m.catalog_model_id
   )
   SELECT k.model_id, COALESCE(w.id, c.id) AS id, k.measurement_kind,
+    w.measurement_min AS workspace_model_measurement_min,
+    w.measurement_max AS workspace_model_measurement_max,
+    w.measurement_unit AS workspace_model_measurement_unit,
+    w.measurement_scale AS workspace_model_measurement_scale,
     COALESCE(w.measurement_min, c.measurement_min) AS measurement_min,
     COALESCE(w.measurement_max, c.measurement_max) AS measurement_max,
     COALESCE(w.measurement_unit, c.measurement_unit) AS measurement_unit,
@@ -1435,21 +1472,18 @@ export async function createEquipmentUnit(db: DB, modelId: string, stockId?: str
 }
 
 export async function updateBrewingLosses(db: DB, item: Equipment, values: Pick<EquipmentSpecifications,
-  'mash_efficiency_pct' | 'grain_absorption_l_per_kg'>): Promise<void> {
+  'mash_efficiency_pct' | 'grain_absorption_l_per_kg'>, model?: Equipment): Promise<void> {
   if (!['all_in_one', 'mash_tun', 'kettle', 'electric_kettle'].includes(item.kind)) throw new Error('Choose brewing equipment');
   for (const [key, value] of Object.entries(values)) {
     if (value != null && (!Number.isFinite(value) || value < 0 || key === 'mash_efficiency_pct' && value > 100)) {
       throw new Error(`Enter a valid ${key.replaceAll('_', ' ')}`);
     }
   }
-  await db.tx(async tx => {
-    await tx.exec(`INSERT INTO equipment_mash_assumptions(equipment_id, ${equipmentAssumptionColumns.join(', ')})
-      VALUES (?, ${equipmentAssumptionColumns.map(() => '?').join(', ')})
-      ON CONFLICT(equipment_id) DO UPDATE SET ${equipmentAssumptionColumns.map(column => `${column} = excluded.${column}`).join(', ')}`,
-    [item.id, ...equipmentAssumptionColumns.map(column => values[column] ?? null)]);
-    if (item.model_id) await tx.exec(`UPDATE equipment_models SET ${equipmentAssumptionColumns.map(column => `${column} = ?`).join(', ')}
-      WHERE id = ?`, [...equipmentAssumptionColumns.map(column => values[column] ?? null), item.model_id]);
-  });
+  await db.exec(`INSERT INTO equipment_mash_assumptions(equipment_id, ${equipmentAssumptionColumns.join(', ')})
+    VALUES (?, ${equipmentAssumptionColumns.map(() => '?').join(', ')})
+    ON CONFLICT(equipment_id) DO UPDATE SET ${equipmentAssumptionColumns.map(column => `${column} = excluded.${column}`).join(', ')}`,
+  [item.id, ...equipmentAssumptionColumns.map(column => values[column] == null || values[column] === model?.[column]
+    ? null : values[column])]);
 }
 
 export async function latestMeasuredMashEfficiency(db: DB, equipmentId: string): Promise<number | null> {
@@ -1597,17 +1631,19 @@ export async function createEquipment(db: DB, name: string, kind: string, catalo
   return id;
 }
 
-export async function updateEquipmentCapacity(db: DB, item: Equipment, capacityLiters: number | null): Promise<void> {
+export async function updateEquipmentCapacity(db: DB, item: Equipment, capacityLiters: number | null,
+  model?: Equipment): Promise<void> {
   await putEquipmentCapability(db, 'equipment_liquid_containment', item.id,
-    { capacity_liters: capacityLiters === item.catalog_model?.capacity_liters ? null : capacityLiters });
+    { capacity_liters: capacityLiters == null || capacityLiters === model?.capacity_liters ? null : capacityLiters });
 }
 
-export async function updateEquipmentPressureRating(db: DB, item: Equipment, maxPressureKpa: number | null): Promise<void> {
+export async function updateEquipmentPressureRating(db: DB, item: Equipment, maxPressureKpa: number | null,
+  model?: Equipment): Promise<void> {
   if (maxPressureKpa != null && (!Number.isFinite(maxPressureKpa) || maxPressureKpa <= 0)) {
     throw new Error('Enter a positive pressure rating');
   }
   await putEquipmentCapability(db, 'equipment_pressure_rating', item.id,
-    { max_pressure_kpa: maxPressureKpa === item.catalog_model?.max_pressure_kpa ? null : maxPressureKpa });
+    { max_pressure_kpa: maxPressureKpa == null || maxPressureKpa === model?.max_pressure_kpa ? null : maxPressureKpa });
 }
 
 export async function addEquipmentModelCapability(db: DB, model: Equipment, capability: string, values: {
@@ -1735,18 +1771,19 @@ export async function updateEquipmentCalibration(db: DB, item: Equipment, values
   });
 }
 
-export async function updateEquipmentRatedPower(db: DB, item: Equipment, watts: number | null): Promise<void> {
+export async function updateEquipmentRatedPower(db: DB, item: Equipment, watts: number | null,
+  model?: Equipment): Promise<void> {
   if (!item.has_heating) throw new Error('This equipment has no heating capability');
   if (watts != null && (!Number.isFinite(watts) || watts <= 0)) throw new Error('Enter a positive power');
   await putEquipmentCapability(db, 'equipment_heating', item.id,
-    { rated_power_watts: watts === item.catalog_model?.rated_power_watts ? null : watts });
+    { rated_power_watts: watts == null || watts === model?.rated_power_watts ? null : watts });
 }
 
 export async function updateEquipmentThermalCapabilities(db: DB, item: Equipment, values: {
   has_heating: boolean; rated_power_watts: number | null;
   has_cooling: boolean; rated_heat_removal_watts: number | null;
   has_temperature_control: boolean; min_temperature_c: number | null; max_temperature_c: number | null;
-}): Promise<void> {
+}, model?: Equipment): Promise<void> {
   const positive = (value: number | null, label: string) => {
     if (value != null && (!Number.isFinite(value) || value <= 0)) throw new Error(`Enter a positive ${label}`);
   };
@@ -1758,27 +1795,27 @@ export async function updateEquipmentThermalCapabilities(db: DB, item: Equipment
       && values.min_temperature_c >= values.max_temperature_c) throw new Error('Enter a valid temperature range');
   await db.tx(async tx => {
     if (values.has_heating) await putEquipmentCapability(tx, 'equipment_heating', item.id,
-      { rated_power_watts: values.rated_power_watts === item.catalog_model?.rated_power_watts
+      { rated_power_watts: values.rated_power_watts === model?.rated_power_watts
         ? null : values.rated_power_watts });
     if (values.has_cooling) await putEquipmentCapability(tx, 'equipment_cooling', item.id,
-      { rated_heat_removal_watts: values.rated_heat_removal_watts === item.catalog_model?.rated_heat_removal_watts
+      { rated_heat_removal_watts: values.rated_heat_removal_watts === model?.rated_heat_removal_watts
         ? null : values.rated_heat_removal_watts });
     if (values.has_temperature_control) await putEquipmentCapability(tx, 'equipment_temperature_control', item.id,
-      { min_temperature_c: values.min_temperature_c === item.catalog_model?.min_temperature_c
+      { min_temperature_c: values.min_temperature_c === model?.min_temperature_c
         ? null : values.min_temperature_c,
-        max_temperature_c: values.max_temperature_c === item.catalog_model?.max_temperature_c
+        max_temperature_c: values.max_temperature_c === model?.max_temperature_c
           ? null : values.max_temperature_c });
   });
 }
 
 export async function updateEquipmentMeasurementRange(db: DB, item: Equipment,
-  range: { min: number; max: number; unit: string } | null, channelKind?: string): Promise<void> {
+  range: { min: number; max: number; unit: string } | null, channelKind?: string, parent?: Equipment): Promise<void> {
   const kind = channelKind || measurementKindForEquipment(item.kind);
   if (!kind || !item.measurement_channels?.some(channel => channel.measurement_kind === kind)) {
     throw new Error('This equipment has no matching measurement channel');
   }
   const scale = ['SG', '°Plato', '°Brix', 'pH'].includes(range?.unit || '') ? range?.unit ?? null : null;
-  const model = item.catalog_model?.measurement_channels?.find(channel => channel.measurement_kind === kind);
+  const model = parent?.measurement_channels?.find(channel => channel.measurement_kind === kind);
   const modelUnit = model?.measurement_scale || model?.measurement_unit;
   await db.exec(`INSERT INTO equipment_measurement_channels
     (id, equipment_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
@@ -1791,6 +1828,90 @@ export async function updateEquipmentMeasurementRange(db: DB, item: Equipment,
     range?.max === model?.measurement_max ? null : range?.max ?? null,
     range?.unit === modelUnit ? null : scale ? null : range?.unit ?? null,
     range?.unit === modelUnit ? null : scale]);
+}
+
+const unitOverrideLocation = {
+  capacity_liters: 'equipment_liquid_containment', max_pressure_kpa: 'equipment_pressure_rating',
+  rated_power_watts: 'equipment_heating', rated_heat_removal_watts: 'equipment_cooling',
+  min_temperature_c: 'equipment_temperature_control', max_temperature_c: 'equipment_temperature_control',
+  mash_efficiency_pct: 'equipment_mash_assumptions', grain_absorption_l_per_kg: 'equipment_mash_assumptions'
+} as const;
+
+export type EquipmentOverrideField = keyof typeof unitOverrideLocation;
+
+export async function clearEquipmentUnitOverrides(db: DB, item: Equipment,
+  fields: EquipmentOverrideField[]): Promise<void> {
+  await db.tx(async tx => {
+    for (const field of fields) {
+      const table = unitOverrideLocation[field];
+      await tx.exec(`UPDATE ${table} SET ${field} = NULL WHERE equipment_id = ?`, [item.id]);
+    }
+  });
+}
+
+export async function clearEquipmentUnitMeasurementOverrides(db: DB, item: Equipment, kind: string): Promise<void> {
+  if (!item.measurement_channels?.some(channel => channel.measurement_kind === kind)) {
+    throw new Error('This equipment has no matching measurement channel');
+  }
+  await db.exec(`UPDATE equipment_measurement_channels SET measurement_min = NULL,
+    measurement_max = NULL, measurement_unit = NULL, measurement_scale = NULL
+    WHERE equipment_id = ? AND measurement_kind = ?`, [item.id, kind]);
+}
+
+const modelOverrideFields = [
+  'capacity_liters', 'max_pressure_kpa', 'rated_power_watts', 'rated_heat_removal_watts',
+  'min_temperature_c', 'max_temperature_c', 'mash_efficiency_pct', 'grain_absorption_l_per_kg'
+] as const;
+export type EquipmentModelOverrideField = typeof modelOverrideFields[number];
+
+export async function clearEquipmentModelOverride(db: DB, model: Equipment,
+  field: EquipmentModelOverrideField): Promise<void> {
+  await db.exec(`UPDATE equipment_models SET ${field} = NULL WHERE id = ?`, [model.id]);
+}
+
+export async function updateEquipmentModelAttribute(db: DB, model: Equipment, field: EquipmentModelOverrideField,
+  value: number | null, catalogValue?: number | null): Promise<void> {
+  if (value != null) {
+    if (!Number.isFinite(value)) throw new Error('Enter a valid model value');
+    if (['capacity_liters', 'max_pressure_kpa', 'rated_power_watts', 'rated_heat_removal_watts'].includes(field)
+      && value <= 0 || field === 'mash_efficiency_pct' && (value < 0 || value > 100)
+      || field === 'grain_absorption_l_per_kg' && value < 0) throw new Error('Enter a valid model value');
+    if (field === 'min_temperature_c' && model.max_temperature_c != null && value >= model.max_temperature_c
+      || field === 'max_temperature_c' && model.min_temperature_c != null && value <= model.min_temperature_c) {
+      throw new Error('Enter a valid temperature range');
+    }
+  }
+  await db.exec(`UPDATE equipment_models SET ${field} = ? WHERE id = ?`,
+    [value == null || value === catalogValue ? null : value, model.id]);
+}
+
+export async function clearEquipmentModelMeasurementOverrides(db: DB, model: Equipment, kind: string): Promise<void> {
+  if (!model.measurement_channels?.some(channel => channel.measurement_kind === kind)) {
+    throw new Error('This model has no matching measurement channel');
+  }
+  await db.exec(`UPDATE equipment_model_measurement_channels SET measurement_min = NULL,
+    measurement_max = NULL, measurement_unit = NULL, measurement_scale = NULL
+    WHERE model_id = ? AND measurement_kind = ?`, [model.id, kind]);
+}
+
+export async function updateEquipmentModelMeasurementRange(db: DB, model: Equipment, kind: string,
+  range: { min: number; max: number; unit: string } | null, catalogChannel?: MeasurementChannel): Promise<void> {
+  if (!model.measurement_channels?.some(channel => channel.measurement_kind === kind)) {
+    throw new Error('This model has no matching measurement channel');
+  }
+  const scale = ['SG', '°Plato', '°Brix', 'pH'].includes(range?.unit || '') ? range?.unit ?? null : null;
+  const catalogUnit = catalogChannel?.measurement_scale || catalogChannel?.measurement_unit;
+  await db.exec(`INSERT INTO equipment_model_measurement_channels
+    (id, model_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET measurement_min = excluded.measurement_min,
+      measurement_max = excluded.measurement_max, measurement_unit = excluded.measurement_unit,
+      measurement_scale = excluded.measurement_scale`,
+  [`${model.id}:${kind}`, model.id, kind,
+    range?.min === catalogChannel?.measurement_min ? null : range?.min ?? null,
+    range?.max === catalogChannel?.measurement_max ? null : range?.max ?? null,
+    range?.unit === catalogUnit ? null : scale ? null : range?.unit ?? null,
+    range?.unit === catalogUnit ? null : scale]);
 }
 
 export async function deleteEquipment(db: DB, id: string): Promise<void> {
