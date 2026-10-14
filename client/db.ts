@@ -80,7 +80,8 @@ export interface Equipment extends EquipmentSpecifications { id: string; name: s
   model_id?: string; model_name?: string; stock_id?: string | null; added_at?: number | null; removed_at?: number | null;
   catalog_model_id?: string | null; catalog_model?: CatalogEquipment;
   measurement_channels?: EquipmentMeasurementChannel[] }
-export interface EquipmentUse { id: string; equipment_id: string; batch_id: string; batch_name: string; assigned_at: number }
+export interface EquipmentUse { id: string; equipment_id: string; batch_id: string; batch_name: string;
+  assigned_at: number; ended_at: number | null }
 const equipmentCalibrationColumns = ['buffer_4_observed', 'buffer_7_observed', 'reference_sg', 'observed_sg',
   'reference_brix', 'observed_brix', 'reference_g', 'observed_g', 'reference_kpa', 'observed_kpa',
   'reference_volumes', 'observed_volumes', 'reference_mg_l', 'observed_mg_l'] as const;
@@ -423,12 +424,13 @@ export async function listBatches(db: DB): Promise<Batch[]> {
     ORDER BY b.created_at DESC, b.id DESC`);
 }
 
-export async function listCurrentEquipmentUses(db: DB): Promise<EquipmentUse[]> {
-  return db.execO<EquipmentUse>(`SELECT e.id, u.equipment_id, e.batch_id, b.name AS batch_name, e.actual_at AS assigned_at
+export async function listEquipmentUses(db: DB): Promise<EquipmentUse[]> {
+  return db.execO<EquipmentUse>(`SELECT e.id, u.equipment_id, e.batch_id, b.name AS batch_name,
+      e.actual_at AS assigned_at, x.ended_at
     FROM batch_events e JOIN equipment_use_events u ON u.event_id = e.id
     JOIN batches b ON b.id = e.batch_id LEFT JOIN event_ends x ON x.id = e.id
-    WHERE e.actual_at IS NOT NULL AND e.skipped_at IS NULL AND x.id IS NULL
-    ORDER BY e.actual_at DESC, e.id DESC`);
+    WHERE e.actual_at IS NOT NULL AND e.skipped_at IS NULL
+    ORDER BY (x.id IS NOT NULL), COALESCE(x.ended_at, e.actual_at) DESC, e.id DESC`);
 }
 
 export async function assignEquipmentToBatch(db: DB, equipmentId: string, batchId: string, accountId: string): Promise<void> {
@@ -1575,73 +1577,46 @@ export async function createEquipment(db: DB, name: string, kind: string, catalo
       has_temperature_control, min_temperature_c, max_temperature_c, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [modelId, catalogModel?.name || name.trim(), kind, catalogModel?.id || null,
-      catalogModel ? null : Number(capacityKinds.has(kind)), catalogModel ? null : overrides.capacity_liters ?? null,
+      catalogModel ? null : Number(capacityKinds.has(kind)),
+      catalogModel && !changed('capacity_liters') ? null : overrides.capacity_liters ?? null,
       catalogModel ? null : Number(kind === 'fermenter' || overrides.max_pressure_kpa != null),
-      catalogModel ? null : overrides.max_pressure_kpa ?? null,
+      catalogModel && !changed('max_pressure_kpa') ? null : overrides.max_pressure_kpa ?? null,
       catalogModel ? null : Number(boilOffKinds.has(kind) || !!overrides.has_heating),
-      catalogModel ? null : overrides.rated_power_watts ?? null,
+      catalogModel && !changed('rated_power_watts') ? null : overrides.rated_power_watts ?? null,
       catalogModel ? null : Number(!!overrides.has_cooling),
-      catalogModel ? null : overrides.rated_heat_removal_watts ?? null,
+      catalogModel && !changed('rated_heat_removal_watts') ? null : overrides.rated_heat_removal_watts ?? null,
       catalogModel ? null : Number(boilOffKinds.has(kind) || kind === 'fermentation_temperature_control'
         || !!overrides.has_temperature_control || !!overrides.built_in_temperature_control),
-      catalogModel ? null : overrides.min_temperature_c ?? null,
-      catalogModel ? null : overrides.max_temperature_c ?? null, now]);
+      catalogModel && !changed('min_temperature_c') ? null : overrides.min_temperature_c ?? null,
+      catalogModel && !changed('max_temperature_c') ? null : overrides.max_temperature_c ?? null, now]);
     await tx.exec(`INSERT INTO equipment(id, name, model_id, stock_id, added_at, created_at)
       VALUES (?, ?, ?, ?, ?, ?)`, [id, name.trim(), modelId, stockId?.trim() || null, now, now]);
-    if ((!catalogModel && capacityKinds.has(kind)) || changed('capacity_liters')) {
-      await putEquipmentCapability(tx, 'equipment_liquid_containment', id,
-        { capacity_liters: changed('capacity_liters') ? overrides.capacity_liters : null });
-    }
-    if (changed('max_pressure_kpa') || !catalogModel && kind === 'fermenter') {
-      await putEquipmentCapability(tx, 'equipment_pressure_rating', id,
-        { max_pressure_kpa: overrides.max_pressure_kpa });
-    }
-    if ((!catalogModel && boilOffKinds.has(kind)) || overrides.has_heating && !catalogModel?.has_heating
-      || changed('rated_power_watts')) {
-      await putEquipmentCapability(tx, 'equipment_heating', id,
-        { rated_power_watts: changed('rated_power_watts') ? overrides.rated_power_watts : null });
-    }
-    if (overrides.has_cooling && !catalogModel?.has_cooling || changed('rated_heat_removal_watts')) {
-      await putEquipmentCapability(tx, 'equipment_cooling', id,
-        { rated_heat_removal_watts: changed('rated_heat_removal_watts') ? overrides.rated_heat_removal_watts : null });
-    }
-    if ((overrides.built_in_temperature_control || overrides.has_temperature_control)
-      && !catalogModel?.has_temperature_control
-      || changed('min_temperature_c') || changed('max_temperature_c')
-      || !catalogModel && (boilOffKinds.has(kind) || kind === 'fermentation_temperature_control')) {
-      await putEquipmentCapability(tx, 'equipment_temperature_control', id,
-        { min_temperature_c: changed('min_temperature_c') ? overrides.min_temperature_c : null,
-          max_temperature_c: changed('max_temperature_c') ? overrides.max_temperature_c : null });
-    }
     const measurementKind = measurementKindForEquipment(kind);
     if (measurementKind && (!catalogModel || changed('measurement_min') || changed('measurement_max')
       || changed('measurement_unit'))) {
-      const display = changed('measurement_unit') ? overrides.measurement_unit : null;
+      const display = catalogModel && !changed('measurement_unit') ? null : overrides.measurement_unit;
       const scale = ['SG', '°Plato', '°Brix', 'pH'].includes(display || '') ? display : null;
-      await tx.exec(`INSERT INTO equipment_measurement_channels
-        (id, equipment_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`, [`${id}:${measurementKind}`, id, measurementKind,
-        changed('measurement_min') ? overrides.measurement_min : null,
-        changed('measurement_max') ? overrides.measurement_max : null,
+      await tx.exec(`INSERT INTO equipment_model_measurement_channels
+        (id, model_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`, [`${modelId}:${measurementKind}`, modelId, measurementKind,
+        catalogModel && !changed('measurement_min') ? null : overrides.measurement_min,
+        catalogModel && !changed('measurement_max') ? null : overrides.measurement_max,
         scale ? null : display, scale]);
     }
     for (const [channelKind, range] of Object.entries(channelRanges)) {
       const modelChannel = catalogModel?.measurement_channels?.find(channel => channel.measurement_kind === channelKind);
       if (!modelChannel) throw new Error('Unknown equipment measurement channel');
       const scale = ['SG', '°Plato', '°Brix', 'pH'].includes(range.unit) ? range.unit : null;
-      await tx.exec(`INSERT INTO equipment_measurement_channels
-        (id, equipment_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`, [`${id}:${channelKind}`, id, channelKind,
+      if (range.min === modelChannel.measurement_min && range.max === modelChannel.measurement_max
+        && range.unit === (modelChannel.measurement_scale || modelChannel.measurement_unit)) continue;
+      await tx.exec(`INSERT INTO equipment_model_measurement_channels
+        (id, model_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`, [`${modelId}:${channelKind}`, modelId, channelKind,
         range.min === modelChannel.measurement_min ? null : range.min,
         range.max === modelChannel.measurement_max ? null : range.max,
         range.unit === (modelChannel.measurement_scale || modelChannel.measurement_unit) ? null : scale ? null : range.unit,
         range.unit === (modelChannel.measurement_scale || modelChannel.measurement_unit) ? null : scale]);
     }
-    if (!catalogModel) await tx.exec(`INSERT INTO equipment_model_measurement_channels
-      (id, model_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
-      SELECT ? || ':' || measurement_kind, ?, measurement_kind, measurement_min, measurement_max,
-        measurement_unit, measurement_scale FROM equipment_measurement_channels WHERE equipment_id = ?`,
-    [modelId, modelId, id]);
   });
   return id;
 }
