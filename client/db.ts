@@ -106,7 +106,12 @@ export interface InventoryItem { id: string; name: string; category: string; def
   yield_pct?: number | null; color_lovibond?: number | null; alpha_acid_pct?: number | null;
   typical_brix?: number | null; extract_color_value?: number | null; extract_color_scale?: string | null;
   extract_color_reference_value?: number | null; extract_color_reference_unit?: string | null;
-  hop_form?: IngredientProperties['hop_form'] | null; attenuation_pct?: number | null }
+  hop_form?: IngredientProperties['hop_form'] | null; attenuation_pct?: number | null;
+  container_kind?: string | null; capacity_liters?: number | null; material?: string | null;
+  wood_species?: string | null; wood_origin?: string | null; connector_type?: string | null }
+export interface ContainerSpecs { container_kind?: string | null; capacity_liters?: number | null;
+  material?: string | null; wood_species?: string | null; wood_origin?: string | null;
+  connector_type?: string | null }
 export interface IngredientProperties { yield_pct?: number; color_lovibond?: number; alpha_acid_pct?: number;
   hop_form?: 'pellet' | 'whole' | 'plug'; attenuation_pct?: number;
   grain_class?: 'base' | 'kilned' | 'caramel' | 'roasted' | 'flaked' | 'other';
@@ -2256,7 +2261,8 @@ export async function listInventory(db: Pick<DB, 'execO'>): Promise<InventoryIte
     COALESCE(lo.extract_color_value, s.extract_color_value) AS extract_color_value,
     COALESCE(lo.extract_color_scale, s.extract_color_scale) AS extract_color_scale,
     COALESCE(lo.extract_color_reference_value, s.extract_color_reference_value) AS extract_color_reference_value,
-    COALESCE(lo.extract_color_reference_unit, s.extract_color_reference_unit) AS extract_color_reference_unit
+    COALESCE(lo.extract_color_reference_unit, s.extract_color_reference_unit) AS extract_color_reference_unit,
+    s.container_kind, s.capacity_liters, s.material, s.wood_species, s.wood_origin, s.connector_type
     FROM inventory_items i
     LEFT JOIN effective_supplies s ON s.id = i.supply_id
     LEFT JOIN supply_lots lot ON lot.id = i.lot_id
@@ -2310,6 +2316,26 @@ export async function linkSupplyCatalogProduct(db: DB, supplyId: string, catalog
     if (!product || product.category !== supply.category) throw new Error('Choose a catalog product of the same type');
   }
   await db.exec('UPDATE supplies SET catalog_supply_id = ? WHERE id = ?', [catalogSupplyId, supplyId]);
+}
+
+const containerSpecColumns = ['container_kind', 'capacity_liters', 'material', 'wood_species',
+  'wood_origin', 'connector_type'] as const;
+
+export async function supplyContainerSpecs(db: DB, supplyId: string): Promise<ContainerSpecs> {
+  return (await db.execO<ContainerSpecs>('SELECT * FROM supply_container_specs WHERE supply_id = ?', [supplyId]))[0] || {};
+}
+
+export async function saveSupplyContainerSpecs(db: Pick<DB, 'exec'>, supplyId: string, specs: ContainerSpecs): Promise<void> {
+  if (specs.capacity_liters != null && (!Number.isFinite(specs.capacity_liters) || specs.capacity_liters <= 0))
+    throw new Error('Enter a positive container capacity');
+  const values = containerSpecColumns.map(column => {
+    const value = specs[column];
+    return typeof value === 'string' ? value.trim() || null : value ?? null;
+  });
+  await db.exec(`INSERT INTO supply_container_specs(supply_id, ${containerSpecColumns.join(', ')})
+    VALUES (?, ${containerSpecColumns.map(() => '?').join(', ')})
+    ON CONFLICT(supply_id) DO UPDATE SET ${containerSpecColumns.map(column => `${column} = excluded.${column}`).join(', ')}`,
+  [supplyId, ...values]);
 }
 
 export async function updateIngredientProperties(db: DB, item: InventoryItem, properties: IngredientProperties): Promise<void> {
@@ -2524,7 +2550,7 @@ export function inventoryBalance(rows: InventoryMovement[], unit: string): numbe
 export async function createInventoryItem(db: DB, name: string, category: string, defaultUnit: string,
   startingQuantity: number | null = null, accountId: string | null = null, displayUnit = defaultUnit,
   locationId: string | null = null, catalogSupplyId: string | null = null, lotCode: string | null = null,
-  properties?: IngredientProperties): Promise<string> {
+  properties?: IngredientProperties, containerSpecs?: ContainerSpecs): Promise<string> {
   const items = await listInventory(db);
   const spec = properties && Object.values(properties).some(value => value != null)
     ? ingredientPropertyInsert(category, properties) : null;
@@ -2547,6 +2573,7 @@ export async function createInventoryItem(db: DB, name: string, category: string
       VALUES (?, ${spec.columns.map(() => '?').join(', ')})
       ON CONFLICT(supply_id) DO UPDATE SET ${spec.columns.map(column => `${column} = excluded.${column}`).join(', ')}`,
     [supplyId, ...spec.values]);
+    if (category === 'Packaging' && containerSpecs) await saveSupplyContainerSpecs(tx, supplyId, containerSpecs);
     const existingLot = await tx.execO<{ id: string }>(`SELECT id FROM supply_lots WHERE supply_id = ?
       AND (lot_code = ? OR lot_code IS NULL AND ? IS NULL) ORDER BY created_at, id LIMIT 1`,
     [supplyId, cleanLot, cleanLot]);

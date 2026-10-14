@@ -6,7 +6,8 @@ import { addInventoryEntry, convertInventoryUnit, createInventoryItem, inventory
   listInventoryBalances, listInventoryLocations, listInventoryMovements, moveInventoryStock, saveInventoryLocation, stockAtLocation,
   updateIngredientProperties, updateLotIngredientProperties, supplyIngredientProperties, lotIngredientProperties, ingredientProperties,
   readSupplyMedia, saveSupplyMedia, linkSupplyCatalogProduct,
-  type IngredientProperties, type InventoryItem, type InventoryLocation, type InventoryMovement, type LocalDb, type SupplyMedia } from './db.ts';
+  supplyContainerSpecs, saveSupplyContainerSpecs,
+  type ContainerSpecs, type IngredientProperties, type InventoryItem, type InventoryLocation, type InventoryMovement, type LocalDb, type SupplyMedia } from './db.ts';
 import { formatTime } from './time.ts';
 import type { PreferredUnits } from './api.ts';
 import { compoundMassUnit, formatQuantity, quantityForStorage, quantityUnitsForCategory, storageUnit, unitOptions } from '../shared/units.ts';
@@ -34,6 +35,13 @@ function catalogCharacteristics(product: CatalogInventory): string {
     if (product.hop_form) details.push(product.hop_form);
   } else if (product.category === 'Yeast' && product.attenuation_pct != null) {
     details.push(`${product.attenuation_pct}% attenuation`);
+  } else if (product.category === 'Packaging') {
+    if (product.container_kind) details.push(product.container_kind);
+    if (product.capacity_liters != null) details.push(`${Number(product.capacity_liters.toFixed(2))} L`);
+    if (product.material) details.push(product.material);
+    if (product.wood_origin || product.wood_species) details.push(
+      [product.wood_origin, product.wood_species].filter(Boolean).join(' '));
+    if (product.connector_type) details.push(product.connector_type);
   }
   return details.join(' · ');
 }
@@ -134,6 +142,27 @@ function PropertyFields({ category, includeClass = false }: { category: string; 
   </>;
 }
 
+function PackagingFields({ defaults }: { defaults?: ContainerSpecs }) {
+  const form = Form.useFormInstance();
+  const kind = Form.useWatch('container_kind', form) || defaults?.container_kind;
+  const material = Form.useWatch('material', form) || defaults?.material;
+  return <>
+    <Form.Item name="container_kind" label="Container type"><Select allowClear options={[
+      { value: 'keg', label: 'Keg' }, { value: 'barrel', label: 'Barrel' }, { value: 'bottle', label: 'Bottle' }
+    ]} /></Form.Item>
+    {kind && <Form.Item name="capacity_liters" label="Capacity (L)" preserve={false}>
+      <InputNumber className="full-width" min={0} step="any" placeholder={defaults?.capacity_liters?.toString()} />
+    </Form.Item>}
+    <Form.Item name="material" label="Material"><Input placeholder={defaults?.material || 'Stainless steel, PET, wood…'} /></Form.Item>
+    {kind === 'barrel' && material?.toLowerCase() === 'wood' && <>
+      <Form.Item name="wood_species" label="Wood species" preserve={false}><Input placeholder={defaults?.wood_species || 'Oak'} /></Form.Item>
+      <Form.Item name="wood_origin" label="Wood origin" preserve={false}><Input placeholder={defaults?.wood_origin || 'French, American…'} /></Form.Item>
+    </>}
+    {kind === 'keg' && <Form.Item name="connector_type" label="Connector type" preserve={false}>
+      <Input placeholder={defaults?.connector_type || 'Ball lock, Sanke D…'} /></Form.Item>}
+  </>;
+}
+
 export function InventorySection({ db, basePath, accountId, items, supplies, catalogRevision, preferredUnits, selectedId, onSelect, onChanged }: {
   db: LocalDb; basePath: string; accountId: string; items: InventoryItem[]; supplies: InventoryItem[]; catalogRevision: number; preferredUnits: PreferredUnits;
   selectedId: string | null; onSelect: (id: string | null) => void; onChanged: () => Promise<void>;
@@ -166,6 +195,7 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const [creatingCustomProduct, setCreatingCustomProduct] = useState(false);
   const [ingredientSettingsOpen, setIngredientSettingsOpen] = useState(false);
   const [supplyProperties, setSupplyProperties] = useState<IngredientProperties>({});
+  const [containerProperties, setContainerProperties] = useState<ContainerSpecs>({});
   const [lotSettingsOpen, setLotSettingsOpen] = useState(false);
   const [lotTarget, setLotTarget] = useState<InventoryItem | null>(null);
   const [lotProperties, setLotProperties] = useState<IngredientProperties>({});
@@ -299,6 +329,12 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
+  async function saveContainerProperties(values: ContainerSpecs) {
+    if (!item?.supply_id) return;
+    try { await saveSupplyContainerSpecs(db, item.supply_id, values); setIngredientSettingsOpen(false); await onChanged(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+
   async function saveLotProperties(values: IngredientProperties) {
     if (!lotTarget) return;
     try { await updateLotIngredientProperties(db, lotTarget, values); setLotSettingsOpen(false); setLotTarget(null); await onChanged(); }
@@ -358,7 +394,8 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
   const balance = item ? stockTotal(productRows, onHand, item.default_unit) : undefined;
 
   async function create(values: { name: string; category: string; default_unit: string;
-    starting_quantity?: number; pounds?: number; ounces?: number; location_id?: string; lot_code?: string } & IngredientProperties) {
+    starting_quantity?: number; pounds?: number; ounces?: number; location_id?: string; lot_code?: string }
+    & IngredientProperties & ContainerSpecs) {
     try {
       if (newStockProduct) {
         values.name = newStockProduct.name;
@@ -390,6 +427,10 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
             typical_brix: values.typical_brix, extract_color_value: values.extract_color_value,
             extract_color_scale: values.extract_color_scale, extract_color_reference_value: values.extract_color_reference_value,
             extract_color_reference_unit: values.extract_color_reference_unit
+          } : undefined, creatingCustomProduct && values.category === 'Packaging' ? {
+            container_kind: values.container_kind, capacity_liters: values.capacity_liters,
+            material: values.material, wood_species: values.wood_species,
+            wood_origin: values.wood_origin, connector_type: values.connector_type
           } : undefined);
       }
       setNewItemCategory(null); setNewStockProduct(null); setNewStockLotCode(undefined);
@@ -484,10 +525,13 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
         <div className="content-heading"><div><span className="eyebrow">{item.category}</span><h2>{item.name}</h2>
           <p className="muted">{balance === undefined ? 'Calculating stock' : balance === null ? 'Balance needs unit conversion'
             : `${formatStockQuantity(balance, item.default_unit, itemDisplayUnit || item.default_unit)} estimated on hand`}</p></div>
-          <div className="heading-actions">{['Grain', 'Other fermentables', 'Adjunct', 'Hops', 'Yeast'].includes(item.category) &&
+          <div className="heading-actions">{['Grain', 'Other fermentables', 'Adjunct', 'Hops', 'Yeast', 'Packaging'].includes(item.category) &&
             <Button icon={<SettingOutlined />} onClick={() => {
-                setError(''); void supplyIngredientProperties(db, item).then(values => {
-                  setSupplyProperties(values); setIngredientSettingsOpen(true);
+                setError(''); void (item.category === 'Packaging' && item.supply_id
+                  ? supplyContainerSpecs(db, item.supply_id) : supplyIngredientProperties(db, item)).then(values => {
+                  if (item.category === 'Packaging') setContainerProperties(values as ContainerSpecs);
+                  else setSupplyProperties(values as IngredientProperties);
+                  setIngredientSettingsOpen(true);
                 }).catch(cause => setError(String(cause)));
               }}>Supply properties</Button>}
             <Button type="primary" onClick={() => openCreate(item.category, item)}>Add stock</Button></div></div>
@@ -522,6 +566,12 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
           currentIngredientProperties.extract_color_value != null && `Extract color ${currentIngredientProperties.extract_color_value} ${currentIngredientProperties.extract_color_scale || ''}${currentIngredientProperties.extract_color_reference_value != null ? ` at ${currentIngredientProperties.extract_color_reference_value} ${currentIngredientProperties.extract_color_reference_unit || ''}` : ''}`,
           item.grain_class && `${item.grain_class} grain class`
         ].filter(Boolean).join(' · ')}</p>}
+        {item.category === 'Packaging' && <p className="muted">{catalogCharacteristics({
+          id: item.id, name: item.name, category: item.category, unit: item.default_unit,
+          container_kind: item.container_kind, capacity_liters: item.capacity_liters,
+          material: item.material, wood_species: item.wood_species,
+          wood_origin: item.wood_origin, connector_type: item.connector_type
+        })}</p>}
         <h3>Lots and locations</h3>
         <Table<StockTreeRow> key={`${item.id}:${stockTreeRows.filter(row => row.children).map(row => row.key).join(',')}`}
           dataSource={stockTreeRows} rowKey="key" pagination={false} size="small"
@@ -629,8 +679,14 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
     <Modal title={item ? `${item.name} supply defaults` : 'Supply defaults'} open={ingredientSettingsOpen}
       onCancel={() => setIngredientSettingsOpen(false)} footer={null} destroyOnHidden>
       {error && <Alert type="error" message={error} className="form-alert" />}
-      <Form key={`${item?.supply_id}:${ingredientSettingsOpen}`} layout="vertical" initialValues={supplyProperties} onFinish={saveIngredientProperties}>
-        <PropertyFields category={item?.category || ''} includeClass />
+      <Form key={`${item?.supply_id}:${ingredientSettingsOpen}`} layout="vertical"
+        initialValues={item?.category === 'Packaging' ? containerProperties : supplyProperties}
+        onFinish={(values: ContainerSpecs & IngredientProperties) => item?.category === 'Packaging'
+          ? saveContainerProperties(values) : saveIngredientProperties(values)}>
+        {item?.category === 'Packaging' ? <>
+          {catalogProduct && <p className="muted">Leave a field empty to use the catalog value.</p>}
+          <PackagingFields defaults={catalogProduct || undefined} />
+        </> : <PropertyFields category={item?.category || ''} includeClass />}
         <Button type="primary" htmlType="submit">Save properties</Button>
       </Form>
     </Modal>
@@ -694,7 +750,8 @@ export function InventorySection({ db, basePath, accountId, items, supplies, cat
         <Form.Item name="default_unit" label="Unit" rules={[{ required: true }]}>
           <Select showSearch options={unitOptions(quantityUnitsForCategory(activeNewCategory))}
             onChange={unit => { changeQuantityUnit(itemForm, previousItemUnit.current, unit, 'starting_quantity'); previousItemUnit.current = unit; }} /></Form.Item>
-        {creatingCustomProduct && <PropertyFields category={activeNewCategory} includeClass />}
+        {creatingCustomProduct && (activeNewCategory === 'Packaging' ? <PackagingFields />
+          : <PropertyFields category={activeNewCategory} includeClass />)}
         <QuantityFields unit={newItemUnit} label="Starting quantity on hand" name="starting_quantity" optional={!existingItem} />
         {existingAtLocation && <p className="muted">This item is already at this location. The quantity will be recorded as a purchase.</p>}
         {existingItem && !existingAtLocation && <p className="muted">This creates another stock row for the selected location.</p>}

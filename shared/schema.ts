@@ -83,6 +83,8 @@ const definitions: Record<string, string> = {
     extract_color_reference_unit TEXT`,
   supply_hop_specs: `supply_id TEXT PRIMARY KEY NOT NULL, alpha_acid_pct REAL, hop_form TEXT`,
   supply_yeast_specs: `supply_id TEXT PRIMARY KEY NOT NULL, attenuation_pct REAL`,
+  supply_container_specs: `supply_id TEXT PRIMARY KEY NOT NULL, container_kind TEXT, capacity_liters REAL,
+    material TEXT, wood_species TEXT, wood_origin TEXT, connector_type TEXT`,
   supply_lots: `id TEXT PRIMARY KEY NOT NULL, supply_id TEXT NOT NULL, lot_code TEXT,
     crop_year INTEGER, best_before INTEGER, created_at INTEGER NOT NULL`,
   lot_grain_specs: `lot_id TEXT PRIMARY KEY NOT NULL, yield_pct REAL, color_lovibond REAL`,
@@ -341,7 +343,7 @@ export interface SyncResponse {
 }
 
 export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
-export const workspaceSchemaVersion = 38;
+export const workspaceSchemaVersion = 39;
 // Earlier builds identified OG and FG by title. Assign the matching gravity
 // steps once during upgrade so titles can subsequently change without changing
 // the meaning of a measurement. Existing explicit assignments always win.
