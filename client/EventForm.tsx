@@ -5,7 +5,7 @@ import { fromDatetimeLocal, toDatetimeLocal } from './time.ts';
 import { addPhoto, recordEvent, skipBatchEvent, updateEvent, updatePhotoEvent, type ActualEvent, type Equipment, type EventInput, type InventoryItem, type LocalDb, type MeasurementKind, type Plan, type PlanDetails } from './db.ts';
 import type { PreferredUnits } from './api.ts';
 import { compoundMassUnit, gravityScales, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions } from '../shared/units.ts';
-import { supportsDuration } from './planTiming.ts';
+import { supportsDuration, timeUnits } from './planTiming.ts';
 import { inventoryCategories } from '../shared/catalog.ts';
 import { QuantityFields } from './QuantityFields.tsx';
 import { changeNumberUnit, changeQuantityUnit } from './unitFields.ts';
@@ -34,7 +34,8 @@ function eventUnit(kind: string, units: PreferredUnits): string | undefined {
 }
 
 interface Values {
-  event_type: string; measurement_kind?: MeasurementKind; actual_at: string; ended_at?: string;
+  event_type: string; measurement_kind?: MeasurementKind; actual_at: string;
+  duration_value?: number; duration_unit?: typeof timeUnits[number]['value'];
   note?: string; value?: number; unit?: string; uncertainty?: number; equipment_id?: string;
   source?: string; item_name?: string; inventory_item_id?: string;
   item_category?: string; quantity?: number; pounds?: number; ounces?: number;
@@ -58,6 +59,13 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
   const [kind, setKind] = useState(initialEvent?.event_type || initialPlan?.event_type || 'note');
   const chillToTarget = kind === 'temperature_control' && plannedString('phase') === 'chill';
   const timedControl = supportsDuration(kind, plannedString('phase'));
+  const recordedDuration = initialEvent?.actual_at != null && initialEvent.ended_at != null
+    ? initialEvent.ended_at - initialEvent.actual_at : null;
+  const initialDuration = recordedDuration != null && recordedDuration > 0
+    ? recordedDuration : plannedNumber('duration_seconds');
+  const initialDurationUnit = initialDuration && initialDuration > 0
+    ? [...timeUnits].reverse().find(unit => initialDuration % unit.multiplier === 0) || timeUnits[0]
+    : timeUnits[1];
   const [measurement, setMeasurement] = useState<MeasurementKind>(initialData?.measurementKind || initialMeasurement || 'temperature');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -74,6 +82,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
   const selectedUnit = Form.useWatch('unit', form) as string | undefined;
   const selectedTargetUnit = Form.useWatch('target_unit', form) as string | undefined;
   const selectedContainerUnit = Form.useWatch('container_unit', form) as string | undefined;
+  const selectedDurationUnit = Form.useWatch('duration_unit', form) as string | undefined;
   const selectedCategory = Form.useWatch('item_category', form) as string | undefined;
   const vesselOptions = equipment.filter(item => vesselKinds.has(item.kind)).map(item => ({ value: item.id, label: item.name }));
   const destinationId = initialData?.payload.to_vessel_id || plannedString('to_vessel_id');
@@ -86,6 +95,13 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
     if (kind === 'addition') changeQuantityUnit(form, from, next);
     else if (kind === 'measurement') changeNumberUnit(form, ['value', 'uncertainty'], from, next, ['uncertainty']);
     else changeNumberUnit(form, ['quantity'], from, next);
+  }
+
+  function changeDurationUnit(next: typeof timeUnits[number]['value']) {
+    const previous = timeUnits.find(unit => unit.value === (selectedDurationUnit || initialDurationUnit.value));
+    const nextUnit = timeUnits.find(unit => unit.value === next);
+    const value = form.getFieldValue('duration_value') as number | undefined;
+    if (previous && nextUnit && value != null) form.setFieldValue('duration_value', value * previous.multiplier / nextUnit.multiplier);
   }
 
   async function submit(values: Values) {
@@ -101,10 +117,17 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
         return;
       }
       let payload: EventInput['payload'];
+      const startedAt = fromDatetimeLocal(values.actual_at);
+      const durationUnit = timeUnits.find(unit => unit.value === values.duration_unit);
+      const durationSeconds = timedControl && values.duration_value != null
+        ? Math.round(values.duration_value * (durationUnit?.multiplier || 0)) : null;
+      if (timedControl && values.duration_value != null && (!durationUnit || durationSeconds == null || durationSeconds <= 0))
+        throw new Error('Choose a positive length');
+      const endedAt = durationSeconds == null ? null : startedAt + durationSeconds;
       const input: EventInput = {
         batchId, accountId, eventType: initialPlan?.event_type || values.event_type,
-        actualAt: fromDatetimeLocal(values.actual_at),
-        endedAt: values.ended_at ? fromDatetimeLocal(values.ended_at) : null,
+        actualAt: startedAt,
+        endedAt,
         eventId: initialPlan?.id || null, note: values.note || '',
       };
       if (kind === 'measurement') {
@@ -127,7 +150,7 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
         if (values.target_value == null && values.power_watts == null) throw new Error('Enter a target or power');
         payload = { equipment_id: values.equipment_id || null, mode: values.mode || 'hold',
           target_value: values.target_value ?? null, target_unit: values.target_unit || null,
-          power_watts: values.power_watts ?? null, ended_at: values.ended_at ? fromDatetimeLocal(values.ended_at) : null };
+          power_watts: values.power_watts ?? null, ended_at: endedAt };
       } else if (kind === 'pressure_control') {
         if (!values.equipment_id || values.target_value == null || !values.target_unit) throw new Error('Choose equipment and a pressure target');
         payload = { equipment_id: values.equipment_id, target_value: values.target_value, target_unit: values.target_unit };
@@ -163,7 +186,8 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
 
   return <Form form={form} layout="vertical" onFinish={submit} initialValues={{
     event_type: kind, actual_at: initialEvent?.actual_at != null ? toDatetimeLocal(initialEvent.actual_at) : toDatetimeLocal(),
-    ended_at: initialEvent?.ended_at ? toDatetimeLocal(initialEvent.ended_at) : undefined,
+    duration_value: initialDuration && initialDuration > 0 ? initialDuration / initialDurationUnit.multiplier : undefined,
+    duration_unit: initialDurationUnit.value,
     note: initialEvent?.note || undefined,
     measurement_kind: initialData?.measurementKind || plannedString('measurement_kind') || measurement,
     mode: initialData?.payload.mode || plannedString('mode') || 'hold', source: initialData?.payload.source || 'manual',
@@ -191,8 +215,11 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
     <div>
       <Form.Item name="actual_at" label={chillToTarget ? 'Reached target' : timedControl ? 'Started' : 'When'} rules={[{ required: true }]}><Input type="datetime-local" /></Form.Item>
     </div>
-    {timedControl &&
-      <Form.Item name="ended_at" label="Ended"><Input type="datetime-local" /></Form.Item>}
+    {timedControl && <div className="form-pair">
+      <Form.Item name="duration_value" label="Length"><InputNumber className="full-width" min={0.001} step="any" /></Form.Item>
+      <Form.Item name="duration_unit" label="Unit"><Select options={timeUnits.map(({ value, label }) => ({ value, label }))}
+        onChange={changeDurationUnit} /></Form.Item>
+    </div>}
     {kind === 'measurement' && <>
       <Form.Item name="measurement_kind" label="Measurement" rules={[{ required: true }]}>
         <Select disabled={!!initialEvent} options={measurementKinds.map(item => ({ value: item.value, label: item.label }))}

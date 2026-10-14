@@ -2,6 +2,13 @@ import type { ActualEvent, Plan, PlanDetails } from './db.ts';
 import { formatQuantity } from '../shared/units.ts';
 import { kindLabel } from './constants.ts';
 
+export const timeUnits = [
+  { value: 'seconds', label: 'Seconds', multiplier: 1 },
+  { value: 'minutes', label: 'Minutes', multiplier: 60 },
+  { value: 'hours', label: 'Hours', multiplier: 3600 },
+  { value: 'days', label: 'Days', multiplier: 86400 }
+] as const;
+
 type TimedPlan = Pick<Plan, 'id' | 'title'> & Partial<Pick<Plan, 'event_type' | 'planned_at' | 'anchor_event_id' | 'offset_seconds' | 'details'>>;
 
 export function supportsDuration(eventType: string, phase?: string): boolean {

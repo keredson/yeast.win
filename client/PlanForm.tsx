@@ -5,7 +5,7 @@ import { kindLabel, measurementKinds } from './constants.ts';
 import type { Equipment, InventoryItem, PlanDetails, PlanInput } from './db.ts';
 import { vesselKinds } from '../shared/equipment.ts';
 import { compoundMassUnit, convertUnit, gravityScales, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions } from '../shared/units.ts';
-import { planDuration, supportsDuration } from './planTiming.ts';
+import { planDuration, supportsDuration, timeUnits } from './planTiming.ts';
 import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
 import { QuantityFields } from './QuantityFields.tsx';
 import type { PreferredUnits } from './api.ts';
@@ -24,12 +24,6 @@ export function repeatPreset(input: PlanInput): PlanPreset {
     offsetSeconds: input.offset_seconds || 0
   };
 }
-const timeUnits = [
-  { value: 'seconds', label: 'Seconds', multiplier: 1 },
-  { value: 'minutes', label: 'Minutes', multiplier: 60 },
-  { value: 'hours', label: 'Hours', multiplier: 3600 },
-  { value: 'days', label: 'Days', multiplier: 86400 }
-] as const;
 const titleLabels: Record<string, string> = {
   measurement: 'What will be measured?',
   temperature_control: 'Temperature action', pressure_control: 'Pressure action',

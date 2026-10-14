@@ -138,7 +138,7 @@ Action details are a single editable set of values. Recipe actions have type-spe
 
 #### Temperature control intervals
 
-The next temperature-control event for the **same batch**, of any mode and on any equipment, implicitly ends the preceding setting. We do not model simultaneous heater and chiller settings for one batch. An explicit end is stored in `event_ends` and the temperature-control payload. Query the next setting by `(batch_id, actual_at, id)` for an implicit end. A late or concurrent setting then changes the derived interval without rewriting a prior event. Since those keys live on `batch_events`, index that table on `(batch_id, event_type, actual_at, id)`.
+The next temperature-control event for the **same batch**, of any mode and on any equipment, implicitly ends the preceding setting. We do not model simultaneous heater and chiller settings for one batch. The batch record form shows Started and Length for timed actions, initially using the plan's duration; an entered length derives the explicit end stored in `event_ends` and the temperature-control payload. An empty length leaves the end implicit. Query the next setting by `(batch_id, actual_at, id)` for an implicit end. A late or concurrent setting then changes the derived interval without rewriting a prior event. Since those keys live on `batch_events`, index that table on `(batch_id, event_type, actual_at, id)`.
 
 If one fridge serves several batches, record the relevant temperature-control event in **each batch**. These are duplicate batch observations of one physical setting, not a new shared control-session entity. Joining a batch to an already running fridge records when that batch began experiencing its setting.
 
