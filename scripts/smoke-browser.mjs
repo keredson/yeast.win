@@ -95,9 +95,6 @@ try {
     throw new Error('Sync button is still in the header');
   }
 
-  await page.getByRole('combobox', { name: 'Brewery' }).click();
-  if (await page.getByText('＋ New brewery').count()) throw new Error('Brewery creation is still in the switcher');
-  await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Account settings' }).click();
   await page.getByRole('button', { name: 'New brewery' }).click();
   await page.getByRole('dialog', { name: 'New brewery' }).waitFor();
@@ -105,6 +102,9 @@ try {
   await page.getByRole('textbox', { name: 'Brewery name' }).fill(secondBrewery);
   await page.getByRole('dialog', { name: 'New brewery' }).getByRole('button', { name: 'Create brewery' }).click();
   await page.locator('.workspace-select').getByText(secondBrewery).waitFor();
+  await page.getByRole('combobox', { name: 'Brewery' }).click();
+  if (await page.getByText('＋ New brewery').count()) throw new Error('Brewery creation is still in the switcher');
+  await page.keyboard.press('Escape');
   await page.getByRole('button', { name: `Edit ${secondBrewery}` }).click();
   const slug = `smoke-custom-${Date.now()}`;
   await page.getByRole('dialog', { name: 'Edit brewery' }).getByRole('textbox', { name: 'Brewery slug' }).fill(slug);
@@ -321,28 +321,47 @@ try {
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: batchName }).click();
   await page.getByRole('button', { name: 'Assign', exact: true }).click();
   await navigateSection(page, 'Equipment');
-  const vevorRow = page.locator('.equipment-table').getByRole('row').filter({ has: page.getByRole('link', { name: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }) });
-  await vevorRow.getByRole('link', { name: batchName }).waitFor();
-  await vevorRow.getByRole('link', { name: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
+  await page.locator('.equipment-table').getByRole('link', { name: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
+  await page.waitForURL('**/equipment/vevor-electric-brewing-system-9-2-gal-35-l');
+  const vevorRow = page.locator('.equipment-table').getByRole('row').filter({ has: page.getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }) });
+  await vevorRow.getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
+  await page.waitForURL(url => /^\/equipment\/vevor-electric-brewing-system-9-2-gal-35-l\/unit-[a-z0-9_-]+$/.test(new URL(url).pathname));
   await page.getByRole('button', { name: 'Release' }).click();
-  await navigateSection(page, 'Equipment');
-  await vevorRow.getByRole('cell', { name: '—' }).waitFor();
-  await vevorRow.getByRole('link', { name: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
+  await page.getByRole('link', { name: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
+  await vevorRow.getByRole('cell', { name: '—' }).last().waitFor();
+  await vevorRow.getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
-  await page.waitForURL('**/equipment');
+  await page.waitForURL('**/equipment/vevor-electric-brewing-system-9-2-gal-35-l');
+  await page.getByRole('button', { name: 'Add unit' }).click();
+  const addVevorUnit = page.getByRole('dialog', { name: 'Add equipment unit' });
+  if (await addVevorUnit.getByRole('textbox', { name: 'Unit name' }).count()) {
+    throw new Error('A stock unit should not ask for a separate name');
+  }
+  await addVevorUnit.getByRole('textbox', { name: 'Stock ID (optional)' }).fill('Second VEVOR');
+  await addVevorUnit.getByRole('button', { name: 'Add unit' }).click();
+  await page.waitForURL('**/equipment/vevor-electric-brewing-system-9-2-gal-35-l/second-vevor');
+  await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
+  await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
+  await page.waitForURL('**/equipment/vevor-electric-brewing-system-9-2-gal-35-l');
+  await navigateSection(page, 'Equipment');
   await chooseEquipmentType(page, 'Define equipment', 'Passive vessels', 'Fermenter');
   const basicFermenterDialog = page.getByRole('dialog', { name: 'Add fermenter' });
   await basicFermenterDialog.getByRole('textbox', { name: 'Name' }).fill('Basic smoke fermenter');
   await basicFermenterDialog.getByRole('button', { name: 'Create equipment' }).click();
   await page.getByRole('heading', { name: 'Basic smoke fermenter' }).waitFor();
   if (await page.getByText(/^Temperature range:/).count()) throw new Error('Basic fermenter started with temperature control');
+  if (await page.getByRole('button', { name: 'Add capability' }).count()) {
+    throw new Error('Stock units should not offer model capability changes');
+  }
+  await page.getByRole('link', { name: 'Basic smoke fermenter' }).click();
   await page.getByRole('button', { name: 'Add capability' }).click();
   await page.getByRole('menuitem', { name: 'Temperature control' }).click();
   const addedControlDialog = page.getByRole('dialog', { name: 'Add Temperature control' });
   await addedControlDialog.getByRole('spinbutton', { name: 'Minimum temperature (°C)' }).fill('0');
   await addedControlDialog.getByRole('spinbutton', { name: 'Maximum temperature (°C)' }).fill('30');
   await addedControlDialog.getByRole('button', { name: 'Add capability' }).click();
+  await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   await page.getByText('Temperature range: 0–30 °C').waitFor();
   await page.getByRole('button', { name: 'Edit thermal capabilities' }).click();
   const addedControlEditDialog = page.getByRole('dialog', { name: 'Thermal capabilities' });
@@ -354,7 +373,8 @@ try {
   await page.getByText('Temperature range: 0–32 °C').waitFor();
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
-  await page.waitForURL('**/equipment');
+  await page.waitForURL('**/equipment/basic-smoke-fermenter');
+  await navigateSection(page, 'Equipment');
   await page.getByRole('button', { name: 'Add from catalog' }).click();
   const tiltPicker = page.getByRole('dialog', { name: 'Add from catalog' });
   await tiltPicker.getByRole('searchbox', { name: 'Search equipment models' }).fill('Tilt Hydrometer');
@@ -379,7 +399,8 @@ try {
   await page.getByText('Temperature offset: Not calibrated').waitFor();
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
-  await page.waitForURL('**/equipment');
+  await page.waitForURL('**/equipment/tilt-hydrometer-and-thermometer');
+  await navigateSection(page, 'Equipment');
   await page.getByRole('button', { name: 'Add from catalog' }).click();
   const cboxPicker = page.getByRole('dialog', { name: 'Add from catalog' });
   await cboxPicker.getByRole('searchbox', { name: 'Search equipment models' }).fill('CboxQC');
@@ -391,7 +412,8 @@ try {
   await page.getByText('Dissolved oxygen: 0–10 mg/L').waitFor();
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
-  await page.waitForURL('**/equipment');
+  await page.waitForURL('**/equipment/anton-paar-cboxqc');
+  await navigateSection(page, 'Equipment');
   await chooseEquipmentType(page, 'Define equipment', 'Control', 'Electric kettle');
   const kettleDialog = page.getByRole('dialog', { name: 'Add electric kettle' });
   await kettleDialog.getByLabel('Capacity (optional)').waitFor();
@@ -413,11 +435,16 @@ try {
   await page.getByRole('dialog', { name: 'Edit rated power' }).getByRole('spinbutton', { name: 'Rated power (W)' }).fill('2000');
   await page.getByRole('button', { name: 'Save rated power' }).click();
   await page.getByText('Rated power: 2000 W').waitFor();
-  await page.getByRole('button', { name: 'Edit model default' }).click();
+  if (await page.getByRole('button', { name: 'Edit model heat loss' }).count()) {
+    throw new Error('Stock unit should not edit model heat loss');
+  }
+  await page.getByRole('link', { name: 'Smoke electric kettle' }).click();
+  await page.getByRole('button', { name: 'Edit model heat loss' }).click();
   const modelBoilDialog = page.getByRole('dialog', { name: 'Edit brewery model heat loss' });
   await modelBoilDialog.getByRole('spinbutton', { name: 'Heat loss at boil (W)' }).fill('100');
   await modelBoilDialog.getByRole('button', { name: 'Save model default' }).click();
   await page.getByText('Heat loss at boil: 100 W (brewery model)').waitFor();
+  await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   await page.getByRole('button', { name: 'Calibrate unit' }).click();
   const boilDialog = page.getByRole('dialog', { name: "Calibrate this unit's boil-off" });
   await boilDialog.getByRole('spinbutton', { name: 'Start volume (L)' }).fill('30');
@@ -443,16 +470,16 @@ try {
   await temperatureDialog.getByRole('spinbutton', { name: 'Equipment reading (°C)' }).fill('63');
   await temperatureDialog.getByRole('button', { name: 'Save temperature calibration' }).click();
   await page.getByText('Temperature offset: +2 °C').waitFor();
-  await page.getByRole('button', { name: 'Edit equipment name and slug' }).click();
-  const identityDialog = page.getByRole('dialog', { name: 'Edit equipment unit' });
-  await identityDialog.getByRole('textbox', { name: 'Name' }).fill('Smoke kettle renamed');
-  await identityDialog.getByRole('textbox', { name: 'Slug' }).fill('my-smoke-kettle');
+  await page.getByRole('button', { name: 'Edit Stock ID' }).click();
+  const identityDialog = page.getByRole('dialog', { name: 'Edit Stock ID' });
+  await identityDialog.getByRole('textbox', { name: 'Stock ID (optional)' }).fill('My smoke kettle');
   await identityDialog.getByRole('button', { name: 'Save unit' }).click();
-  await page.getByRole('heading', { name: 'Smoke kettle renamed' }).waitFor();
-  await page.waitForURL('**/equipment/my-smoke-kettle');
+  await page.getByText('Stock ID: My smoke kettle').waitFor();
+  await page.waitForURL('**/equipment/smoke-electric-kettle/my-smoke-kettle');
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
-  await page.waitForURL('**/equipment');
+  await page.waitForURL('**/equipment/smoke-electric-kettle');
+  await navigateSection(page, 'Equipment');
   await chooseEquipmentType(page, 'Define equipment', 'Passive vessels', 'Mash tun');
   const mashTunDialog = page.getByRole('dialog', { name: 'Add mash tun' });
   await mashTunDialog.getByLabel('Capacity (optional)').waitFor();
@@ -486,7 +513,9 @@ try {
   await page.getByRole('dialog', { name: 'Edit pH range' }).getByRole('spinbutton', { name: 'Range maximum' }).fill('15');
   await page.getByRole('button', { name: 'Save range' }).click();
   await page.getByText('pH: 0–15 pH').waitFor();
-  if (new URL(page.url()).pathname !== '/equipment/smoke-ph-meter') throw new Error('Equipment detail URL should use its name');
+  if (!/^\/equipment\/smoke-ph-meter\/unit-[a-z0-9_-]+$/.test(new URL(page.url()).pathname)) {
+    throw new Error('Equipment unit URL should sit beneath its model');
+  }
   await page.getByRole('button', { name: 'Edit pH 4.00 buffer reading' }).click();
   const phCalibrationDialog = page.getByRole('dialog', { name: 'Calibrate pH meter' });
   await phCalibrationDialog.getByRole('spinbutton', { name: 'pH 4.00 buffer reading' }).fill('4.01');
@@ -495,7 +524,7 @@ try {
   await page.getByText('pH 4.00 buffer reading: 4.01').waitFor();
   await navigateSection(page, 'Equipment');
   if (!String(await page.getByRole('link', { name: 'Smoke pH meter' }).getAttribute('href')).endsWith('/equipment/smoke-ph-meter')) {
-    throw new Error('Equipment list link should use its name slug');
+    throw new Error('Equipment list link should open the model');
   }
   const addEquipmentActions = page.locator('.equipment-add-actions');
   await addEquipmentActions.getByRole('button', { name: 'Add from catalog' }).waitFor();
@@ -516,7 +545,7 @@ try {
   await page.getByText('Gravity: 0–32 °Brix').waitFor();
   await navigateSection(page, 'Equipment');
   if (await page.locator('.equipment-table').count() !== 1) throw new Error('Equipment should use one table');
-  for (const heading of ['Name', 'Capabilities', 'Current batch']) {
+  for (const heading of ['Model', 'Units', 'Capabilities']) {
     if (!await page.locator('.equipment-table').getByRole('columnheader', { name: heading }).count()) {
       throw new Error(`Equipment table is missing ${heading}`);
     }
@@ -546,14 +575,18 @@ try {
   await page.getByText('ph 5.2 pH').waitFor();
   await navigateSection(page, 'Equipment');
   await page.locator('.equipment-table').getByRole('link', { name: 'Smoke pH meter' }).click();
+  await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   await page.getByRole('heading', { name: 'Smoke pH meter' }).waitFor();
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
-  await page.waitForURL('**/equipment');
+  await page.waitForURL('**/equipment/smoke-ph-meter');
+  await navigateSection(page, 'Equipment');
   await page.locator('.equipment-table a').filter({ hasText: 'Refractometer' }).click();
+  await page.locator('.equipment-table').getByRole('link', { name: /^Unit [A-Za-z0-9_-]{6}$/ }).click();
   await page.locator('.equipment-delete').getByRole('button', { name: 'Delete' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete' }).click();
-  await page.waitForURL('**/equipment');
+  await page.waitForURL('**/equipment/smoke-refractometer');
+  await navigateSection(page, 'Equipment');
   await page.getByRole('button', { name: 'Define equipment' }).waitFor();
   await navigateSection(page, 'Batches');
   await openBatch(page, batchName);
@@ -784,7 +817,9 @@ try {
   await navigateSection(page, 'Batches');
   await page.getByRole('button', { name: 'New batch' }).click();
   await page.getByRole('dialog', { name: 'New batch' }).getByLabel('Batch name').fill('Batch from recipe');
-  await page.getByRole('dialog', { name: 'New batch' }).getByRole('combobox', { name: 'Recipe (optional)' }).click();
+  await page.getByRole('dialog', { name: 'New batch' }).getByRole('combobox', { name: 'Start from' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: /^Recipe$/ }).click();
+  await page.getByRole('dialog', { name: 'New batch' }).getByRole('combobox', { name: 'Recipe', exact: true }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'Smoke recipe' }).click();
   await page.getByRole('button', { name: 'Create batch' }).click();
   await page.getByRole('heading', { name: 'Batch from recipe' }).waitFor();

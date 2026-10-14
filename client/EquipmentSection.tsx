@@ -5,16 +5,16 @@ import { CloudOutlined, ContainerOutlined, ControlOutlined, DashboardOutlined, E
 import { boilOffKinds, capacityKinds, equipmentGroups, equipmentKindLabel, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
 import type { CatalogEquipment } from '../shared/catalog.ts';
 import { assignEquipmentToBatch, createEquipment, createEquipmentUnit, deleteEquipment, listCurrentEquipmentUses, releaseEquipmentUse,
-  addEquipmentCapability, updateEquipmentBoilHeatLoss, clearEquipmentBoilHeatLoss,
+  addEquipmentModelCapability, updateEquipmentBoilHeatLoss, clearEquipmentBoilHeatLoss,
   updateEquipmentModelBoilHeatLoss, clearEquipmentModelBoilHeatLoss,
-  updateEquipmentCalibration, updateEquipmentIdentity,
+  updateEquipmentCalibration, updateEquipmentStockId,
   updateEquipmentRatedPower, updateEquipmentCapacity, updateEquipmentPressureRating,
   updateEquipmentTemperatureOffset, updateEquipmentThermalCapabilities, updateBrewingLosses, latestMeasuredMashEfficiency,
   updateEquipmentMeasurementRange,
   type Batch, type Equipment, type EquipmentSpecifications, type EquipmentUse, type LocalDb } from './db.ts';
 import { capacityInLiters, capacityLabel, capacityUnits } from '../shared/capacity.ts';
 import { changeNumberUnit } from './unitFields.ts';
-import { equipmentPathSegment, equipmentSlug } from './equipmentRoutes.ts';
+import { equipmentModelPathSegment, equipmentUnitPathSegment } from './equipmentRoutes.ts';
 import { heatLossFromBoil, predictedBoilOff } from './boilOff.ts';
 import { convertUnit, unitOptions, unitGroups, type PreferredUnits } from '../shared/units.ts';
 import { measurementKinds } from './constants.ts';
@@ -153,6 +153,10 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const [rangeForm] = Form.useForm();
   const [capabilityForm] = Form.useForm();
   const item = equipment.find(row => row.id === selectedId) || null;
+  const itemModel = item ? models.find(row => row.id === item.model_id) : undefined;
+  const selectedModel = models.find(row => row.id === selectedId) || null;
+  const modelUnits = selectedModel ? equipment.filter(row => row.model_id === selectedModel.id) : [];
+  const sortedModelUnits = [...modelUnits].sort((a, b) => (a.stock_id || '').localeCompare(b.stock_id || '') || a.id.localeCompare(b.id));
   const newCapacityUnit = Form.useWatch('capacity_unit', equipmentForm) as string | undefined;
   const newRangeUnit = Form.useWatch('measurement_unit', equipmentForm) as string | undefined;
   const editCapacityUnit = Form.useWatch('capacity_unit', capacityForm) as string | undefined;
@@ -257,7 +261,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     if (addingCapability.startsWith('measurement:')) {
       capabilityForm.setFieldValue('measurement_unit', channelUnits(addingCapability.slice('measurement:'.length))[0]);
     }
-  }, [addingCapability, item?.id, capabilityForm]);
+  }, [addingCapability, selectedModel?.id, capabilityForm]);
 
   useEffect(() => {
     if (!editThermal || !item) return;
@@ -390,10 +394,10 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  async function saveIdentity(values: { name: string; slug: string; stock_id?: string }) {
+  async function saveIdentity(values: { stock_id?: string }) {
     if (!item) return;
     try {
-      await updateEquipmentIdentity(db, item, values.name, values.slug, values.stock_id, equipment);
+      await updateEquipmentStockId(db, item, values.stock_id, equipment);
       setEditIdentity(false); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -415,15 +419,15 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   }
 
   async function saveModelBoilHeatLoss(values: { heat_loss_watts: number }) {
-    if (!item) return;
-    try { await updateEquipmentModelBoilHeatLoss(db, item, values.heat_loss_watts);
+    if (!selectedModel) return;
+    try { await updateEquipmentModelBoilHeatLoss(db, selectedModel, values.heat_loss_watts);
       setEditModelBoilHeatLoss(false); await onChanged(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
   async function clearModelBoilHeatLoss() {
-    if (!item) return;
-    try { await clearEquipmentModelBoilHeatLoss(db, item); setEditModelBoilHeatLoss(false); await onChanged(); }
+    if (!selectedModel) return;
+    try { await clearEquipmentModelBoilHeatLoss(db, selectedModel); setEditModelBoilHeatLoss(false); await onChanged(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
@@ -450,18 +454,18 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     rated_power_watts?: number; rated_heat_removal_watts?: number;
     min_temperature_c?: number; max_temperature_c?: number;
     measurement_min?: number; measurement_max?: number; measurement_unit?: string }) {
-    if (!item || !addingCapability) return;
+    if (!selectedModel || !addingCapability) return;
     try {
       if (addingCapability.startsWith('measurement:')) {
         const kind = addingCapability.slice('measurement:'.length);
         const range = validRange(values.measurement_min, values.measurement_max, values.measurement_unit,
           channelEquipmentKinds[kind] || kind);
-        await addEquipmentCapability(db, item, addingCapability, {
+        await addEquipmentModelCapability(db, selectedModel, addingCapability, {
           measurement_min: range?.min, measurement_max: range?.max,
           measurement_unit: values.measurement_unit || channelUnits(kind)[0]
         });
       } else {
-        await addEquipmentCapability(db, item, addingCapability, values);
+        await addEquipmentModelCapability(db, selectedModel, addingCapability, values);
       }
       setAddingCapability(null); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
@@ -471,7 +475,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     if (!item) return;
     try {
       await deleteEquipment(db, item.id);
-      onSelect(null);
+      onSelect(item.model_id || null);
       await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -492,14 +496,14 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
   const query = catalogQuery.trim().toLocaleLowerCase();
   const matchingModels = catalog.filter(model => (!catalogKind || model.kind === catalogKind)
     && (!query || `${model.name} ${equipmentKindLabel(model.kind)}`.toLocaleLowerCase().includes(query)));
-  const missingCapabilities = item ? [
-    ...(!item.has_liquid_containment ? [{ key: 'liquid_containment', label: 'Liquid capacity' }] : []),
-    ...(!item.has_pressure_rating ? [{ key: 'pressure_rating', label: 'Pressure rating' }] : []),
-    ...(!item.has_heating ? [{ key: 'heating', label: 'Heating' }] : []),
-    ...(!item.has_cooling ? [{ key: 'cooling', label: 'Cooling' }] : []),
-    ...(!item.has_temperature_control ? [{ key: 'temperature_control', label: 'Temperature control' }] : []),
+  const missingCapabilities = selectedModel ? [
+    ...(!selectedModel.has_liquid_containment ? [{ key: 'liquid_containment', label: 'Liquid capacity' }] : []),
+    ...(!selectedModel.has_pressure_rating ? [{ key: 'pressure_rating', label: 'Pressure rating' }] : []),
+    ...(!selectedModel.has_heating ? [{ key: 'heating', label: 'Heating' }] : []),
+    ...(!selectedModel.has_cooling ? [{ key: 'cooling', label: 'Cooling' }] : []),
+    ...(!selectedModel.has_temperature_control ? [{ key: 'temperature_control', label: 'Temperature control' }] : []),
     { key: 'measurement', label: 'Measurement channel', children: measurementCapabilityKinds
-      .filter(kind => !item.measurement_channels?.some(channel => channel.measurement_kind === kind.value))
+      .filter(kind => !selectedModel.measurement_channels?.some(channel => channel.measurement_kind === kind.value))
       .map(kind => ({ key: `measurement:${kind.value}`, label: kind.label })) }
   ].filter(entry => entry.key !== 'measurement' || entry.children?.length) : [];
   function chooseCatalogModel(model: CatalogEquipment) {
@@ -523,13 +527,38 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           <Button icon={<PlusOutlined />}>Define equipment</Button>
         </Dropdown>
       </div>
-      {equipment.length > 0 && <Table<Equipment> className="equipment-table" dataSource={[...equipment].sort((a, b) => a.name.localeCompare(b.name))}
+      {models.length > 0 && <Table<Equipment> className="equipment-table" dataSource={[...models].sort((a, b) => a.name.localeCompare(b.name))}
         rowKey="id" pagination={false} size="small" tableLayout="fixed" columns={[
-          { title: 'Name', dataIndex: 'name', width: '42%', render: (_, row) =>
-            <a href={`${basePath}/equipment/${equipmentPathSegment(row, equipment)}`}
+          { title: 'Model', dataIndex: 'name', width: '50%', render: (_, row) =>
+            <a href={`${basePath}/equipment/${equipmentModelPathSegment(row, models)}`}
               onClick={event => { event.preventDefault(); onSelect(row.id); }}>{row.name}</a> },
-          { title: 'Capabilities', key: 'capabilities', width: '30%', render: (_: unknown, row: Equipment) => equipmentCapabilities(row) },
-          { title: 'Current batch', key: 'current-batch', width: '28%', render: (_: unknown, row: Equipment) => {
+          { title: 'Units', key: 'units', width: '20%', render: (_: unknown, row: Equipment) =>
+            equipment.filter(unit => unit.model_id === row.id).length },
+          { title: 'Capabilities', key: 'capabilities', width: '30%', render: (_: unknown, row: Equipment) => equipmentCapabilities(row) }
+        ]} />}
+    </section> : selectedModel ? <section className="record-detail">
+      <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(selectedModel.kind)}</span>
+        <h2>{selectedModel.name}</h2><p className="muted">All equipment units of this model.</p></div>
+        <Button icon={<PlusOutlined />} onClick={() => setAddingUnit(true)}>Add unit</Button></div>
+      <div className="equipment-parameters">
+        <div className="equipment-parameter"><span>Capabilities:</span> {equipmentCapabilities(selectedModel)}</div>
+        {boilOffKinds.has(selectedModel.kind) && <div className="equipment-parameter"><span>Heat loss at boil: {
+          selectedModel.boil_heat_loss_watts == null ? 'Not calibrated'
+            : `${Math.round(selectedModel.boil_heat_loss_watts)} W (${selectedModel.workspace_model_boil_heat_loss_watts != null
+              ? 'brewery model' : 'catalog model'})`}</span>
+          <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit model heat loss"
+            onClick={() => setEditModelBoilHeatLoss(true)} /></div>}
+      </div>
+      {missingCapabilities.length > 0 && <Dropdown trigger={['click']} placement="bottomLeft"
+        menu={{ items: missingCapabilities, triggerSubMenuAction: 'click', onClick: ({ key }) => setAddingCapability(key) }}>
+        <Button icon={<PlusOutlined />}>Add capability</Button>
+      </Dropdown>}
+      {modelUnits.length > 0 && <Table<Equipment> className="equipment-table" dataSource={sortedModelUnits}
+        rowKey="id" pagination={false} size="small" tableLayout="fixed" columns={[
+          { title: 'Stock ID', dataIndex: 'stock_id', width: '65%', render: (value, row) =>
+            <a href={`${basePath}/equipment/${equipmentUnitPathSegment(row, equipment, models)}`}
+              onClick={event => { event.preventDefault(); onSelect(row.id); }}>{value || `Unit ${row.id.slice(0, 6)}`}</a> },
+          { title: 'Current batch', key: 'current-batch', width: '35%', render: (_: unknown, row: Equipment) => {
             const current = uses.filter(use => use.equipment_id === row.id);
             return current.length ? <div className="equipment-current-batches">{current.map(use =>
               <a key={use.id} href={`${basePath}/batch/${use.batch_id}`}
@@ -538,10 +567,14 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         ]} />}
     </section> : !item ? <Empty description="Equipment not found" /> : <section className="record-detail">
         <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(item.kind)}</span>
-          <div className="equipment-title"><h2>{item.name}</h2>
-            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit equipment name and slug" onClick={() => setEditIdentity(true)} /></div>
-          <div className="muted">Model: {item.model_name || item.name}{item.stock_id ? ` · Stock ID: ${item.stock_id}` : ''}</div></div></div>
+          <div className="equipment-title"><h2>{itemModel?.name || item.model_name || item.name}</h2></div>
+          <div className="muted">Model: {itemModel
+            ? <a href={`${basePath}/equipment/${equipmentModelPathSegment(itemModel, models)}`}
+              onClick={event => { event.preventDefault(); onSelect(itemModel.id); }}>{itemModel.name}</a>
+            : item.model_name || item.name}</div></div></div>
         <div className="equipment-parameters">
+          <div className="equipment-parameter"><span>Stock ID: {item.stock_id || 'Not set'}</span>
+            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit Stock ID" onClick={() => setEditIdentity(true)} /></div>
           <div className="equipment-parameter equipment-assignments"><strong>Current batches</strong>
             {itemUses.map(use => <div key={use.id} className="equipment-assignment">
               <a href={`${basePath}/batch/${use.batch_id}`} onClick={event => { event.preventDefault(); onSelectBatch(use.batch_id); }}>{use.batch_name}</a>
@@ -575,8 +608,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
             <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit temperature offset" onClick={() => setNewTemperatureCalibration(true)} /></div>}
           {boilOffKinds.has(item.kind) && <div className="equipment-parameter"><span>Heat loss at boil: {specs.boil_heat_loss_watts == null
             ? 'Not calibrated' : `${Math.round(specs.boil_heat_loss_watts)} W (${boilHeatLossSource})`}</span>
-            <Button type="text" size="small" onClick={() => setNewBoilCalibration(true)}>Calibrate unit</Button>
-            <Button type="text" size="small" onClick={() => setEditModelBoilHeatLoss(true)}>Edit model default</Button></div>}
+            <Button type="text" size="small" onClick={() => setNewBoilCalibration(true)}>Calibrate unit</Button></div>}
           {ratedEstimate != null && <div className="equipment-parameter">Estimated boil-off at rated power: {Number(ratedEstimate.toFixed(2))} L/h</div>}
           {['all_in_one', 'mash_tun', 'kettle', 'electric_kettle'].includes(item.kind) &&
             <div className="equipment-parameter"><span>Mash efficiency: {specs.mash_efficiency_pct != null
@@ -595,11 +627,6 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           {profile?.fields.map(field => <div key={field.key} className="equipment-parameter"><span>{field.label}: {calibrationValues[field.key] == null ? 'Not calibrated' : String(calibrationValues[field.key])}</span>
             <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${field.label}`} onClick={() => setEditCalibration(true)} /></div>)}
         </div>
-        {missingCapabilities.length > 0 && <Dropdown trigger={['click']} placement="bottomLeft"
-          menu={{ items: missingCapabilities, triggerSubMenuAction: 'click',
-            onClick: ({ key }) => setAddingCapability(key) }}>
-          <Button icon={<PlusOutlined />}>Add capability</Button>
-        </Dropdown>}
         <div className="equipment-delete"><Popconfirm title={`Delete ${item.name}?`}
           description="The unit is removed from your equipment list. Its batch history and calibrations remain."
           okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => void remove()}>
@@ -626,15 +653,15 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       </div> : <Empty description={catalog.length ? 'No matching equipment' : 'No catalog equipment available'} />}
     </Modal>
     <Modal title="Add equipment unit" open={addingUnit} onCancel={() => setAddingUnit(false)} footer={null} destroyOnHidden>
-      <Form layout="vertical" onFinish={async (values: { model_id: string; name: string; stock_id?: string }) => {
+      <Form key={selectedModel?.id || 'all'} layout="vertical" initialValues={{ model_id: selectedModel?.id }}
+        onFinish={async (values: { model_id: string; stock_id?: string }) => {
         try {
-          const id = await createEquipmentUnit(db, values.model_id, values.name, values.stock_id);
+          const id = await createEquipmentUnit(db, values.model_id, values.stock_id);
           setAddingUnit(false); await onChanged(); onSelect(id);
         } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
       }}>
         <Form.Item name="model_id" label="Model" rules={[{ required: true }]}><Select showSearch optionFilterProp="label"
           options={models.map(model => ({ value: model.id, label: model.name }))} /></Form.Item>
-        <Form.Item name="name" label="Unit name" rules={[{ required: true, whitespace: true }]}><Input maxLength={120} /></Form.Item>
         <Form.Item name="stock_id" label="Stock ID (optional)"><Input maxLength={80} /></Form.Item>
         <Button type="primary" htmlType="submit">Add unit</Button>
       </Form>
@@ -735,7 +762,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       ? `Add ${measurementSentenceLabel(addingCapability.slice('measurement:'.length))} measurement`
       : `Add ${missingCapabilities.find(capability => capability.key === addingCapability)?.label || 'capability'}`}
       open={!!addingCapability} onCancel={() => setAddingCapability(null)} footer={null} destroyOnHidden>
-      <Form key={`${item?.id}:${addingCapability}`} form={capabilityForm} layout="vertical" onFinish={saveAddedCapability}
+      <Form key={`${selectedModel?.id}:${addingCapability}`} form={capabilityForm} layout="vertical" onFinish={saveAddedCapability}
         initialValues={{ measurement_unit: addingCapability?.startsWith('measurement:')
           ? channelUnits(addingCapability.slice('measurement:'.length))[0] : undefined }}>
         {addingCapability === 'liquid_containment' && <Form.Item name="capacity_liters" label="Capacity (L, optional)">
@@ -812,12 +839,9 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <Button type="primary" htmlType="submit">Save</Button>
       </Form>
     </Modal>
-    <Modal title="Edit equipment unit" open={editIdentity} onCancel={() => setEditIdentity(false)} footer={null} destroyOnHidden>
-      <Form key={item?.id} layout="vertical" onFinish={saveIdentity} initialValues={{ name: item?.name, slug: item ? equipmentSlug(item) : '', stock_id: item?.stock_id }}>
-        <Form.Item name="name" label="Name" rules={[{ required: true, whitespace: true }]}><Input maxLength={120} /></Form.Item>
+    <Modal title="Edit Stock ID" open={editIdentity} onCancel={() => setEditIdentity(false)} footer={null} destroyOnHidden>
+      <Form key={item?.id} layout="vertical" onFinish={saveIdentity} initialValues={{ stock_id: item?.stock_id }}>
         <Form.Item name="stock_id" label="Stock ID (optional)"><Input maxLength={80} /></Form.Item>
-        <Form.Item name="slug" label="Slug" rules={[{ required: true }, { pattern: /^[a-z0-9]+(?:-[a-z0-9]+)*$/, message: 'Use lowercase letters, numbers, and hyphens' }]}>
-          <Input maxLength={80} /></Form.Item>
         <Button type="primary" htmlType="submit">Save unit</Button>
       </Form>
     </Modal>
@@ -855,16 +879,16 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     </Modal>
     <Modal title="Edit brewery model heat loss" open={editModelBoilHeatLoss}
       onCancel={() => setEditModelBoilHeatLoss(false)} footer={null} destroyOnHidden>
-      <Form key={`${item?.model_id}:${editModelBoilHeatLoss}`} layout="vertical" onFinish={saveModelBoilHeatLoss}
-        initialValues={{ heat_loss_watts: specs.workspace_model_boil_heat_loss_watts ?? undefined }}>
-        <p className="muted">Default for every {item?.model_name || 'model'} unit without its own calibration.
-          {specs.catalog_model_boil_heat_loss_watts != null &&
-            ` Catalog default: ${Math.round(specs.catalog_model_boil_heat_loss_watts)} W.`}</p>
+      <Form key={`${selectedModel?.id}:${editModelBoilHeatLoss}`} layout="vertical" onFinish={saveModelBoilHeatLoss}
+        initialValues={{ heat_loss_watts: selectedModel?.workspace_model_boil_heat_loss_watts ?? undefined }}>
+        <p className="muted">Default for every {selectedModel?.name || 'model'} unit without its own calibration.
+          {selectedModel?.catalog_model_boil_heat_loss_watts != null &&
+            ` Catalog default: ${Math.round(selectedModel.catalog_model_boil_heat_loss_watts)} W.`}</p>
         <Form.Item name="heat_loss_watts" label="Heat loss at boil (W)" rules={[{ required: true }]}>
           <InputNumber className="full-width" min={0} step="any" /></Form.Item>
         <Button type="primary" htmlType="submit">Save model default</Button>
-        {specs.workspace_model_boil_heat_loss_watts != null && <Button type="text" onClick={() => void clearModelBoilHeatLoss()}>
-          {item?.catalog_model_id ? 'Use catalog default' : 'Clear model default'}</Button>}
+        {selectedModel?.workspace_model_boil_heat_loss_watts != null && <Button type="text" onClick={() => void clearModelBoilHeatLoss()}>
+          {selectedModel.catalog_model_id ? 'Use catalog default' : 'Clear model default'}</Button>}
       </Form>
     </Modal>
     <Modal title="Calibrate temperature" open={newTemperatureCalibration} onCancel={() => setNewTemperatureCalibration(false)} footer={null} destroyOnHidden>

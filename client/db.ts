@@ -3,7 +3,6 @@ import { fetchApi } from './api.ts';
 import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
 import { nanoid } from 'nanoid';
 import { boilOffKinds, capacityKinds, equipmentKinds, measurementRangeUnits, temperatureCalibrationKinds } from '../shared/equipment.ts';
-import { equipmentSlug } from './equipmentRoutes.ts';
 import { openLocalCatalog } from './catalog.ts';
 import { hasGeneratedLocationSuffix, locationSlug } from './locationSlug.ts';
 import { recordSlug } from './recordSlug.ts';
@@ -1373,7 +1372,7 @@ export async function listEquipment(db: DB): Promise<Equipment[]> {
 }
 
 export async function listEquipmentModels(db: DB): Promise<Equipment[]> {
-  return db.execO<Equipment>(`SELECT m.id, m.name, m.kind, m.catalog_model_id,
+  const [models, channels] = await Promise.all([db.execO<Equipment>(`SELECT m.id, m.name, m.kind, m.catalog_model_id,
     COALESCE(m.has_liquid_containment, CASE WHEN cl.model_id IS NOT NULL THEN 1 END) AS has_liquid_containment,
     COALESCE(m.capacity_liters, cl.capacity_liters) AS capacity_liters,
     COALESCE(m.has_pressure_rating, CASE WHEN cp.model_id IS NOT NULL THEN 1 END) AS has_pressure_rating,
@@ -1397,13 +1396,33 @@ export async function listEquipmentModels(db: DB): Promise<Equipment[]> {
     LEFT JOIN catalog.model_boil_characterization cb ON cb.model_id = m.catalog_model_id
     LEFT JOIN catalog.model_cooling cc ON cc.model_id = m.catalog_model_id
     LEFT JOIN catalog.model_temperature_control ct ON ct.model_id = m.catalog_model_id
-    ORDER BY m.name COLLATE NOCASE`);
+    ORDER BY m.name COLLATE NOCASE`),
+  db.execO<MeasurementChannel & { model_id: string }>(`WITH channel_kinds AS (
+    SELECT model_id, measurement_kind FROM equipment_model_measurement_channels
+    UNION SELECT m.id, c.measurement_kind FROM equipment_models m
+      JOIN catalog.model_measurement_channels c ON c.model_id = m.catalog_model_id
+  )
+  SELECT k.model_id, COALESCE(w.id, c.id) AS id, k.measurement_kind,
+    COALESCE(w.measurement_min, c.measurement_min) AS measurement_min,
+    COALESCE(w.measurement_max, c.measurement_max) AS measurement_max,
+    COALESCE(w.measurement_unit, c.measurement_unit) AS measurement_unit,
+    COALESCE(w.measurement_scale, c.measurement_scale) AS measurement_scale
+  FROM channel_kinds k JOIN equipment_models m ON m.id = k.model_id
+  LEFT JOIN equipment_model_measurement_channels w
+    ON w.model_id = m.id AND w.measurement_kind = k.measurement_kind
+  LEFT JOIN catalog.model_measurement_channels c
+    ON c.model_id = m.catalog_model_id AND c.measurement_kind = k.measurement_kind`)]);
+  const byId = new Map(models.map(model => [model.id, model]));
+  for (const channel of channels) {
+    const model = byId.get(channel.model_id);
+    if (model) (model.measurement_channels ||= []).push(channel);
+  }
+  return models;
 }
 
-export async function createEquipmentUnit(db: DB, modelId: string, name: string, stockId?: string): Promise<string> {
-  const models = await db.execO<{ id: string }>('SELECT id FROM equipment_models WHERE id = ?', [modelId]);
+export async function createEquipmentUnit(db: DB, modelId: string, stockId?: string): Promise<string> {
+  const models = await db.execO<{ id: string; name: string }>('SELECT id, name FROM equipment_models WHERE id = ?', [modelId]);
   if (!models.length) throw new Error('Choose an equipment model');
-  if (!name.trim()) throw new Error('Enter an equipment name');
   if (stockId?.trim()) {
     const used = await db.execO<{ id: string }>('SELECT id FROM equipment WHERE stock_id = ? AND removed_at IS NULL', [stockId.trim()]);
     if (used.length) throw new Error('Stock ID is already in use');
@@ -1411,7 +1430,7 @@ export async function createEquipmentUnit(db: DB, modelId: string, name: string,
   const id = nanoid();
   const now = nowSeconds();
   await db.exec('INSERT INTO equipment(id, name, model_id, stock_id, added_at, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    [id, name.trim(), modelId, stockId?.trim() || null, now, now]);
+    [id, models[0].name, modelId, stockId?.trim() || null, now, now]);
   return id;
 }
 
@@ -1469,19 +1488,12 @@ export async function latestMeasuredMashEfficiency(db: DB, equipmentId: string):
   return null;
 }
 
-export async function updateEquipmentIdentity(db: DB, item: Equipment, name: string, slug: string, stockId: string | undefined,
+export async function updateEquipmentStockId(db: DB, item: Equipment, stockId: string | undefined,
   equipment: Equipment[]): Promise<void> {
-  const trimmed = name.trim();
-  if (!trimmed || trimmed.length > 120) throw new Error('Enter an equipment name');
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) || slug.length > 80) throw new Error('Enter a valid slug');
-  if (equipment.some(row => row.id !== item.id && (equipmentSlug(row) === slug || row.id === slug))) {
-    throw new Error('That slug is already used by another equipment item');
-  }
   if (stockId?.trim() && equipment.some(row => row.id !== item.id && row.stock_id === stockId.trim())) {
     throw new Error('Stock ID is already in use');
   }
-  await db.exec('UPDATE equipment SET name = ?, slug = ?, stock_id = ? WHERE id = ?',
-    [trimmed, slug, stockId?.trim() || null, item.id]);
+  await db.exec('UPDATE equipment SET stock_id = ? WHERE id = ?', [stockId?.trim() || null, item.id]);
 }
 
 async function putEquipmentCapability(db: Pick<DB, 'exec'>, table: string, id: string,
@@ -1598,7 +1610,7 @@ export async function updateEquipmentPressureRating(db: DB, item: Equipment, max
     { max_pressure_kpa: maxPressureKpa === item.catalog_model?.max_pressure_kpa ? null : maxPressureKpa });
 }
 
-export async function addEquipmentCapability(db: DB, item: Equipment, capability: string, values: {
+export async function addEquipmentModelCapability(db: DB, model: Equipment, capability: string, values: {
   capacity_liters?: number | null; max_pressure_kpa?: number | null;
   rated_power_watts?: number | null; rated_heat_removal_watts?: number | null;
   min_temperature_c?: number | null; max_temperature_c?: number | null;
@@ -1606,38 +1618,38 @@ export async function addEquipmentCapability(db: DB, item: Equipment, capability
 } = {}): Promise<void> {
   const positive = (value: number | null | undefined) => value == null || Number.isFinite(value) && value > 0;
   if (capability === 'liquid_containment') {
-    if (item.has_liquid_containment) throw new Error('Liquid capacity is already available');
+    if (model.has_liquid_containment) throw new Error('Liquid capacity is already available');
     if (!positive(values.capacity_liters)) throw new Error('Enter a positive capacity');
-    await putEquipmentCapability(db, 'equipment_liquid_containment', item.id,
-      { capacity_liters: values.capacity_liters });
+    await db.exec('UPDATE equipment_models SET has_liquid_containment = 1, capacity_liters = ? WHERE id = ?',
+      [values.capacity_liters ?? null, model.id]);
   } else if (capability === 'pressure_rating') {
-    if (item.has_pressure_rating) throw new Error('Pressure rating is already available');
+    if (model.has_pressure_rating) throw new Error('Pressure rating is already available');
     if (!positive(values.max_pressure_kpa)) throw new Error('Enter a positive pressure rating');
-    await putEquipmentCapability(db, 'equipment_pressure_rating', item.id,
-      { max_pressure_kpa: values.max_pressure_kpa });
+    await db.exec('UPDATE equipment_models SET has_pressure_rating = 1, max_pressure_kpa = ? WHERE id = ?',
+      [values.max_pressure_kpa ?? null, model.id]);
   } else if (capability === 'heating') {
-    if (item.has_heating) throw new Error('Heating is already available');
+    if (model.has_heating) throw new Error('Heating is already available');
     if (!positive(values.rated_power_watts)) throw new Error('Enter a positive power');
-    await putEquipmentCapability(db, 'equipment_heating', item.id,
-      { rated_power_watts: values.rated_power_watts });
+    await db.exec('UPDATE equipment_models SET has_heating = 1, rated_power_watts = ? WHERE id = ?',
+      [values.rated_power_watts ?? null, model.id]);
   } else if (capability === 'cooling') {
-    if (item.has_cooling) throw new Error('Cooling is already available');
+    if (model.has_cooling) throw new Error('Cooling is already available');
     if (!positive(values.rated_heat_removal_watts)) throw new Error('Enter a positive heat removal rate');
-    await putEquipmentCapability(db, 'equipment_cooling', item.id,
-      { rated_heat_removal_watts: values.rated_heat_removal_watts });
+    await db.exec('UPDATE equipment_models SET has_cooling = 1, rated_heat_removal_watts = ? WHERE id = ?',
+      [values.rated_heat_removal_watts ?? null, model.id]);
   } else if (capability === 'temperature_control') {
-    if (item.has_temperature_control) throw new Error('Temperature control is already available');
+    if (model.has_temperature_control) throw new Error('Temperature control is already available');
     if (values.min_temperature_c != null && !Number.isFinite(values.min_temperature_c)
       || values.max_temperature_c != null && !Number.isFinite(values.max_temperature_c)
       || values.min_temperature_c != null && values.max_temperature_c != null
         && values.min_temperature_c >= values.max_temperature_c) throw new Error('Enter a valid temperature range');
-    await putEquipmentCapability(db, 'equipment_temperature_control', item.id,
-      { min_temperature_c: values.min_temperature_c, max_temperature_c: values.max_temperature_c });
+    await db.exec('UPDATE equipment_models SET has_temperature_control = 1, min_temperature_c = ?, max_temperature_c = ? WHERE id = ?',
+      [values.min_temperature_c ?? null, values.max_temperature_c ?? null, model.id]);
   } else if (capability.startsWith('measurement:')) {
     const kind = capability.slice('measurement:'.length);
     if (!['temperature', 'ph', 'gravity', 'volume', 'pressure', 'carbonation', 'dissolved_oxygen', 'mass']
       .includes(kind)) throw new Error('Unknown measurement channel');
-    if (item.measurement_channels?.some(channel => channel.measurement_kind === kind)) {
+    if (model.measurement_channels?.some(channel => channel.measurement_kind === kind)) {
       throw new Error('Measurement channel is already available');
     }
     if (!values.measurement_unit) throw new Error('Choose a measurement unit');
@@ -1647,9 +1659,9 @@ export async function addEquipmentCapability(db: DB, item: Equipment, capability
         || values.measurement_min >= values.measurement_max) throw new Error('Enter a valid measurement range');
     }
     const scale = ['SG', '°Plato', '°Brix', 'pH'].includes(values.measurement_unit) ? values.measurement_unit : null;
-    await db.exec(`INSERT INTO equipment_measurement_channels
-      (id, equipment_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`, [`${item.id}:${kind}`, item.id, kind,
+    await db.exec(`INSERT INTO equipment_model_measurement_channels
+      (id, model_id, measurement_kind, measurement_min, measurement_max, measurement_unit, measurement_scale)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`, [`${model.id}:${kind}`, model.id, kind,
       values.measurement_min ?? null, values.measurement_max ?? null,
       scale ? null : values.measurement_unit, scale]);
   } else {
@@ -1668,16 +1680,16 @@ export async function clearEquipmentBoilHeatLoss(db: DB, item: Equipment): Promi
   await db.exec('DELETE FROM equipment_boil_calibration WHERE equipment_id = ?', [item.id]);
 }
 
-export async function updateEquipmentModelBoilHeatLoss(db: DB, item: Equipment, watts: number): Promise<void> {
-  if (!boilOffKinds.has(item.kind) || !item.model_id) throw new Error('Choose a boiling equipment model');
+export async function updateEquipmentModelBoilHeatLoss(db: DB, model: Equipment, watts: number): Promise<void> {
+  if (!boilOffKinds.has(model.kind)) throw new Error('Choose a boiling equipment model');
   if (!Number.isFinite(watts) || watts < 0) throw new Error('Enter a valid heat loss');
   await db.exec(`INSERT INTO equipment_model_boil_characterization(model_id, heat_loss_watts) VALUES (?, ?)
-    ON CONFLICT(model_id) DO UPDATE SET heat_loss_watts = excluded.heat_loss_watts`, [item.model_id, watts]);
+    ON CONFLICT(model_id) DO UPDATE SET heat_loss_watts = excluded.heat_loss_watts`, [model.id, watts]);
 }
 
-export async function clearEquipmentModelBoilHeatLoss(db: DB, item: Equipment): Promise<void> {
-  if (!boilOffKinds.has(item.kind) || !item.model_id) throw new Error('Choose a boiling equipment model');
-  await db.exec('DELETE FROM equipment_model_boil_characterization WHERE model_id = ?', [item.model_id]);
+export async function clearEquipmentModelBoilHeatLoss(db: DB, model: Equipment): Promise<void> {
+  if (!boilOffKinds.has(model.kind)) throw new Error('Choose a boiling equipment model');
+  await db.exec('DELETE FROM equipment_model_boil_characterization WHERE model_id = ?', [model.id]);
 }
 
 export async function updateEquipmentTemperatureOffset(db: DB, item: Equipment, offsetC: number): Promise<void> {

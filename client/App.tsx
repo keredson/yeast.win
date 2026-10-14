@@ -10,7 +10,8 @@ import { RecipeSection } from './RecipeSection.tsx';
 import { RecipeTypeIcon } from './RecipeTypeIcon.tsx';
 import { InventorySection } from './InventorySection.tsx';
 import { inventorySupplyForPath, inventoryPathSegment } from './inventoryRoutes.ts';
-import { equipmentItemForPath, equipmentPathSegment } from './equipmentRoutes.ts';
+import { equipmentModelForPath, equipmentModelPathSegment, equipmentUnitForPath,
+  equipmentUnitPathSegment } from './equipmentRoutes.ts';
 import { EquipmentSection } from './EquipmentSection.tsx';
 import { LocationsSection } from './LocationsSection.tsx';
 import { locationForPath } from './locationRoutes.ts';
@@ -28,6 +29,8 @@ function routeFromPath(path: string): Route {
   const prefix = /^\/brewery\/([a-z0-9-]+)(?=\/|$)/.exec(path);
   const slug = prefix?.[1] || null;
   const localPath = prefix ? path.slice(prefix[0].length) || '/' : path;
+  const equipmentUnit = /^\/equipment\/([A-Za-z0-9_-]+\/[A-Za-z0-9_-]+)$/.exec(localPath);
+  if (equipmentUnit) return { section: 'equipment', selectedId: equipmentUnit[1], slug };
   for (const section of ['batches', 'recipes', 'inventory', 'equipment', 'locations'] as const) {
     if (localPath === `/${section}`) return { section, selectedId: null, slug };
     const segmentPattern = section === 'inventory' || section === 'equipment' || section === 'locations' || section === 'recipes' ? '[A-Za-z0-9_-]+' : '[A-Za-z0-9_-]{10,32}';
@@ -347,12 +350,16 @@ export function App() {
 
   useEffect(() => {
     if (route.section !== 'equipment' || !route.selectedId || equipmentWorkspaceId !== workspaceId) return;
-    const found = equipmentItemForPath(route.selectedId, equipment);
+    const model = equipmentModelForPath(route.selectedId, equipmentModels);
+    const unit = model ? undefined : equipmentUnitForPath(route.selectedId, equipment, equipmentModels);
+    const found = model || unit;
     if (!found) return;
-    const path = routePath('equipment', equipmentPathSegment(found, equipment), workspaceBase(workspaceId, session?.workspaces || []));
+    const segment = model ? equipmentModelPathSegment(model, equipmentModels)
+      : equipmentUnitPathSegment(unit!, equipment, equipmentModels);
+    const path = routePath('equipment', segment, workspaceBase(workspaceId, session?.workspaces || []));
     if (location.pathname !== path) history.replaceState(null, '', path);
     if (route.selectedId !== found.id) setRoute(current => ({ ...current, selectedId: found.id }));
-  }, [route.section, route.selectedId, equipment, equipmentWorkspaceId, workspaceId, session?.workspaces]);
+  }, [route.section, route.selectedId, equipment, equipmentModels, equipmentWorkspaceId, workspaceId, session?.workspaces]);
 
   useEffect(() => {
     if (route.section !== 'locations' || !route.selectedId || inventoryWorkspaceId !== workspaceId) return;
@@ -385,10 +392,12 @@ export function App() {
     const inventoryItem = next === 'inventory' && id
       ? supplies.find(row => row.id === id) || supplies.find(row => row.id === inventory.find(stock => stock.id === id)?.supply_id) : null;
     const equipmentItem = next === 'equipment' && id ? equipment.find(row => row.id === id) : null;
+    const equipmentModel = next === 'equipment' && id ? equipmentModels.find(row => row.id === id) : null;
     const locationItem = next === 'locations' && id ? locations.find(row => row.id === id) : null;
     const recipeItem = next === 'recipes' && id ? recipes.find(row => row.id === id) : null;
     const segment = inventoryItem ? inventoryPathSegment(inventoryItem, supplies)
-      : equipmentItem ? equipmentPathSegment(equipmentItem, equipment) : locationItem ? locationItem.slug
+      : equipmentItem ? equipmentUnitPathSegment(equipmentItem, equipment, equipmentModels)
+        : equipmentModel ? equipmentModelPathSegment(equipmentModel, equipmentModels) : locationItem ? locationItem.slug
         : recipeItem ? recipeItem.slug : id;
     const path = routePath(next, segment, base);
     if (location.pathname !== path || location.search) history.pushState(null, '', path);
@@ -622,7 +631,8 @@ export function App() {
             {section === 'equipment' && (equipmentWorkspaceId !== workspaceId ? <div className="loading-screen"><Spin description="Loading equipment" /></div>
               : <EquipmentSection key={workspaceId} db={db} basePath={activeBase} accountId={session.account.id} batches={batches} equipment={equipment} models={equipmentModels}
                 catalog={catalogEquipment} preferredUnits={preferredUnits} selectedId={route.selectedId
-                  ? equipmentItemForPath(route.selectedId, equipment)?.id || route.selectedId : null}
+                  ? equipmentModelForPath(route.selectedId, equipmentModels)?.id
+                    || equipmentUnitForPath(route.selectedId, equipment, equipmentModels)?.id || route.selectedId : null}
                 onSelect={id => showItem('equipment', id)} onSelectBatch={id => showItem('batches', id)} onChanged={changed} />)}
           </>}
       </main>
