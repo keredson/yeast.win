@@ -247,9 +247,6 @@ button, input, textarea { font: inherit; }
 .timeline-gap { position: relative; z-index: 1; width: fit-content; margin: 0 0 0 2rem;
   padding: 2px 8px; background: #fff; color: #728079; font-size: 12px; font-weight: 600; }
 .timeline-group .ant-card-body { padding: 0; }
-.timeline-group-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
-  padding: 13px 18px; border-bottom: 1px solid #e6ebe4; background: #f6f8f4; }
-.timeline-group-heading strong { font-size: 14px; }
 .timeline-entry { padding: 14px 18px; }
 .recipe-timeline .timeline-entry { padding-block: 8px; }
 .timeline-entry + .timeline-entry { border-top: 1px solid #edf0eb; }

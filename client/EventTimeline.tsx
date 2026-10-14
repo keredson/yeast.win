@@ -4,12 +4,16 @@ import { CheckOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ActualEvent, Equipment, PlanInput } from './db.ts';
 import { kindLabel, measurementKinds } from './constants.ts';
 import { formatTime } from './time.ts';
-import { effectivePlanTime, formatOffset, orderTimelineGroup, planDetailsLabel, planDuration, planKindLabel, timelineGroupKey, timelineGroupStep } from './planTiming.ts';
+import { formatOffset, orderTimelineGroup, planDetailsLabel, planDuration, planKindLabel, timelineGroupKey, timelineGroupStep, timelinePosition } from './planTiming.ts';
 import type { PlanPreset } from './PlanForm.tsx';
 
 export type TimelineEvent = PlanInput & { id: string; actual_at?: number | null; skipped_at?: number | null; ended_at?: number | null };
 export interface TimelinePhoto { id: string; url: string; batch_event_id: string | null }
-interface Group { key: string; at: number | null; step: number; label: string; events: TimelineEvent[] }
+interface Group { key: string; at: number | null; step: number; events: TimelineEvent[] }
+
+function shortTime(seconds: number): string {
+  return new Date(seconds * 1000).toLocaleTimeString(undefined, { timeStyle: 'short' });
+}
 
 export function actionForMenu(key: string, plans: TimelineEvent[]): { kind: string; preset: PlanPreset } {
   const [action, measurementKind] = key.split(':');
@@ -48,10 +52,10 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
   const groups = useMemo(() => {
     const startAt = batchStartAt ?? 0;
     const startKey = timelineGroupKey(startAt, 0, 'start');
-    const grouped = new Map<string, Group>([[startKey, { key: startKey, at: startAt, step: 0, label: '', events: [] }]]);
+    const grouped = new Map<string, Group>([[startKey, { key: startKey, at: startAt, step: 0, events: [] }]]);
     const eventTimes = new Map<string, number | null>();
     for (const item of events) {
-      const at = item.actual_at ?? item.skipped_at ?? effectivePlanTime(item, events, events as ActualEvent[], startAt);
+      const at = timelinePosition(item, events, startAt);
       eventTimes.set(item.id, at);
     }
     for (const item of events) {
@@ -60,17 +64,15 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
       const key = timelineGroupKey(at, step, item.id);
       let group = grouped.get(key);
       if (!group) {
-        group = { key, at, step, label: isBatch && (item.actual_at != null || item.skipped_at != null)
-          ? formatTime(at!) : '', events: [] };
+        group = { key, at, step, events: [] };
         grouped.set(key, group);
       }
-      if (isBatch && key !== startKey && !group.label && (item.actual_at != null || item.skipped_at != null)) group.label = formatTime(at!);
       group.events.push(item);
     }
     for (const group of grouped.values()) group.events = orderTimelineGroup(group.events, eventTimes);
     return [...grouped.values()].sort((a, b) => (a.at ?? Number.MAX_SAFE_INTEGER) - (b.at ?? Number.MAX_SAFE_INTEGER)
       || a.step - b.step || a.key.localeCompare(b.key));
-  }, [events, batchStartAt, isBatch]);
+  }, [events, batchStartAt]);
 
   return <section className={`batch-timeline${isBatch ? '' : ' recipe-timeline'}`}><div className="column-title"><h3>Timeline</h3>{isBatch && <span>{events.length} actions</span>}</div>
     <div className="card-stack timeline-track">{groups.map((group, index) => {
@@ -79,10 +81,9 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
       const gapSeconds = group.at != null && previousAt != null ? group.at - previousAt : 0;
       const gapAlreadyShown = previous?.events.some(item => planDuration(item) === gapSeconds);
       return <Fragment key={group.key}>
-      {gapSeconds > 0 && !gapAlreadyShown && (!isBatch || !group.label)
+      {gapSeconds > 0 && !gapAlreadyShown
         && <div className="timeline-gap">{formatOffset(gapSeconds)}</div>}
       {group.events.length > 0 && <Card size="small" className="timeline-group">
-      {group.label && <div className="timeline-group-heading"><strong>{group.label}</strong></div>}
       {group.events.map(item => {
         const happened = item.actual_at != null;
         const skipped = !happened && item.skipped_at != null;
@@ -99,9 +100,9 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
             {!isBatch && detail && <span className="recipe-event-detail">{detail}</span>}</div>
             {metadata && <div className="plan-meta">{metadata}</div>}</div>
             <div className="timeline-status-actions">
-              {isBatch && <Tag color={happened ? (item.event_type === 'equipment_use' || planDuration(item)) && !item.ended_at ? 'cyan' : 'green' : skipped ? 'default' : 'blue'}>
-                {happened ? item.event_type === 'equipment_use' && !item.ended_at ? 'In use'
-                  : planDuration(item) && !item.ended_at ? 'In progress' : 'Done' : skipped ? 'Skipped' : 'Pending'}</Tag>}
+              {isBatch && <Tag color={happened ? (item.event_type === 'equipment_use' || planDuration(item)) && !item.ended_at ? 'cyan' : 'green' : skipped ? 'default' : 'blue'}
+                title={happened ? `Recorded ${formatTime(item.actual_at)}` : skipped ? `Skipped ${formatTime(item.skipped_at)}` : undefined}>
+                {happened ? shortTime(item.actual_at!) : skipped ? 'Skipped' : 'Pending'}</Tag>}
               {item.event_type === 'equipment_use' && item.ended_at == null && onReleaseEquipment &&
                 <Button type="text" size="small" onClick={() => onReleaseEquipment(item.id)}>Release</Button>}
               {onRecord && !happened && <Button type="text" shape="circle" icon={<CheckOutlined />} aria-label={`Record ${item.title}`}

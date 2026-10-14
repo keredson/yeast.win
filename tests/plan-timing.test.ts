@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { effectivePlanTime, orderTimelineGroup, planDetailsLabel, planDuration, planTimingLabel, timelineGroupKey, timelineGroupStep } from '../client/planTiming.ts';
+import { effectivePlanTime, orderTimelineGroup, planDetailsLabel, planDuration, planTimingLabel, timelineGroupKey, timelineGroupStep, timelinePosition } from '../client/planTiming.ts';
 import type { Plan } from '../client/db.ts';
 
 test('plans use batch start and an actual anchor when it arrives', () => {
@@ -23,6 +23,21 @@ test('plans use batch start and an actual anchor when it arrives', () => {
   const recorded = plans.map(plan => plan.id === 'boil' ? { ...plan, actual_at: start + 4800 } : plan);
   assert.equal(effectivePlanTime(nutrient, recorded, recorded, start), start + 5400);
   assert.equal(effectivePlanTime(preparation, recorded, recorded, start), start + 4500);
+});
+
+test('recording an action keeps its planned timeline position', () => {
+  const start = 1_800_000_000;
+  const grain: Plan = { id: 'grain', batch_id: 'batch', title: 'Add grain', event_type: 'addition',
+    planned_at: null, anchor_event_id: null, offset_seconds: 0, details: { item_category: 'Grain' },
+    actual_at: null, skipped_at: null, note: null, source_id: null };
+  const mash: Plan = { ...grain, id: 'mash', title: 'Mash', event_type: 'temperature_control',
+    offset_seconds: 600, details: { phase: 'mash', duration_seconds: 3600 } };
+  const grainRecorded = { ...grain, actual_at: start + 900 };
+  const plans = [grainRecorded, mash];
+  assert.equal(timelinePosition(grainRecorded, plans, start), start);
+  assert.equal(timelinePosition(mash, plans, start), start + 600);
+  const unplanned = { ...grain, id: 'note', offset_seconds: null, actual_at: start + 1200 };
+  assert.equal(timelinePosition(unplanned, [...plans, unplanned], start), start + 1200);
 });
 
 test('a timed process exposes separate start and end anchors', () => {
