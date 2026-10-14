@@ -1,12 +1,13 @@
-import { useState } from 'react';
-import { Alert, Button, Form, Input, InputNumber, Select } from 'antd';
+import { useEffect, useState } from 'react';
+import { Alert, AutoComplete, Button, Form, Input, InputNumber, Select } from 'antd';
 import { kindLabel, measurementKinds, planKinds } from './constants.ts';
 import { fromDatetimeLocal, toDatetimeLocal } from './time.ts';
 import { addPhoto, recordEvent, skipBatchEvent, updateEvent, updatePhotoEvent, type ActualEvent, type Equipment, type EventInput, type InventoryItem, type LocalDb, type MeasurementKind, type Plan, type PlanDetails } from './db.ts';
 import type { PreferredUnits } from './api.ts';
 import { compoundMassUnit, gravityScales, quantityForStorage, quantityUnitsForCategory, splitOunces, unitGroups, unitOptions } from '../shared/units.ts';
 import { supportsDuration, timeUnits } from './planTiming.ts';
-import { inventoryCategories } from '../shared/catalog.ts';
+import { inventoryCategories, unitForCategory, type CatalogInventory } from '../shared/catalog.ts';
+import { findCatalogSupply, queryCatalogSupplies } from './catalog.ts';
 import { QuantityFields } from './QuantityFields.tsx';
 import { changeNumberUnit, changeQuantityUnit } from './unitFields.ts';
 import { vesselKinds } from '../shared/equipment.ts';
@@ -38,16 +39,16 @@ interface Values {
   gravity_role?: 'og' | 'fg' | '';
   duration_value?: number; duration_unit?: typeof timeUnits[number]['value'];
   note?: string; value?: number; unit?: string; uncertainty?: number; equipment_id?: string;
-  source?: string; item_name?: string; inventory_item_id?: string;
+  source?: string; item_name?: string; inventory_item_id?: string; catalog_item_id?: string;
   item_category?: string; quantity?: number; pounds?: number; ounces?: number;
   mode?: string; target_value?: number; target_unit?: string; power_watts?: number;
   to_vessel_id?: string; container_name?: string; container_size?: number;
   container_unit?: string; container_count?: number;
 }
 
-export function EventForm({ db, batchId, accountId, equipment, inventory, preferredUnits, initialPlan, initialEvent, initialData, onSaved }: {
+export function EventForm({ db, batchId, accountId, equipment, inventory, catalogRevision, preferredUnits, initialPlan, initialEvent, initialData, onSaved }: {
   db: LocalDb; batchId: string; accountId: string; equipment: Equipment[];
-  inventory: InventoryItem[]; preferredUnits: PreferredUnits; initialPlan?: Plan | null;
+  inventory: InventoryItem[]; catalogRevision: number; preferredUnits: PreferredUnits; initialPlan?: Plan | null;
   initialEvent?: ActualEvent | null; initialData?: { measurementKind?: MeasurementKind; payload: Record<string, string | number | null> } | null;
   onSaved: () => Promise<void>;
 }) {
@@ -71,6 +72,8 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [photo, setPhoto] = useState<File | null>(null);
+  const [productQuery, setProductQuery] = useState('');
+  const [catalogProducts, setCatalogProducts] = useState<CatalogInventory[]>([]);
   const initialQuantity = typeof initialData?.payload.quantity === 'number' ? initialData.payload.quantity : plannedNumber('quantity');
   const storedUnit = String(initialData?.payload.unit || plannedString('unit') || (kind === 'measurement'
     ? measurementUnit(initialMeasurement || 'temperature', preferredUnits) : eventUnit(kind, preferredUnits)) || '');
@@ -80,12 +83,23 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
   const initialSplit = initialUnit === compoundMassUnit && initialQuantity != null ? splitOunces(initialQuantity) : null;
   const initialCategory = plannedString('item_category')
     || inventory.find(item => item.id === (initialData?.payload.inventory_item_id || plannedString('inventory_item_id')))?.category || 'Other';
+  const selectedCategory = Form.useWatch('item_category', form) as string | undefined;
+  useEffect(() => {
+    if (kind !== 'addition') return;
+    let cancelled = false;
+    void queryCatalogSupplies({ category: selectedCategory || initialCategory, query: productQuery, limit: 80 })
+      .then(rows => { if (!cancelled) setCatalogProducts(rows); })
+      .catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => { cancelled = true; };
+  }, [kind, selectedCategory, initialCategory, productQuery, catalogRevision]);
   const selectedUnit = Form.useWatch('unit', form) as string | undefined;
   const selectedTargetUnit = Form.useWatch('target_unit', form) as string | undefined;
   const selectedContainerUnit = Form.useWatch('container_unit', form) as string | undefined;
   const selectedDurationUnit = Form.useWatch('duration_unit', form) as string | undefined;
-  const selectedCategory = Form.useWatch('item_category', form) as string | undefined;
   const selectedInventoryId = Form.useWatch('inventory_item_id', form) as string | undefined;
+  const selectedCatalogId = Form.useWatch('catalog_item_id', form) as string | undefined;
+  const selectedStock = inventory.find(item => item.id === selectedInventoryId);
+  const selectedProduct = catalogProducts.find(item => item.id === selectedCatalogId);
   const genericPitch = initialPlan?.title === 'Pitch yeast' && kind === 'addition';
   const quantityOptional = kind === 'addition' && (selectedCategory || initialCategory) === 'Yeast' && !selectedInventoryId;
   const vesselOptions = equipment.filter(item => vesselKinds.has(item.kind)).map(item => ({ value: item.id, label: item.name }));
@@ -142,14 +156,23 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
           equipment_id: values.equipment_id || null,
           source: values.source || 'manual' };
       } else if (kind === 'addition') {
-        const itemName = values.item_name || plannedString('item_name') || initialPlan?.title;
+        const itemName = values.item_name?.trim() || (genericPitch ? initialPlan?.title : undefined);
         const itemId = values.inventory_item_id;
+        const stock = inventory.find(item => item.id === itemId);
+        const category = values.item_category || initialCategory;
+        const unchanged = itemName === (plannedString('item_name') || initialPlan?.title)
+          && category === initialCategory;
+        const keepPlannedSupply = unchanged && (!values.catalog_item_id
+          || values.catalog_item_id === plannedString('catalog_item_id'));
+        const catalogId = stock ? null : values.catalog_item_id || (unchanged ? plannedString('catalog_item_id') : null)
+          || (itemName ? (await findCatalogSupply(category, itemName))?.id : null);
         const amount = quantityForStorage(values.unit || '', values.quantity, values.pounds, values.ounces);
         if (!itemName) throw new Error('Enter an item');
         if (!amount && !quantityOptional) throw new Error('Enter a quantity');
-        payload = { item_name: itemName, item_category: values.item_category || initialCategory,
+        payload = { item_name: itemName, item_category: category,
           inventory_item_id: itemId || null,
-          supply_id: inventory.find(item => item.id === itemId)?.supply_id || plannedString('supply_id') || null,
+          catalog_item_id: catalogId || null,
+          supply_id: stock ? stock.supply_id || null : (keepPlannedSupply ? plannedString('supply_id') : null) || null,
           quantity: amount?.quantity ?? null, unit: amount?.unit || null };
       } else if (kind === 'temperature_control') {
         if (chillToTarget && values.target_value == null) throw new Error('Enter a target temperature');
@@ -198,8 +221,9 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
     measurement_kind: initialData?.measurementKind || plannedString('measurement_kind') || measurement,
     gravity_role: plannedString('gravity_role') || '',
     mode: initialData?.payload.mode || plannedString('mode') || 'hold', source: initialData?.payload.source || 'manual',
-    item_name: plannedString('item_name'), item_category: initialCategory,
+    item_name: plannedString('item_name') || (genericPitch ? undefined : initialPlan?.title), item_category: initialCategory,
     inventory_item_id: plannedString('inventory_item_id'),
+    catalog_item_id: plannedString('catalog_item_id'),
     equipment_id: plannedString('equipment_id'),
     to_vessel_id: plannedString('to_vessel_id'),
     container_name: plannedString('container_name'), container_size: plannedNumber('container_size'),
@@ -256,15 +280,44 @@ export function EventForm({ db, batchId, accountId, equipment, inventory, prefer
       <>
         <Form.Item name="item_category" label="Type"><Select options={[...new Set([...inventoryCategories,
           ...inventory.map(row => row.category), ...(initialCategory ? [initialCategory] : [])])].map(value => ({ value, label: value }))}
-          onChange={() => form.setFieldsValue({ inventory_item_id: undefined, item_name: undefined, unit: preferredUnits.mass,
-            quantity: undefined, pounds: undefined, ounces: undefined })} /></Form.Item>
-        <Form.Item name="inventory_item_id" label="Inventory item"><Select allowClear placeholder="Optional"
-          options={inventory.filter(item => item.category === (selectedCategory || initialCategory)).map(item =>
-            ({ value: item.id, label: [item.name, item.lot_code && `Lot ${item.lot_code}`, item.location_name].filter(Boolean).join(' · ') }))}
-          onChange={id => { const item = inventory.find(row => row.id === id);
-            if (item) { changeQuantityUnit(form, selectedUnit || initialUnit, item.display_unit);
-              form.setFieldsValue({ item_name: item.name, item_category: item.category, unit: item.display_unit }); } }} /></Form.Item>
-        <Form.Item name="item_name" label="What was added?" rules={genericPitch ? [] : [{ required: true }]}><Input placeholder="e.g. Fermaid O, yeast, oxygen" /></Form.Item>
+          onChange={value => { setProductQuery(''); form.setFieldsValue({ inventory_item_id: undefined, catalog_item_id: undefined,
+            item_name: undefined, unit: unitForCategory(value, preferredUnits.mass),
+            quantity: undefined, pounds: undefined, ounces: undefined }); }} /></Form.Item>
+        <Form.Item name="inventory_item_id" hidden><Input /></Form.Item>
+        <Form.Item name="catalog_item_id" hidden><Input /></Form.Item>
+        <Form.Item name="item_name" label="What was added?" rules={genericPitch ? [] : [{ required: true }]}
+          extra={selectedStock ? ['From inventory', selectedStock.lot_code && `Lot ${selectedStock.lot_code}`,
+            selectedStock.location_name].filter(Boolean).join(' · ')
+            : selectedCatalogId ? ['Catalog product', selectedProduct?.manufacturer].filter(Boolean).join(' · ') : undefined}>
+          <AutoComplete placeholder="Search your inventory or the catalog, or enter a name" maxLength={120}
+            options={[
+              ...inventory.filter(item => item.category === (selectedCategory || initialCategory)
+                && item.name.toLowerCase().includes(productQuery.toLowerCase()))
+                .map(item => ({ value: `stock:${item.id}`, label: [item.name, item.lot_code && `Lot ${item.lot_code}`,
+                  item.location_name, 'Your inventory'].filter(Boolean).join(' · ') })),
+              ...catalogProducts.map(item => ({ value: `catalog:${item.id}`,
+                label: [item.name, item.manufacturer, 'Catalog'].filter(Boolean).join(' · ') }))
+            ]}
+            filterOption={false} onSearch={setProductQuery}
+            onChange={() => form.setFieldsValue({ inventory_item_id: undefined, catalog_item_id: undefined })}
+            onSelect={value => {
+              if (value.startsWith('stock:')) {
+                const item = inventory.find(row => row.id === value.slice(6));
+                if (!item) return;
+                changeQuantityUnit(form, selectedUnit || initialUnit, item.display_unit);
+                form.setFieldsValue({ item_name: item.name, inventory_item_id: item.id,
+                  catalog_item_id: undefined, unit: item.display_unit });
+              } else if (value.startsWith('catalog:')) {
+                const item = catalogProducts.find(row => row.id === value.slice(8));
+                if (!item) return;
+                const nextUnit = unitGroups.mass.includes(item.unit as typeof unitGroups.mass[number])
+                  ? unitForCategory(item.category, preferredUnits.mass) : item.unit;
+                changeQuantityUnit(form, selectedUnit || initialUnit, nextUnit);
+                form.setFieldsValue({ item_name: item.name, catalog_item_id: item.id,
+                  inventory_item_id: undefined, unit: nextUnit });
+              }
+            }} />
+        </Form.Item>
       </>
       <Form.Item name="unit" label="Unit" rules={[{ required: true }]}>
         <Select showSearch options={unitOptions(quantityUnitsForCategory(selectedCategory || initialCategory))}
