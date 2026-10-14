@@ -62,6 +62,15 @@ export function effectivePlanTime(plan: TimedPlan, plans: TimedPlan[], events: A
   return startAt + (plan.offset_seconds || 0);
 }
 
+export function timelinePosition<T extends TimedPlan & { actual_at?: number | null; skipped_at?: number | null }>(
+  plan: T, plans: T[], startAt: number): number | null {
+  // Recorded actions with no timing rule were added directly to the log.
+  if (plan.planned_at == null && plan.anchor_event_id == null && plan.offset_seconds == null)
+    return plan.actual_at ?? plan.skipped_at ?? startAt;
+  // Recording a planned action changes its status, not its place in the plan.
+  return effectivePlanTime(plan, plans, [], startAt);
+}
+
 export function timelineGroupStep(plan: TimedPlan, plans: TimedPlan[], eventTimes: ReadonlyMap<string, number | null>,
   visiting = new Set<string>()): number {
   const at = eventTimes.get(plan.id);
