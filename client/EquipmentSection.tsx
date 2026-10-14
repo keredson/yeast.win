@@ -914,10 +914,11 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
             <Button disabled={!assignBatchId} onClick={() => void assignBatch()}>Assign</Button>
           </div>}
         </div>}
-        <div className="equipment-delete"><Popconfirm title={`Delete ${item.name}?`}
-          description="The unit is removed from your equipment list. Its batch history and calibrations remain."
-          okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => void remove()}>
-          <Button type="text" danger>Delete</Button>
+        <div className="equipment-delete"><Popconfirm
+          title={item.stock_id ? `Delete unit ${item.stock_id}?` : 'Delete this unit?'}
+          description="This unit is removed from your equipment list. The model and its other units remain. Batch history and calibrations are retained."
+          okText="Delete unit" okButtonProps={{ danger: true }} onConfirm={() => void remove()}>
+          <Button type="text" danger>Delete unit</Button>
         </Popconfirm></div>
       </section>}
     <Modal title="Edit model product URL" open={editModelUrl} onCancel={() => setEditModelUrl(false)} footer={null} destroyOnHidden>
