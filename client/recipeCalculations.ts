@@ -13,11 +13,13 @@ export interface RecipeEstimate {
   measuredFinalGravity: boolean;
   colorSrm: number | null;
   efficiencyLabel: string | null;
+  mashEfficiencyPct: number | null;
+  measuredMashEfficiency: boolean;
   missing: string[];
   sources: { targetLiters: string[]; originalGravity: string[]; finalGravity: string[];
-    abvPct: string[]; colorSrm: string[] };
+    abvPct: string[]; colorSrm: string[]; mashEfficiency: string[] };
   unavailable: { targetLiters: string[]; originalGravity: string[]; finalGravity: string[];
-    abvPct: string[]; colorSrm: string[] };
+    abvPct: string[]; colorSrm: string[]; mashEfficiency: string[] };
 }
 
 export const appMashEfficiencyPct = 75;
@@ -62,7 +64,7 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
   recipeInputs: Record<string, unknown>, eventInputs: Record<string, Record<string, unknown>>,
   recentMashEfficiency: Record<string, number | { value: number; batchName: string }> = {}, recipeType = 'beer',
   breweryMashEfficiencyPct: number | null = null, context: 'recipe' | 'batch' = 'recipe',
-  catalog: CatalogInventory[] = [], readings: BatchGravityReadings = {}): RecipeEstimate {
+  catalog: CatalogInventory[] = [], readings: BatchGravityReadings = {}, measuredMashEfficiencyPct: number | null = null): RecipeEstimate {
   const batch = context === 'batch';
   const missing: string[] = [];
   const gravityMissing: string[] = [];
@@ -77,12 +79,13 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
   if (!targetLiters) { missing.push(targetHelp); gravityMissing.push(targetHelp); colorMissing.push(targetHelp); }
   if (recipeType !== 'beer') return { targetLiters, originalGravity: null, finalGravity: null, abvPct: null,
     usedAppYeastAttenuation: false, measuredOriginalGravity: false, measuredFinalGravity: false, colorSrm: null,
-    efficiencyLabel: null, missing: [...missing, `Gravity and alcohol estimates for this ${context} type need fermentable sugar inputs.`],
-    sources: { targetLiters: targetSources, originalGravity: [], finalGravity: [], abvPct: [], colorSrm: [] },
+    efficiencyLabel: null, mashEfficiencyPct: null, measuredMashEfficiency: false,
+    missing: [...missing, `Gravity and alcohol estimates for this ${context} type need fermentable sugar inputs.`],
+    sources: { targetLiters: targetSources, originalGravity: [], finalGravity: [], abvPct: [], colorSrm: [], mashEfficiency: [] },
     unavailable: { targetLiters: targetLiters ? [] : [targetHelp],
       originalGravity: [`Gravity estimates for this ${context} type need fermentable sugar inputs.`],
       finalGravity: [`Gravity estimates for this ${context} type need fermentable sugar inputs.`],
-      abvPct: [`Alcohol estimates for this ${context} type need fermentable sugar inputs.`], colorSrm: [] } };
+      abvPct: [`Alcohol estimates for this ${context} type need fermentable sugar inputs.`], colorSrm: [], mashEfficiency: [] } };
 
   const ingredient = (event: Event) => {
     const details = event.details;
@@ -106,11 +109,15 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
   const recentReading = recentMashEfficiency[mashEquipmentId];
   const recentEfficiency = validEfficiency(typeof recentReading === 'number' ? recentReading : recentReading?.value);
   const breweryEfficiency = validEfficiency(breweryMashEfficiencyPct);
-  const mashEfficiency = modelEfficiency ?? recentEfficiency
+  const measuredEfficiency = batch && measuredMashEfficiencyPct != null
+    && Number.isFinite(measuredMashEfficiencyPct) && measuredMashEfficiencyPct >= 0 && measuredMashEfficiencyPct <= 105
+    ? measuredMashEfficiencyPct : null;
+  const mashEfficiency = measuredEfficiency ?? modelEfficiency ?? recentEfficiency
     ?? (importedBrewhouseEfficiency == null ? breweryEfficiency ?? appMashEfficiencyPct : null);
   const gravitySources = [...targetSources];
   const colorSources = [...targetSources];
   let efficiencyLabel: string | null = null;
+  let mashEfficiencySource: string | null = null;
   let efficiency: number | null = null;
   let extractVolume: number | null = targetLiters;
   if (mashEfficiency != null) {
@@ -120,10 +127,12 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
       ? batchWortLoss : estimatedPostBoilLoss(events, equipment);
     efficiency = mashEfficiency;
     extractVolume = targetLiters == null ? null : targetLiters + wortLoss;
-    const source = snapshotEfficiency != null ? 'batch event input'
+    const source = measuredEfficiency != null ? 'this batch’s grain additions, collected wort volume, and pre-boil gravity'
+      : snapshotEfficiency != null ? 'batch event input'
       : modelEfficiency != null ? `${batch ? 'equipment unit' : 'equipment model'} ${mashEquipment?.name || mashEquipmentId}`
       : recentEfficiency != null ? `batch ${typeof recentReading === 'object' ? recentReading.batchName : 'measurement'} using ${mashEquipment?.name || mashEquipmentId}`
         : breweryEfficiency != null ? 'brewery default' : 'app default';
+    mashEfficiencySource = source;
     efficiencyLabel = `${mashEfficiency}% mash efficiency (${source}); ${wortLoss} L post-boil loss`;
     gravitySources.push(`Mash efficiency: ${mashEfficiency}% (${source}).`);
     const usedEquipment = new Set(events.filter(event => event.event_type === 'temperature_control'
@@ -204,7 +213,7 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
   }
   if (!grainCount) { const message = 'Add grain with an amount and extract yield.';
     missing.push(message); gravityMissing.push(message); }
-  const canEstimateGravity = !!targetLiters && !!efficiency && grainCount > 0
+  const canEstimateGravity = !!targetLiters && efficiency != null && grainCount > 0
     && !gravityMissing.some(message => message.includes('adjunct') || message.startsWith('Set an amount')
       || message.startsWith('Expected OG does not yet include'));
   const gallons = extractVolume == null ? null : convertUnit(extractVolume, 'L', 'US gal');
@@ -259,12 +268,15 @@ export function calculateRecipe(events: Event[], inventory: InventoryItem[], equ
 
   return { targetLiters, originalGravity, finalGravity, abvPct, usedAppYeastAttenuation,
     measuredOriginalGravity, measuredFinalGravity, colorSrm,
-    efficiencyLabel, missing: [...new Set(missing)],
+    efficiencyLabel, mashEfficiencyPct: mashEfficiency, measuredMashEfficiency: measuredEfficiency != null,
+    missing: [...new Set(missing)],
     sources: { targetLiters: targetSources, originalGravity: gravitySources, finalGravity: finalSources,
-      abvPct: abvSources, colorSrm: colorSources },
+      abvPct: abvSources, colorSrm: colorSources, mashEfficiency: mashEfficiency == null ? []
+        : [`${measuredEfficiency == null ? 'Assumed' : 'Measured'} mash efficiency: ${mashEfficiency}% (${mashEfficiencySource}).`] },
     unavailable: { targetLiters: targetLiters ? [] : [targetHelp], originalGravity: originalGravity == null ? gravityMissing : [],
       finalGravity: finalGravity == null ? [...(originalGravity == null ? gravityMissing : []),
         ...(attenuationHelp ? [attenuationHelp] : [])] : [],
       abvPct: abvPct == null ? [...(originalGravity == null ? gravityMissing : []),
-        ...(finalGravity == null && attenuationHelp ? [attenuationHelp] : [])] : [], colorSrm: colorMissing } };
+        ...(finalGravity == null && attenuationHelp ? [attenuationHelp] : [])] : [], colorSrm: colorMissing,
+      mashEfficiency: mashEfficiency == null ? ['Set a mash efficiency assumption or record grain additions, collected wort volume, and pre-boil gravity.'] : [] } };
 }

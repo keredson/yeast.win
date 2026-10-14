@@ -1651,39 +1651,59 @@ export async function updateBrewingLosses(db: DB, item: Equipment, values: Pick<
     ? null : values[column])]);
 }
 
+type MeasuredMashDrain = { id: string; batch_id: string; batch_name: string; actual_at: number };
+
+async function measuredMashEfficiencyForDrain(db: DB, drain: MeasuredMashDrain): Promise<number | null> {
+  const collected = await db.execO<{ quantity: number | null; unit: string | null }>(
+    'SELECT quantity, unit FROM transfers WHERE event_id = ?', [drain.id]);
+  const volumes = await db.execO<{ value: number; unit: string }>(`SELECT v.value, v.unit FROM volume_measurements v
+    JOIN batch_events e ON e.id = v.event_id WHERE e.anchor_event_id = ? AND e.actual_at IS NOT NULL
+      AND e.skipped_at IS NULL
+    ORDER BY e.actual_at DESC LIMIT 1`, [drain.id]);
+  const gravities = await db.execO<{ value: number; unit: string }>(`SELECT g.value, g.unit FROM gravity_measurements g
+    JOIN batch_events e ON e.id = g.event_id WHERE e.anchor_event_id = ? AND e.actual_at IS NOT NULL
+      AND e.skipped_at IS NULL
+    ORDER BY e.actual_at DESC LIMIT 1`, [drain.id]);
+  const volume = collected[0]?.quantity != null && collected[0].unit
+    ? { value: collected[0].quantity, unit: collected[0].unit } : volumes[0];
+  if (!volume || !gravities.length) return null;
+  const additions = await db.execO<{ quantity: number; unit: string; yield_pct: number | null }>(`SELECT a.quantity, a.unit,
+    i.yield_pct FROM additions a JOIN batch_events e ON e.id = a.event_id
+    LEFT JOIN inventory_items item ON item.id = a.inventory_item_id
+    LEFT JOIN batch_event_inputs i ON i.id = e.id
+    WHERE e.batch_id = ? AND e.actual_at IS NOT NULL AND e.skipped_at IS NULL AND e.actual_at <= ?
+      AND (item.category = 'Grain' OR a.item_category = 'Grain')`, [drain.batch_id, drain.actual_at]);
+  const grains: MashGrain[] = additions.map(row => ({ quantity: row.quantity, unit: row.unit,
+    yieldPct: Number(row.yield_pct) }));
+  if (!grains.length) return null;
+  return mashEfficiencyPct(grains, volume.value, volume.unit, gravities[0].value, gravities[0].unit);
+}
+
+export async function measuredMashEfficiencyForBatch(db: DB, batchId: string): Promise<number | null> {
+  const drains = await db.execO<MeasuredMashDrain>(`SELECT d.id, d.batch_id, b.name AS batch_name, d.actual_at FROM batch_events d
+    JOIN transfers t ON t.event_id = d.id JOIN batches b ON b.id = d.batch_id
+    WHERE d.batch_id = ? AND d.actual_at IS NOT NULL AND d.skipped_at IS NULL AND t.purpose = 'drain_grain'
+    ORDER BY d.actual_at DESC, d.id DESC`, [batchId]);
+  for (const drain of drains) {
+    const value = await measuredMashEfficiencyForDrain(db, drain);
+    if (value != null) return value;
+  }
+  return null;
+}
+
 export async function latestMeasuredMashEfficiencySource(db: DB, equipmentId: string): Promise<{
   value: number; batchName: string } | null> {
-  const drains = await db.execO<{ id: string; batch_id: string; batch_name: string; actual_at: number }>(`SELECT d.id, d.batch_id, b.name AS batch_name, d.actual_at FROM batch_events d
+  const drains = await db.execO<MeasuredMashDrain>(`SELECT d.id, d.batch_id, b.name AS batch_name, d.actual_at FROM batch_events d
     JOIN transfers t ON t.event_id = d.id
     JOIN batches b ON b.id = d.batch_id
     LEFT JOIN batch_events m ON m.id = d.anchor_event_id
     LEFT JOIN temperature_control_events mc ON mc.event_id = m.id
-    WHERE d.event_type = 'transfer' AND d.actual_at IS NOT NULL
+    WHERE d.event_type = 'transfer' AND d.actual_at IS NOT NULL AND d.skipped_at IS NULL
       AND t.purpose = 'drain_grain'
       AND COALESCE(t.mash_equipment_id, mc.equipment_id) = ?
     ORDER BY d.actual_at DESC, d.id DESC LIMIT 30`, [equipmentId]);
   for (const drain of drains) {
-    const collected = await db.execO<{ quantity: number | null; unit: string | null }>(
-      'SELECT quantity, unit FROM transfers WHERE event_id = ?', [drain.id]);
-    const volumes = await db.execO<{ value: number; unit: string }>(`SELECT v.value, v.unit FROM volume_measurements v
-      JOIN batch_events e ON e.id = v.event_id WHERE e.anchor_event_id = ? AND e.actual_at IS NOT NULL
-      ORDER BY e.actual_at DESC LIMIT 1`, [drain.id]);
-    const gravities = await db.execO<{ value: number; unit: string }>(`SELECT g.value, g.unit FROM gravity_measurements g
-      JOIN batch_events e ON e.id = g.event_id WHERE e.anchor_event_id = ? AND e.actual_at IS NOT NULL
-      ORDER BY e.actual_at DESC LIMIT 1`, [drain.id]);
-    const volume = collected[0]?.quantity != null && collected[0].unit
-      ? { value: collected[0].quantity, unit: collected[0].unit } : volumes[0];
-    if (!volume || !gravities.length) continue;
-    const additions = await db.execO<{ quantity: number; unit: string; yield_pct: number | null }>(`SELECT a.quantity, a.unit,
-      i.yield_pct FROM additions a JOIN batch_events e ON e.id = a.event_id
-      LEFT JOIN inventory_items item ON item.id = a.inventory_item_id
-      LEFT JOIN batch_event_inputs i ON i.id = e.id
-      WHERE e.batch_id = ? AND e.actual_at IS NOT NULL AND e.actual_at <= ?
-        AND (item.category = 'Grain' OR a.item_category = 'Grain')`, [drain.batch_id, drain.actual_at]);
-    const grains: MashGrain[] = additions.map(row => ({ quantity: row.quantity, unit: row.unit,
-      yieldPct: Number(row.yield_pct) }));
-    if (!grains.length) continue;
-    const result = mashEfficiencyPct(grains, volume.value, volume.unit, gravities[0].value, gravities[0].unit);
+    const result = await measuredMashEfficiencyForDrain(db, drain);
     if (result != null) return { value: result, batchName: drain.batch_name };
   }
   return null;

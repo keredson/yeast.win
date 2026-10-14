@@ -12,8 +12,8 @@ function EstimateTile({ label, value, help, sources }: { label: string; value: s
     </Tooltip></span><strong>{value ?? '—'}</strong></div>;
 }
 
-export function CalculationsCard({ estimate, volumeUnit, showColor, label }: {
-  estimate: RecipeEstimate; volumeUnit: string; showColor: boolean; label: string;
+export function CalculationsCard({ estimate, volumeUnit, showColor, showMashEfficiency = false, label }: {
+  estimate: RecipeEstimate; volumeUnit: string; showColor: boolean; showMashEfficiency?: boolean; label: string;
 }) {
   return <section className="recipe-estimates" aria-label={label}>
     <h3>Details</h3>
@@ -21,6 +21,9 @@ export function CalculationsCard({ estimate, volumeUnit, showColor, label }: {
       <EstimateTile label="Batch size" value={estimate.targetLiters == null ? null
         : `${Number((convertUnit(estimate.targetLiters, 'L', volumeUnit) || 0).toFixed(2))} ${volumeUnit}`}
         help={estimate.unavailable.targetLiters} sources={estimate.sources.targetLiters} />
+      {showMashEfficiency && <EstimateTile label={estimate.measuredMashEfficiency ? 'Mash efficiency' : 'Assumed mash efficiency'}
+        value={estimate.mashEfficiencyPct == null ? null : `${Number(estimate.mashEfficiencyPct.toFixed(1))}%`}
+        help={estimate.unavailable.mashEfficiency} sources={estimate.sources.mashEfficiency} />}
       <EstimateTile label={estimate.measuredOriginalGravity ? 'OG' : 'Expected OG'}
         value={estimate.originalGravity?.toFixed(3) ?? null}
         help={estimate.unavailable.originalGravity} sources={estimate.sources.originalGravity} />
