@@ -36,6 +36,9 @@ button, input, textarea { font: inherit; }
 .mobile-nav-drawer .ant-drawer-header, .mobile-nav-drawer .ant-drawer-body { background: #193b39; color: white; }
 .mobile-nav-drawer .ant-drawer-header { border-bottom: 1px solid #42615b; }
 .mobile-nav-drawer .ant-drawer-title, .mobile-nav-drawer .ant-drawer-close { color: white; }
+.mobile-nav-drawer .drawer-brand { display: flex; align-items: center; gap: 8px; }
+.mobile-nav-drawer .drawer-brand img { width: 26px; height: 26px; border-radius: 8px; }
+.mobile-nav-drawer .drawer-brand strong { font-size: 20px; letter-spacing: -.03em; }
 .mobile-nav-drawer .ant-drawer-body { padding: 0; min-height: 0; }
 .app-main { min-width: 0; width: 100%; max-width: 1340px; padding: 28px clamp(18px, 3vw, 52px) 64px; }
 .app-breadcrumb { max-width: 1050px; margin: 0 0 15px; overflow-x: auto; white-space: nowrap; scrollbar-width: thin; }

@@ -651,7 +651,7 @@ export function App() {
         </Popover>}
       </div>}
     </div>
-    <div className="nav-brand"><img src="/icon.svg" alt="" /><strong>Yeast.Win!</strong></div>
+    {!mobile && <div className="nav-brand"><img src="/icon.svg" alt="" /><strong>Yeast.Win!</strong></div>}
     <nav className="nav-links" aria-label="Sections">
       <SectionNavigation route={route} recent={recent} records={{ batches: recentRecords.batches, recipes: recentRecords.recipes,
         inventory: [], equipment: [], locations: [] }}
@@ -674,7 +674,9 @@ export function App() {
   return <div className="app-shell">
     <div className="app-body">
       <Layout.Sider className="app-nav" width={240} theme="dark">{sidebar(false)}</Layout.Sider>
-      <Drawer className="mobile-nav-drawer" title="Yeast.Win!" placement="left" width={260} open={menuOpen}
+      <Drawer className="mobile-nav-drawer" title={<span className="drawer-brand">
+        <img src="/icon.svg" alt="" /><strong>Yeast.Win!</strong>
+      </span>} placement="left" width={260} open={menuOpen}
         onClose={() => setMenuOpen(false)}>{sidebar(true)}</Drawer>
       <main className="app-main">
         <div className="page-navigation">

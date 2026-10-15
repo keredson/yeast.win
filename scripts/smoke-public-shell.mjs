@@ -119,6 +119,8 @@ try {
   await page.setViewportSize({ width: 320, height: 720 });
   await page.getByRole('button', { name: 'Open navigation' }).click();
   const mobileNavigation = page.getByRole('dialog', { name: 'Yeast.Win!' });
+  assert.equal(await mobileNavigation.locator('.drawer-brand img[src="/icon.svg"]').count(), 1);
+  assert.equal(await mobileNavigation.locator('.nav-brand').count(), 0, 'the drawer repeats its brand below the selector');
   assert.equal(await mobileNavigation.getByRole('combobox', { name: 'Brewery' }).isVisible(), true);
   assert.equal(await mobileNavigation.getByRole('button', { name: 'Account menu' }).isVisible(), true);
   await mobileNavigation.getByRole('button', { name: 'Close' }).click();
