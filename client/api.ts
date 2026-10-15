@@ -1,6 +1,8 @@
 export type { PreferredUnits } from '../shared/units.ts';
 import type { PreferredUnits } from '../shared/units.ts';
 import type { SyncSchemaConflict } from '../shared/syncSchema.ts';
+import { fetchWithApiRevision } from './apiRevision.ts';
+export { AppUpdateRequiredError } from './apiRevision.ts';
 
 export interface Workspace { id: string; name: string; slug: string | null }
 export interface Session {
@@ -33,7 +35,7 @@ export async function syncError(response: Response, fallback: string): Promise<E
 
 export async function fetchApi(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   try {
-    const response = await fetch(input, init);
+    const response = await fetchWithApiRevision(input, init);
     if ([502, 503, 504].includes(response.status)) throw new ApiUnavailableError();
     return response;
   } catch (cause) {

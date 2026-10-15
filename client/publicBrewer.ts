@@ -1,5 +1,6 @@
 import './publicBrewer.css';
 import { renderActivityGrid, type BrewerActivity } from './ActivityGrid.ts';
+import { apiAssetUrl, fetchWithApiRevision } from './apiRevision.ts';
 
 export async function showPublicBrewer(username: string): Promise<void> {
   const root = document.getElementById('root')!;
@@ -9,7 +10,7 @@ export async function showPublicBrewer(username: string): Promise<void> {
     </header><section class="public-brewer-card" aria-live="polite"><p>Loading brewer…</p></section></div></main>`;
   const card = root.querySelector<HTMLElement>('.public-brewer-card')!;
   try {
-    const response = await fetch(`/api/brewer/${encodeURIComponent(username)}`, { cache: 'no-store' });
+    const response = await fetchWithApiRevision(`/api/brewer/${encodeURIComponent(username)}`, { cache: 'no-store' });
     if (response.status === 404) {
       card.innerHTML = '<h1>Brewer not found</h1><p>There is no brewer at this address.</p>';
       return;
@@ -33,7 +34,7 @@ export async function showPublicBrewer(username: string): Promise<void> {
     const avatar = card.querySelector<HTMLElement>('.public-brewer-avatar')!;
     if (brewer.has_avatar) {
       const image = document.createElement('img');
-      image.src = `/api/brewer/${encodeURIComponent(brewer.username)}/avatar`;
+      image.src = apiAssetUrl(`/api/brewer/${encodeURIComponent(brewer.username)}/avatar`);
       image.alt = '';
       avatar.append(image);
     } else avatar.textContent = brewer.username[0].toUpperCase();
@@ -41,7 +42,7 @@ export async function showPublicBrewer(username: string): Promise<void> {
     activityCard.className = 'public-activity-card';
     card.after(activityCard);
     try {
-      const activityResponse = await fetch(`/api/brewer/${encodeURIComponent(username)}/activity`, { cache: 'no-store' });
+      const activityResponse = await fetchWithApiRevision(`/api/brewer/${encodeURIComponent(username)}/activity`, { cache: 'no-store' });
       if (!activityResponse.ok) throw new Error('Activity unavailable');
       renderActivityGrid(activityCard, await activityResponse.json() as BrewerActivity);
     } catch { activityCard.textContent = 'Activity is unavailable right now.'; }

@@ -1,4 +1,5 @@
 import './public.css';
+import { fetchWithApiRevision } from './apiRevision.ts';
 
 const root = document.getElementById('root')!;
 const signedOutKey = 'brewlog:signed-out';
@@ -123,7 +124,7 @@ function login(message = ''): void {
     const sequence = ++checkSequence;
     status.textContent = 'Checking username…';
     try {
-      const response = await fetch(`/api/username?username=${encodeURIComponent(username)}`, {
+      const response = await fetchWithApiRevision(`/api/username?username=${encodeURIComponent(username)}`, {
         credentials: 'same-origin', cache: 'no-store'
       });
       if (!response.ok) throw new Error('Could not check the username. Try again.');
@@ -192,7 +193,7 @@ function login(message = ''): void {
       }
       const unitSystem = form.querySelector<HTMLInputElement>('input[name="unit_system"]:checked')?.value;
       if (!exists && !unitSystem) { showError('Choose metric or imperial units.'); return; }
-      const response = await fetch(`/api/${exists ? 'login' : 'register'}`, {
+      const response = await fetchWithApiRevision(`/api/${exists ? 'login' : 'register'}`, {
         method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(exists ? { username, password } : { username, password, unit_system: unitSystem,
           time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone || null })
@@ -289,7 +290,7 @@ async function start(): Promise<void> {
   const brewer = /^\/brewer\/([A-Za-z0-9][A-Za-z0-9_-]{2,39})$/.exec(location.pathname);
   if (localStorage.getItem(signedOutKey) !== '1') {
     try {
-      const response = await fetch('/api/me', { credentials: 'same-origin' });
+      const response = await fetchWithApiRevision('/api/me', { credentials: 'same-origin' });
       if (response.ok) {
         if (location.pathname === '/login') history.replaceState(null, '', destination());
         await loadApp(); return;

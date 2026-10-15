@@ -1,3 +1,5 @@
+import { fetchWithApiRevision } from './apiRevision.ts';
+
 let updateCheck: Promise<boolean> | undefined;
 
 /** Ask the installed service worker for a new app build. The updated worker takes
@@ -34,7 +36,7 @@ export function checkForAppUpdate(): Promise<boolean> {
 /** Replace cached app files with the current deployment without touching local databases. */
 export async function forceAppRefresh(): Promise<void> {
   let response: Response;
-  try { response = await fetch(`/api/healthz?refresh=${Date.now()}`, { cache: 'no-store', credentials: 'same-origin' }); }
+  try { response = await fetchWithApiRevision(`/api/healthz?refresh=${Date.now()}`, { cache: 'no-store', credentials: 'same-origin' }); }
   catch { throw new Error('Connect to the server before refreshing the app.'); }
   if (!response.ok) throw new Error('The server is unavailable. Try again when it responds.');
 

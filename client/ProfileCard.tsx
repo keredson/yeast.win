@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { UploadOutlined } from '@ant-design/icons';
 import { Alert, Avatar, Button, Card, Input, Select, Switch } from 'antd';
+import { fetchApi } from './api.ts';
 
 interface Props {
   username: string;
@@ -69,7 +70,7 @@ export function ProfileCard({ username, fullName, onFullNameChange, avatarSrc, o
         context.drawImage(image, (image.width - side) / 2, (image.height - side) / 2, side, side, 0, 0, 256, 256);
         const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(result =>
           result ? resolve(result) : reject(new Error('Could not encode avatar')), 'image/jpeg', 0.85));
-        const response = await fetch('/api/me/avatar', { method: 'PUT', credentials: 'same-origin',
+        const response = await fetchApi('/api/me/avatar', { method: 'PUT', credentials: 'same-origin',
           headers: { 'Content-Type': 'image/jpeg' }, body: blob });
         if (!response.ok) {
           const result = await response.json() as { error?: string };

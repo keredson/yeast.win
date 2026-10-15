@@ -11,6 +11,7 @@ import { openCatalogDb } from './catalog.ts';
 import { receiveCborChanges, streamCborChanges } from './sync.ts';
 import { syncContentType } from '../shared/cborSync.ts';
 import { syncSchemaConflict, syncSchemaHeader } from '../shared/syncSchema.ts';
+import { appUpdateConflict, clientApiVersionHeader, serverRevisionHeader } from '../shared/apiCompatibility.ts';
 import { isValidId } from '../shared/schema.ts';
 import { validPreferredUnits } from '../shared/units.ts';
 import { requestAddress, requestIsSecure } from './http.ts';
@@ -26,6 +27,7 @@ const catalogDb = openCatalogDb(dataDir);
 const workspaceDbs = new Map<string, Database.Database>();
 const distDir = resolve(projectRoot, 'dist');
 const startedAt = new Date().toISOString();
+const deploymentInfo = runtimeDeploymentInfo(projectRoot, distDir, !!process.env.BREWLOG_DEV_SOCKET, startedAt);
 const port = Number(process.env.BREWLOG_PORT || 3001);
 const host = process.env.BREWLOG_HOST || '0.0.0.0';
 const trustCloudflare = process.env.BREWLOG_TRUST_CLOUDFLARE === 'true';
@@ -158,6 +160,9 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', 'http://localhost');
     const pathname = url.pathname;
     if (!pathname.startsWith('/api/')) return serveStatic(req, res, pathname);
+    res.setHeader(serverRevisionHeader, deploymentInfo.commit || 'unknown');
+    const conflict = appUpdateConflict(pathname, req.method, req.headers[clientApiVersionHeader.toLowerCase()] as string | undefined);
+    if (conflict) return json(res, 409, conflict);
     if (pathname === '/api/healthz' && req.method === 'GET') return json(res, 200, { ok: true });
     if (pathname === '/api/about' && req.method === 'GET')
       return json(res, 200, runtimeDeploymentInfo(projectRoot, distDir, !!devSocket, startedAt));

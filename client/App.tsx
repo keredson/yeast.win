@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppstoreOutlined, BookOutlined, DisconnectOutlined, EnvironmentOutlined, HomeOutlined, InfoCircleOutlined, InboxOutlined, LogoutOutlined, MenuOutlined, SettingOutlined, ToolOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Breadcrumb, Button, Drawer, Empty, Layout, Menu, Popconfirm, Popover, Progress, Select, Spin, Tooltip } from 'antd';
+import { Alert, Avatar, Breadcrumb, Button, Drawer, Empty, Layout, Menu, Modal, Popconfirm, Popover, Progress, Select, Spin, Tooltip } from 'antd';
 import { api, ApiError, ApiUnavailableError, ClientUpdateRequiredError, type PreferredUnits, type Session, type Workspace } from './api.ts';
-import { checkForAppUpdate } from './appUpdate.ts';
+import { checkForAppUpdate, forceAppRefresh } from './appUpdate.ts';
+import { apiAssetUrl } from './apiRevision.ts';
 import { defaultPreferredUnits } from '../shared/units.ts';
 import { forgetLocalDb, openLocalDb, syncNow, type SyncProgress, type Batch, type Equipment, type InventoryRecord, type InventoryLocation, type LocalDb, type Recipe, type RecipeType,
   listBatches, listEquipment, listEquipmentModels, listInventory, listSupplies, listInventoryLocations, listRecipes } from './db.ts';
@@ -223,6 +224,24 @@ export function App() {
   const [now, setNow] = useState(Date.now());
   const [menuOpen, setMenuOpen] = useState(false);
   const [avatarVersion, setAvatarVersion] = useState(Date.now());
+  const [appUpdateRequired, setAppUpdateRequired] = useState(false);
+  const [appUpdateError, setAppUpdateError] = useState('');
+  const [appUpdating, setAppUpdating] = useState(false);
+
+  useEffect(() => {
+    const requireUpdate = () => setAppUpdateRequired(true);
+    window.addEventListener('yeast:app-update-required', requireUpdate);
+    return () => window.removeEventListener('yeast:app-update-required', requireUpdate);
+  }, []);
+
+  async function updateAppForApi() {
+    setAppUpdating(true); setAppUpdateError('');
+    try { await forceAppRefresh(); }
+    catch (cause) {
+      setAppUpdateError(cause instanceof Error ? cause.message : String(cause));
+      setAppUpdating(false);
+    }
+  }
 
   useEffect(() => {
     if (localStorage.getItem(signedOutKey) === '1') {
@@ -655,9 +674,14 @@ export function App() {
     setSession(updated);
   }
 
-  if (loading) return <div className="loading-screen"><Spin size="large" /></div>;
-  if (!session) return <div className="loading-screen"><Spin size="large" /></div>;
-  const avatarSrc = session.account.has_avatar ? `/api/me/avatar?v=${avatarVersion}` : undefined;
+  const updateDialog = <Modal title="Update Yeast.Win!" open={appUpdateRequired} closable={false} maskClosable={false}
+    footer={null}>
+    <p>The server has changed and this app needs an update to continue. Saved brewery data will remain on this device.</p>
+    {appUpdateError && <Alert type="error" showIcon message={appUpdateError} className="form-alert" />}
+    <Button type="primary" loading={appUpdating} onClick={() => void updateAppForApi()}>Update and reload</Button>
+  </Modal>;
+  if (loading || !session) return <><div className="loading-screen"><Spin size="large" /></div>{updateDialog}</>;
+  const avatarSrc = session.account.has_avatar ? apiAssetUrl(`/api/me/avatar?v=${avatarVersion}`) : undefined;
   const preferredUnits = session.preferred_units || defaultPreferredUnits;
   const activeBase = workspaceBase(workspaceId, session.workspaces);
   const workspaceProgress = syncPhase === 'syncing' && syncProgress
@@ -720,6 +744,7 @@ export function App() {
   </div>;
 
   return <div className="app-shell">
+    {updateDialog}
     <div className="app-body">
       <Layout.Sider className="app-nav" width={240} theme="dark">{sidebar(false)}</Layout.Sider>
       <Drawer className="mobile-nav-drawer" title={<span className="drawer-brand">
