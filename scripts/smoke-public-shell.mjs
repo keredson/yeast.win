@@ -9,7 +9,7 @@ const browser = await chromium.launch({
 });
 
 try {
-  const context = await browser.newContext();
+  const context = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
   const page = await context.newPage();
   const appAssets = [];
   page.on('request', request => {
@@ -75,6 +75,32 @@ try {
   await page.locator('.app-nav').getByRole('menuitem', { name: 'Home' }).click();
   await page.locator('.app-nav').getByRole('menuitem', { name: 'Settings' }).click();
   await page.waitForURL('**/settings');
+  assert.equal(await page.getByRole('switch', { name: 'Automatic sync' }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: 'Download catalog images' }).count(), 0);
+  const raptSettingsButton = page.getByRole('button', { name: 'RAPT Pill settings' });
+  await raptSettingsButton.click();
+  const raptSettings = page.getByRole('dialog', { name: 'RAPT Pill' });
+  const webhookUrl = raptSettings.getByRole('textbox', { name: 'RAPT webhook URL' });
+  await webhookUrl.waitFor();
+  await page.waitForFunction(() => !!document.querySelector('input[aria-label="RAPT webhook URL"]')?.value);
+  const firstWebhookUrl = await webhookUrl.inputValue();
+  assert.match(firstWebhookUrl, /\/api\/webhooks\/rapt\/[A-Za-z0-9_-]{43}$/);
+  assert.equal(await raptSettings.getByRole('link', { name: /Open RAPT webhooks/ }).getAttribute('href'),
+    'https://app.rapt.io/integration/webhooks/list');
+  await raptSettings.getByRole('button', { name: 'Copy RAPT webhook URL' }).click();
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), firstWebhookUrl);
+  await raptSettings.getByRole('button', { name: 'Copy payload' }).click();
+  assert.match(await page.evaluate(() => navigator.clipboard.readText()), /"device_id": "@device_id"/);
+  await raptSettings.getByRole('button', { name: 'Close' }).click();
+  await raptSettingsButton.click();
+  assert.equal(await webhookUrl.inputValue(), firstWebhookUrl, 'reopening RAPT settings rotated the webhook URL');
+  await raptSettings.getByRole('button', { name: 'Delete integration' }).click();
+  await page.locator('.ant-popconfirm').getByRole('button', { name: 'Cancel' }).click();
+  assert.equal(await webhookUrl.inputValue(), firstWebhookUrl, 'canceling integration deletion changed the URL');
+  await raptSettings.getByRole('button', { name: 'Delete integration' }).click();
+  await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete integration' }).click();
+  await raptSettings.waitFor({ state: 'hidden' });
+  assert.equal((await page.evaluate(async () => (await (await fetch('/api/me/rapt')).json()).webhook_path)), null);
   await page.getByRole('button', { name: 'Account menu' }).click();
   await page.getByRole('menuitem', { name: 'Log out' }).click();
   await page.getByRole('link', { name: 'Sign in' }).waitFor();

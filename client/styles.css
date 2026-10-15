@@ -50,6 +50,17 @@ button, input, textarea { font: inherit; }
 .brewery-row > div:first-child { min-width: 0; overflow-wrap: anywhere; }
 .brewery-row .ant-tag { margin-left: 8px; }
 .brewery-actions { display: flex; flex: none; gap: 4px; }
+.integrations-card .ant-card-body { padding: 0; }
+.integrations-table { width: 100%; border-collapse: collapse; }
+.integrations-table th { padding: 16px 24px; text-align: left; font-weight: 400; }
+.integrations-table th .muted { display: block; margin-top: 3px; }
+.integrations-table td { width: 56px; padding: 8px 16px 8px 0; text-align: right; }
+.rapt-settings { display: flex; flex-direction: column; gap: 12px; }
+.rapt-settings .ant-typography { margin: 0; }
+.rapt-field-label { font-weight: 600; }
+.rapt-settings .rapt-payload { margin: 0; padding: 12px; border-radius: 8px; background: #f5f7f3;
+  overflow-x: auto; font-size: 12px; }
+.rapt-device .ant-select { width: min(100%, 220px); flex: none; }
 .setting-row > strong { text-align: right; }
 .setting-description { margin: 4px 0 0 !important; max-width: 500px; }
 .account-page > .ant-btn { align-self: flex-start; }
@@ -307,6 +318,8 @@ button, input, textarea { font: inherit; }
   .heading-actions { justify-content: start; width: 100%; }
   .form-pair, .form-triple { grid-template-columns: 1fr; gap: 0; }
   .unit-grid { grid-template-columns: 1fr; }
+  .rapt-device { align-items: stretch; flex-direction: column; gap: 8px; }
+  .rapt-device .ant-select { width: 100%; }
 }
 @media (max-width: 360px) {
   .header-controls { flex-wrap: wrap; }

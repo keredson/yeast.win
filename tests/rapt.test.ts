@@ -9,7 +9,7 @@ after(() => rmSync(directory, { recursive: true, force: true }));
 process.env.BREWLOG_DATA_DIR = directory;
 
 const { closeWorkspaceDb, createWorkspace, openAuthDb, openWorkspaceDb } = await import('../server/db.ts');
-const { assignRaptDevice, ingestRaptReading, parseRaptReading, raptConnectionForToken,
+const { assignRaptDevice, deleteRaptIntegration, ensureRaptToken, ingestRaptReading, parseRaptReading, raptConnectionForToken,
   raptDevices, rotateRaptToken, unassignRaptDevice } = await import('../server/rapt.ts');
 const auth = openAuthDb();
 const first = createWorkspace(auth, 'account-a', 'Home');
@@ -35,7 +35,8 @@ const body = (timestamp: string) => ({
 });
 
 test('RAPT tokens are private to an account and rotation invalidates the old URL', () => {
-  const old = rotateRaptToken(auth, 'account-a');
+  const old = ensureRaptToken(auth, 'account-a');
+  assert.equal(ensureRaptToken(auth, 'account-a'), old);
   const other = rotateRaptToken(auth, 'account-b');
   assert.equal(raptConnectionForToken(auth, old)?.account_id, 'account-a');
   assert.equal(raptConnectionForToken(auth, other)?.account_id, 'account-b');
@@ -89,4 +90,17 @@ test('a Pill can be reassigned to another workspace without moving old readings'
   const unassigned = parseRaptReading(body(new Date(Date.now() + 3000).toISOString()));
   assert.ok(unassigned);
   assert.equal(ingestRaptReading(auth, 'account-a', unassigned, workspace), 'unassigned');
+});
+
+test('deleting a RAPT integration revokes its URL and clears its devices without removing batch readings', () => {
+  const token = ensureRaptToken(auth, 'account-a');
+  const other = ensureRaptToken(auth, 'account-b');
+  deleteRaptIntegration(auth, 'account-a');
+  assert.equal(raptConnectionForToken(auth, token), null);
+  assert.equal(raptDevices(auth, 'account-a').length, 0);
+  assert.equal((auth.prepare('SELECT count(*) AS n FROM rapt_assignments WHERE account_id = ?').get('account-a') as
+    { n: number }).n, 0);
+  assert.equal(raptConnectionForToken(auth, other)?.account_id, 'account-b');
+  assert.equal((workspace(first.id).prepare('SELECT count(*) AS n FROM batch_events').get() as { n: number }).n, 1);
+  assert.notEqual(ensureRaptToken(auth, 'account-a'), token);
 });

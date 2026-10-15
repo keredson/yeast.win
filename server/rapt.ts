@@ -32,6 +32,20 @@ export function rotateRaptToken(auth: Database.Database, accountId: string): str
   return token;
 }
 
+export function ensureRaptToken(auth: Database.Database, accountId: string): string {
+  auth.prepare(`INSERT OR IGNORE INTO rapt_connections(account_id, token, created_at) VALUES (?, ?, ?)`)
+    .run(accountId, randomBytes(32).toString('base64url'), nowSeconds());
+  return raptConnection(auth, accountId)!.token;
+}
+
+export function deleteRaptIntegration(auth: Database.Database, accountId: string): void {
+  auth.transaction(() => {
+    auth.prepare('DELETE FROM rapt_connections WHERE account_id = ?').run(accountId);
+    auth.prepare('DELETE FROM rapt_assignments WHERE account_id = ?').run(accountId);
+    auth.prepare('DELETE FROM rapt_devices WHERE account_id = ?').run(accountId);
+  })();
+}
+
 export function raptDevices(auth: Database.Database, accountId: string): RaptDevice[] {
   return auth.prepare(`SELECT d.device_id, d.name, d.device_type, d.last_seen_at,
       a.workspace_id, a.batch_id

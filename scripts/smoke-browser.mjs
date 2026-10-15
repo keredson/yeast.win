@@ -1427,15 +1427,11 @@ try {
   await page.getByRole('heading', { name: 'Settings' }).waitFor();
   console.log('Saved preferred units and used them in an event form');
 
-  const autoSyncSwitch = page.getByRole('switch', { name: 'Automatic sync' });
-  await autoSyncSwitch.click();
-  if (await page.evaluate(() => localStorage.getItem('brewlog:auto-sync')) !== '0') {
-    throw new Error('Automatic sync setting did not persist');
+  if (await page.getByRole('switch', { name: 'Automatic sync' }).count()) {
+    throw new Error('Settings still exposes an automatic sync switch');
   }
   await page.reload();
   await page.getByRole('heading', { name: 'Settings' }).waitFor();
-  if (await autoSyncSwitch.getAttribute('aria-checked') !== 'false') throw new Error('Automatic sync setting was not restored');
-  await autoSyncSwitch.click();
   await page.getByRole('button', { name: 'Change password' }).click();
   const passwordDialog = page.getByRole('dialog', { name: 'Change password' });
   await passwordDialog.getByLabel('Current password').fill('wrong-password');

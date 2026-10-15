@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { DeleteOutlined, DownloadOutlined, EditOutlined, PlusOutlined, SyncOutlined, UploadOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Button, Card, Form, Input, InputNumber, Modal, Progress, Select, Switch, Tag, Tooltip, Typography } from 'antd';
+import { CopyOutlined, DeleteOutlined, EditOutlined, PlusOutlined, SettingOutlined, SyncOutlined, UploadOutlined } from '@ant-design/icons';
+import { Alert, Avatar, Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Select, Tag, Tooltip, Typography } from 'antd';
 import { api, type PreferredUnits, type Workspace } from './api.ts';
-import { downloadCatalogImages } from './catalog.ts';
 import { breweryMashEfficiency, breweryBatchSize, updateBreweryMashEfficiency, updateBreweryBatchSize,
   type LocalDb } from './db.ts';
 import { appMashEfficiencyPct } from './recipeCalculations.ts';
@@ -25,8 +24,6 @@ interface Props {
   syncStatus: string;
   canSync: boolean;
   onManualSync: () => void;
-  autoSync: boolean;
-  onAutoSyncChange: (enabled: boolean) => void;
 }
 
 interface PasswordValues { currentPassword: string; newPassword: string; confirmPassword: string }
@@ -51,7 +48,7 @@ const raptPayload = `{
 export function AccountSection({ username, workspaces, activeWorkspaceId, db,
   onCreateWorkspace, onUpdateWorkspace, onDeleteWorkspace,
   avatarSrc, onAvatarUploaded, preferredUnits, onPreferredUnitsChange,
-  syncPhase, syncStatus, canSync, onManualSync, autoSync, onAutoSyncChange }: Props) {
+  syncPhase, syncStatus, canSync, onManualSync }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [passwordForm] = Form.useForm<PasswordValues>();
   const [breweryForm] = Form.useForm<{ name: string; slug?: string }>();
@@ -66,10 +63,11 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
   const [passwordChanged, setPasswordChanged] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [raptSetup, setRaptSetup] = useState<RaptSetup | null>(null);
+  const [raptOpen, setRaptOpen] = useState(false);
   const [raptBusy, setRaptBusy] = useState(false);
   const [raptDeviceBusy, setRaptDeviceBusy] = useState<string | null>(null);
   const [raptError, setRaptError] = useState('');
-  const [raptCopied, setRaptCopied] = useState(false);
+  const [raptCopied, setRaptCopied] = useState<'url' | 'payload' | null>(null);
   const [unitsBusy, setUnitsBusy] = useState(false);
   const [unitsError, setUnitsError] = useState('');
   const [mashEfficiency, setMashEfficiency] = useState<number | null>(null);
@@ -80,21 +78,29 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
   const [batchSizeDraft, setBatchSizeDraft] = useState<number | null>(null);
   const [batchSizeBusy, setBatchSizeBusy] = useState(false);
   const [batchSizeError, setBatchSizeError] = useState('');
-  const [imageDownloadProgress, setImageDownloadProgress] = useState<{ done: number; total: number } | null>(null);
-  const [imageDownloadMessage, setImageDownloadMessage] = useState('');
-  const [imageDownloading, setImageDownloading] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    void api<RaptSetup>('/me/rapt').then(result => { if (!cancelled) setRaptSetup(result); })
-      .catch(cause => { if (!cancelled) setRaptError(cause instanceof Error ? cause.message : String(cause)); });
-    return () => { cancelled = true; };
-  }, []);
   async function refreshRapt() {
     setRaptSetup(await api<RaptSetup>('/me/rapt'));
   }
-  async function rotateRaptWebhook() {
-    setRaptBusy(true); setRaptError(''); setRaptCopied(false);
-    try { await api('/me/rapt/webhook', 'POST'); await refreshRapt(); }
+  async function openRaptSettings() {
+    setRaptOpen(true); setRaptBusy(true); setRaptError(''); setRaptCopied(null);
+    try {
+      await api('/me/rapt/webhook', 'PUT');
+      await refreshRapt();
+    } catch (cause) { setRaptError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setRaptBusy(false); }
+  }
+  async function copyRapt(value: string, kind: 'url' | 'payload') {
+    setRaptError('');
+    try { await navigator.clipboard.writeText(value); setRaptCopied(kind); }
+    catch (cause) { setRaptError(cause instanceof Error ? cause.message : String(cause)); }
+  }
+  async function deleteRapt() {
+    setRaptBusy(true); setRaptError(''); setRaptCopied(null);
+    try {
+      await api('/me/rapt/webhook', 'DELETE');
+      setRaptSetup(null);
+      setRaptOpen(false);
+    }
     catch (cause) { setRaptError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setRaptBusy(false); }
   }
@@ -110,18 +116,6 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
       await refreshRapt();
     } catch (cause) { setRaptError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setRaptDeviceBusy(null); }
-  }
-  async function saveCatalogImages() {
-    setImageDownloading(true);
-    setImageDownloadMessage('');
-    try {
-      const result = await downloadCatalogImages((done, total) => setImageDownloadProgress({ done, total }));
-      setImageDownloadMessage(result.failed
-        ? `${result.downloaded} saved; ${result.failed} could not be downloaded. Try again later.`
-        : `${result.downloaded} new images saved for offline use.`);
-    } catch (cause) {
-      setImageDownloadMessage(cause instanceof Error ? cause.message : String(cause));
-    } finally { setImageDownloading(false); }
   }
   useEffect(() => {
     let cancelled = false;
@@ -311,41 +305,53 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
       {passwordChanged && <Alert type="success" message="Password changed. Other sessions have been signed out." showIcon />}
       <Button onClick={() => { setPasswordError(''); setPasswordOpen(true); }}>Change password</Button>
     </Card>
-    <Card title="RAPT Pill" className="account-card">
-      <Typography.Paragraph type="secondary" className="setting-description">
-        Create a Custom Web Hook in your RAPT account with method POST. Select the Pills you want to send here.
-        Only readings from Pills assigned below are added to batches.
-      </Typography.Paragraph>
-      {raptSetup?.webhook_path ? <>
-        <Input aria-label="RAPT webhook URL" readOnly value={`${window.location.origin}${raptSetup.webhook_path}`} />
-        <div className="brewery-actions">
-          <Button onClick={() => { void navigator.clipboard.writeText(`${window.location.origin}${raptSetup.webhook_path}`)
-            .then(() => setRaptCopied(true)).catch(cause => setRaptError(cause instanceof Error ? cause.message : String(cause))); }}>
-            {raptCopied ? 'Copied' : 'Copy URL'}
-          </Button>
-          <Button loading={raptBusy} onClick={() => void rotateRaptWebhook()}>Rotate URL</Button>
-        </div>
-        <Typography.Paragraph type="secondary" className="setting-description">
-          Rotating the URL stops the old one. Update the Web Hook in RAPT after rotating.
-        </Typography.Paragraph>
-      </> : <Button loading={raptBusy} onClick={() => void rotateRaptWebhook()}>Generate webhook URL</Button>}
-      <Typography.Paragraph className="setting-description">Use this payload in the RAPT Web Hook:</Typography.Paragraph>
-      <pre>{raptPayload}</pre>
-      <div className="setting-row"><strong>Your Pills</strong><Button onClick={() => void refreshRapt().catch(cause =>
-        setRaptError(cause instanceof Error ? cause.message : String(cause)))}>Refresh</Button></div>
-      {raptSetup?.devices.length ? raptSetup.devices.map(device => <div className="setting-row" key={device.device_id}>
-        <div><strong>{device.name}</strong><div className="muted">{device.device_type} · {device.device_id}</div></div>
-        <Select aria-label={`Batch for ${device.name}`} placeholder="Unassigned" allowClear
-          value={device.workspace_id && device.batch_id ? `${device.workspace_id}:${device.batch_id}` : undefined}
-          style={{ minWidth: 220 }} disabled={raptDeviceBusy === device.device_id}
-          options={raptSetup.targets.map(target => ({ value: `${target.workspace_id}:${target.batch_id}`,
-            label: `${target.workspace_name} / ${target.batch_name}` }))}
-          onChange={value => void setRaptAssignment(device.device_id, value)} />
-      </div>) : <Typography.Paragraph type="secondary">
-        No Pills received yet. Send a test reading from RAPT, then refresh.
-      </Typography.Paragraph>}
-      {raptError && <Alert type="error" message={raptError} showIcon />}
+    <Card title="Integrations" className="account-card integrations-card">
+      <table className="integrations-table"><tbody><tr>
+        <th scope="row"><strong>RAPT Pill</strong><span className="muted">Automatic Pill readings for batches</span></th>
+        <td><Button type="text" shape="circle" icon={<SettingOutlined />} aria-label="RAPT Pill settings"
+          title="RAPT Pill settings" onClick={() => void openRaptSettings()} /></td>
+      </tr></tbody></table>
     </Card>
+    <Modal title="RAPT Pill" open={raptOpen} onCancel={() => setRaptOpen(false)} footer={null}
+      width={640} destroyOnHidden>
+      <div className="rapt-settings">
+        <Typography.Paragraph type="secondary" className="setting-description">
+          Create a Custom Web Hook in your RAPT account with method POST. Select the Pills you want to send here.
+          Only readings from Pills assigned below are added to batches.
+        </Typography.Paragraph>
+        <a href="https://app.rapt.io/integration/webhooks/list" target="_blank" rel="noreferrer">Open RAPT webhooks ↗</a>
+        <label className="rapt-field-label" htmlFor="rapt-webhook-url">Webhook URL</label>
+        <Input id="rapt-webhook-url" aria-label="RAPT webhook URL" readOnly
+          value={raptSetup?.webhook_path ? `${window.location.origin}${raptSetup.webhook_path}` : ''}
+          placeholder={raptBusy ? 'Creating webhook URL…' : 'Webhook URL unavailable'}
+          suffix={<Button type="text" size="small" icon={<CopyOutlined />} aria-label="Copy RAPT webhook URL"
+            title={raptCopied === 'url' ? 'Copied' : 'Copy URL'} disabled={!raptSetup?.webhook_path || raptBusy}
+            onClick={() => { if (raptSetup?.webhook_path) void copyRapt(`${window.location.origin}${raptSetup.webhook_path}`, 'url'); }} />} />
+        {raptCopied === 'url' && <span className="muted" role="status">URL copied</span>}
+        <div className="setting-row"><strong>Payload</strong><Button icon={<CopyOutlined />}
+          onClick={() => void copyRapt(raptPayload, 'payload')}>{raptCopied === 'payload' ? 'Copied' : 'Copy payload'}</Button></div>
+        <pre className="rapt-payload">{raptPayload}</pre>
+        <div className="setting-row"><strong>Your Pills</strong><Button onClick={() => void refreshRapt().catch(cause =>
+          setRaptError(cause instanceof Error ? cause.message : String(cause)))}>Refresh</Button></div>
+        {raptSetup?.devices.length ? raptSetup.devices.map(device => <div className="setting-row rapt-device" key={device.device_id}>
+          <div><strong>{device.name}</strong><div className="muted">{device.device_type} · {device.device_id}</div></div>
+          <Select aria-label={`Batch for ${device.name}`} placeholder="Unassigned" allowClear
+            value={device.workspace_id && device.batch_id ? `${device.workspace_id}:${device.batch_id}` : undefined}
+            disabled={raptDeviceBusy === device.device_id}
+            options={raptSetup.targets.map(target => ({ value: `${target.workspace_id}:${target.batch_id}`,
+              label: `${target.workspace_name} / ${target.batch_name}` }))}
+            onChange={value => void setRaptAssignment(device.device_id, value)} />
+        </div>) : <Typography.Paragraph type="secondary">
+          No Pills received yet. Send a test reading from RAPT, then refresh.
+        </Typography.Paragraph>}
+        {raptError && <Alert type="error" message={raptError} showIcon />}
+        <Popconfirm title="Delete the RAPT integration?"
+          description="The webhook URL will stop working and Pill assignments will be removed. Recorded batch readings stay in the log."
+          okText="Delete integration" okButtonProps={{ danger: true }} onConfirm={() => void deleteRapt()}>
+          <Button danger disabled={raptBusy}>Delete integration</Button>
+        </Popconfirm>
+      </div>
+    </Modal>
     <Modal title="Change password" open={passwordOpen} onCancel={() => { setPasswordOpen(false); passwordForm.resetFields(); }}
       footer={null} destroyOnHidden>
       <Form form={passwordForm} layout="vertical" onFinish={updatePassword}>
@@ -387,26 +393,9 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
       <div className="setting-row"><div><strong>Sync status</strong><div className="muted">{syncPhase === 'syncing' ? 'Syncing…' : syncPhase === 'failed' ? `Sync failed · ${syncStatus}` : syncStatus}</div></div>
         <Tooltip title={`${syncStatus} · Sync brewery and catalog`}><Button className="sync-button" type="text" shape="circle" aria-label="Sync now"
           icon={<SyncOutlined spin={syncPhase === 'syncing'} />} disabled={!canSync || syncPhase === 'syncing'} onClick={onManualSync} /></Tooltip></div>
-      <div className="setting-row">
-        <div><strong>Automatic sync</strong><Typography.Paragraph type="secondary" className="setting-description">
-          Sync when opening a brewery, after changes, on reconnect, and every 30 seconds while the app is open.
-        </Typography.Paragraph></div>
-        <Switch checked={autoSync} onChange={onAutoSyncChange} aria-label="Automatic sync" />
-      </div>
       <Typography.Paragraph type="secondary" className="setting-description">
-        Changes stay on this device until they sync. Use the sync icon above to sync manually.
+        Changes stay on this device until they sync automatically. Use the sync icon above to sync now.
       </Typography.Paragraph>
-    </Card>
-    <Card title="Catalog images" className="account-card">
-      <Typography.Paragraph type="secondary" className="setting-description">
-        Images you view are saved for offline use. Download the rest to see them offline too.
-      </Typography.Paragraph>
-      <Button icon={<DownloadOutlined />} loading={imageDownloading} onClick={() => void saveCatalogImages()}>
-        Download catalog images
-      </Button>
-      {imageDownloadProgress && imageDownloading && <Progress percent={imageDownloadProgress.total
-        ? Math.round(100 * imageDownloadProgress.done / imageDownloadProgress.total) : 100} />}
-      {imageDownloadMessage && <Typography.Paragraph className="setting-description">{imageDownloadMessage}</Typography.Paragraph>}
     </Card>
   </div>;
 }

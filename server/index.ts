@@ -13,7 +13,7 @@ import { syncSchemaConflict, syncSchemaHeader } from '../shared/syncSchema.ts';
 import { isValidId } from '../shared/schema.ts';
 import { validPreferredUnits } from '../shared/units.ts';
 import { requestAddress, requestIsSecure } from './http.ts';
-import { assignRaptDevice, ingestRaptReading, parseRaptReading, raptConnection, raptConnectionForToken,
+import { assignRaptDevice, deleteRaptIntegration, ensureRaptToken, ingestRaptReading, parseRaptReading, raptConnection, raptConnectionForToken,
   raptDevices, rotateRaptToken, unassignRaptDevice } from './rapt.ts';
 
 assertCrSqliteAvailable();
@@ -226,8 +226,12 @@ const server = createServer(async (req, res) => {
       const secret = rotateRaptToken(authDb, account.id);
       return json(res, 200, { webhook_path: `/api/webhooks/rapt/${secret}` });
     }
+    if (pathname === '/api/me/rapt/webhook' && req.method === 'PUT') {
+      const secret = ensureRaptToken(authDb, account.id);
+      return json(res, 200, { webhook_path: `/api/webhooks/rapt/${secret}` });
+    }
     if (pathname === '/api/me/rapt/webhook' && req.method === 'DELETE') {
-      authDb.prepare('DELETE FROM rapt_connections WHERE account_id = ?').run(account.id);
+      deleteRaptIntegration(authDb, account.id);
       return json(res, 200, { ok: true });
     }
     const raptAssignmentMatch = /^\/api\/me\/rapt\/devices\/([A-Za-z0-9_-]{8,64})\/assignment$/.exec(pathname);

@@ -42,37 +42,6 @@ export function catalogMediaUrl(kind: CatalogMediaKind, id: string): Promise<str
   return pending;
 }
 const catalogRefreshIntervalMs = 24 * 60 * 60_000;
-const catalogImageCacheName = 'brewlog-catalog-images-v1';
-
-export async function downloadCatalogImages(onProgress?: (done: number, total: number) => void): Promise<{ downloaded: number; failed: number }> {
-  const db = await openLocalCatalog();
-  const rows = await db.execO<{ url: string }>(`SELECT image_url AS url FROM products WHERE image_url IS NOT NULL
-    UNION SELECT thumbnail_url FROM products WHERE thumbnail_url IS NOT NULL
-    UNION SELECT logo_url FROM manufacturer_logos WHERE logo_url IS NOT NULL`);
-  const urls = [...new Set(rows.map(row => row.url).filter(url => /^https:\/\//i.test(url)))];
-  const cache = await caches.open(catalogImageCacheName);
-  let next = 0;
-  let done = 0;
-  let downloaded = 0;
-  let failed = 0;
-  onProgress?.(0, urls.length);
-  async function worker(): Promise<void> {
-    while (next < urls.length) {
-      const url = urls[next++];
-      try {
-        if (!await cache.match(url)) {
-          const response = await fetch(url, { mode: 'no-cors', cache: 'no-store' });
-          if (response.status !== 0 && !response.ok) throw new Error(`Image request failed: ${response.status}`);
-          await cache.put(url, response);
-          downloaded++;
-        }
-      } catch { failed++; }
-      onProgress?.(++done, urls.length);
-    }
-  }
-  await Promise.all(Array.from({ length: 4 }, () => worker()));
-  return { downloaded, failed };
-}
 
 export function openLocalCatalog(): Promise<DB> {
   if (!opened) opened = (async () => {

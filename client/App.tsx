@@ -75,7 +75,6 @@ function SectionNavigation({ route, recent, records, onNavigate }: {
 const cachedSessionKey = 'brewlog:last-session';
 const signedOutKey = 'brewlog:signed-out';
 const profileOpen = new URLSearchParams(location.search).has('profileOpen');
-const autoSyncKey = 'brewlog:auto-sync';
 const activeBreweryKey = 'brewlog:active-brewery';
 
 function initialBrewery(workspaces: Workspace[]): string | null {
@@ -194,7 +193,6 @@ export function App() {
   const section = route.section;
   const activeSection = useRef(section);
   activeSection.current = section;
-  const [autoSync, setAutoSync] = useState(() => localStorage.getItem(autoSyncKey) !== '0');
   const [batches, setBatches] = useState<Batch[]>([]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [inventory, setInventory] = useState<InventoryRecord[]>([]);
@@ -537,13 +535,13 @@ export function App() {
   }, [workspaceId, session, refresh]);
 
   useEffect(() => {
-    if (!db || !workspaceId || !autoSync || !appActive) return;
+    if (!db || !workspaceId || !appActive) return;
     const callback = () => { runAutomaticSync(db, workspaceId); };
     callback();
     const timer = window.setInterval(callback, 5 * 60_000);
     window.addEventListener('online', callback);
     return () => { window.clearInterval(timer); window.removeEventListener('online', callback); };
-  }, [db, workspaceId, runAutomaticSync, autoSync, appActive]);
+  }, [db, workspaceId, runAutomaticSync, appActive]);
 
   const changed = useCallback(async () => {
     if (!db || !workspaceId) return;
@@ -637,7 +635,7 @@ export function App() {
           }} />}
         {serverDisconnected && <Popover trigger="click" title="Server disconnected" content={<div className="connection-popover">
           <p>Your brewing entries are saved on this device.</p>
-          <p>{autoSync ? 'They will sync when the server is available again.' : 'Sync them from Settings when the server is available again.'}</p>
+          <p>They will sync when the server is available again.</p>
         </div>}>
           <Button className="connection-button" type="text" shape="circle" aria-label="Server disconnected"
             icon={<DisconnectOutlined />} />
@@ -686,9 +684,8 @@ export function App() {
             rememberSession(updated); setSession(updated); setAvatarVersion(Date.now()); }}
           preferredUnits={preferredUnits} onPreferredUnitsChange={updatePreferredUnits}
           syncPhase={syncPhase} syncStatus={timeSinceSync(lastSyncedAt, now)} canSync={!!db && !!workspaceId}
-          onManualSync={() => { if (db && workspaceId) void runSync(db, workspaceId, true); }}
-          autoSync={autoSync} onAutoSyncChange={enabled => { localStorage.setItem(autoSyncKey, enabled ? '1' : '0'); setAutoSync(enabled); }}
-          /> : !workspaceId ? <Empty description="Add a brewery in Settings to begin">
+          onManualSync={() => { if (db && workspaceId) void runSync(db, workspaceId, true); }} /> : !workspaceId
+          ? <Empty description="Add a brewery in Settings to begin">
             <Button type="primary" onClick={() => showSection('settings')}>Open Settings</Button></Empty> :
           !db ? <div className="loading-screen"><Spin description="Opening data on this device" /></div>
             : section !== 'home' && (sectionData?.workspaceId !== workspaceId || sectionData.section !== section)
