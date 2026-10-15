@@ -1,11 +1,14 @@
 import type { Workspace } from './api.ts';
 
-export type Section = 'home' | 'batches' | 'recipes' | 'inventory' | 'equipment' | 'locations' | 'settings';
+export type Section = 'home' | 'batches' | 'recipes' | 'inventory' | 'equipment' | 'locations' | 'settings' | 'about' | 'brewer';
 export interface Route { section: Section; selectedId: string | null; slug: string | null }
 const detailPaths = { batches: 'batch', recipes: 'recipe', inventory: 'inventory', equipment: 'equipment', locations: 'location' } as const;
 
 export function routeFromPath(path: string): Route {
   if (path === '/settings' || path === '/me') return { section: 'settings', selectedId: null, slug: null };
+  if (path === '/about') return { section: 'about', selectedId: null, slug: null };
+  const brewer = /^\/brewer\/([A-Za-z0-9][A-Za-z0-9_-]{2,39})$/.exec(path);
+  if (brewer) return { section: 'brewer', selectedId: brewer[1].toLowerCase(), slug: null };
   const prefix = /^\/brewery\/([a-z0-9-]+)(?=\/|$)/.exec(path);
   const slug = prefix?.[1] || null;
   const localPath = prefix ? path.slice(prefix[0].length) || '/' : path;
@@ -27,7 +30,8 @@ export function workspaceBase(workspaceId: string | null, workspaces: Workspace[
 }
 
 export function routePath(section: Section, selectedId: string | null, base: string): string {
-  if (section === 'settings') return '/settings';
+  if (section === 'settings' || section === 'about') return `/${section}`;
+  if (section === 'brewer') return selectedId ? `/brewer/${selectedId.toLowerCase()}` : '/settings';
   if (section === 'home') return base || '/';
   return selectedId ? `${base}/${detailPaths[section]}/${selectedId}` : `${base}/${section}`;
 }

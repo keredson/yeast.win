@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppstoreOutlined, BookOutlined, DisconnectOutlined, EnvironmentOutlined, HomeOutlined, InboxOutlined, LogoutOutlined, MenuOutlined, SettingOutlined, ToolOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Breadcrumb, Button, Drawer, Dropdown, Empty, Layout, Menu, Popover, Progress, Select, Spin, Tooltip } from 'antd';
+import { AppstoreOutlined, BookOutlined, DisconnectOutlined, EnvironmentOutlined, HomeOutlined, InfoCircleOutlined, InboxOutlined, LogoutOutlined, MenuOutlined, SettingOutlined, ToolOutlined } from '@ant-design/icons';
+import { Alert, Avatar, Breadcrumb, Button, Drawer, Empty, Layout, Menu, Popconfirm, Popover, Progress, Select, Spin, Tooltip } from 'antd';
 import { api, ApiError, ApiUnavailableError, ClientUpdateRequiredError, type PreferredUnits, type Session, type Workspace } from './api.ts';
 import { checkForAppUpdate } from './appUpdate.ts';
 import { defaultPreferredUnits } from '../shared/units.ts';
@@ -21,6 +21,8 @@ import { recipeForPath, recipePathSegment } from './recipeRoutes.ts';
 import { breadcrumbNodes, type BreadcrumbRecords, type BreadcrumbSection } from './breadcrumbs.ts';
 import { routeFromPath, routePath, workspaceBase, type Route, type Section } from './appRoutes.ts';
 import { AccountSection } from './AccountSection.tsx';
+import { AboutSection } from './AboutSection.tsx';
+import { ProfileCard } from './ProfileCard.tsx';
 import { openLocalCatalog, syncLocalCatalog } from './catalog.ts';
 
 function recordPath(section: BreadcrumbSection, id: string | null, base: string, records: BreadcrumbRecords): string {
@@ -45,7 +47,7 @@ const navItems = [
   { key: 'equipment', label: 'Equipment', icon: ToolOutlined },
   { key: 'locations', label: 'Locations', icon: EnvironmentOutlined }
 ] as const;
-type RecordSection = Exclude<Section, 'settings' | 'home'>;
+type RecordSection = Exclude<Section, 'settings' | 'about' | 'brewer' | 'home'>;
 type NavRecord = { id: string; name: string; recipe_type?: RecipeType | null };
 type RecentItems = Record<RecordSection, string[]>;
 const recordSections: RecordSection[] = ['batches', 'recipes', 'inventory', 'equipment', 'locations'];
@@ -53,7 +55,7 @@ const emptyRecents = (): RecentItems => ({ batches: [], recipes: [], inventory: 
 
 function SectionNavigation({ route, recent, records, onNavigate }: {
   route: Route; recent: RecentItems; records: Record<RecordSection, NavRecord[]>;
-  onNavigate: (section: RecordSection | 'home' | 'settings', id: string | null) => void;
+  onNavigate: (section: Section, id: string | null) => void;
 }) {
   const items = [{ key: 'home', label: 'Home', icon: <HomeOutlined /> }, ...navItems.flatMap(({ key, label, icon: Icon }) => {
     const links = (key === 'inventory' || key === 'equipment' || key === 'locations' ? [] : recent[key]).map(id => records[key].find(item => item.id === id))
@@ -65,12 +67,13 @@ function SectionNavigation({ route, recent, records, onNavigate }: {
         <span className="nav-recent-title" title={item.name}>{item.name}</span>
       </span>
     }))];
-  }), { key: 'settings', label: 'Settings', icon: <SettingOutlined /> }];
+  }), { key: 'settings', label: 'Settings', icon: <SettingOutlined /> },
+  { key: 'about', label: 'About', icon: <InfoCircleOutlined /> }];
   return <Menu mode="inline" theme="dark"
     selectedKeys={[route.selectedId && route.section !== 'inventory' && route.section !== 'equipment' && route.section !== 'locations'
       ? `${route.section}:${route.selectedId}` : route.section]}
     items={items}
-    onClick={({ key }) => { const [section, id] = key.split(':'); onNavigate(section as RecordSection | 'home' | 'settings', id || null); }} />;
+    onClick={({ key }) => { const [section, id] = key.split(':'); onNavigate(section as Section, id || null); }} />;
 }
 const cachedSessionKey = 'brewlog:last-session';
 const signedOutKey = 'brewlog:signed-out';
@@ -83,15 +86,17 @@ function initialBrewery(workspaces: Workspace[]): string | null {
   const remembered = localStorage.getItem(activeBreweryKey);
   if (linked) return workspaces.find(item => item.id === linked)?.id || workspaces[0]?.id || null;
   if (slug) return workspaces.find(item => item.slug === slug)?.id || workspaces[0]?.id || null;
-  if (routeFromPath(location.pathname).section === 'settings') return workspaces.find(item => item.id === remembered)?.id || workspaces[0]?.id || null;
+  if (['settings', 'about', 'brewer'].includes(routeFromPath(location.pathname).section))
+    return workspaces.find(item => item.id === remembered)?.id || workspaces[0]?.id || null;
   return workspaces.find(item => item.slug === null)?.id || workspaces[0]?.id || null;
 }
 
 function canonicalizeLocation(workspaces: Workspace[]): void {
   const linked = new URLSearchParams(location.search).get('brewery');
   const route = routeFromPath(location.pathname);
-  if (route.section === 'settings') {
-    if (location.pathname !== '/settings' || location.search) history.replaceState(null, '', '/settings');
+  if (route.section === 'settings' || route.section === 'about' || route.section === 'brewer') {
+    const path = routePath(route.section, route.selectedId, '');
+    if (location.pathname !== path || location.search) history.replaceState(null, '', path);
     return;
   }
   const workspace = linked ? workspaces.find(item => item.id === linked)
@@ -304,7 +309,7 @@ export function App() {
       if (session) canonicalizeLocation(session.workspaces);
       const next = routeFromPath(location.pathname);
       setRoute(next);
-      if (next.section === 'settings' || !session) return;
+      if (next.section === 'settings' || next.section === 'about' || next.section === 'brewer' || !session) return;
       const workspace = next.slug ? session.workspaces.find(item => item.slug === next.slug)
         : session.workspaces.find(item => item.slug === null);
       if (workspace) {
@@ -325,7 +330,7 @@ export function App() {
         next[name] = Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string').slice(0, 5) : [];
       } catch { next[name] = []; }
     }
-    if (route.section !== 'settings' && route.section !== 'home' && route.selectedId) {
+    if (route.section !== 'settings' && route.section !== 'about' && route.section !== 'brewer' && route.section !== 'home' && route.selectedId) {
       const name = route.section;
       if (name !== 'recipes' || !next[name].includes(route.selectedId)) {
         next[name] = [route.selectedId, ...next[name].filter(id => id !== route.selectedId)].slice(0, 5);
@@ -379,7 +384,16 @@ export function App() {
     const base = workspaceBase(targetWorkspaceId, session?.workspaces || []);
     const path = routePath(next, null, base);
     if (location.pathname !== path || location.search) history.pushState(null, '', path);
-    setRoute({ section: next, selectedId: null, slug: next === 'settings' ? null : base.split('/')[2] || null });
+    setRoute({ section: next, selectedId: null,
+      slug: next === 'settings' || next === 'about' || next === 'brewer' ? null : base.split('/')[2] || null });
+    setMenuOpen(false);
+  }
+
+  function showBrewer() {
+    if (!session) return;
+    const path = routePath('brewer', session.account.username, '');
+    if (location.pathname !== path || location.search) history.pushState(null, '', path);
+    setRoute(routeFromPath(path));
     setMenuOpen(false);
   }
 
@@ -622,7 +636,7 @@ export function App() {
       total: workspaceProgress.total + catalogSyncProgress.total }
     : workspaceProgress || (catalogSyncProgress ? { label: 'Updating catalog', ...catalogSyncProgress } : null);
   const breadcrumbRecords = { batches, recipes, inventory, supplies, equipment, equipmentModels, locations };
-  const crumbs = section !== 'settings' && section !== 'home' && db
+  const crumbs = section !== 'settings' && section !== 'about' && section !== 'brewer' && section !== 'home' && db
     ? breadcrumbNodes(section, route.selectedId, breadcrumbRecords) : [];
   const showBrewerySwitcher = session.workspaces.length > 1;
   const sidebar = (mobile: boolean) => <div className="nav-panel">
@@ -645,7 +659,7 @@ export function App() {
     <nav className="nav-links" aria-label="Sections">
       <SectionNavigation route={route} recent={recent} records={{ batches: recentRecords.batches, recipes: recentRecords.recipes,
         inventory: [], equipment: [], locations: [] }}
-        onNavigate={(name, id) => { if (name !== 'home' && name !== 'settings' && id) showItem(name, id);
+        onNavigate={(name, id) => { if (name !== 'home' && name !== 'settings' && name !== 'about' && name !== 'brewer' && id) showItem(name, id);
           else showSection(name); if (mobile) setMenuOpen(false); }} />
     </nav>
     <div className="nav-footer">
@@ -658,15 +672,19 @@ export function App() {
           <span>{syncDisplayProgress.label}</span>
         </div>
       </Tooltip>}
-      <Dropdown trigger={['click']} placement="topRight" menu={{ items: [
-        { key: 'username', label: session.account.username, disabled: true },
-        { key: 'logout', label: 'Log out', icon: <LogoutOutlined /> }
-      ], onClick: ({ key }) => { if (key === 'logout') void signOut(); } }}>
-        <Button className="avatar-button" type="text" aria-label="Account menu">
+      <div className="nav-profile-row">
+        <a className="nav-profile-link" href={routePath('brewer', session.account.username, '')} aria-label="Your profile"
+          onClick={event => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault(); showBrewer(); }}>
           <Avatar size={32} src={avatarSrc}>{session.account.username[0].toUpperCase()}</Avatar>
           <span className="nav-account-name">{session.account.username}</span>
-        </Button>
-      </Dropdown>
+        </a>
+        <Popconfirm title="Log out?" description="End your session on this device?" okText="Log out" cancelText="Cancel"
+          onConfirm={() => void signOut()}>
+          <Button className="nav-logout-button" type="text" shape="circle" aria-label="Log out" title="Log out"
+            icon={<LogoutOutlined />} />
+        </Popconfirm>
+      </div>
     </div>
   </div>;
 
@@ -698,7 +716,13 @@ export function App() {
           }))} />}
         </div>
         {error && <Alert type="warning" showIcon closable onClose={() => setError('')} message={error} className="page-alert" />}
-        {section === 'settings' ? <AccountSection username={session.account.username} avatarSrc={avatarSrc}
+        {section === 'about' ? <AboutSection /> : section === 'brewer' ? <div className="account-page">
+          <div className="section-heading"><div><div className="eyebrow">Brewer</div><h1>{route.selectedId === session.account.username.toLowerCase()
+            ? session.account.username : 'Brewer not found'}</h1></div></div>
+          {route.selectedId === session.account.username.toLowerCase() && <ProfileCard username={session.account.username} avatarSrc={avatarSrc}
+            onAvatarUploaded={() => { const updated = { ...session, account: { ...session.account, has_avatar: true } };
+              rememberSession(updated); setSession(updated); setAvatarVersion(Date.now()); }} />}
+        </div> : section === 'settings' ? <AccountSection username={session.account.username} avatarSrc={avatarSrc}
           workspaces={session.workspaces} activeWorkspaceId={workspaceId}
           onCreateWorkspace={createWorkspace} onUpdateWorkspace={renameWorkspace} onDeleteWorkspace={removeWorkspace}
           onAvatarUploaded={() => { const updated = { ...session, account: { ...session.account, has_avatar: true } };

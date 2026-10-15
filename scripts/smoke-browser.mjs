@@ -35,7 +35,7 @@ async function signIn(page, createAccount = false) {
     await page.getByRole('radio', { name: /Metric/ }).check();
   }
   await page.locator('.public-card form button[type="submit"]').click();
-  await page.getByRole('button', { name: 'Account menu' }).waitFor({ timeout: 30_000 });
+  await page.getByRole('link', { name: 'Your profile' }).waitFor({ timeout: 30_000 });
   await navigateSection(page, 'Batches');
   await page.getByRole('button', { name: 'New batch' }).waitFor();
 }
@@ -1454,8 +1454,8 @@ try {
   if (await second.evaluate(async () => (await fetch('/api/me')).status) !== 401) {
     throw new Error('Password change did not revoke other sessions');
   }
-  await page.getByRole('button', { name: 'Account menu' }).click();
-  await page.getByRole('menuitem', { name: 'Log out' }).click();
+  await page.locator('.app-nav').getByRole('button', { name: 'Log out' }).click();
+  await page.locator('.ant-popconfirm').getByRole('button', { name: 'Log out' }).click();
   await page.getByRole('link', { name: 'Sign in' }).click();
   await page.locator('.public-card form button[type="submit"]').waitFor();
   const oldPasswordStatus = await page.evaluate(async credentials => (await fetch('/api/login', {

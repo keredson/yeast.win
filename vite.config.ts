@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { sourceBuildInfo } from './server/buildInfo.ts';
+import type { BuildInfo } from './shared/buildInfo.ts';
 
 const projectRoot = fileURLToPath(new URL('.', import.meta.url));
 
@@ -20,16 +22,27 @@ function appAssetManifest(): Plugin {
   };
 }
 
+function buildInfoAsset(info: BuildInfo): Plugin {
+  return {
+    name: 'yeast-build-info',
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'build-info.json', source: JSON.stringify(info) });
+    }
+  };
+}
+
 export default defineConfig(({ command }) => {
   const socketPath = resolve(projectRoot, '.brewlog-api.sock');
   if (command === 'serve' && (process.env.BREWLOG_DEV_ROOT !== projectRoot
     || process.env.BREWLOG_DEV_SOCKET !== socketPath)) {
     throw new Error('Start the development app with yarn dev so Vite and the API use this checkout socket.');
   }
+  const buildInfo = sourceBuildInfo(projectRoot, command === 'serve' ? 'development' : 'production');
   return ({
   root: projectRoot,
+  define: { __YEAST_BUILD_INFO__: JSON.stringify(buildInfo) },
   plugins: [
-    react(), appAssetManifest(),
+    react(), appAssetManifest(), buildInfoAsset(buildInfo),
     VitePWA({
       registerType: 'autoUpdate',
       manifest: {

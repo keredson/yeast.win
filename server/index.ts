@@ -13,6 +13,7 @@ import { syncSchemaConflict, syncSchemaHeader } from '../shared/syncSchema.ts';
 import { isValidId } from '../shared/schema.ts';
 import { validPreferredUnits } from '../shared/units.ts';
 import { requestAddress, requestIsSecure } from './http.ts';
+import { runtimeDeploymentInfo } from './buildInfo.ts';
 import { assignRaptDevice, deleteRaptIntegration, ensureRaptToken, ingestRaptReading, parseRaptReading, raptConnection, raptConnectionForToken,
   raptDevices, rotateRaptToken, unassignRaptDevice } from './rapt.ts';
 
@@ -21,6 +22,7 @@ const authDb = openAuthDb();
 const catalogDb = openCatalogDb(dataDir);
 const workspaceDbs = new Map<string, Database.Database>();
 const distDir = resolve(projectRoot, 'dist');
+const startedAt = new Date().toISOString();
 const port = Number(process.env.BREWLOG_PORT || 3001);
 const host = process.env.BREWLOG_HOST || '0.0.0.0';
 const trustCloudflare = process.env.BREWLOG_TRUST_CLOUDFLARE === 'true';
@@ -145,6 +147,8 @@ const server = createServer(async (req, res) => {
     const pathname = url.pathname;
     if (!pathname.startsWith('/api/')) return serveStatic(req, res, pathname);
     if (pathname === '/api/healthz' && req.method === 'GET') return json(res, 200, { ok: true });
+    if (pathname === '/api/about' && req.method === 'GET')
+      return json(res, 200, runtimeDeploymentInfo(projectRoot, distDir, !!devSocket, startedAt));
     const raptWebhookMatch = /^\/api\/webhooks\/rapt\/([^/]+)$/.exec(pathname);
     if (raptWebhookMatch && req.method === 'POST') {
       const connection = raptConnectionForToken(authDb, raptWebhookMatch[1]);

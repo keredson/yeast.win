@@ -44,7 +44,7 @@ try {
   await page.getByLabel('Confirm password').fill('smoke12345');
   await page.getByRole('radio', { name: /Imperial/ }).check();
   await page.getByRole('button', { name: 'Create account' }).click();
-  await page.getByRole('button', { name: 'Account menu' }).waitFor({ timeout: 30_000 });
+  await page.getByRole('link', { name: 'Your profile' }).waitFor({ timeout: 30_000 });
   assert.deepEqual(await page.evaluate(async () => (await (await fetch('/api/me')).json()).preferred_units),
     { temperature: '°F', volume: 'US gal', mass: 'lb + oz', pressure: 'psi' });
   assert.equal(new URL(page.url()).pathname, '/batch/protected-example', 'sign-in did not return to the requested route');
@@ -53,7 +53,8 @@ try {
   assert.equal(await page.locator('.app-header').count(), 0, 'the old header is still present');
   assert.equal(await page.locator('.app-nav').getByRole('combobox', { name: 'Brewery' }).count(), 0,
     'a single brewery should not show the switcher');
-  assert.equal(await page.locator('.app-nav .nav-footer').getByRole('button', { name: 'Account menu' }).isVisible(), true);
+  assert.equal(await page.locator('.app-nav .nav-footer').getByRole('link', { name: 'Your profile' }).isVisible(), true);
+  assert.equal(await page.locator('.app-nav .nav-footer').getByRole('button', { name: 'Log out' }).isVisible(), true);
   assert.equal(await page.locator('.account-page .ant-card').first().getByText('Profile').count(), 1);
   assert.equal(await page.locator('.account-page .ant-card').nth(1).getByText('Preferred units').count(), 1);
   assert.equal(await page.locator('.account-page .ant-card').last().getByText('Security').count(), 1);
@@ -67,7 +68,8 @@ try {
   if (!dev) {
     await context.setOffline(true);
     await page.reload();
-    await page.getByRole('button', { name: 'Account menu' }).waitFor({ timeout: 30_000 });
+    await page.getByRole('link', { name: 'Your profile' }).waitFor({ timeout: 30_000 });
+    await context.setOffline(false);
   }
   const signInContext = await browser.newContext();
   const signInPage = await signInContext.newPage();
@@ -78,9 +80,40 @@ try {
   assert.equal(await signInPage.getByRole('radio', { name: /Imperial/ }).isVisible(), false);
   await signInPage.getByLabel('Password', { exact: true }).fill('smoke12345');
   await signInPage.getByRole('button', { name: 'Sign in' }).click();
-  await signInPage.getByRole('button', { name: 'Account menu' }).waitFor({ timeout: 30_000 });
+  await signInPage.getByRole('link', { name: 'Your profile' }).waitFor({ timeout: 30_000 });
   await signInContext.close();
+  await page.locator('.app-nav').getByRole('link', { name: 'Your profile' }).click();
+  await page.waitForURL(`**/brewer/${username}`);
+  await page.getByRole('heading', { name: username }).waitFor();
+  await page.goBack();
+  await page.waitForURL('**/settings');
   await page.locator('.app-nav').getByRole('menuitem', { name: 'Home' }).click();
+  await page.locator('.app-nav').getByRole('menuitem', { name: 'About' }).click();
+  await page.waitForURL('**/about');
+  await page.getByRole('heading', { name: 'About Yeast.Win!' }).waitFor();
+  assert.equal(await page.getByRole('link', { name: /View the source on GitHub/ }).getAttribute('href'),
+    'https://github.com/keredson/yeast.win');
+  const deployment = await page.evaluate(async () => (await (await fetch('/api/about')).json()));
+  assert.equal(deployment.environment, dev ? 'development' : 'production');
+  assert.match(deployment.commit, /^[0-9a-f]{40}$/);
+  await page.getByText('Server started').waitFor();
+  if (dev) {
+    await page.getByText('Development', { exact: true }).first().waitFor();
+    await page.locator('.deployment-dirty').first().waitFor();
+  }
+  await page.evaluate(async () => {
+    await (await caches.open('brewlog-app-assets-v1')).put('/about-smoke-stale', new Response('stale'));
+    await caches.open('about-smoke-preserve');
+  });
+  await page.getByRole('button', { name: 'App update options' }).click();
+  await page.getByRole('dialog', { name: 'Update app' }).waitFor();
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+    page.getByRole('dialog', { name: 'Update app' }).getByRole('button', { name: 'Update and reload' }).click()
+  ]);
+  await page.getByRole('heading', { name: 'About Yeast.Win!' }).waitFor();
+  assert.equal(await page.evaluate(async () => !!await (await caches.open('brewlog-app-assets-v1')).match('/about-smoke-stale')), false);
+  assert.equal(await page.evaluate(async () => (await caches.keys()).includes('about-smoke-preserve')), true);
   await page.locator('.app-nav').getByRole('menuitem', { name: 'Settings' }).click();
   await page.waitForURL('**/settings');
   assert.equal(await page.getByRole('switch', { name: 'Automatic sync' }).count(), 0);
@@ -129,7 +162,7 @@ try {
   assert.equal(await mobileNavigation.locator('.nav-brand').count(), 0, 'the drawer repeats its brand below the selector');
   if (dev) assert.equal(await mobileNavigation.getByRole('combobox', { name: 'Brewery' }).isVisible(), true);
   else assert.equal(await mobileNavigation.getByRole('combobox', { name: 'Brewery' }).count(), 0);
-  assert.equal(await mobileNavigation.getByRole('button', { name: 'Account menu' }).isVisible(), true);
+  assert.equal(await mobileNavigation.getByRole('link', { name: 'Your profile' }).isVisible(), true);
   await mobileNavigation.getByRole('button', { name: 'Close' }).click();
   await page.goto(base);
   await page.getByRole('heading', { name: 'Dashboard' }).waitFor();
@@ -182,8 +215,11 @@ try {
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete integration' }).click();
   await raptSettings.waitFor({ state: 'hidden' });
   assert.equal((await page.evaluate(async () => (await (await fetch('/api/me/rapt')).json()).webhook_path)), null);
-  await page.getByRole('button', { name: 'Account menu' }).click();
-  await page.getByRole('menuitem', { name: 'Log out' }).click();
+  await page.locator('.app-nav').getByRole('button', { name: 'Log out' }).click();
+  await page.locator('.ant-popconfirm').getByRole('button', { name: 'Cancel' }).click();
+  assert.equal(await page.locator('.app-nav').getByRole('link', { name: 'Your profile' }).isVisible(), true);
+  await page.locator('.app-nav').getByRole('button', { name: 'Log out' }).click();
+  await page.locator('.ant-popconfirm').getByRole('button', { name: 'Log out' }).click();
   await page.getByRole('link', { name: 'Sign in' }).waitFor();
   console.log(`Light public routes, protected redirect, and authenticated app load passed${dev ? ' in dev' : ' with offline reopen'}`);
 } finally { await browser.close(); }

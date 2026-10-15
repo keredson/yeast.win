@@ -30,3 +30,26 @@ export function checkForAppUpdate(): Promise<boolean> {
   })().catch(() => false).finally(() => { updateCheck = undefined; });
   return updateCheck;
 }
+
+/** Replace cached app files with the current deployment without touching local databases. */
+export async function forceAppRefresh(): Promise<void> {
+  let response: Response;
+  try { response = await fetch(`/api/healthz?refresh=${Date.now()}`, { cache: 'no-store', credentials: 'same-origin' }); }
+  catch { throw new Error('Connect to the server before refreshing the app.'); }
+  if (!response.ok) throw new Error('The server is unavailable. Try again when it responds.');
+
+  if ('serviceWorker' in navigator) {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.filter(registration => registration.scope === `${location.origin}/`
+      && [registration.active, registration.waiting, registration.installing].some(worker =>
+        worker && new URL(worker.scriptURL).pathname === '/sw.js')).map(registration => registration.unregister()));
+  }
+  if ('caches' in window) {
+    const names = await caches.keys();
+    await Promise.all(names.filter(name => name.startsWith('workbox-precache') || name === 'brewlog-app-assets-v1')
+      .map(name => caches.delete(name)));
+  }
+  const destination = new URL(location.href);
+  destination.searchParams.set('app-refresh', String(Date.now()));
+  location.replace(destination.href);
+}

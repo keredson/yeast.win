@@ -18,3 +18,13 @@ test('account settings have a standalone URL and old links resolve to it', () =>
   assert.deepEqual(routeFromPath('/settings'), { section: 'settings', selectedId: null, slug: null });
   assert.deepEqual(routeFromPath('/me'), routeFromPath('/settings'));
 });
+
+test('about has a standalone URL across breweries', () => {
+  assert.equal(routePath('about', null, '/brewery/brewery'), '/about');
+  assert.deepEqual(routeFromPath('/about'), { section: 'about', selectedId: null, slug: null });
+});
+
+test('brewer profile uses a singular global URL', () => {
+  assert.equal(routePath('brewer', 'Sample_Brewer', '/brewery/brewery'), '/brewer/sample_brewer');
+  assert.deepEqual(routeFromPath('/brewer/Sample_Brewer'), { section: 'brewer', selectedId: 'sample_brewer', slug: null });
+});

@@ -21,10 +21,13 @@ button, input, textarea { font: inherit; }
 .nav-links { min-height: 0; overflow-y: auto; flex: 1; }
 .nav-footer { border-top: 1px solid #42615b; padding: 14px 8px 0; }
 .nav-footer .nav-sync-progress { margin-bottom: 12px; }
-.nav-panel .ant-btn.avatar-button { display: flex; align-items: center; justify-content: flex-start; gap: 10px;
-  width: 100%; height: auto; padding: 4px; color: white; text-align: left; }
-.nav-panel .ant-btn.avatar-button:hover { color: white; background: #29514a; }
-.nav-panel .avatar-button .ant-avatar { flex: none; background: #e7b464; color: #193b39; font-weight: 700; }
+.nav-profile-row { display: flex; align-items: center; gap: 4px; }
+.nav-profile-link { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; padding: 4px;
+  border-radius: 6px; color: white; text-decoration: none; }
+.nav-profile-link:hover { color: white; background: #29514a; }
+.nav-profile-link .ant-avatar { flex: none; background: #e7b464; color: #193b39; font-weight: 700; }
+.nav-panel .ant-btn.nav-logout-button { flex: none; color: white; }
+.nav-panel .ant-btn.nav-logout-button:hover { color: white; background: #29514a; }
 .nav-account-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .connection-popover { max-width: 260px; }
 .connection-popover p { margin: 0; }
@@ -49,6 +52,13 @@ button, input, textarea { font: inherit; }
 .app-breadcrumb a { color: #356b53; }
 .account-page .ant-btn.sync-button { flex: none; color: #1d604f; border: 0 !important; box-shadow: none; }
 .account-page { max-width: 680px; display: flex; flex-direction: column; gap: 18px; }
+.about-page { max-width: 720px; display: flex; flex-direction: column; gap: 18px; }
+.about-page .ant-typography { margin-bottom: 0; }
+.deployment-details { display: grid; grid-template-columns: minmax(110px, 150px) minmax(0, 1fr); gap: 10px 16px; margin: 0; }
+.deployment-details dt { color: #728079; }
+.deployment-details dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.deployment-details .deployment-dirty { margin-left: 8px; }
+.browser-build-value { display: flex; align-items: center; gap: 4px; }
 .account-page .section-heading { margin-bottom: 4px; }
 .account-card .ant-card-body { display: flex; flex-direction: column; gap: 16px; }
 .profile-row { display: flex; align-items: center; gap: 20px; }
