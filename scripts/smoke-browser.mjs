@@ -359,6 +359,10 @@ try {
     .filter({ hasText: /^Use VEVOR Electric Brewing System 9\.2 Gal\/35 L · Unit [A-Za-z0-9_-]{6}$/ }).waitFor();
   await page.getByRole('button', { name: 'Edit Use VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
   const editEquipmentUse = page.getByRole('dialog', { name: 'Edit equipment use' });
+  if (await editEquipmentUse.getByRole('combobox', { name: 'Equipment to use' }).count()) {
+    throw new Error('Active equipment use allows changing the unit before release');
+  }
+  await editEquipmentUse.getByText(/^VEVOR Electric Brewing System 9\.2 Gal\/35 L · Unit [A-Za-z0-9_-]{6}$/).waitFor();
   await editEquipmentUse.getByRole('button', { name: 'Release' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Cancel' }).click();
   await editEquipmentUse.getByRole('button', { name: 'Release' }).waitFor();

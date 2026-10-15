@@ -59,7 +59,8 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
     && event.event_type === 'equipment_use' && event.actual_at != null
     && event.skipped_at == null && event.ended_at == null);
   const assignedEquipmentIds = new Set(activeEquipmentUses.map(event => event.details.equipment_id));
-  const availableEquipment = equipment.filter(item => item.id === editingEquipmentUse?.details.equipment_id
+  const availableEquipment = equipment.filter(item => editingEquipmentUse?.ended_at != null
+    || item.id === editingEquipmentUse?.details.equipment_id
     || !assignedEquipmentIds.has(item.id));
   const hasRaptPill = equipment.some(item => /rapt pill/i.test(
     equipmentModels.find(row => row.id === item.model_id)?.name || item.name));
@@ -67,6 +68,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
     const model = equipmentModels.find(row => row.id === item.model_id);
     return `${model?.name || item.name} · ${item.stock_id || `Unit ${item.id.slice(0, 6)}`}`;
   };
+  const currentEquipment = equipment.find(item => item.id === editingEquipmentUse?.details.equipment_id);
   useEffect(() => { setAssignEquipmentId(undefined); setEditingEquipmentUse(null); setEquipmentUseOpen(false); }, [selectedId]);
 
   async function refreshDetail() {
@@ -145,6 +147,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
     setEquipmentBusy(true);
     try {
       if (editingEquipmentUse) {
+        if (editingEquipmentUse.ended_at == null) throw new Error('Release this equipment before changing the unit');
         const item = equipment.find(row => row.id === assignEquipmentId);
         if (!item) throw new Error('Choose an available equipment unit');
         await updateBatchPlan(db, selectedId, editingEquipmentUse.id,
@@ -286,7 +289,15 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
       onCancel={() => { setEquipmentUseOpen(false); setEditingEquipmentUse(null); setAssignEquipmentId(undefined); setEquipmentError(''); }}
       footer={null} destroyOnHidden>
       {equipmentError && <Alert type="error" message={equipmentError} className="form-alert" />}
-      {availableEquipment.length > 0 ? <div className="equipment-assignment-form">
+      {editingEquipmentUse && editingEquipmentUse.ended_at == null ? <>
+        <p><strong>{currentEquipment ? equipmentLabel(currentEquipment) : editingEquipmentUse.title}</strong></p>
+        <p className="muted">In use since {formatTime(editingEquipmentUse.actual_at!)}.</p>
+        <Popconfirm title="Release this equipment from the batch?"
+          description="This ends its use now and keeps the record in the timeline."
+          okText="Release" onConfirm={() => void releaseEquipment(editingEquipmentUse.id)}>
+          <Button danger disabled={equipmentBusy}>Release</Button>
+        </Popconfirm>
+      </> : availableEquipment.length > 0 ? <div className="equipment-assignment-form">
         <Select aria-label="Equipment to use" placeholder="Choose equipment" showSearch optionFilterProp="label"
           value={assignEquipmentId} onChange={setAssignEquipmentId}
           options={availableEquipment.map(item => ({ value: item.id, label: equipmentLabel(item) }))} />
@@ -294,12 +305,6 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
           loading={equipmentBusy} onClick={() => void assignEquipment()}>
           {editingEquipmentUse ? 'Save equipment' : 'Start using equipment'}</Button>
       </div> : <p className="muted">Add an equipment unit before using it in this batch.</p>}
-      {editingEquipmentUse?.ended_at == null && editingEquipmentUse && <Popconfirm
-        title="Release this equipment from the batch?"
-        description="This ends its use now and keeps the record in the timeline."
-        okText="Release" onConfirm={() => void releaseEquipment(editingEquipmentUse.id)}>
-        <Button type="text" danger disabled={equipmentBusy}>Release</Button>
-      </Popconfirm>}
       {hasRaptPill && <p className="muted">For automatic readings, also assign the device under <a href="/me">Account → RAPT Pill</a>
         {' '}after RAPT sends its first reading.</p>}
     </Modal>
