@@ -9,4 +9,5 @@ vendor/
 *.sqlite-*
 .DS_Store
 *.log
+__pycache__/
 .brewlog-api.sock

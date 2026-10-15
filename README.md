@@ -22,7 +22,7 @@ To run a second development copy, run `yarn dev` from another checkout. Each che
 BREWLOG_DATA_DIR=./data-second yarn dev
 ```
 
-`BREWLOG_PORT` applies to `yarn start`, which serves the built app and API together over TCP. Development always uses the checkout socket. Without a separate `BREWLOG_DATA_DIR`, both copies use the same server databases.
+`BREWLOG_PORT` and `BREWLOG_HOST` apply to `yarn start`, which serves the built app and API together over TCP. Set `BREWLOG_SOCKET` to serve production over a Unix socket instead. Development always uses the checkout socket. Without a separate `BREWLOG_DATA_DIR`, both copies use the same server databases.
 
 For a production build:
 
@@ -31,7 +31,11 @@ yarn build
 yarn start
 ```
 
-The server serves the built PWA and API together on port 3001. Point your Cloudflare Tunnel at that port using one HTTPS hostname. Keep `data/` and the downloaded `vendor/crsqlite.so` on the host; `data/` holds the auth, catalog, and brewery databases. Back up the SQLite database files consistently, including their WAL files, or use SQLite's backup API. Do not copy a live database file alone as a backup.
+The server serves the built PWA and API together on port 3001 by default, or on `BREWLOG_SOCKET` when configured. Point your Cloudflare Tunnel at that endpoint using one HTTPS hostname. Keep `data/` and the downloaded `vendor/crsqlite.so` on the host; `data/` holds the auth, catalog, and brewery databases. Back up the SQLite database files consistently, including their WAL files, or use SQLite's backup API. Do not copy a live database file alone as a backup.
+
+For a production installation with a dedicated runtime account, socket-activated GitHub deployment hook,
+systemd service, and Cloudflare Tunnel, see [deploy/README.md](deploy/README.md). The one-time host setup is
+run with `make provision`; subsequent local releases can be tested with `make deploy`.
 
 ## Current workflow
 

@@ -1,0 +1,25 @@
+[Unit]
+Description=Yeast.Win socket-activated deployment hook
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yeast-deploy
+Group=yeast-deploy
+Environment=HOME=/var/lib/yeast-deploy
+Environment=XDG_CACHE_HOME=/var/lib/yeast-deploy/.cache
+EnvironmentFile=/etc/yeast-win/deploy-hook.env
+ExecStart=/usr/bin/python3 /usr/local/libexec/yeast-win/deploy_hook.py
+WorkingDirectory=/var/lib/yeast-deploy
+TimeoutStartSec=20min
+RuntimeMaxSec=20min
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/yeast-win /var/lib/yeast-deploy
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true

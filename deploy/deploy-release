@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 2 || ! "$1" =~ ^[0-9a-f]{40}$ || ! "$2" =~ ^[A-Za-z0-9._-]{1,80}$ ]]; then
+  echo "usage: deploy-release COMMIT_SHA RUN_ID" >&2
+  exit 2
+fi
+
+commit="$1"
+run_id="$2"
+deploy_home=/var/lib/yeast-deploy
+repository="$deploy_home/repository.git"
+release_root=/opt/yeast-win/releases
+release="$release_root/$commit"
+temporary="$release_root/.${commit}.${run_id}.tmp"
+archive="$deploy_home/${run_id}.tar"
+lock="$deploy_home/deploy.lock"
+
+export HOME="$deploy_home"
+export XDG_CACHE_HOME="$deploy_home/.cache"
+umask 0022
+
+exec 9>"$lock"
+if ! flock -n 9; then
+  echo "another deployment is already running" >&2
+  exit 75
+fi
+
+cleanup() {
+  rm -f "$archive"
+  if [[ -d "$temporary" ]]; then rm -rf --one-file-system "$temporary"; fi
+}
+trap cleanup EXIT
+
+git --git-dir="$repository" fetch --prune origin main
+remote_main="$(git --git-dir="$repository" rev-parse FETCH_HEAD)"
+if [[ "$remote_main" != "$commit" ]]; then
+  echo "requested commit $commit is not current origin/main ($remote_main)" >&2
+  exit 3
+fi
+
+if [[ ! -d "$release" ]]; then
+  mkdir -p "$temporary"
+  git --git-dir="$repository" archive --format=tar --output="$archive" "$commit"
+  tar -xf "$archive" -C "$temporary"
+  (
+    cd "$temporary"
+    corepack yarn install --frozen-lockfile --non-interactive
+    corepack yarn setup:sqlite
+    corepack yarn build
+  )
+  test -f "$temporary/dist/index.html"
+  test -f "$temporary/vendor/crsqlite.so"
+  test -f "$temporary/node_modules/tsx/dist/loader.mjs"
+  mv "$temporary" "$release"
+fi
+
+next_link="/opt/yeast-win/.current.$run_id"
+ln -s "$release" "$next_link"
+mv -Tf "$next_link" /opt/yeast-win/current
+sudo -n /usr/bin/systemctl restart yeast-win.service
+
+for _ in $(seq 1 30); do
+  if curl --fail --silent --show-error --unix-socket /run/yeast-win/app.sock \
+    http://localhost/api/healthz >/dev/null; then
+    echo "deployed $commit"
+    exit 0
+  fi
+  sleep 1
+done
+
+echo "yeast-win did not become healthy after deploying $commit" >&2
+/usr/bin/systemctl --no-pager --full status yeast-win.service >&2 || true
+exit 1

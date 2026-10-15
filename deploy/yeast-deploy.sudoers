@@ -1,0 +1,1 @@
+yeast-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart yeast-win.service

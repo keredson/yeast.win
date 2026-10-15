@@ -1,0 +1,12 @@
+[Unit]
+Description=Yeast.Win deployment webhook socket
+
+[Socket]
+ListenStream=/run/yeast-deploy/hook.sock
+Service=yeast-deploy-hook.service
+SocketMode=0600
+DirectoryMode=0711
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target
