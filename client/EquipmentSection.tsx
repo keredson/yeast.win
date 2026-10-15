@@ -938,7 +938,11 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
               { title: 'Status', key: 'status', render: (_: unknown, use: EquipmentUse) =>
                 use.ended_at == null ? 'In use' : 'Previous' },
               { title: '', key: 'action', render: (_: unknown, use: EquipmentUse) =>
-                use.ended_at == null ? <Button type="text" size="small" onClick={() => void releaseBatch(use.id)}>Release</Button> : null }
+                use.ended_at == null ? <Popconfirm title={`Release ${item.stock_id || item.name} from ${use.batch_name}?`}
+                  description="This ends its use now and keeps the batch history."
+                  okText="Release" onConfirm={() => void releaseBatch(use.id)}>
+                  <Button type="text" size="small">Release</Button>
+                </Popconfirm> : null }
             ]} />}
           {availableBatches.length > 0 && <div className="equipment-assignment-form">
             <Select aria-label="Assign to batch" placeholder="Choose a batch" showSearch optionFilterProp="label"

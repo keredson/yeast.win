@@ -356,6 +356,9 @@ try {
     .filter({ hasText: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
   await useEquipment.getByRole('button', { name: 'Start using equipment' }).click();
   await page.locator('.batch-timeline').getByText('Use VEVOR Electric Brewing System 9.2 Gal/35 L').waitFor();
+  await page.locator('.batch-timeline').getByRole('button', { name: 'Release' }).click();
+  await page.locator('.ant-popconfirm').getByRole('button', { name: 'Cancel' }).click();
+  await page.locator('.batch-timeline').getByRole('button', { name: 'Release' }).waitFor();
   await navigateSection(page, 'Equipment');
   await page.locator('.equipment-table').getByRole('link', { name: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
   await page.waitForURL('**/equipment/vevor-electric-brewing-system-9-2-gal-35-l');
@@ -393,6 +396,7 @@ try {
   const unitBatches = page.locator('.equipment-batches');
   await unitBatches.getByRole('row').filter({ hasText: batchName }).getByText('In use').waitFor();
   await page.getByRole('button', { name: 'Release' }).click();
+  await page.locator('.ant-popconfirm').getByRole('button', { name: 'Release' }).click();
   await unitBatches.getByRole('row').filter({ hasText: batchName }).getByText('Previous').waitFor();
   await unitModelCard.getByRole('link', { name: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
   await vevorRow.getByRole('cell', { name: '—' }).last().waitFor();

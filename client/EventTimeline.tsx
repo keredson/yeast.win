@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState } from 'react';
-import { Button, Card, Dropdown, Tag } from 'antd';
+import { Button, Card, Dropdown, Popconfirm, Tag } from 'antd';
 import { CheckOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ActualEvent, Equipment, PlanInput } from './db.ts';
 import { kindLabel, measurementKinds } from './constants.ts';
@@ -109,7 +109,11 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
                 title={happened ? `Recorded ${formatTime(item.actual_at)}` : skipped ? `Skipped ${formatTime(item.skipped_at)}` : undefined}>
                 {happened ? shortTime(item.actual_at!) : skipped ? 'Skipped' : 'Pending'}</Tag>}
               {item.event_type === 'equipment_use' && item.ended_at == null && onReleaseEquipment &&
-                <Button type="text" size="small" onClick={() => onReleaseEquipment(item.id)}>Release</Button>}
+                <Popconfirm title={`Release ${usedEquipment?.stock_id || usedEquipment?.name || 'equipment'} from this batch?`}
+                  description="This ends its use now and keeps the record in the timeline."
+                  okText="Release" onConfirm={() => onReleaseEquipment(item.id)}>
+                  <Button type="text" size="small">Release</Button>
+                </Popconfirm>}
               {onRecord && !happened && <Button type="text" shape="circle" icon={<CheckOutlined />} aria-label={`Record ${item.title}`}
                 title="Record or skip" onClick={() => onRecord(item as ActualEvent)} />}
               {!isBatch && <Button type="text" shape="circle" size="small" icon={<EditOutlined />}
