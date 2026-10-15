@@ -50,7 +50,9 @@ try {
   assert.equal(new URL(page.url()).pathname, '/batch/protected-example', 'sign-in did not return to the requested route');
   await page.goto(`${base}/me`);
   await page.waitForURL('**/settings');
-  assert.equal(await page.locator('.account-page .ant-card').first().getByText('Preferred units').count(), 1);
+  assert.equal(await page.locator('.account-page .ant-card').first().getByText('Profile').count(), 1);
+  assert.equal(await page.locator('.account-page .ant-card').nth(1).getByText('Preferred units').count(), 1);
+  assert.equal(await page.locator('.account-page .ant-card').last().getByText('Security').count(), 1);
   assert.equal(await page.getByText('Recipe calculations').count(), 0);
   await page.getByRole('heading', { name: 'Settings' }).waitFor();
   if (!dev) {

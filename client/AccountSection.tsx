@@ -249,6 +249,17 @@ export function AccountSection({ username, workspaces, activeWorkspaceId,
 
   return <div className="account-page">
     <div className="section-heading"><div><div className="eyebrow">Account</div><h1>Settings</h1></div></div>
+    <Card title="Profile" className="account-card">
+      <div className="profile-row">
+        <Avatar size={72} src={avatarSrc}>{username[0].toUpperCase()}</Avatar>
+        <div><strong>{username}</strong><div className="muted">Your account avatar appears in the header.</div>
+          <input ref={fileInput} className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp"
+            aria-label="Avatar image" onChange={event => { const file = event.target.files?.[0]; if (file) void uploadAvatar(file); }} />
+          <Button icon={<UploadOutlined />} loading={avatarBusy} onClick={() => fileInput.current?.click()}>Upload avatar</Button>
+        </div>
+      </div>
+      {avatarError && <Alert type="error" message={avatarError} showIcon />}
+    </Card>
     <Card title="Preferred units" className="account-card">
       <Typography.Paragraph type="secondary" className="setting-description">Used as defaults when logging new values. Existing records keep their entered units.</Typography.Paragraph>
       <div className="unit-grid">
@@ -266,17 +277,6 @@ export function AccountSection({ username, workspaces, activeWorkspaceId,
           onChange={value => void updateUnits({ ...preferredUnits, pressure: value })} /></label>
       </div>
       {unitsError && <Alert type="error" message={unitsError} showIcon />}
-    </Card>
-    <Card title="Profile" className="account-card">
-      <div className="profile-row">
-        <Avatar size={72} src={avatarSrc}>{username[0].toUpperCase()}</Avatar>
-        <div><strong>{username}</strong><div className="muted">Your account avatar appears in the header.</div>
-          <input ref={fileInput} className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp"
-            aria-label="Avatar image" onChange={event => { const file = event.target.files?.[0]; if (file) void uploadAvatar(file); }} />
-          <Button icon={<UploadOutlined />} loading={avatarBusy} onClick={() => fileInput.current?.click()}>Upload avatar</Button>
-        </div>
-      </div>
-      {avatarError && <Alert type="error" message={avatarError} showIcon />}
     </Card>
     <Card title="Breweries" className="account-card" extra={<Button type="text" shape="circle" icon={<PlusOutlined />}
       aria-label="New brewery" title="New brewery" onClick={() => void openBreweryEditor('new')} />}>
@@ -333,10 +333,6 @@ export function AccountSection({ username, workspaces, activeWorkspaceId,
       <Typography.Paragraph>This permanently deletes this brewery’s batches, recipes, inventory, equipment, and photos from the server and this device.</Typography.Paragraph>
       {breweryError && <Alert type="error" message={breweryError} />}
     </Modal>
-    <Card title="Security" className="account-card">
-      {passwordChanged && <Alert type="success" message="Password changed. Other sessions have been signed out." showIcon />}
-      <Button onClick={() => { setPasswordError(''); setPasswordOpen(true); }}>Change password</Button>
-    </Card>
     <Card title="Integrations" className="account-card integrations-card">
       <table className="integrations-table"><tbody><tr>
         <th scope="row"><strong>RAPT Pill</strong><span className="muted">Automatic Pill readings for batches</span></th>
@@ -384,6 +380,10 @@ export function AccountSection({ username, workspaces, activeWorkspaceId,
         </Popconfirm>
       </div>
     </Modal>
+    <Card title="Security" className="account-card">
+      {passwordChanged && <Alert type="success" message="Password changed. Other sessions have been signed out." showIcon />}
+      <Button onClick={() => { setPasswordError(''); setPasswordOpen(true); }}>Change password</Button>
+    </Card>
     <Modal title="Change password" open={passwordOpen} onCancel={() => { setPasswordOpen(false); passwordForm.resetFields(); }}
       footer={null} destroyOnHidden>
       <Form form={passwordForm} layout="vertical" onFinish={updatePassword}>
