@@ -133,6 +133,16 @@ try {
   await page.getByLabel('Batch name').fill('Second brewery batch');
   await page.getByRole('button', { name: 'Create batch' }).click();
   await page.getByRole('heading', { name: 'Second brewery batch' }).waitFor();
+  await page.setViewportSize({ width: 320, height: 720 });
+  if (!await page.evaluate(() => {
+    const heading = document.querySelector('.batch-content-heading');
+    const gear = heading.querySelector('button[aria-label="Batch settings"]').getBoundingClientRect();
+    const description = heading.querySelector('p').getBoundingClientRect();
+    return gear.right >= heading.getBoundingClientRect().right - 4
+      && gear.top < description.top && document.documentElement.scrollWidth <= innerWidth + 1;
+  })) throw new Error('Batch settings is not at the upper right on a narrow phone');
+  await page.setViewportSize({ width: 1280, height: 900 });
+  console.log('Batch settings stays at the upper right on mobile');
   const secondBreweryBatchUrl = page.url();
   if (!new URL(secondBreweryBatchUrl).pathname.startsWith(`/brewery/${slug}/batch/`)
     || new URL(secondBreweryBatchUrl).search) throw new Error('Second brewery batch should use a clean brewery slug URL');

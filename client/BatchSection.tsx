@@ -260,7 +260,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
       <div className="record-index-actions"><Button icon={<PlusOutlined />}
         onClick={() => setNewBatch(true)}>New batch</Button></div>
     </section> : !batch ? <Empty description="Batch not found" /> : <section className="record-detail">
-      <div className="content-heading"><div><span className="eyebrow">Batch log</span><h2>{batch.name}</h2>
+      <div className="content-heading batch-content-heading"><div><span className="eyebrow">Batch log</span><h2>{batch.name}</h2>
         <p className="muted">{batch.description || 'A living record of this brew.'}</p>
         <p className="muted">Started {formatTime(batch.created_at)}</p>
         {batch.source_batch_id && <p className="muted">Started from {batch.source_batch_name

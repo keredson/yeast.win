@@ -324,6 +324,10 @@ button, input, textarea { font: inherit; }
   .section-heading h1, .content-heading h2 { font-size: 29px; }
   .content-heading { flex-wrap: wrap; margin-bottom: 20px; }
   .heading-actions { justify-content: start; width: 100%; }
+  .batch-content-heading { flex-wrap: nowrap; }
+  .batch-content-heading > div:first-child { min-width: 0; flex: 1 1 auto; }
+  .batch-content-heading h2 { overflow-wrap: anywhere; }
+  .batch-content-heading .heading-actions { flex: none; width: auto; margin-top: 20px; }
   .form-pair, .form-triple { grid-template-columns: 1fr; gap: 0; }
   .unit-grid { grid-template-columns: 1fr; }
   .rapt-device { align-items: stretch; flex-direction: column; gap: 8px; }
