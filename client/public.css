@@ -35,9 +35,14 @@ button, input { font: inherit; }
 .splash-page { background: #f6f4ed; overflow: hidden; }
 .splash-shell { max-width: 1200px; }
 .splash-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
-.splash-signin { color: #204c42; font-weight: 700; text-decoration: none; }
+.splash-nav { display: flex; align-items: center; gap: 18px; }
+.splash-github { color: #526b60; font-size: 14px; font-weight: 650; text-decoration: none; }
+.splash-github:hover { text-decoration: underline; text-underline-offset: 4px; }
+.splash-github-narrow { display: none; }
+.splash-signin { display: inline-flex; align-items: center; gap: 5px; padding: 8px 12px; border: 1px solid #1f6b5b;
+  border-radius: 9px; background: #1f6b5b; color: white; font-weight: 700; text-decoration: none; }
 .splash-signin span { margin-left: 5px; }
-.splash-signin:hover { text-decoration: underline; text-underline-offset: 4px; }
+.splash-signin:hover { border-color: #185848; background: #185848; }
 .splash-hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, .94fr); align-items: center;
   gap: clamp(40px, 5vw, 88px); min-height: min(730px, calc(100vh - 180px)); padding: 40px 0 44px; }
 .splash-copy { position: relative; z-index: 1; }
@@ -87,6 +92,9 @@ button, input { font: inherit; }
   background: #f7e9d7; color: #a47443; font-family: sans-serif; font-size: 16px; font-style: normal; }
 .splash-footer { display: flex; justify-content: space-between; gap: 16px; border-top: 1px solid #dfdfd3;
   padding-top: 20px; color: #7b8a7c; font-size: 13px; }
+.splash-footer-links { display: flex; gap: 20px; }
+.splash-footer a { color: #41685d; font-weight: 700; text-decoration: none; }
+.splash-footer a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .splash-details { padding: 84px 0 96px; border-top: 1px solid #dfdfd3; }
 .splash-section-heading { display: grid; grid-template-columns: 1fr 1fr; align-items: end; gap: 10px 65px; }
 .splash-section-heading .public-eyebrow { grid-column: 1 / -1; margin: 0 0 6px; }
@@ -119,6 +127,9 @@ button, input { font: inherit; }
   .splash-page { padding: 22px; }
   .splash-header .public-brand { gap: 9px; font-size: 22px; }
   .splash-header .public-brand img { width: 36px; height: 36px; }
+  .splash-nav { gap: 11px; }
+  .splash-github-wide { display: none; }
+  .splash-github-narrow { display: inline; }
   .splash-signin { font-size: 14px; }
   .splash-hero { gap: 54px; padding: 86px 0 35px; }
   .splash-copy .public-eyebrow { margin-bottom: 20px; font-size: 11px; }
@@ -138,5 +149,5 @@ button, input { font: inherit; }
   .splash-features h3 { margin-top: 12px; }
   .splash-offline { display: block; padding: 32px 25px; }
   .splash-offline a { width: max-content; margin-top: 24px; }
-  .splash-footer { flex-wrap: wrap; line-height: 1.5; }
+  .splash-footer, .splash-footer-links { flex-wrap: wrap; line-height: 1.5; }
 }

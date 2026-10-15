@@ -22,7 +22,10 @@ function brand(): string {
 
 function splash(): void {
   root.innerHTML = `<main class="public-page splash-page"><div class="public-shell splash-shell">
-    <header class="splash-header">${brand()}<a class="splash-signin" href="/login">Sign in <span aria-hidden="true">↗</span></a></header>
+    <header class="splash-header">${brand()}<nav class="splash-nav" aria-label="Landing page">
+      <a class="splash-github" href="https://github.com/keredson/yeast.win" target="_blank" rel="noreferrer"><span class="splash-github-wide">Fork on GitHub</span><span class="splash-github-narrow">GitHub</span> <span aria-hidden="true">↗</span></a>
+      <a class="splash-signin" href="/login">Sign in <span aria-hidden="true">↗</span></a>
+    </nav></header>
     <section class="splash-hero">
       <div class="splash-copy">
         <p class="public-eyebrow">A fermentation notebook · Free and open source</p>
@@ -63,7 +66,8 @@ function splash(): void {
     <section class="splash-offline"><div><p class="public-eyebrow">Keep making, even offline</p>
       <h2>Take the notebook with you.</h2><p>Open your batches without a connection. Changes sync when you reconnect and use the app again.</p></div>
       <a href="/login">Get started <span aria-hidden="true">→</span></a></section>
-    <footer class="splash-footer"><span>Yeast.Win! · Free and open source</span><span>Made for curious fermenters.</span></footer>
+    <footer class="splash-footer"><span>Yeast.Win! · Free and open source</span><span class="splash-footer-links"><span>Made for curious fermenters.</span>
+      <a href="https://github.com/keredson/yeast.win" target="_blank" rel="noreferrer">Fork on GitHub <span aria-hidden="true">↗</span></a></span></footer>
   </div></main>`;
 }
 
