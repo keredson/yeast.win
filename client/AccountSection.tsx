@@ -10,6 +10,8 @@ import { ProfileCard } from './ProfileCard.tsx';
 
 interface Props {
   username: string;
+  fullName: string | null;
+  onFullNameChange: (fullName: string | null) => Promise<void>;
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
   onCreateWorkspace: (name: string) => Promise<Workspace>;
@@ -48,7 +50,7 @@ const raptPayload = `{
   "created_date": "@created_date"
 }`;
 
-export function AccountSection({ username, workspaces, activeWorkspaceId,
+export function AccountSection({ username, fullName, onFullNameChange, workspaces, activeWorkspaceId,
   onCreateWorkspace, onUpdateWorkspace, onDeleteWorkspace,
   avatarSrc, onAvatarUploaded, hidePublicProfile, onHidePublicProfileChange, timeZone, onTimeZoneChange,
   preferredUnits, onPreferredUnitsChange,
@@ -230,7 +232,8 @@ export function AccountSection({ username, workspaces, activeWorkspaceId,
 
   return <div className="account-page">
     <div className="section-heading"><div><div className="eyebrow">Account</div><h1>Settings</h1></div></div>
-    <ProfileCard username={username} avatarSrc={avatarSrc} onAvatarUploaded={onAvatarUploaded}
+    <ProfileCard username={username} fullName={fullName} onFullNameChange={onFullNameChange}
+      avatarSrc={avatarSrc} onAvatarUploaded={onAvatarUploaded}
       hidePublicProfile={hidePublicProfile} onHidePublicProfileChange={onHidePublicProfileChange}
       timeZone={timeZone} onTimeZoneChange={onTimeZoneChange} />
     <Card title="Preferred units" className="account-card">

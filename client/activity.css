@@ -1,12 +1,13 @@
 .activity-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .activity-heading h2 { margin: 0; font-size: 18px; }
-.activity-scroll { overflow-x: auto; padding: 14px 0 5px; }
+.activity-scroll { min-width: 0; padding: 14px 0 5px; }
 .activity-months { position: relative; height: 18px; color: #60746a; font-size: 11px; }
 .activity-month { position: absolute; top: 0; }
-.activity-grid { display: grid; width: max-content; grid-template-rows: repeat(7, 11px); grid-auto-columns: 11px;
-  grid-auto-flow: column; gap: 3px; }
+.activity-grid { display: grid; width: 100%; aspect-ratio: 53 / 7; grid-template-rows: repeat(7, minmax(0, 1fr));
+  grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; gap: clamp(1px, 0.35vw, 3px); }
 .activity-day { border-radius: 2px; background: #e6ebe3; }
 .activity-level-1 { background: #b5d6ae; }
 .activity-level-2 { background: #78b876; }
 .activity-level-3 { background: #39875c; }
 .activity-level-4 { background: #1f604a; }
+@media (max-width: 560px) { .activity-month:nth-child(even) { display: none; } }

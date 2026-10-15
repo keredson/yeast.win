@@ -5,7 +5,7 @@ import { createWorkspace } from './db.ts';
 import { nowSeconds } from '../shared/schema.ts';
 import { defaultPreferredUnits, preferredUnitsForSystem, type PreferredUnits, type UnitSystem } from '../shared/units.ts';
 
-export interface Account { id: string; username: string; has_avatar: boolean; hide_public_profile: boolean | null; time_zone: string | null }
+export interface Account { id: string; username: string; full_name: string | null; has_avatar: boolean; hide_public_profile: boolean | null; time_zone: string | null }
 const sessionSeconds = 30 * 24 * 60 * 60;
 
 function passwordHash(password: string, salt = randomBytes(16).toString('hex')): string {
@@ -32,13 +32,14 @@ function createSession(db: Database.Database, accountId: string): string {
   return token;
 }
 
-export function register(db: Database.Database, username: string, password: string, unitSystem: UnitSystem, timeZone: string): string | null {
+export function register(db: Database.Database, username: string, password: string, unitSystem: UnitSystem,
+  timeZone: string, fullName: string | null = null): string | null {
   const normalized = username.trim().toLowerCase();
   return db.transaction(() => {
     if (usernameExists(db, normalized)) return null;
     const id = createId();
-    db.prepare('INSERT INTO accounts(id, username, password_hash, created_at, time_zone) VALUES (?, ?, ?, ?, ?)')
-      .run(id, normalized, passwordHash(password), nowSeconds(), timeZone);
+    db.prepare('INSERT INTO accounts(id, username, password_hash, created_at, time_zone, full_name) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(id, normalized, passwordHash(password), nowSeconds(), timeZone, fullName);
     savePreferredUnits(db, id, preferredUnitsForSystem(unitSystem));
     createWorkspace(db, id, 'Homebrew');
     return createSession(db, id);
@@ -50,13 +51,13 @@ export function usernameExists(db: Database.Database, username: string): boolean
 }
 
 export function publicBrewer(db: Database.Database, username: string, viewerId?: string):
-  { username: string; has_avatar: boolean; hidden: boolean } | null {
-  const row = db.prepare(`SELECT a.id, a.username, a.hide_public_profile,
+  { username: string; full_name: string | null; has_avatar: boolean; hidden: boolean } | null {
+  const row = db.prepare(`SELECT a.id, a.username, a.full_name, a.hide_public_profile,
       EXISTS(SELECT 1 FROM account_avatars v WHERE v.account_id = a.id) AS has_avatar
     FROM accounts a WHERE lower(a.username) = ?`).get(username.toLowerCase()) as
-    { id: string; username: string; has_avatar: number; hide_public_profile: number | null } | undefined;
+    { id: string; username: string; full_name: string | null; has_avatar: number; hide_public_profile: number | null } | undefined;
   if (!row || row.hide_public_profile === 1 && row.id !== viewerId) return null;
-  return { username: row.username, has_avatar: !!row.has_avatar, hidden: row.hide_public_profile === 1 };
+  return { username: row.username, full_name: row.full_name, has_avatar: !!row.has_avatar, hidden: row.hide_public_profile === 1 };
 }
 
 export function publicBrewerAvatar(db: Database.Database, username: string, viewerId?: string): Buffer | null {
@@ -70,6 +71,10 @@ export function setPublicProfileHidden(db: Database.Database, accountId: string,
   db.prepare('UPDATE accounts SET hide_public_profile = ? WHERE id = ?').run(hidden ? 1 : 0, accountId);
 }
 
+export function saveFullName(db: Database.Database, accountId: string, fullName: string | null): void {
+  db.prepare('UPDATE accounts SET full_name = ? WHERE id = ?').run(fullName, accountId);
+}
+
 export function login(db: Database.Database, username: string, password: string): string | null {
   const row = db.prepare('SELECT id, password_hash FROM accounts WHERE lower(username) = ?')
     .get(username.trim().toLowerCase()) as { id: string; password_hash: string } | undefined;
@@ -79,11 +84,11 @@ export function login(db: Database.Database, username: string, password: string)
 
 export function accountForToken(db: Database.Database, token: string | undefined): Account | null {
   if (!token) return null;
-  const row = db.prepare(`SELECT a.id, a.username, a.hide_public_profile, a.time_zone,
+  const row = db.prepare(`SELECT a.id, a.username, a.full_name, a.hide_public_profile, a.time_zone,
       EXISTS(SELECT 1 FROM account_avatars v WHERE v.account_id = a.id) AS has_avatar FROM sessions s
     JOIN accounts a ON a.id = s.account_id
     WHERE s.token_hash = ? AND s.expires_at > ?`)
-    .get(tokenHash(token), nowSeconds()) as { id: string; username: string; has_avatar: number; hide_public_profile: number | null; time_zone: string | null } | undefined;
+    .get(tokenHash(token), nowSeconds()) as { id: string; username: string; full_name: string | null; has_avatar: number; hide_public_profile: number | null; time_zone: string | null } | undefined;
   return row ? { ...row, has_avatar: !!row.has_avatar,
     hide_public_profile: row.hide_public_profile === null ? null : row.hide_public_profile === 1 } : null;
 }

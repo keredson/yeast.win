@@ -10,7 +10,7 @@ const envPath = resolve(projectRoot, '.env');
 if (existsSync(envPath)) process.loadEnvFile(envPath);
 export const dataDir = resolve(projectRoot, process.env.BREWLOG_DATA_DIR || './data');
 const extensionPath = resolve(projectRoot, 'vendor/crsqlite.so');
-const authSchemaVersion = 4;
+const authSchemaVersion = 5;
 mkdirSync(dataDir, { recursive: true });
 
 export function assertCrSqliteAvailable(): void {
@@ -42,7 +42,8 @@ export function openAuthDb(): Database.Database {
       password_hash TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       hide_public_profile INTEGER DEFAULT NULL CHECK (hide_public_profile IN (0, 1) OR hide_public_profile IS NULL),
-      time_zone TEXT
+      time_zone TEXT,
+      full_name TEXT
     );
     CREATE TABLE IF NOT EXISTS sessions (
       token_hash TEXT PRIMARY KEY NOT NULL,
@@ -76,6 +77,8 @@ export function openAuthDb(): Database.Database {
     db.exec('ALTER TABLE accounts ADD COLUMN hide_public_profile INTEGER DEFAULT NULL CHECK (hide_public_profile IN (0, 1) OR hide_public_profile IS NULL)');
   if (!accountColumns.some(column => column.name === 'time_zone'))
     db.exec('ALTER TABLE accounts ADD COLUMN time_zone TEXT');
+  if (!accountColumns.some(column => column.name === 'full_name'))
+    db.exec('ALTER TABLE accounts ADD COLUMN full_name TEXT');
   const hasLegacyMeta = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_meta'").get();
   const rootMigrationDone = version >= 1 || (hasLegacyMeta
     && !!db.prepare("SELECT 1 FROM auth_meta WHERE key = 'nullable_root_slug_v1'").get());

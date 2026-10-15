@@ -1,9 +1,11 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { UploadOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Button, Card, Select, Switch } from 'antd';
+import { Alert, Avatar, Button, Card, Input, Select, Switch } from 'antd';
 
 interface Props {
   username: string;
+  fullName: string | null;
+  onFullNameChange: (fullName: string | null) => Promise<void>;
   avatarSrc?: string;
   onAvatarUploaded: () => void;
   hidePublicProfile: boolean | null;
@@ -14,15 +16,26 @@ interface Props {
 
 const timeZones = Array.from(new Set(['UTC', ...Intl.supportedValuesOf('timeZone')])).sort();
 
-export function ProfileCard({ username, avatarSrc, onAvatarUploaded, hidePublicProfile, onHidePublicProfileChange,
+export function ProfileCard({ username, fullName, onFullNameChange, avatarSrc, onAvatarUploaded, hidePublicProfile, onHidePublicProfileChange,
   timeZone, onTimeZoneChange }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarError, setAvatarError] = useState('');
+  const [fullNameDraft, setFullNameDraft] = useState(fullName || '');
+  const [fullNameBusy, setFullNameBusy] = useState(false);
+  const [fullNameError, setFullNameError] = useState('');
   const [visibilityBusy, setVisibilityBusy] = useState(false);
   const [visibilityError, setVisibilityError] = useState('');
   const [timeZoneBusy, setTimeZoneBusy] = useState(false);
   const [timeZoneError, setTimeZoneError] = useState('');
+  useEffect(() => setFullNameDraft(fullName || ''), [fullName]);
+
+  async function updateFullName() {
+    setFullNameBusy(true); setFullNameError('');
+    try { await onFullNameChange(fullNameDraft.trim() || null); }
+    catch (cause) { setFullNameError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setFullNameBusy(false); }
+  }
 
   async function updateVisibility(hidden: boolean) {
     setVisibilityBusy(true); setVisibilityError('');
@@ -78,6 +91,17 @@ export function ProfileCard({ username, avatarSrc, onAvatarUploaded, hidePublicP
       </div>
     </div>
     {avatarError && <Alert type="error" message={avatarError} showIcon />}
+    <div className="setting-row profile-full-name-row">
+      <label htmlFor="profile-full-name"><strong>Full name</strong></label>
+      <div className="profile-full-name-control">
+        <Input id="profile-full-name" aria-label="Full name" autoComplete="name" maxLength={80}
+          value={fullNameDraft} onChange={event => setFullNameDraft(event.target.value)}
+          onPressEnter={() => void updateFullName()} />
+        <Button loading={fullNameBusy} disabled={fullNameDraft.trim() === (fullName || '')}
+          onClick={() => void updateFullName()}>Save</Button>
+      </div>
+    </div>
+    {fullNameError && <Alert type="error" message={fullNameError} showIcon />}
     <div className="setting-row profile-visibility-row">
       <div><strong>Hide public profile</strong><div className="muted">When enabled, visitors cannot view your brewer page or avatar.</div></div>
       <Switch aria-label="Hide public profile" checked={hidePublicProfile === true} loading={visibilityBusy}

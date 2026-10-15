@@ -639,6 +639,14 @@ export function App() {
     setSession(updated);
   }
 
+  async function updateFullName(fullName: string | null) {
+    if (!session) return;
+    await api('/me/profile', 'PATCH', { full_name: fullName });
+    const updated = { ...session, account: { ...session.account, full_name: fullName } };
+    rememberSession(updated);
+    setSession(updated);
+  }
+
   async function updateTimeZone(timeZone: string) {
     if (!session) return;
     await api('/me/time-zone', 'PATCH', { time_zone: timeZone });
@@ -740,7 +748,8 @@ export function App() {
         </div>
         {error && <Alert type="warning" showIcon closable onClose={() => setError('')} message={error} className="page-alert" />}
         {section === 'about' ? <AboutSection /> : section === 'brewer' ? <BrewerSection username={route.selectedId || ''} />
-          : section === 'settings' ? <AccountSection username={session.account.username} avatarSrc={avatarSrc}
+          : section === 'settings' ? <AccountSection username={session.account.username}
+          fullName={session.account.full_name} onFullNameChange={updateFullName} avatarSrc={avatarSrc}
           workspaces={session.workspaces} activeWorkspaceId={workspaceId}
           onCreateWorkspace={createWorkspace} onUpdateWorkspace={renameWorkspace} onDeleteWorkspace={removeWorkspace}
           onAvatarUploaded={() => { const updated = { ...session, account: { ...session.account, has_avatar: true } };

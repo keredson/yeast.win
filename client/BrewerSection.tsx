@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Avatar, Card, Spin } from 'antd';
+import { Alert, Spin } from 'antd';
 import { api, ApiError } from './api.ts';
 import { renderActivityGrid, type BrewerActivity } from './ActivityGrid.ts';
+import './publicBrewer.css';
 
-interface Brewer { username: string; has_avatar: boolean; hidden: boolean }
+interface Brewer { username: string; full_name: string | null; has_avatar: boolean; hidden: boolean }
 
 export function BrewerSection({ username }: { username: string }) {
   const [brewer, setBrewer] = useState<Brewer | null>(null);
@@ -28,15 +29,21 @@ export function BrewerSection({ username }: { username: string }) {
   }, [activity]);
 
   return <div className="brewer-page">
-    <div className="section-heading"><div><div className="eyebrow">Brewer</div><h1>{brewer?.username || (error === 'Brewer not found' ? error : username)}</h1></div></div>
-    {error && <Alert type={error === 'Brewer not found' ? 'info' : 'warning'} message={error} showIcon />}
-    {brewer && <><Card className="account-card"><div className="profile-row">
-      <Avatar size={88} src={brewer.has_avatar ? `/api/brewer/${encodeURIComponent(brewer.username)}/avatar` : undefined}>
-        {brewer.username[0].toUpperCase()}</Avatar>
-      <div><strong>{brewer.username}</strong>{brewer.hidden && <div className="muted">This profile is hidden from visitors.</div>}</div>
-    </div></Card>
-      <Card className="account-card"><div ref={activityContainer}>
+    {error && !brewer && <section className="public-brewer-card"><h1>{error === 'Brewer not found' ? error : 'Profile unavailable'}</h1>
+      {error !== 'Brewer not found' && <p>{error}</p>}</section>}
+    {!brewer && !error && <section className="public-brewer-card"><Spin description="Loading brewer" /></section>}
+    {brewer && <><section className="public-brewer-card">
+      <div className="public-brewer-avatar">{brewer.has_avatar
+        ? <img src={`/api/brewer/${encodeURIComponent(brewer.username)}/avatar`} alt="" />
+        : brewer.username[0].toUpperCase()}</div>
+      <div><p className="public-eyebrow">Brewer</p><h1>{brewer.full_name || brewer.username}</h1>
+        {brewer.full_name && <p className="public-brewer-handle">@{brewer.username}</p>}
+        {brewer.hidden && <p className="public-brewer-hidden">This profile is hidden from visitors.</p>}
+      </div>
+    </section>
+      <section className="public-activity-card" ref={activityContainer}>
         {!activity && !error && <Spin description="Loading activity" />}
-      </div></Card></>}
+        {error && <Alert type="warning" message={error} showIcon />}
+      </section></>}
   </div>;
 }

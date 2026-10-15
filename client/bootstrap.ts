@@ -80,10 +80,12 @@ function login(message = ''): void {
     <form id="account-form"><label>Username<input name="username" autocomplete="username" maxlength="40" required></label>
     <p class="public-username-status" role="status" aria-live="polite"></p>
     <label>Password<input name="password" type="password" autocomplete="current-password" maxlength="256" required></label>
+    <p class="public-password-rule" role="status" aria-live="polite" hidden>Use at least 8 characters.</p>
     <label class="public-confirm" hidden>Confirm password<input name="confirm_password" type="password" autocomplete="new-password" maxlength="256"></label>
+    <p class="public-confirm-rule" role="status" aria-live="polite" hidden>Passwords do not match.</p>
     <fieldset class="public-unit-system" hidden disabled><legend>Which units do you prefer?</legend>
       <label><input type="radio" name="unit_system" value="metric" required><span>Metric<small>°C · L · g · kPa</small></span></label>
-      <label><input type="radio" name="unit_system" value="imperial" required><span>Imperial<small>°F · US gal · lb + oz · psi</small></span></label>
+      <label><input type="radio" name="unit_system" value="imperial" required checked><span>Imperial<small>°F · US gal · lb + oz · psi</small></span></label>
     </fieldset>
     <button class="public-primary" type="submit">Continue</button></form></section></div></main>`;
   const showError = (value: string) => {
@@ -96,6 +98,8 @@ function login(message = ''): void {
   const passwordInput = form.elements.namedItem('password') as HTMLInputElement;
   const confirmInput = form.elements.namedItem('confirm_password') as HTMLInputElement;
   const confirmLabel = form.querySelector<HTMLElement>('.public-confirm')!;
+  const passwordRule = form.querySelector<HTMLElement>('.public-password-rule')!;
+  const confirmRule = form.querySelector<HTMLElement>('.public-confirm-rule')!;
   const unitSystemFieldset = form.querySelector<HTMLFieldSetElement>('.public-unit-system')!;
   const status = form.querySelector<HTMLElement>('.public-username-status')!;
   const button = form.querySelector<HTMLButtonElement>('button')!;
@@ -103,6 +107,17 @@ function login(message = ''): void {
   let accountExists: boolean | null = null;
   let checkSequence = 0;
   let checkTimer: number | undefined;
+  let passwordTouched = false;
+  let confirmTouched = false;
+  const updatePasswordRules = () => {
+    passwordRule.hidden = accountExists !== false || !passwordTouched || passwordInput.value.length >= 8;
+    confirmRule.hidden = accountExists !== false || !confirmTouched || !confirmInput.value
+      || confirmInput.value === passwordInput.value;
+  };
+  passwordInput.addEventListener('blur', () => { passwordTouched = !!passwordInput.value; updatePasswordRules(); });
+  confirmInput.addEventListener('blur', () => { confirmTouched = !!confirmInput.value; updatePasswordRules(); });
+  passwordInput.addEventListener('input', () => { showError(''); updatePasswordRules(); });
+  confirmInput.addEventListener('input', () => { showError(''); updatePasswordRules(); });
 
   async function checkUsername(username: string): Promise<boolean | null> {
     const sequence = ++checkSequence;
@@ -117,6 +132,7 @@ function login(message = ''): void {
       checkedUsername = username.toLowerCase();
       accountExists = result.exists;
       confirmLabel.hidden = result.exists;
+      updatePasswordRules();
       confirmInput.required = !result.exists;
       unitSystemFieldset.hidden = result.exists;
       unitSystemFieldset.disabled = result.exists;
@@ -141,6 +157,10 @@ function login(message = ''): void {
     checkedUsername = '';
     accountExists = null;
     confirmLabel.hidden = true;
+    passwordTouched = false;
+    confirmTouched = false;
+    passwordRule.hidden = true;
+    confirmRule.hidden = true;
     confirmInput.required = false;
     unitSystemFieldset.hidden = true;
     unitSystemFieldset.disabled = true;
@@ -164,8 +184,12 @@ function login(message = ''): void {
       if (!exists && !/^[A-Za-z0-9][A-Za-z0-9_-]{2,39}$/.test(username)) {
         showError('Use 3–40 letters, numbers, _ or - for the username.'); return;
       }
-      if (!exists && password.length < 8) { showError('Use at least 8 characters for the password.'); return; }
-      if (!exists && password !== confirmInput.value) { showError('Passwords do not match.'); return; }
+      if (!exists && password.length < 8) {
+        showError(''); passwordTouched = true; updatePasswordRules(); passwordInput.focus(); return;
+      }
+      if (!exists && password !== confirmInput.value) {
+        showError(''); confirmTouched = true; updatePasswordRules(); confirmInput.focus(); return;
+      }
       const unitSystem = form.querySelector<HTMLInputElement>('input[name="unit_system"]:checked')?.value;
       if (!exists && !unitSystem) { showError('Choose metric or imperial units.'); return; }
       const response = await fetch(`/api/${exists ? 'login' : 'register'}`, {

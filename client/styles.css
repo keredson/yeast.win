@@ -32,7 +32,8 @@ button, input, textarea { font: inherit; }
 .profile-visibility-row { align-items: center; }
 .profile-time-zone-row { align-items: center; gap: 16px; }
 .profile-time-zone-row .ant-select { width: min(100%, 250px); flex: none; }
-@media (max-width: 520px) { .profile-time-zone-row { align-items: stretch; flex-direction: column; }
+@media (max-width: 520px) { .profile-full-name-row, .profile-time-zone-row { align-items: stretch; flex-direction: column; }
+  .profile-full-name-control { width: 100%; }
   .profile-time-zone-row .ant-select { width: 100%; } }
 .connection-popover { max-width: 260px; }
 .connection-popover p { margin: 0; }
@@ -74,6 +75,8 @@ button, input, textarea { font: inherit; }
 .unit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .unit-grid label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.profile-full-name-control { display: flex; align-items: center; gap: 8px; width: min(100%, 360px); }
+.profile-full-name-control .ant-input { min-width: 0; }
 .brewery-row + .brewery-row { border-top: 1px solid #e8ebe8; padding-top: 14px; }
 .brewery-row > div:first-child { min-width: 0; overflow-wrap: anywhere; }
 .brewery-row .ant-tag { margin-left: 8px; }

@@ -25,6 +25,7 @@ button, input { font: inherit; }
 .public-card label { display: grid; gap: 7px; font-size: 14px; font-weight: 600; }
 .public-card label[hidden] { display: none; }
 .public-username-status { min-height: 1.25em; margin: -10px 0 -6px; color: #526b60; font-size: 13px; }
+.public-password-rule, .public-confirm-rule { margin: -10px 0 -6px; color: #a64237; font-size: 13px; }
 .public-card input { width: 100%; min-height: 42px; padding: 9px 12px; border: 1px solid #c9d5ca; border-radius: 9px; }
 .public-card input:focus { outline: 2px solid #1f6b5b; outline-offset: 1px; }
 .public-unit-system { display: grid; gap: 9px; min-width: 0; margin: 0; padding: 0; border: 0; }

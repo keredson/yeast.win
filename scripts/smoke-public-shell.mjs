@@ -40,13 +40,29 @@ try {
   const username = `shell${Date.now()}`;
   await page.getByLabel('Username').fill(username);
   await page.getByText('New username. Choose a password to create your account.').waitFor();
+  assert.equal(await page.getByRole('radio', { name: /Imperial/ }).isChecked(), true);
+  assert.equal(await page.getByLabel('Full name').count(), 0, 'signup should not ask for a full name');
+  assert.equal(await page.getByText('Use at least 8 characters.').isVisible(), false);
+  await page.getByLabel('Password', { exact: true }).fill('short');
+  assert.equal(await page.getByText('Use at least 8 characters.').isVisible(), false);
+  await page.getByLabel('Confirm password').focus();
+  assert.equal(await page.getByText('Use at least 8 characters.').isVisible(), true);
   await page.getByLabel('Password', { exact: true }).fill('smoke12345');
+  assert.equal(await page.getByText('Use at least 8 characters.').isVisible(), false);
+  await page.getByLabel('Confirm password').fill('mismatch');
+  assert.equal(await page.getByText('Passwords do not match.').isVisible(), false);
+  await page.getByRole('radio', { name: /Imperial/ }).focus();
+  assert.equal(await page.getByText('Passwords do not match.').isVisible(), true);
+  await page.getByRole('button', { name: 'Create account' }).click();
+  assert.equal(await page.locator('.public-error').isVisible(), false, 'password mismatch should not show a second error');
   await page.getByLabel('Confirm password').fill('smoke12345');
+  assert.equal(await page.getByText('Passwords do not match.').isVisible(), false);
   await page.getByRole('radio', { name: /Imperial/ }).check();
   await page.getByRole('button', { name: 'Create account' }).click();
   await page.getByRole('link', { name: 'Your profile' }).waitFor({ timeout: 30_000 });
   assert.deepEqual(await page.evaluate(async () => (await (await fetch('/api/me')).json()).preferred_units),
     { temperature: '°F', volume: 'US gal', mass: 'lb + oz', pressure: 'psi' });
+  assert.equal(await page.evaluate(async () => (await (await fetch('/api/me')).json()).account.full_name), null);
   assert.equal(new URL(page.url()).pathname, '/batch/protected-example', 'sign-in did not return to the requested route');
   await page.goto(`${base}/me`);
   await page.waitForURL('**/settings');
@@ -58,6 +74,16 @@ try {
   assert.equal(await page.locator('.account-page .ant-card').first().getByText('Profile', { exact: true }).count(), 1);
   assert.equal(await page.locator('.account-page .ant-card').nth(1).getByText('Preferred units').count(), 1);
   assert.equal(await page.locator('.account-page .ant-card').last().getByText('Security').count(), 1);
+  await page.getByRole('textbox', { name: 'Full name' }).fill('Smoke Brewer');
+  await page.locator('.profile-full-name-row').getByRole('button', { name: 'Save' }).click();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('brewlog:last-session')).account.full_name === 'Smoke Brewer');
+  assert.equal(await page.evaluate(async () => (await (await fetch('/api/me')).json()).account.full_name), 'Smoke Brewer');
+  await page.getByRole('textbox', { name: 'Full name' }).fill('');
+  await page.locator('.profile-full-name-row').getByRole('button', { name: 'Save' }).click();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('brewlog:last-session')).account.full_name === null);
+  await page.getByRole('textbox', { name: 'Full name' }).fill('Smoke Brewer');
+  await page.locator('.profile-full-name-row').getByRole('button', { name: 'Save' }).click();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('brewlog:last-session')).account.full_name === 'Smoke Brewer');
   assert.equal(await page.getByText('Recipe calculations').count(), 0);
   await page.getByRole('heading', { name: 'Settings' }).waitFor();
   if (!dev) {
@@ -84,11 +110,17 @@ try {
   await signInContext.close();
   await page.locator('.app-nav').getByRole('link', { name: 'Your profile' }).click();
   await page.waitForURL(`**/brewer/${username}`);
-  await page.getByRole('heading', { name: username }).waitFor();
+  await page.getByRole('heading', { name: 'Smoke Brewer' }).waitFor();
+  assert.equal(await page.locator('.brewer-page .public-brewer-card .public-brewer-handle').textContent(), `@${username}`);
   assert.equal(await page.getByRole('button', { name: 'Upload avatar' }).count(), 0);
   assert.equal(await page.locator('.app-nav').count(), 1, 'signed-in brewer page left the app shell');
   await page.locator('.activity-day').first().waitFor();
   assert.equal(await page.locator('.activity-day').count(), 365);
+  assert.equal(await page.locator('.activity-scroll').evaluate(element => element.scrollWidth <= element.clientWidth), true);
+  await page.setViewportSize({ width: 320, height: 720 });
+  assert.equal(await page.locator('.activity-scroll').evaluate(element => element.scrollWidth <= element.clientWidth), true,
+    'signed-in activity grid scrolls sideways on a phone');
+  await page.setViewportSize({ width: 1280, height: 720 });
   const activityBeforeToday = await page.evaluate(async name => (await (await fetch(`/api/brewer/${name}/activity`)).json()), username);
   assert.equal(activityBeforeToday.days.length, 365);
   assert.notEqual(activityBeforeToday.through_date, new Intl.DateTimeFormat('en-CA', {
@@ -97,7 +129,7 @@ try {
   assert.deepEqual(await page.evaluate(async name => {
     const response = await fetch(`/api/brewer/${name}`);
     return { status: response.status, body: await response.json() };
-  }, username), { status: 200, body: { username, has_avatar: false, hidden: false } });
+  }, username), { status: 200, body: { username, full_name: 'Smoke Brewer', has_avatar: false, hidden: false } });
   await page.goBack();
   await page.waitForURL('**/settings');
   const timeZone = page.getByRole('combobox', { name: 'Time zone' });
@@ -260,7 +292,10 @@ try {
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Log out' }).click();
   await page.getByRole('link', { name: 'Sign in' }).waitFor();
   await page.goto(`${base}/brewer/${username}`);
-  await page.getByRole('heading', { name: username }).waitFor();
+  await page.getByRole('heading', { name: 'Smoke Brewer' }).waitFor();
+  assert.equal(await page.getByText(`@${username}`).isVisible(), true);
+  assert.equal(await page.locator('.activity-scroll').evaluate(element => element.scrollWidth <= element.clientWidth), true,
+    'public activity grid scrolls sideways on a phone');
   assert.equal(new URL(page.url()).pathname, `/brewer/${username}`, 'public profile redirected to sign in');
   assert.equal(await page.getByRole('button', { name: 'Upload avatar' }).count(), 0);
   assert.equal(await page.locator('.app-nav').count(), 0, 'signed-out brewer page loaded the app shell');

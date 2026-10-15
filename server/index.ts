@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import type Database from 'better-sqlite3';
 import { accountForToken, changePassword, clearSessionCookie, getAvatar, getPreferredUnits, login, logout,
-  publicBrewer, publicBrewerAvatar, readSessionCookie, register, saveAvatar, savePreferredUnits, saveTimeZone,
+  publicBrewer, publicBrewerAvatar, readSessionCookie, register, saveAvatar, saveFullName, savePreferredUnits, saveTimeZone,
   setPublicProfileHidden, sessionCookie, sessionCookieName,
   usernameExists } from './auth.ts';
 import { assertCrSqliteAvailable, closeWorkspaceDb, createWorkspace, dataDir, deleteWorkspace, openAuthDb, openWorkspaceDb, projectRoot, updateWorkspace } from './db.ts';
@@ -43,6 +43,15 @@ const raptRequests = new Map<string, { count: number; resetAt: number }>();
 const loginWindowMs = 15 * 60 * 1000;
 const loginLimit = 10;
 const registrationLimit = 20;
+
+function validFullName(value: unknown): boolean {
+  return value === undefined || value === null || typeof value === 'string'
+    && value.trim().length <= 80 && !/[\x00-\x1f\x7f]/.test(value);
+}
+
+function normalizeFullName(value: unknown): string | null {
+  return typeof value === 'string' ? value.trim() || null : null;
+}
 
 function json(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
@@ -202,7 +211,8 @@ const server = createServer(async (req, res) => {
       const attempts = previous && previous.resetAt > now ? previous : { count: 0, resetAt: now + loginWindowMs };
       if (attempts.count >= registrationLimit) return json(res, 429, { error: 'Too many registrations. Try again later.' });
       registrationAttempts.set(registrationKey, { ...attempts, count: attempts.count + 1 });
-      const body = await readJson(req, 4 * 1024) as { username?: unknown; password?: unknown; unit_system?: unknown; time_zone?: unknown };
+      const body = await readJson(req, 4 * 1024) as { username?: unknown; password?: unknown; unit_system?: unknown;
+        time_zone?: unknown; full_name?: unknown };
       if (typeof body.username !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{2,39}$/.test(body.username.trim())) {
         return json(res, 400, { error: 'Username must be 3–40 letters, numbers, underscores, or hyphens' });
       }
@@ -212,8 +222,9 @@ const server = createServer(async (req, res) => {
       if (body.unit_system !== 'metric' && body.unit_system !== 'imperial') {
         return json(res, 400, { error: 'Choose metric or imperial units' });
       }
+      if (!validFullName(body.full_name)) return json(res, 400, { error: 'Full name must be 80 characters or fewer' });
       const token = register(authDb, body.username, body.password, body.unit_system,
-        registrationTimeZone(clientAddress(req), body.time_zone));
+        registrationTimeZone(clientAddress(req), body.time_zone), normalizeFullName(body.full_name));
       if (!token) return json(res, 409, { error: 'Username is already taken' });
       return json(res, 201, { ok: true }, { 'Set-Cookie': sessionCookie(token, secureRequest(req), cookieName) });
     }
@@ -243,11 +254,19 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { account, workspaces: ownerWorkspaces(account.id), preferred_units: getPreferredUnits(authDb, account.id) });
     }
     if (pathname === '/api/me/profile' && req.method === 'PATCH') {
-      const body = await readJson(req, 1024) as { hide_public_profile?: unknown };
-      if (typeof body.hide_public_profile !== 'boolean')
+      const body = await readJson(req, 1024) as { hide_public_profile?: unknown; full_name?: unknown };
+      const hasVisibility = Object.hasOwn(body, 'hide_public_profile');
+      const hasFullName = Object.hasOwn(body, 'full_name');
+      if (!hasVisibility && !hasFullName) return json(res, 400, { error: 'No profile changes provided' });
+      if (hasVisibility && typeof body.hide_public_profile !== 'boolean')
         return json(res, 400, { error: 'Choose whether to hide your public profile' });
-      setPublicProfileHidden(authDb, account.id, body.hide_public_profile);
-      return json(res, 200, { hide_public_profile: body.hide_public_profile });
+      if (hasFullName && !validFullName(body.full_name))
+        return json(res, 400, { error: 'Full name must be 80 characters or fewer' });
+      if (hasVisibility) setPublicProfileHidden(authDb, account.id, body.hide_public_profile as boolean);
+      const fullName = hasFullName ? normalizeFullName(body.full_name) : account.full_name;
+      if (hasFullName) saveFullName(authDb, account.id, fullName);
+      return json(res, 200, { hide_public_profile: hasVisibility ? body.hide_public_profile : account.hide_public_profile,
+        full_name: fullName });
     }
     if (pathname === '/api/me/time-zone' && req.method === 'PATCH') {
       const body = await readJson(req, 1024) as { time_zone?: unknown };
