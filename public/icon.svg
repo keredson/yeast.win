@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="Yeast.Win!">
+  <rect width="192" height="192" rx="40" fill="#193b39"/>
+  <path d="M78 37h36m-32 0v47l-40 65c-5 9 1 17 11 17h86c10 0 16-8 11-17l-40-65V37" fill="none" stroke="#fff4dd" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M61 119h70l20 32c4 7-1 15-11 15H52c-10 0-15-8-11-15z" fill="#e7b464"/>
+  <path d="M61 119h70" fill="none" stroke="#fff4dd" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="83" cy="143" r="7" fill="#fff4dd"/>
+  <circle cx="111" cy="133" r="5" fill="#fff4dd"/>
+  <circle cx="97" cy="105" r="6" fill="#e7b464"/>
+  <circle cx="84" cy="87" r="4" fill="#e7b464"/>
+  <circle cx="101" cy="69" r="3" fill="#e7b464"/>
+</svg>

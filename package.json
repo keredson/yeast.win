@@ -1,0 +1,46 @@
+{
+  "name": "brewlog",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:server": "node --watch --import tsx server/index.ts",
+    "dev:web": "vite --host 0.0.0.0",
+    "build": "tsc --noEmit && vite build",
+    "start": "node --import tsx server/index.ts",
+    "test": "tsx --test tests/*.test.ts",
+    "setup:sqlite": "bash scripts/setup-sqlite.sh",
+    "catalog:backup": "node scripts/backup-catalog.mjs",
+    "smoke:browser": "node scripts/smoke-browser.mjs",
+    "smoke:public-shell": "node scripts/smoke-public-shell.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^6.3.4",
+    "@vlcn.io/crsqlite-wasm": "0.16.0",
+    "antd": "6.6.5",
+    "better-sqlite3": "13.0.3",
+    "cbor-x": "^1.6.5",
+    "dayjs": "1.11.13",
+    "nanoid": "6.0.2",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "22.18.6",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "@vitejs/plugin-react": "6.1.2",
+    "concurrently": "9.2.1",
+    "playwright-core": "1.64.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vite": "8.3.4",
+    "vite-plugin-pwa": "2.0.0",
+    "workbox-build": "7.4.1",
+    "workbox-window": "7.4.1"
+  },
+  "packageManager": "yarn@1.22.22"
+}
