@@ -31,10 +31,13 @@ Cloudflare Tunnel with these published applications:
 - `yeast.win` -> `unix:/run/yeast-win/app.sock`
 - `deploy.yeast.win` -> `unix:/run/yeast-deploy/hook.sock`
 
-Protect the deployment hostname with a Cloudflare Access service-token policy. Create a service token for
-GitHub Actions, then add these secrets to a GitHub `production` environment:
+Add this secret to a GitHub `production` environment:
 
 - `YEAST_DEPLOY_SECRET`: the value stored in `/etc/yeast-win/deploy-hook.env`
+
+The HMAC signature produced with this secret is the deployment endpoint's required authentication.
+Cloudflare Access is optional defense in depth. If it is enabled, also add its service-token credentials:
+
 - `CF_ACCESS_CLIENT_ID`: the Access service token client ID
 - `CF_ACCESS_CLIENT_SECRET`: the Access service token client secret
 
@@ -48,9 +51,11 @@ sudo sed -n 's/^YEAST_DEPLOY_SECRET=//p' /etc/yeast-win/deploy-hook.env
 ## Operation
 
 A push to `main` runs the TypeScript tests, Python hook tests, typecheck, and production build on a
-GitHub-hosted runner. After they pass, the workflow signs the commit and posts it through Cloudflare
-Access. The local hook accepts only the current `origin/main`, builds a versioned release beneath
+GitHub-hosted runner. After they pass, the workflow signs the commit and posts it through Cloudflare.
+The local hook accepts only the current `origin/main`, builds a versioned release beneath
 `/opt/yeast-win/releases`, atomically changes `/opt/yeast-win/current`, and restarts the application.
+The deploy account belongs to a dedicated health-check group which can connect to the application socket
+but cannot traverse the application's data directory.
 
 Useful commands:
 

@@ -16,7 +16,7 @@ cleanup() {
 trap cleanup EXIT
 
 for command in git node python3 corepack curl unzip flock sudo visudo systemctl ssh-keygen openssl \
-  getent useradd install sed; do
+  getent groupadd useradd usermod install sed; do
   if ! command -v "$command" >/dev/null; then
     echo "required command is missing: $command" >&2
     exit 1
@@ -36,6 +36,10 @@ fi
 if ! getent passwd yeast-deploy >/dev/null; then
   sudo useradd --system --user-group --home-dir "$deploy_home" --shell /usr/sbin/nologin yeast-deploy
 fi
+if ! getent group yeast-win-health >/dev/null; then
+  sudo groupadd --system yeast-win-health
+fi
+sudo usermod --append --groups yeast-win-health yeast-deploy
 
 sudo install -d -o yeast-win -g yeast-win -m 0700 "$app_home" "$app_home/data"
 sudo install -d -o yeast-deploy -g yeast-deploy -m 0755 /opt/yeast-win /opt/yeast-win/releases
