@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Select } from 'antd';
 import { PlusOutlined, SettingOutlined } from '@ant-design/icons';
-import { addBatchPlan, createBatch, eventDetails, eventFormData, listEvents, listPhotos, releaseEquipmentUse,
+import { addBatchPlan, assignEquipmentToBatch, createBatch, eventDetails, eventFormData, listEvents, listPhotos, releaseEquipmentUse,
   startBatchFromRecipe, startBatchFromTemplate, startBatchFromPrevious, updateBatchPlan,
   batchTargetVolume, breweryBatchSize, breweryMashEfficiency, latestMeasuredMashEfficiencySource,
   measuredMashEfficiencyForBatch, updateBatchSettings,
@@ -49,7 +49,21 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   const [recordingEvent, setRecordingEvent] = useState<ActualEvent | null>(null);
   const [editingData, setEditingData] = useState<{ measurementKind?: MeasurementKind; payload: Record<string, string | number | null> } | null>(null);
   const [error, setError] = useState('');
+  const [assignEquipmentId, setAssignEquipmentId] = useState<string | undefined>();
+  const [equipmentBusy, setEquipmentBusy] = useState(false);
   const batch = batches.find(item => item.id === selectedId) || null;
+  const activeEquipmentUses = events.filter(event => event.batch_id === selectedId
+    && event.event_type === 'equipment_use' && event.actual_at != null
+    && event.skipped_at == null && event.ended_at == null);
+  const assignedEquipmentIds = new Set(activeEquipmentUses.map(event => event.details.equipment_id));
+  const availableEquipment = equipment.filter(item => !assignedEquipmentIds.has(item.id));
+  const hasRaptPill = equipment.some(item => /rapt pill/i.test(
+    equipmentModels.find(row => row.id === item.model_id)?.name || item.name));
+  const equipmentLabel = (item: Equipment) => {
+    const model = equipmentModels.find(row => row.id === item.model_id);
+    return `${model?.name || item.name} · ${item.stock_id || `Unit ${item.id.slice(0, 6)}`}`;
+  };
+  useEffect(() => { setAssignEquipmentId(undefined); }, [selectedId]);
 
   async function refreshDetail() {
     if (!selectedId) return;
@@ -121,6 +135,24 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   }, [db, selectedId, events, inventory, equipment, catalogRevision]);
 
   async function changed() { await refreshDetail(); await onChanged(); }
+
+  async function assignEquipment() {
+    if (!selectedId || !assignEquipmentId) return;
+    setEquipmentBusy(true);
+    try {
+      await assignEquipmentToBatch(db, assignEquipmentId, selectedId, accountId);
+      setAssignEquipmentId(undefined);
+      await changed();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setEquipmentBusy(false); }
+  }
+
+  async function releaseEquipment(useId: string) {
+    setEquipmentBusy(true);
+    try { await releaseEquipmentUse(db, useId); await changed(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setEquipmentBusy(false); }
+  }
 
   async function openBatchSize() {
     if (!batch) return;
@@ -221,6 +253,25 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
       {calculation?.batchId === selectedId && <CalculationsCard estimate={calculation.estimate}
         volumeUnit={preferredUnits.volume} showColor={calculation.recipeType === 'beer'}
         showMashEfficiency={calculation.estimate.mashEfficiencyPct != null} label="Batch details" />}
+      <section className="batch-equipment" aria-label="Equipment in use">
+        <h3>Equipment in use</h3>
+        {activeEquipmentUses.length > 0 && <ul>{activeEquipmentUses.map(use => {
+          const item = equipment.find(row => row.id === use.details.equipment_id);
+          return <li key={use.id}><span>{item ? equipmentLabel(item) : use.title}</span>
+            <Button type="text" size="small" disabled={equipmentBusy}
+              onClick={() => void releaseEquipment(use.id)}>Release</Button></li>;
+        })}</ul>}
+        {availableEquipment.length > 0 && <div className="equipment-assignment-form">
+          <Select aria-label="Equipment to assign" placeholder="Choose equipment" showSearch optionFilterProp="label"
+            value={assignEquipmentId} onChange={setAssignEquipmentId}
+            options={availableEquipment.map(item => ({ value: item.id, label: equipmentLabel(item) }))} />
+          <Button disabled={!assignEquipmentId} loading={equipmentBusy}
+            onClick={() => void assignEquipment()}>Assign equipment</Button>
+        </div>}
+        {equipment.length === 0 && <p className="muted">Add an equipment unit to assign it to this batch.</p>}
+        {hasRaptPill && <p className="muted">For automatic readings, also assign the device under <a href="/me">Account → RAPT Pill</a>
+          {' '}after RAPT sends its first reading.</p>}
+      </section>
       <EventTimeline events={events} batchStartAt={batch.created_at} equipment={equipment} details={details} photos={photos}
         onEdit={event => event.actual_at != null ? void recordOrEdit(event as ActualEvent) : setEditingPlan(event as ActualEvent)}
         onRecord={event => void recordOrEdit(event)}

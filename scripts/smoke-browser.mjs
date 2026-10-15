@@ -343,9 +343,14 @@ try {
   if (await page.getByRole('button', { name: /Override (capacity|pressure rating|rated power) for this unit/ }).count()) {
     throw new Error('Fixed model specifications are editable from the stock unit page');
   }
-  await page.getByRole('combobox', { name: 'Assign to batch' }).click();
-  await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: batchName }).click();
-  await page.getByRole('button', { name: 'Assign', exact: true }).click();
+  await navigateSection(page, 'Batches');
+  await openBatch(page, batchName);
+  const batchEquipment = page.getByRole('region', { name: 'Equipment in use' });
+  await batchEquipment.getByRole('combobox', { name: 'Equipment to assign' }).click();
+  await page.locator('.ant-select-dropdown:visible .ant-select-item-option')
+    .filter({ hasText: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
+  await batchEquipment.getByRole('button', { name: 'Assign equipment' }).click();
+  await batchEquipment.getByText('VEVOR Electric Brewing System 9.2 Gal/35 L').waitFor();
   await navigateSection(page, 'Equipment');
   await page.locator('.equipment-table').getByRole('link', { name: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
   await page.waitForURL('**/equipment/vevor-electric-brewing-system-9-2-gal-35-l');
