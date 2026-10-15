@@ -11,7 +11,7 @@ import { openCatalogDb } from './catalog.ts';
 import { receiveCborChanges, streamCborChanges } from './sync.ts';
 import { syncContentType } from '../shared/cborSync.ts';
 import { syncSchemaConflict, syncSchemaHeader } from '../shared/syncSchema.ts';
-import { appUpdateConflict, clientApiVersionHeader, serverRevisionHeader } from '../shared/apiCompatibility.ts';
+import { endpointContract, endpointVersionConflict, endpointVersionHeader, serverRevisionHeader } from '../shared/apiCompatibility.ts';
 import { isValidId } from '../shared/schema.ts';
 import { validPreferredUnits } from '../shared/units.ts';
 import { requestAddress, requestIsSecure } from './http.ts';
@@ -161,7 +161,11 @@ const server = createServer(async (req, res) => {
     const pathname = url.pathname;
     if (!pathname.startsWith('/api/')) return serveStatic(req, res, pathname);
     res.setHeader(serverRevisionHeader, deploymentInfo.commit || 'unknown');
-    const conflict = appUpdateConflict(pathname, req.method, req.headers[clientApiVersionHeader.toLowerCase()] as string | undefined);
+    const contract = endpointContract(pathname, req.method);
+    if (contract) res.setHeader(endpointVersionHeader, String(contract.version));
+    const suppliedVersion = req.headers[endpointVersionHeader.toLowerCase()] || url.searchParams.get('endpoint_version') || undefined;
+    const conflict = endpointVersionConflict(contract, suppliedVersion === undefined ? undefined
+      : typeof suppliedVersion === 'string' ? suppliedVersion : 'invalid');
     if (conflict) return json(res, 409, conflict);
     if (pathname === '/api/healthz' && req.method === 'GET') return json(res, 200, { ok: true });
     if (pathname === '/api/about' && req.method === 'GET')
