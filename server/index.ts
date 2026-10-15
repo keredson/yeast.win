@@ -11,6 +11,7 @@ import { syncContentType } from '../shared/cborSync.ts';
 import { syncSchemaConflict, syncSchemaHeader } from '../shared/syncSchema.ts';
 import { isValidId } from '../shared/schema.ts';
 import { validPreferredUnits } from '../shared/units.ts';
+import { requestAddress, requestIsSecure } from './http.ts';
 
 assertCrSqliteAvailable();
 const authDb = openAuthDb();
@@ -18,12 +19,15 @@ const catalogDb = openCatalogDb(dataDir);
 const workspaceDbs = new Map<string, Database.Database>();
 const distDir = resolve(projectRoot, 'dist');
 const port = Number(process.env.BREWLOG_PORT || 3001);
+const host = process.env.BREWLOG_HOST || '0.0.0.0';
+const trustCloudflare = process.env.BREWLOG_TRUST_CLOUDFLARE === 'true';
 const devSocket = process.env.BREWLOG_DEV_SOCKET;
+const productionSocket = process.env.BREWLOG_SOCKET;
 if (devSocket && (process.env.BREWLOG_DEV_ROOT !== projectRoot
   || devSocket !== resolve(projectRoot, '.brewlog-api.sock'))) {
   throw new Error('Development API socket must belong to this checkout.');
 }
-const cookieName = sessionCookieName(devSocket || port);
+const cookieName = sessionCookieName(devSocket || productionSocket || port);
 const loginFailures = new Map<string, { count: number; resetAt: number }>();
 const registrationAttempts = new Map<string, { count: number; resetAt: number }>();
 const passwordFailures = new Map<string, { count: number; resetAt: number }>();
@@ -65,7 +69,12 @@ function sessionToken(req: IncomingMessage) {
 }
 
 function secureRequest(req: IncomingMessage): boolean {
-  return (req.socket as { encrypted?: boolean }).encrypted === true || req.headers['x-forwarded-proto'] === 'https';
+  return requestIsSecure((req.socket as { encrypted?: boolean }).encrypted === true,
+    req.headers['x-forwarded-proto'], trustCloudflare);
+}
+
+function clientAddress(req: IncomingMessage): string {
+  return requestAddress(req.socket.remoteAddress, req.headers['cf-connecting-ip'], trustCloudflare);
 }
 
 function jpegDimensions(image: Buffer): { width: number; height: number } | null {
@@ -131,8 +140,9 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', 'http://localhost');
     const pathname = url.pathname;
     if (!pathname.startsWith('/api/')) return serveStatic(req, res, pathname);
+    if (pathname === '/api/healthz' && req.method === 'GET') return json(res, 200, { ok: true });
     if (pathname === '/api/register' && req.method === 'POST') {
-      const registrationKey = req.socket.remoteAddress || 'unknown';
+      const registrationKey = clientAddress(req);
       const now = Date.now();
       const previous = registrationAttempts.get(registrationKey);
       const attempts = previous && previous.resetAt > now ? previous : { count: 0, resetAt: now + loginWindowMs };
@@ -153,7 +163,7 @@ const server = createServer(async (req, res) => {
       const body = await readJson(req, 4 * 1024) as { username?: unknown; password?: unknown };
       if (typeof body.username !== 'string' || body.username.length > 40 || typeof body.password !== 'string'
         || body.password.length > 256) return json(res, 400, { error: 'Invalid username or password' });
-      const loginKey = req.socket.remoteAddress || 'unknown';
+      const loginKey = clientAddress(req);
       const now = Date.now();
       const previous = loginFailures.get(loginKey);
       const failures = previous && previous.resetAt > now ? previous : { count: 0, resetAt: now + loginWindowMs };
@@ -307,7 +317,9 @@ const server = createServer(async (req, res) => {
 });
 
 if (devSocket) server.listen(devSocket, () => console.log(`Yeast.Win! server listening on ${devSocket}`));
-else server.listen(port, '0.0.0.0', () => console.log(`Yeast.Win! server listening on port ${port}`));
+else if (productionSocket) server.listen(productionSocket,
+  () => console.log(`Yeast.Win! server listening on ${productionSocket}`));
+else server.listen(port, host, () => console.log(`Yeast.Win! server listening on ${host}:${port}`));
 
 function shutdown() {
   server.close();
