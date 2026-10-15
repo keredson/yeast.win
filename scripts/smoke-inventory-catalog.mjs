@@ -18,20 +18,20 @@ try {
   await page.getByRole('button', { name: 'Account menu' }).waitFor({ timeout: 30_000 });
   await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Settings' }).click();
   await page.waitForFunction(() => {
-    const button = document.querySelector('button[aria-label="Sync now"]');
+    const button = document.querySelector('button[aria-label="Sync Homebrew"]');
     return button && !button.hasAttribute('disabled');
   }, undefined, { timeout: 30_000 });
   const catalogSync = page.waitForResponse(response => response.url().includes('/api/catalog/sync')
     && response.request().method() === 'GET', { timeout: 60_000 });
-  await page.getByRole('button', { name: 'Sync now' }).click();
+  await page.getByRole('button', { name: 'Sync Homebrew' }).click();
   if (!(await catalogSync).ok()) throw new Error('Manual sync did not fetch catalog changes');
   await page.waitForFunction(() => {
-    const button = document.querySelector('button[aria-label="Sync now"]');
+    const button = document.querySelector('button[aria-label="Sync Homebrew"]');
     return button && !button.hasAttribute('disabled');
   }, undefined, { timeout: 60_000 });
   const forcedCatalogSync = page.waitForResponse(response => response.url().includes('/api/catalog/sync')
     && response.request().method() === 'GET', { timeout: 60_000 });
-  await page.getByRole('button', { name: 'Sync now' }).click();
+  await page.getByRole('button', { name: 'Sync Homebrew' }).click();
   if (!(await forcedCatalogSync).ok()) throw new Error('Manual sync was blocked by the catalog refresh interval');
   await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Inventory' }).first().click();
   await page.getByRole('heading', { name: 'Inventory', exact: true }).waitFor();

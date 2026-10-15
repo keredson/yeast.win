@@ -38,7 +38,7 @@ try {
   await dialog.getByRole('button', { name: 'Create batch' }).click();
   await first.getByRole('heading', { name: batchName }).waitFor();
   await first.goto(`${baseUrl}/settings`);
-  await first.getByRole('button', { name: 'Sync now' }).click();
+  await first.getByRole('button', { name: 'Sync Homebrew' }).click();
   await first.waitForFunction(() => {
     const id = JSON.parse(localStorage.getItem('brewlog:last-session')).workspaces[0].id;
     return Number(localStorage.getItem(`brewlog:last-sync:${id}`)) > 0;

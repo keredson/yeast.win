@@ -77,6 +77,28 @@ try {
   await page.waitForURL('**/settings');
   assert.equal(await page.getByRole('switch', { name: 'Automatic sync' }).count(), 0);
   assert.equal(await page.getByRole('button', { name: 'Download catalog images' }).count(), 0);
+  assert.equal(await page.getByText('Changes stay on this device until they sync automatically.').count(), 0);
+  assert.equal(await page.getByRole('button', { name: 'Delete Homebrew' }).count(), 0);
+  await page.getByRole('button', { name: 'Edit Homebrew' }).click();
+  const breweryEditor = page.getByRole('dialog', { name: 'Edit brewery' });
+  await breweryEditor.getByRole('button', { name: 'Delete brewery' }).click();
+  await page.getByRole('dialog', { name: 'Delete Homebrew?' }).getByRole('button', { name: 'Cancel' }).click();
+  await breweryEditor.getByRole('button', { name: 'Close' }).click();
+  if (dev) {
+    await page.getByRole('button', { name: 'New brewery' }).click();
+    const newBrewery = page.getByRole('dialog', { name: 'New brewery' });
+    await newBrewery.getByRole('textbox', { name: 'Brewery name' }).fill('Smoke second brewery');
+    await newBrewery.getByRole('button', { name: 'Create brewery' }).click();
+    await page.getByRole('button', { name: 'Sync Homebrew' }).click();
+    const homebrewId = await page.evaluate(() => JSON.parse(localStorage.getItem('brewlog:last-session')).workspaces[0].id);
+    await page.waitForFunction(id => Number(localStorage.getItem(`brewlog:last-sync:${id}`)) > 0, homebrewId);
+    assert.equal(await page.locator('.workspace-select').getByText('Smoke second brewery').isVisible(), true,
+      'syncing Homebrew changed the selected brewery');
+  }
+  await page.setViewportSize({ width: 320, height: 720 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
+    'brewery actions overflow the Settings page on a narrow phone');
+  await page.setViewportSize({ width: 1280, height: 900 });
   const raptSettingsButton = page.getByRole('button', { name: 'RAPT Pill settings' });
   await raptSettingsButton.click();
   const raptSettings = page.getByRole('dialog', { name: 'RAPT Pill' });

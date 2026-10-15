@@ -20,10 +20,9 @@ interface Props {
   onAvatarUploaded: () => void;
   preferredUnits: PreferredUnits;
   onPreferredUnitsChange: (units: PreferredUnits) => Promise<void>;
-  syncPhase: 'idle' | 'syncing' | 'synced' | 'failed';
-  syncStatus: string;
-  canSync: boolean;
-  onManualSync: () => void;
+  syncingWorkspaceId: string | null;
+  syncStatusFor: (id: string) => string;
+  onManualSync: (id: string) => Promise<void>;
 }
 
 interface PasswordValues { currentPassword: string; newPassword: string; confirmPassword: string }
@@ -48,7 +47,7 @@ const raptPayload = `{
 export function AccountSection({ username, workspaces, activeWorkspaceId, db,
   onCreateWorkspace, onUpdateWorkspace, onDeleteWorkspace,
   avatarSrc, onAvatarUploaded, preferredUnits, onPreferredUnitsChange,
-  syncPhase, syncStatus, canSync, onManualSync }: Props) {
+  syncingWorkspaceId, syncStatusFor, onManualSync }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [passwordForm] = Form.useForm<PasswordValues>();
   const [breweryForm] = Form.useForm<{ name: string; slug?: string }>();
@@ -227,7 +226,12 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
   async function removeBrewery() {
     if (!deleteTarget) return;
     setBreweryBusy(true); setBreweryError('');
-    try { await onDeleteWorkspace(deleteTarget.id); setDeleteTarget(null); }
+    try {
+      await onDeleteWorkspace(deleteTarget.id);
+      setDeleteTarget(null);
+      setBreweryEditor(null);
+      breweryForm.resetFields();
+    }
     catch (cause) { setBreweryError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBreweryBusy(false); }
   }
@@ -249,12 +253,15 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
       aria-label="New brewery" title="New brewery" onClick={() => openBreweryEditor('new')} />}>
       {workspaces.length ? workspaces.map(brewery => <div className="setting-row brewery-row" key={brewery.id}>
         <div><strong>{brewery.name}</strong>{brewery.id === activeWorkspaceId && <Tag color="green">Selected</Tag>}
-          <div className="muted">{brewery.slug === null ? 'Root URLs · /batches' : `/brewery/${brewery.slug}`}</div></div>
+          <div className="muted">{brewery.slug === null ? 'Root URLs · /batches' : `/brewery/${brewery.slug}`}</div>
+          <div className="muted">{syncingWorkspaceId === brewery.id ? 'Syncing…' : syncStatusFor(brewery.id)}</div></div>
         <div className="brewery-actions">
+          <Tooltip title={`${syncStatusFor(brewery.id)} · Sync brewery and catalog`}><Button className="sync-button"
+            type="text" shape="circle" icon={<SyncOutlined spin={syncingWorkspaceId === brewery.id} />}
+            aria-label={`Sync ${brewery.name}`} disabled={!!syncingWorkspaceId}
+            onClick={() => void onManualSync(brewery.id)} /></Tooltip>
           <Button type="text" shape="circle" icon={<EditOutlined />} aria-label={`Edit ${brewery.name}`}
             title="Edit brewery" onClick={() => openBreweryEditor(brewery)} />
-          <Button type="text" shape="circle" danger icon={<DeleteOutlined />} aria-label={`Delete ${brewery.name}`}
-            title="Delete brewery" onClick={() => { setBreweryError(''); setDeleteTarget(brewery); }} />
         </div>
       </div>) : <Typography.Paragraph type="secondary">No breweries yet. Add one to start brewing.</Typography.Paragraph>}
     </Card>
@@ -272,7 +279,11 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
           Clear the slug to use root URLs such as /batches. Only one brewery can have no slug.
         </Typography.Paragraph>}
         {breweryError && <Alert type="error" message={breweryError} className="form-alert" />}
-        <Button type="primary" htmlType="submit" loading={breweryBusy}>{breweryEditor === 'new' ? 'Create brewery' : 'Save brewery'}</Button>
+        <div className="brewery-editor-actions">
+          <Button type="primary" htmlType="submit" loading={breweryBusy}>{breweryEditor === 'new' ? 'Create brewery' : 'Save brewery'}</Button>
+          {breweryEditor !== 'new' && breweryEditor && <Button danger icon={<DeleteOutlined />} disabled={breweryBusy}
+            onClick={() => { setBreweryError(''); setDeleteTarget(breweryEditor); }}>Delete brewery</Button>}
+        </div>
       </Form>
     </Modal>
     <Modal title={`Delete ${deleteTarget?.name || 'brewery'}?`} open={!!deleteTarget} onCancel={() => setDeleteTarget(null)}
@@ -388,14 +399,6 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
           onChange={value => void updateUnits({ ...preferredUnits, pressure: value })} /></label>
       </div>
       {unitsError && <Alert type="error" message={unitsError} showIcon />}
-    </Card>
-    <Card title="Sync" className="account-card">
-      <div className="setting-row"><div><strong>Sync status</strong><div className="muted">{syncPhase === 'syncing' ? 'Syncing…' : syncPhase === 'failed' ? `Sync failed · ${syncStatus}` : syncStatus}</div></div>
-        <Tooltip title={`${syncStatus} · Sync brewery and catalog`}><Button className="sync-button" type="text" shape="circle" aria-label="Sync now"
-          icon={<SyncOutlined spin={syncPhase === 'syncing'} />} disabled={!canSync || syncPhase === 'syncing'} onClick={onManualSync} /></Tooltip></div>
-      <Typography.Paragraph type="secondary" className="setting-description">
-        Changes stay on this device until they sync automatically. Use the sync icon above to sync now.
-      </Typography.Paragraph>
     </Card>
   </div>;
 }

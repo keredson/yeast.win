@@ -1368,9 +1368,9 @@ try {
   await page.screenshot({ path: '/tmp/brewlog-account-mobile.png', fullPage: true });
   await page.setViewportSize({ width: 1280, height: 900 });
   if (await page.getByText('Current brewery', { exact: true }).count()) throw new Error('Current brewery is still shown on /settings');
-  const syncButton = page.getByRole('button', { name: 'Sync now' });
+  const syncButton = page.getByRole('button', { name: 'Sync Homebrew' });
   await syncButton.hover();
-  await page.getByRole('tooltip').getByText(/Last synced \d+ sec ago · Click to sync/).waitFor();
+  await page.getByRole('tooltip').getByText(/Last synced \d+ sec ago · Sync brewery and catalog/).waitFor();
   if (await syncButton.evaluate(button => getComputedStyle(button).borderTopWidth) !== '0px') {
     throw new Error('Sync button should be borderless');
   }
@@ -1383,7 +1383,7 @@ try {
     const id = JSON.parse(localStorage.getItem('brewlog:last-session')).workspaces[0].id;
     return Number(localStorage.getItem(`brewlog:last-sync:${id}`)) > Number(previous);
   }, syncBeforeClick);
-  console.log('Settings sync icon updated the last sync time');
+  console.log('Brewery sync icon updated the last sync time');
   const avatarData = await page.evaluate(() => {
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = 32;
     const context = canvas.getContext('2d'); context.fillStyle = '#407a61'; context.fillRect(0, 0, 32, 32);
@@ -1493,9 +1493,10 @@ try {
   }
 
   await navigateSection(page, 'Settings');
-  await page.getByRole('button', { name: 'Delete Homebrew' }).click();
+  await page.getByRole('button', { name: 'Edit Homebrew' }).click();
+  await page.getByRole('dialog', { name: 'Edit brewery' }).getByRole('button', { name: 'Delete brewery' }).click();
   await page.getByRole('dialog', { name: 'Delete Homebrew?' }).getByRole('button', { name: 'Delete brewery' }).click();
-  await page.getByRole('button', { name: 'Delete Homebrew' }).waitFor({ state: 'hidden' });
+  await page.getByRole('button', { name: 'Edit Homebrew' }).waitFor({ state: 'hidden' });
   const remainingBlocks = await localBreweryBlocks(page, firstWorkspaceId);
   if (remainingBlocks) throw new Error(`Deleted Homebrew database remains in browser storage (${remainingBlocks} blocks): ${JSON.stringify(await page.locator('.page-alert').allTextContents())}`);
   const afterDefaultDelete = await page.evaluate(async () => (await (await fetch('/api/me')).json()).workspaces);
@@ -1520,7 +1521,8 @@ try {
     throw new Error('Clearing the remaining brewery slug did not claim root URLs');
   }
   await navigateSection(page, 'Settings');
-  await page.getByRole('button', { name: 'Delete Renamed brewery' }).click();
+  await page.getByRole('button', { name: 'Edit Renamed brewery' }).click();
+  await page.getByRole('dialog', { name: 'Edit brewery' }).getByRole('button', { name: 'Delete brewery' }).click();
   await page.getByRole('dialog', { name: 'Delete Renamed brewery?' }).getByRole('button', { name: 'Delete brewery' }).click();
   await page.getByText('No breweries yet. Add one to start brewing.').waitFor();
   await page.getByRole('button', { name: 'New brewery' }).click();

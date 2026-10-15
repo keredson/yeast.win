@@ -211,6 +211,7 @@ export function App() {
   const [error, setError] = useState('');
   const [serverDisconnected, setServerDisconnected] = useState(false);
   const [syncPhase, setSyncPhase] = useState<'idle' | 'syncing' | 'synced' | 'failed'>('idle');
+  const [manualSyncWorkspaceId, setManualSyncWorkspaceId] = useState<string | null>(null);
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
   const [catalogSyncProgress, setCatalogSyncProgress] = useState<{ applied: number; total: number } | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
@@ -456,9 +457,10 @@ export function App() {
   }, [db, recent, sectionData]);
 
   const runSync = useCallback(async (activeDb: LocalDb, targetWorkspaceId: string, includeCatalog = false) => {
-    if (activeWorkspaceId.current !== targetWorkspaceId) return;
-    setSyncPhase('syncing');
-    setSyncProgress(null);
+    if (activeWorkspaceId.current === targetWorkspaceId) {
+      setSyncPhase('syncing');
+      setSyncProgress(null);
+    }
     try {
       const [breweryResult, catalogResult] = await Promise.allSettled([
         syncNow(activeDb, targetWorkspaceId, progress => {
@@ -471,12 +473,12 @@ export function App() {
           }, true);
         })() : Promise.resolve(false)
       ]);
-      if (activeWorkspaceId.current !== targetWorkspaceId) return;
-      setCatalogSyncProgress(null);
+      if (activeWorkspaceId.current === targetWorkspaceId) setCatalogSyncProgress(null);
       if (catalogResult.status === 'fulfilled' && catalogResult.value) {
         setCatalogRevision(revision => revision + 1);
       }
-      if (breweryResult.status === 'fulfilled' || catalogResult.status === 'fulfilled' && catalogResult.value) {
+      if (activeWorkspaceId.current === targetWorkspaceId
+        && (breweryResult.status === 'fulfilled' || catalogResult.status === 'fulfilled' && catalogResult.value)) {
         await refresh(activeDb, targetWorkspaceId);
       }
       if (breweryResult.status === 'rejected') throw breweryResult.reason;
@@ -487,17 +489,20 @@ export function App() {
       }
       const syncedAt = Date.now();
       localStorage.setItem(lastSyncKey(targetWorkspaceId), String(syncedAt));
-      setLastSyncedAt(syncedAt);
+      if (activeWorkspaceId.current === targetWorkspaceId) setLastSyncedAt(syncedAt);
       setNow(syncedAt);
-      setSyncPhase('synced');
-      setSyncProgress(null);
+      if (activeWorkspaceId.current === targetWorkspaceId) {
+        setSyncPhase('synced');
+        setSyncProgress(null);
+      }
       setServerDisconnected(false);
       setError('');
     } catch (cause) {
-      if (activeWorkspaceId.current !== targetWorkspaceId) return;
-      setSyncPhase('failed');
-      setSyncProgress(null);
-      setCatalogSyncProgress(null);
+      if (activeWorkspaceId.current === targetWorkspaceId) {
+        setSyncPhase('failed');
+        setSyncProgress(null);
+        setCatalogSyncProgress(null);
+      }
       if (cause instanceof ClientUpdateRequiredError) {
         setError('Updating the app to continue syncing…');
         const updated = await checkForAppUpdate();
@@ -507,6 +512,14 @@ export function App() {
       else if (navigator.onLine) setError(cause instanceof Error ? cause.message : 'Sync failed');
     }
   }, [refresh]);
+
+  async function manualSyncWorkspace(id: string) {
+    if (!session?.workspaces.some(item => item.id === id)) return;
+    setManualSyncWorkspaceId(id);
+    try { await runSync(await openLocalDb(id), id, true); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setManualSyncWorkspaceId(null); }
+  }
 
   const runAutomaticSync = useCallback((activeDb: LocalDb, targetWorkspaceId: string) => {
     const now = Date.now();
@@ -683,8 +696,10 @@ export function App() {
           onAvatarUploaded={() => { const updated = { ...session, account: { ...session.account, has_avatar: true } };
             rememberSession(updated); setSession(updated); setAvatarVersion(Date.now()); }}
           preferredUnits={preferredUnits} onPreferredUnitsChange={updatePreferredUnits}
-          syncPhase={syncPhase} syncStatus={timeSinceSync(lastSyncedAt, now)} canSync={!!db && !!workspaceId}
-          onManualSync={() => { if (db && workspaceId) void runSync(db, workspaceId, true); }} /> : !workspaceId
+          syncingWorkspaceId={manualSyncWorkspaceId || (syncPhase === 'syncing' ? workspaceId : null)}
+          syncStatusFor={id => timeSinceSync(id === workspaceId ? lastSyncedAt
+            : Number(localStorage.getItem(lastSyncKey(id))) || null, now)}
+          onManualSync={manualSyncWorkspace} /> : !workspaceId
           ? <Empty description="Add a brewery in Settings to begin">
             <Button type="primary" onClick={() => showSection('settings')}>Open Settings</Button></Empty> :
           !db ? <div className="loading-screen"><Spin description="Opening data on this device" /></div>

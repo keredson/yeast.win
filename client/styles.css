@@ -50,6 +50,7 @@ button, input, textarea { font: inherit; }
 .brewery-row > div:first-child { min-width: 0; overflow-wrap: anywhere; }
 .brewery-row .ant-tag { margin-left: 8px; }
 .brewery-actions { display: flex; flex: none; gap: 4px; }
+.brewery-editor-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .integrations-card .ant-card-body { padding: 0; }
 .integrations-table { width: 100%; border-collapse: collapse; }
 .integrations-table th { padding: 16px 24px; text-align: left; font-weight: 400; }
