@@ -199,14 +199,15 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   return <div className="section-page">
     {error && <Alert type="error" message={error} closable onClose={() => setError('')} className="form-alert" />}
     {!selectedId ? <section className="record-index">
-      <div className="section-heading"><div><span className="eyebrow">Your brewing record</span><h1>Batches</h1></div>
-        <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="New batch" title="New batch" onClick={() => setNewBatch(true)} /></div>
+      <div className="section-heading"><div><span className="eyebrow">Your brewing record</span><h1>Batches</h1></div></div>
       <p className="muted">Actions and readings, all around the batch.</p>
       {batches.length > 0 && <div className="record-list">{batches.map(item =>
         <a key={item.id} className="record-link" href={`${basePath}/batch/${item.id}`}
           onClick={event => { event.preventDefault(); onSelect(item.id); }}>
           <strong>{item.name}</strong><small>{item.description || formatTime(item.created_at)}</small>
         </a>)}</div>}
+      <div className="record-index-actions"><Button icon={<PlusOutlined />}
+        onClick={() => setNewBatch(true)}>New batch</Button></div>
     </section> : !batch ? <Empty description="Batch not found" /> : <section className="record-detail">
       <div className="content-heading"><div><span className="eyebrow">Batch log</span><h2>{batch.name}</h2>
         <p className="muted">{batch.description || 'A living record of this brew.'}</p>

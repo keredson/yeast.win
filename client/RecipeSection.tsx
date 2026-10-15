@@ -221,7 +221,7 @@ export function RecipeSection({ db, basePath, accountId, recipes, equipment, equ
           <RecipeTypeIcon type={item.recipe_type} />
           <span className="recipe-link-copy"><strong>{item.name}</strong><small>{item.description || 'No description'}</small></span>
         </a>)}</div>}
-      <div className="recipe-index-actions">
+      <div className="record-index-actions">
         <Button icon={<PlusOutlined />} onClick={() => void openNewRecipe()}>New recipe</Button>
         <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>Import recipes</Button>
       </div>
