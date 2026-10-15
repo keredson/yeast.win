@@ -357,9 +357,12 @@ try {
   await useEquipment.getByRole('button', { name: 'Start using equipment' }).click();
   await page.locator('.batch-timeline .title-edit-row strong')
     .filter({ hasText: /^Use VEVOR Electric Brewing System 9\.2 Gal\/35 L · Unit [A-Za-z0-9_-]{6}$/ }).waitFor();
-  await page.locator('.batch-timeline').getByRole('button', { name: 'Release' }).click();
+  await page.getByRole('button', { name: 'Edit Use VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
+  const editEquipmentUse = page.getByRole('dialog', { name: 'Edit equipment use' });
+  await editEquipmentUse.getByRole('button', { name: 'Release' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Cancel' }).click();
-  await page.locator('.batch-timeline').getByRole('button', { name: 'Release' }).waitFor();
+  await editEquipmentUse.getByRole('button', { name: 'Release' }).waitFor();
+  await page.keyboard.press('Escape');
   await navigateSection(page, 'Equipment');
   await page.locator('.equipment-table').getByRole('link', { name: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
   await page.waitForURL('**/equipment/vevor-electric-brewing-system-9-2-gal-35-l');

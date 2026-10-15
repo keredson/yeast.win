@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState } from 'react';
-import { Button, Card, Dropdown, Popconfirm, Tag } from 'antd';
+import { Button, Card, Dropdown, Tag } from 'antd';
 import { CheckOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ActualEvent, Equipment, PlanInput } from './db.ts';
 import { kindLabel, measurementKinds } from './constants.ts';
@@ -40,11 +40,10 @@ const actionItems = [
   { key: 'photo', label: 'Photo' }, { key: 'note', label: 'Notes' }
 ];
 
-export function EventTimeline({ events, batchStartAt, equipment = [], details = {}, photos = [], onEdit, onAdd, onRecord, onReleaseEquipment }: {
+export function EventTimeline({ events, batchStartAt, equipment = [], details = {}, photos = [], onEdit, onAdd, onRecord }: {
   events: TimelineEvent[]; batchStartAt?: number; equipment?: Equipment[]; details?: Record<string, string>; photos?: TimelinePhoto[];
   onEdit: (event: TimelineEvent) => void; onAdd: (kind: string, preset: PlanPreset) => void;
   onRecord?: (event: ActualEvent) => void;
-  onReleaseEquipment?: (eventId: string) => void;
 }) {
   const isBatch = batchStartAt != null;
   const equipmentNames = new Map(equipment.map(item => [item.id, item.name]));
@@ -97,7 +96,7 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
         const images = photos.filter(photo => photo.batch_event_id === item.id);
         return <div key={item.id} className="timeline-entry plan-card">
           <div className="timeline-card"><div><div className={`title-edit-row${isBatch ? '' : ' recipe-title-detail'}`}>
-            {isBatch && item.event_type !== 'equipment_use' && <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${item.title || kindLabel(item.event_type)}`}
+            {isBatch && <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${item.title || kindLabel(item.event_type)}`}
               onClick={() => onEdit(item)} />}
             <strong>{item.title || planKindLabel(item)}{usedUnitLabel && ` · ${usedUnitLabel}`}</strong>
             {item.details.gravity_role && <Tag color={item.details.gravity_role === 'og' ? 'blue' : 'purple'}
@@ -108,12 +107,6 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
               {isBatch && <Tag color={happened ? (item.event_type === 'equipment_use' || planDuration(item)) && !item.ended_at ? 'cyan' : 'green' : skipped ? 'default' : 'blue'}
                 title={happened ? `Recorded ${formatTime(item.actual_at)}` : skipped ? `Skipped ${formatTime(item.skipped_at)}` : undefined}>
                 {happened ? shortTime(item.actual_at!) : skipped ? 'Skipped' : 'Pending'}</Tag>}
-              {item.event_type === 'equipment_use' && item.ended_at == null && onReleaseEquipment &&
-                <Popconfirm title={`Release ${usedEquipment?.stock_id || usedEquipment?.name || 'equipment'} from this batch?`}
-                  description="This ends its use now and keeps the record in the timeline."
-                  okText="Release" onConfirm={() => onReleaseEquipment(item.id)}>
-                  <Button type="text" size="small">Release</Button>
-                </Popconfirm>}
               {onRecord && !happened && <Button type="text" shape="circle" icon={<CheckOutlined />} aria-label={`Record ${item.title}`}
                 title="Record or skip" onClick={() => onRecord(item as ActualEvent)} />}
               {!isBatch && <Button type="text" shape="circle" size="small" icon={<EditOutlined />}

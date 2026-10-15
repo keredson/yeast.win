@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Select } from 'antd';
+import { Alert, Button, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select } from 'antd';
 import { PlusOutlined, SettingOutlined } from '@ant-design/icons';
 import { addBatchPlan, assignEquipmentToBatch, createBatch, eventDetails, eventFormData, listEvents, listPhotos, releaseEquipmentUse,
   startBatchFromRecipe, startBatchFromTemplate, startBatchFromPrevious, updateBatchPlan,
@@ -53,19 +53,21 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   const [equipmentBusy, setEquipmentBusy] = useState(false);
   const [equipmentError, setEquipmentError] = useState('');
   const [equipmentUseOpen, setEquipmentUseOpen] = useState(false);
+  const [editingEquipmentUse, setEditingEquipmentUse] = useState<ActualEvent | null>(null);
   const batch = batches.find(item => item.id === selectedId) || null;
   const activeEquipmentUses = events.filter(event => event.batch_id === selectedId
     && event.event_type === 'equipment_use' && event.actual_at != null
     && event.skipped_at == null && event.ended_at == null);
   const assignedEquipmentIds = new Set(activeEquipmentUses.map(event => event.details.equipment_id));
-  const availableEquipment = equipment.filter(item => !assignedEquipmentIds.has(item.id));
+  const availableEquipment = equipment.filter(item => item.id === editingEquipmentUse?.details.equipment_id
+    || !assignedEquipmentIds.has(item.id));
   const hasRaptPill = equipment.some(item => /rapt pill/i.test(
     equipmentModels.find(row => row.id === item.model_id)?.name || item.name));
   const equipmentLabel = (item: Equipment) => {
     const model = equipmentModels.find(row => row.id === item.model_id);
     return `${model?.name || item.name} · ${item.stock_id || `Unit ${item.id.slice(0, 6)}`}`;
   };
-  useEffect(() => { setAssignEquipmentId(undefined); }, [selectedId]);
+  useEffect(() => { setAssignEquipmentId(undefined); setEditingEquipmentUse(null); setEquipmentUseOpen(false); }, [selectedId]);
 
   async function refreshDetail() {
     if (!selectedId) return;
@@ -142,9 +144,15 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
     if (!selectedId || !assignEquipmentId) return;
     setEquipmentBusy(true);
     try {
-      await assignEquipmentToBatch(db, assignEquipmentId, selectedId, accountId);
+      if (editingEquipmentUse) {
+        const item = equipment.find(row => row.id === assignEquipmentId);
+        if (!item) throw new Error('Choose an available equipment unit');
+        await updateBatchPlan(db, selectedId, editingEquipmentUse.id,
+          { event_type: 'equipment_use', title: `Use ${item.name}`, details: { equipment_id: item.id } });
+      } else await assignEquipmentToBatch(db, assignEquipmentId, selectedId, accountId);
       await changed();
       setAssignEquipmentId(undefined);
+      setEditingEquipmentUse(null);
       setEquipmentUseOpen(false);
     } catch (cause) { setEquipmentError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setEquipmentBusy(false); }
@@ -152,8 +160,13 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
 
   async function releaseEquipment(useId: string) {
     setEquipmentBusy(true);
-    try { await releaseEquipmentUse(db, useId); await changed(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    try {
+      await releaseEquipmentUse(db, useId);
+      await changed();
+      setEditingEquipmentUse(null);
+      setAssignEquipmentId(undefined);
+      setEquipmentUseOpen(false);
+    } catch (cause) { setEquipmentError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setEquipmentBusy(false); }
   }
 
@@ -257,22 +270,36 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
         volumeUnit={preferredUnits.volume} showColor={calculation.recipeType === 'beer'}
         showMashEfficiency={calculation.estimate.mashEfficiencyPct != null} label="Batch details" />}
       <EventTimeline events={events} batchStartAt={batch.created_at} equipment={equipment} details={details} photos={photos}
-        onEdit={event => event.actual_at != null ? void recordOrEdit(event as ActualEvent) : setEditingPlan(event as ActualEvent)}
+        onEdit={event => { if (event.event_type === 'equipment_use') {
+          setEditingEquipmentUse(event as ActualEvent);
+          setAssignEquipmentId(event.details.equipment_id);
+          setEquipmentError(''); setEquipmentUseOpen(true);
+        } else if (event.actual_at != null) void recordOrEdit(event as ActualEvent);
+        else setEditingPlan(event as ActualEvent); }}
         onRecord={event => void recordOrEdit(event)}
-        onReleaseEquipment={id => { void releaseEquipment(id); }}
-        onAdd={(kind, settings) => { if (kind === 'equipment_use') { setEquipmentError(''); setEquipmentUseOpen(true); return; }
+        onAdd={(kind, settings) => { if (kind === 'equipment_use') {
+          setEditingEquipmentUse(null); setAssignEquipmentId(undefined);
+          setEquipmentError(''); setEquipmentUseOpen(true); return; }
           setEditingPlan(null); setPreset(settings); setCreatingKind(kind); }} />
     </section>}
-    <Modal title="Use equipment" open={equipmentUseOpen}
-      onCancel={() => { setEquipmentUseOpen(false); setAssignEquipmentId(undefined); setEquipmentError(''); }} footer={null} destroyOnHidden>
+    <Modal title={editingEquipmentUse ? 'Edit equipment use' : 'Use equipment'} open={equipmentUseOpen}
+      onCancel={() => { setEquipmentUseOpen(false); setEditingEquipmentUse(null); setAssignEquipmentId(undefined); setEquipmentError(''); }}
+      footer={null} destroyOnHidden>
       {equipmentError && <Alert type="error" message={equipmentError} className="form-alert" />}
       {availableEquipment.length > 0 ? <div className="equipment-assignment-form">
         <Select aria-label="Equipment to use" placeholder="Choose equipment" showSearch optionFilterProp="label"
           value={assignEquipmentId} onChange={setAssignEquipmentId}
           options={availableEquipment.map(item => ({ value: item.id, label: equipmentLabel(item) }))} />
-        <Button disabled={!assignEquipmentId} loading={equipmentBusy}
-          onClick={() => void assignEquipment()}>Start using equipment</Button>
+        <Button disabled={!assignEquipmentId || !!editingEquipmentUse && assignEquipmentId === editingEquipmentUse.details.equipment_id}
+          loading={equipmentBusy} onClick={() => void assignEquipment()}>
+          {editingEquipmentUse ? 'Save equipment' : 'Start using equipment'}</Button>
       </div> : <p className="muted">Add an equipment unit before using it in this batch.</p>}
+      {editingEquipmentUse?.ended_at == null && editingEquipmentUse && <Popconfirm
+        title="Release this equipment from the batch?"
+        description="This ends its use now and keeps the record in the timeline."
+        okText="Release" onConfirm={() => void releaseEquipment(editingEquipmentUse.id)}>
+        <Button type="text" danger disabled={equipmentBusy}>Release</Button>
+      </Popconfirm>}
       {hasRaptPill && <p className="muted">For automatic readings, also assign the device under <a href="/me">Account → RAPT Pill</a>
         {' '}after RAPT sends its first reading.</p>}
     </Modal>
