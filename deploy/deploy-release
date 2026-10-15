@@ -48,6 +48,10 @@ if [[ ! -d "$release" ]]; then
     corepack yarn install --frozen-lockfile --non-interactive
     corepack yarn setup:sqlite
     BREWLOG_BUILD_COMMIT="$commit" BREWLOG_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" corepack yarn build
+    if [[ "$(node -p "JSON.parse(require('fs').readFileSync('dist/build-info.json', 'utf8')).commit")" != "$commit" ]]; then
+      echo "built app does not report deployment commit $commit" >&2
+      exit 1
+    fi
   )
   test -f "$temporary/dist/index.html"
   test -f "$temporary/vendor/crsqlite.so"

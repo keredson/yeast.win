@@ -12,11 +12,16 @@ function version(root: string): string {
   return (JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as { version: string }).version;
 }
 
+function releaseCommit(root: string): string | null {
+  const match = resolve(root).match(/\/releases\/(?:\.)?([0-9a-f]{40})(?:\.[^/]+\.tmp)?(?:\/|$)/);
+  return match?.[1] || null;
+}
+
 export function sourceBuildInfo(root: string, environment: BuildInfo['environment']): BuildInfo {
   const gitCommit = git(root, ['rev-parse', 'HEAD']);
   const suppliedCommit = process.env.BREWLOG_BUILD_COMMIT;
   const commit = suppliedCommit && /^[0-9a-f]{40}$/.test(suppliedCommit) ? suppliedCommit
-    : gitCommit && /^[0-9a-f]{40}$/.test(gitCommit) ? gitCommit : null;
+    : gitCommit && /^[0-9a-f]{40}$/.test(gitCommit) ? gitCommit : releaseCommit(root);
   return {
     version: version(root), environment, commit,
     dirty: environment === 'development' || !suppliedCommit
@@ -33,7 +38,7 @@ export function runtimeDeploymentInfo(root: string, distDir: string, development
     if (built.environment === 'production' && built.version === version(root)
       && (built.commit === null || /^[0-9a-f]{40}$/.test(built.commit))
       && typeof built.dirty === 'boolean' && (built.builtAt === null || typeof built.builtAt === 'string')) {
-      return { ...built, startedAt };
+      return { ...built, commit: built.commit || releaseCommit(root), startedAt };
     }
   } catch { /* Older builds may not contain deployment metadata. */ }
   return { ...sourceBuildInfo(root, 'production'), startedAt };
