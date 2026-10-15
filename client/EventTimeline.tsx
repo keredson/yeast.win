@@ -87,7 +87,10 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
       {group.events.map(item => {
         const happened = item.actual_at != null;
         const skipped = !happened && item.skipped_at != null;
-        const detail = item.event_type === 'equipment_use' ? equipmentNames.get(String(item.details.equipment_id || ''))
+        const usedEquipment = item.event_type === 'equipment_use'
+          ? equipment.find(unit => unit.id === item.details.equipment_id) : undefined;
+        const detail = item.event_type === 'equipment_use' ? usedEquipment
+          ? usedEquipment.stock_id || `Unit ${usedEquipment.id.slice(0, 6)}` : undefined
           : happened && ['addition', 'measurement', 'temperature_control', 'note', 'photo'].includes(item.event_type)
           ? details[item.id] : planDetailsLabel(item, equipmentNames) || details[item.id];
         const metadata = item.ended_at != null ? `${item.event_type === 'equipment_use' ? 'Released' : 'Ended'} ${formatTime(item.ended_at)}` : '';
@@ -120,7 +123,8 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
       </Card>}</Fragment>;
     })}</div>
     <div className={`timeline-actions${isBatch ? '' : ' timeline-actions-recipe'}`}><Dropdown trigger={['click']} placement="topLeft" open={menuOpen} onOpenChange={setMenuOpen}
-      menu={{ items: actionItems, triggerSubMenuAction: 'click', onClick: ({ key }) => {
+      menu={{ items: isBatch ? [...actionItems, { key: 'equipment_use', label: 'Use equipment' }] : actionItems,
+        triggerSubMenuAction: 'click', onClick: ({ key }) => {
         const action = actionForMenu(key, events); setMenuOpen(false); onAdd(action.kind, action.preset);
       } }}>
       {isBatch ? <Button type="text" shape="circle" icon={<PlusOutlined />} aria-label="Add action" title="Add action" />

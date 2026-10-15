@@ -51,6 +51,8 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   const [error, setError] = useState('');
   const [assignEquipmentId, setAssignEquipmentId] = useState<string | undefined>();
   const [equipmentBusy, setEquipmentBusy] = useState(false);
+  const [equipmentError, setEquipmentError] = useState('');
+  const [equipmentUseOpen, setEquipmentUseOpen] = useState(false);
   const batch = batches.find(item => item.id === selectedId) || null;
   const activeEquipmentUses = events.filter(event => event.batch_id === selectedId
     && event.event_type === 'equipment_use' && event.actual_at != null
@@ -141,9 +143,10 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
     setEquipmentBusy(true);
     try {
       await assignEquipmentToBatch(db, assignEquipmentId, selectedId, accountId);
-      setAssignEquipmentId(undefined);
       await changed();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+      setAssignEquipmentId(undefined);
+      setEquipmentUseOpen(false);
+    } catch (cause) { setEquipmentError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setEquipmentBusy(false); }
   }
 
@@ -253,32 +256,26 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
       {calculation?.batchId === selectedId && <CalculationsCard estimate={calculation.estimate}
         volumeUnit={preferredUnits.volume} showColor={calculation.recipeType === 'beer'}
         showMashEfficiency={calculation.estimate.mashEfficiencyPct != null} label="Batch details" />}
-      <section className="batch-equipment" aria-label="Equipment in use">
-        <h3>Equipment in use</h3>
-        {activeEquipmentUses.length > 0 && <ul>{activeEquipmentUses.map(use => {
-          const item = equipment.find(row => row.id === use.details.equipment_id);
-          return <li key={use.id}><span>{item ? equipmentLabel(item) : use.title}</span>
-            <Button type="text" size="small" disabled={equipmentBusy}
-              onClick={() => void releaseEquipment(use.id)}>Release</Button></li>;
-        })}</ul>}
-        {availableEquipment.length > 0 && <div className="equipment-assignment-form">
-          <Select aria-label="Equipment to assign" placeholder="Choose equipment" showSearch optionFilterProp="label"
-            value={assignEquipmentId} onChange={setAssignEquipmentId}
-            options={availableEquipment.map(item => ({ value: item.id, label: equipmentLabel(item) }))} />
-          <Button disabled={!assignEquipmentId} loading={equipmentBusy}
-            onClick={() => void assignEquipment()}>Assign equipment</Button>
-        </div>}
-        {equipment.length === 0 && <p className="muted">Add an equipment unit to assign it to this batch.</p>}
-        {hasRaptPill && <p className="muted">For automatic readings, also assign the device under <a href="/me">Account → RAPT Pill</a>
-          {' '}after RAPT sends its first reading.</p>}
-      </section>
       <EventTimeline events={events} batchStartAt={batch.created_at} equipment={equipment} details={details} photos={photos}
         onEdit={event => event.actual_at != null ? void recordOrEdit(event as ActualEvent) : setEditingPlan(event as ActualEvent)}
         onRecord={event => void recordOrEdit(event)}
-        onReleaseEquipment={id => { void releaseEquipmentUse(db, id).then(changed).catch(cause =>
-          setError(cause instanceof Error ? cause.message : String(cause))); }}
-        onAdd={(kind, settings) => { setEditingPlan(null); setPreset(settings); setCreatingKind(kind); }} />
+        onReleaseEquipment={id => { void releaseEquipment(id); }}
+        onAdd={(kind, settings) => { if (kind === 'equipment_use') { setEquipmentError(''); setEquipmentUseOpen(true); return; }
+          setEditingPlan(null); setPreset(settings); setCreatingKind(kind); }} />
     </section>}
+    <Modal title="Use equipment" open={equipmentUseOpen}
+      onCancel={() => { setEquipmentUseOpen(false); setAssignEquipmentId(undefined); setEquipmentError(''); }} footer={null} destroyOnHidden>
+      {equipmentError && <Alert type="error" message={equipmentError} className="form-alert" />}
+      {availableEquipment.length > 0 ? <div className="equipment-assignment-form">
+        <Select aria-label="Equipment to use" placeholder="Choose equipment" showSearch optionFilterProp="label"
+          value={assignEquipmentId} onChange={setAssignEquipmentId}
+          options={availableEquipment.map(item => ({ value: item.id, label: equipmentLabel(item) }))} />
+        <Button disabled={!assignEquipmentId} loading={equipmentBusy}
+          onClick={() => void assignEquipment()}>Start using equipment</Button>
+      </div> : <p className="muted">Add an equipment unit before using it in this batch.</p>}
+      {hasRaptPill && <p className="muted">For automatic readings, also assign the device under <a href="/me">Account → RAPT Pill</a>
+        {' '}after RAPT sends its first reading.</p>}
+    </Modal>
     <Modal title="Batch settings" open={batchSizeOpen} onCancel={() => setBatchSizeOpen(false)}
       footer={null} destroyOnHidden>
       {batchSizeError && <Alert type="error" message={batchSizeError} className="form-alert" />}

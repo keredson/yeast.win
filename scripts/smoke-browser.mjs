@@ -345,12 +345,17 @@ try {
   }
   await navigateSection(page, 'Batches');
   await openBatch(page, batchName);
-  const batchEquipment = page.getByRole('region', { name: 'Equipment in use' });
-  await batchEquipment.getByRole('combobox', { name: 'Equipment to assign' }).click();
+  if (await page.getByRole('region', { name: 'Equipment in use' }).count()) {
+    throw new Error('Batch equipment is still shown in a separate card');
+  }
+  await page.getByRole('button', { name: 'Add action' }).click();
+  await page.getByRole('menuitem', { name: 'Use equipment' }).click();
+  const useEquipment = page.getByRole('dialog', { name: 'Use equipment' });
+  await useEquipment.getByRole('combobox', { name: 'Equipment to use' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option')
     .filter({ hasText: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
-  await batchEquipment.getByRole('button', { name: 'Assign equipment' }).click();
-  await batchEquipment.getByText('VEVOR Electric Brewing System 9.2 Gal/35 L').waitFor();
+  await useEquipment.getByRole('button', { name: 'Start using equipment' }).click();
+  await page.locator('.batch-timeline').getByText('Use VEVOR Electric Brewing System 9.2 Gal/35 L').waitFor();
   await navigateSection(page, 'Equipment');
   await page.locator('.equipment-table').getByRole('link', { name: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
   await page.waitForURL('**/equipment/vevor-electric-brewing-system-9-2-gal-35-l');
