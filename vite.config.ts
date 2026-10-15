@@ -61,7 +61,11 @@ export default defineConfig(({ command }) => {
       }
     })
   ],
-  server: { proxy: { '/api': { target: { host: 'localhost', port: 80, socketPath } } } },
+  server: {
+    port: Number(process.env.VITE_PORT) || 5173,
+    strictPort: true,
+    proxy: { '/api': { target: { host: 'localhost', port: 80, socketPath } } }
+  },
   build: { outDir: 'dist' }
   });
 });
