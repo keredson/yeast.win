@@ -50,6 +50,8 @@ try {
   assert.equal(new URL(page.url()).pathname, '/batch/protected-example', 'sign-in did not return to the requested route');
   await page.goto(`${base}/me`);
   await page.waitForURL('**/settings');
+  assert.equal(await page.locator('.account-page .ant-card').first().getByText('Preferred units').count(), 1);
+  assert.equal(await page.getByText('Recipe calculations').count(), 0);
   await page.getByRole('heading', { name: 'Settings' }).waitFor();
   if (!dev) {
     assert.ok(appAssets.some(url => url.includes('/main-')), 'main app was not downloaded after sign-in');
@@ -88,7 +90,21 @@ try {
     await page.getByRole('button', { name: 'New brewery' }).click();
     const newBrewery = page.getByRole('dialog', { name: 'New brewery' });
     await newBrewery.getByRole('textbox', { name: 'Brewery name' }).fill('Smoke second brewery');
+    await newBrewery.getByRole('spinbutton', { name: 'Default batch size (US gal)' }).fill('7.5');
+    await newBrewery.getByRole('spinbutton', { name: 'Default mash efficiency (%)' }).fill('72.5');
     await newBrewery.getByRole('button', { name: 'Create brewery' }).click();
+    await page.getByRole('button', { name: 'Edit Smoke second brewery' }).click();
+    await page.waitForFunction(() => Number(document.querySelector('input[id="batch_size"]')?.value) === 7.5);
+    assert.equal(Number(await breweryEditor.getByRole('spinbutton', { name: 'Default mash efficiency (%)' }).inputValue()), 72.5);
+    await breweryEditor.getByRole('button', { name: 'Close' }).click();
+    await page.getByRole('button', { name: 'Edit Homebrew' }).click();
+    await breweryEditor.getByRole('spinbutton', { name: 'Default batch size (US gal)' }).fill('6.25');
+    await breweryEditor.getByRole('spinbutton', { name: 'Default mash efficiency (%)' }).fill('68');
+    await breweryEditor.getByRole('button', { name: 'Save brewery' }).click();
+    await page.getByRole('button', { name: 'Edit Homebrew' }).click();
+    await page.waitForFunction(() => document.querySelector('input[id="batch_size"]')?.value === '6.25');
+    assert.equal(Number(await breweryEditor.getByRole('spinbutton', { name: 'Default mash efficiency (%)' }).inputValue()), 68);
+    await breweryEditor.getByRole('button', { name: 'Close' }).click();
     await page.getByRole('button', { name: 'Sync Homebrew' }).click();
     const homebrewId = await page.evaluate(() => JSON.parse(localStorage.getItem('brewlog:last-session')).workspaces[0].id);
     await page.waitForFunction(id => Number(localStorage.getItem(`brewlog:last-sync:${id}`)) > 0, homebrewId);

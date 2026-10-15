@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { CopyOutlined, DeleteOutlined, EditOutlined, PlusOutlined, SettingOutlined, SyncOutlined, UploadOutlined } from '@ant-design/icons';
 import { Alert, Avatar, Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Select, Tag, Tooltip, Typography } from 'antd';
 import { api, type PreferredUnits, type Workspace } from './api.ts';
-import { breweryMashEfficiency, breweryBatchSize, updateBreweryMashEfficiency, updateBreweryBatchSize,
-  type LocalDb } from './db.ts';
+import { breweryMashEfficiency, breweryBatchSize, openLocalDb, updateBreweryMashEfficiency, updateBreweryBatchSize } from './db.ts';
 import { appMashEfficiencyPct } from './recipeCalculations.ts';
 import { appBatchSizeLiters } from '../shared/batchSize.ts';
 import { convertUnit } from '../shared/units.ts';
@@ -12,8 +11,7 @@ interface Props {
   username: string;
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
-  db: LocalDb | null;
-  onCreateWorkspace: (name: string) => Promise<void>;
+  onCreateWorkspace: (name: string) => Promise<Workspace>;
   onUpdateWorkspace: (id: string, name: string, slug: string | null) => Promise<void>;
   onDeleteWorkspace: (id: string) => Promise<void>;
   avatarSrc?: string;
@@ -26,6 +24,7 @@ interface Props {
 }
 
 interface PasswordValues { currentPassword: string; newPassword: string; confirmPassword: string }
+interface BreweryValues { name: string; slug?: string; batch_size: number | null; mash_efficiency: number | null }
 interface RaptSetup {
   webhook_path: string | null;
   devices: { device_id: string; name: string; device_type: string; last_seen_at: number;
@@ -44,14 +43,17 @@ const raptPayload = `{
   "created_date": "@created_date"
 }`;
 
-export function AccountSection({ username, workspaces, activeWorkspaceId, db,
+export function AccountSection({ username, workspaces, activeWorkspaceId,
   onCreateWorkspace, onUpdateWorkspace, onDeleteWorkspace,
   avatarSrc, onAvatarUploaded, preferredUnits, onPreferredUnitsChange,
   syncingWorkspaceId, syncStatusFor, onManualSync }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [passwordForm] = Form.useForm<PasswordValues>();
-  const [breweryForm] = Form.useForm<{ name: string; slug?: string }>();
+  const [breweryForm] = Form.useForm<BreweryValues>();
+  const breweryLoadSequence = useRef(0);
+  const loadedBreweryDefaults = useRef<{ id: string; batchSizeDisplay: number | null; mashEfficiency: number | null } | null>(null);
   const [breweryEditor, setBreweryEditor] = useState<Workspace | 'new' | null>(null);
+  const [breweryEditorLoading, setBreweryEditorLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Workspace | null>(null);
   const [breweryBusy, setBreweryBusy] = useState(false);
   const [breweryError, setBreweryError] = useState('');
@@ -69,14 +71,6 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
   const [raptCopied, setRaptCopied] = useState<'url' | 'payload' | null>(null);
   const [unitsBusy, setUnitsBusy] = useState(false);
   const [unitsError, setUnitsError] = useState('');
-  const [mashEfficiency, setMashEfficiency] = useState<number | null>(null);
-  const [mashEfficiencyDraft, setMashEfficiencyDraft] = useState<number | null>(null);
-  const [efficiencyBusy, setEfficiencyBusy] = useState(false);
-  const [efficiencyError, setEfficiencyError] = useState('');
-  const [batchSizeLiters, setBatchSizeLiters] = useState<number | null>(null);
-  const [batchSizeDraft, setBatchSizeDraft] = useState<number | null>(null);
-  const [batchSizeBusy, setBatchSizeBusy] = useState(false);
-  const [batchSizeError, setBatchSizeError] = useState('');
   async function refreshRapt() {
     setRaptSetup(await api<RaptSetup>('/me/rapt'));
   }
@@ -115,44 +109,6 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
       await refreshRapt();
     } catch (cause) { setRaptError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setRaptDeviceBusy(null); }
-  }
-  useEffect(() => {
-    let cancelled = false;
-    setMashEfficiency(null);
-    setMashEfficiencyDraft(null);
-    if (db) void breweryMashEfficiency(db).then(value => { if (!cancelled) { setMashEfficiency(value); setMashEfficiencyDraft(value); } })
-      .catch(cause => { if (!cancelled) setEfficiencyError(cause instanceof Error ? cause.message : String(cause)); });
-    return () => { cancelled = true; };
-  }, [db]);
-  useEffect(() => {
-    let cancelled = false;
-    setBatchSizeDraft(null);
-    if (db) void breweryBatchSize(db).then(value => {
-      if (!cancelled) { setBatchSizeLiters(value); setBatchSizeDraft(value == null ? null
-        : Number((convertUnit(value, 'L', preferredUnits.volume) ?? value).toFixed(2))); }
-    }).catch(cause => { if (!cancelled) setBatchSizeError(cause instanceof Error ? cause.message : String(cause)); });
-    return () => { cancelled = true; };
-  }, [db, preferredUnits.volume]);
-  async function saveBatchSize(value: number | null) {
-    if (!db) return;
-    setBatchSizeBusy(true); setBatchSizeError('');
-    try {
-      const liters = value == null ? null : convertUnit(value, preferredUnits.volume, 'L');
-      if (value != null && liters == null) throw new Error('Choose a valid batch size unit');
-      await updateBreweryBatchSize(db, liters);
-      setBatchSizeLiters(liters);
-    } catch (cause) {
-      setBatchSizeDraft(batchSizeLiters == null ? null
-        : Number((convertUnit(batchSizeLiters, 'L', preferredUnits.volume) ?? batchSizeLiters).toFixed(2)));
-      setBatchSizeError(cause instanceof Error ? cause.message : String(cause));
-    } finally { setBatchSizeBusy(false); }
-  }
-  async function saveMashEfficiency(value: number | null) {
-    if (!db) return;
-    setEfficiencyBusy(true); setEfficiencyError('');
-    try { await updateBreweryMashEfficiency(db, value); setMashEfficiency(value); }
-    catch (cause) { setMashEfficiencyDraft(mashEfficiency); setEfficiencyError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setEfficiencyBusy(false); }
   }
   async function uploadAvatar(file: File) {
     setAvatarBusy(true);
@@ -205,21 +161,74 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
     finally { setUnitsBusy(false); }
   }
 
-  function openBreweryEditor(target: Workspace | 'new') {
+  async function openBreweryEditor(target: Workspace | 'new') {
+    const sequence = ++breweryLoadSequence.current;
     setBreweryError('');
-    breweryForm.setFieldsValue(target === 'new' ? { name: '', slug: undefined } : { name: target.name, slug: target.slug || '' });
+    loadedBreweryDefaults.current = null;
+    breweryForm.setFieldsValue(target === 'new'
+      ? { name: '', slug: undefined, batch_size: null, mash_efficiency: null }
+      : { name: target.name, slug: target.slug || '', batch_size: null, mash_efficiency: null });
     setBreweryEditor(target);
+    setBreweryEditorLoading(target !== 'new');
+    if (target === 'new') return;
+    try {
+      const targetDb = await openLocalDb(target.id);
+      const [liters, mashEfficiency] = await Promise.all([
+        breweryBatchSize(targetDb), breweryMashEfficiency(targetDb)]);
+      if (breweryLoadSequence.current !== sequence) return;
+      const batchSizeDisplay = liters == null ? null
+        : Number((convertUnit(liters, 'L', preferredUnits.volume) ?? liters).toFixed(2));
+      loadedBreweryDefaults.current = { id: target.id, batchSizeDisplay, mashEfficiency };
+      breweryForm.setFieldsValue({ batch_size: batchSizeDisplay, mash_efficiency: mashEfficiency });
+    } catch (cause) {
+      if (breweryLoadSequence.current === sequence) setBreweryError(cause instanceof Error ? cause.message : String(cause));
+    } finally { if (breweryLoadSequence.current === sequence) setBreweryEditorLoading(false); }
   }
 
-  async function saveBrewery(values: { name: string; slug?: string }) {
-    if (!breweryEditor) return;
+  async function saveBrewery(values: BreweryValues) {
+    if (!breweryEditor || breweryEditorLoading) return;
     setBreweryBusy(true); setBreweryError('');
+    let created: Workspace | null = null;
     try {
-      if (breweryEditor === 'new') await onCreateWorkspace(values.name.trim());
-      else await onUpdateWorkspace(breweryEditor.id, values.name.trim(), (values.slug || '').trim() || null);
+      if (breweryEditor !== 'new' && loadedBreweryDefaults.current?.id !== breweryEditor.id) {
+        throw new Error('Could not load this brewery’s defaults. Close and reopen the editor.');
+      }
+      const batchSize = values.batch_size ?? null;
+      const mashEfficiency = values.mash_efficiency ?? null;
+      if (batchSize != null && (!Number.isFinite(batchSize) || batchSize <= 0)) throw new Error('Enter a positive batch size');
+      if (mashEfficiency != null && (!Number.isFinite(mashEfficiency) || mashEfficiency <= 0 || mashEfficiency > 100)) {
+        throw new Error('Enter an efficiency between 0 and 100%');
+      }
+      let target = breweryEditor;
+      if (target === 'new') {
+        target = await onCreateWorkspace(values.name.trim());
+        created = target;
+        loadedBreweryDefaults.current = { id: target.id, batchSizeDisplay: null, mashEfficiency: null };
+      }
+      const targetDb = await openLocalDb(target.id);
+      const previous = loadedBreweryDefaults.current?.id === target.id ? loadedBreweryDefaults.current : null;
+      if (batchSize !== previous?.batchSizeDisplay && (previous || batchSize != null)) {
+        const liters = batchSize == null ? null : convertUnit(batchSize, preferredUnits.volume, 'L');
+        if (batchSize != null && liters == null) throw new Error('Choose a valid batch size');
+        await updateBreweryBatchSize(targetDb, liters);
+      }
+      if (mashEfficiency !== previous?.mashEfficiency && (previous || mashEfficiency != null)) {
+        await updateBreweryMashEfficiency(targetDb, mashEfficiency);
+      }
+      if (breweryEditor !== 'new') {
+        await onUpdateWorkspace(target.id, values.name.trim(), (values.slug || '').trim() || null);
+      }
       setBreweryEditor(null);
+      breweryLoadSequence.current++;
+      loadedBreweryDefaults.current = null;
       breweryForm.resetFields();
-    } catch (cause) { setBreweryError(cause instanceof Error ? cause.message : String(cause)); }
+    } catch (cause) {
+      if (created) {
+        setBreweryEditor(created);
+        breweryForm.setFieldValue('slug', created.slug || '');
+      }
+      setBreweryError(cause instanceof Error ? cause.message : String(cause));
+    }
     finally { setBreweryBusy(false); }
   }
 
@@ -230,6 +239,8 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
       await onDeleteWorkspace(deleteTarget.id);
       setDeleteTarget(null);
       setBreweryEditor(null);
+      breweryLoadSequence.current++;
+      loadedBreweryDefaults.current = null;
       breweryForm.resetFields();
     }
     catch (cause) { setBreweryError(cause instanceof Error ? cause.message : String(cause)); }
@@ -238,6 +249,24 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
 
   return <div className="account-page">
     <div className="section-heading"><div><div className="eyebrow">Account</div><h1>Settings</h1></div></div>
+    <Card title="Preferred units" className="account-card">
+      <Typography.Paragraph type="secondary" className="setting-description">Used as defaults when logging new values. Existing records keep their entered units.</Typography.Paragraph>
+      <div className="unit-grid">
+        <label>Temperature<Select aria-label="Preferred temperature unit" value={preferredUnits.temperature}
+          disabled={unitsBusy} options={[{ value: '°C', label: '°C' }, { value: '°F', label: '°F' }]}
+          onChange={value => void updateUnits({ ...preferredUnits, temperature: value })} /></label>
+        <label>Volume<Select aria-label="Preferred volume unit" value={preferredUnits.volume}
+          disabled={unitsBusy} options={[{ value: 'L', label: 'L' }, { value: 'US gal', label: 'US gal' }]}
+          onChange={value => void updateUnits({ ...preferredUnits, volume: value })} /></label>
+        <label>Mass<Select aria-label="Preferred mass unit" value={preferredUnits.mass}
+          disabled={unitsBusy} options={[{ value: 'g', label: 'g' }, { value: 'oz', label: 'oz' }, { value: 'lb + oz', label: 'lb + oz' }]}
+          onChange={value => void updateUnits({ ...preferredUnits, mass: value })} /></label>
+        <label>Pressure<Select aria-label="Preferred pressure unit" value={preferredUnits.pressure}
+          disabled={unitsBusy} options={[{ value: 'kPa', label: 'kPa' }, { value: 'psi', label: 'psi' }]}
+          onChange={value => void updateUnits({ ...preferredUnits, pressure: value })} /></label>
+      </div>
+      {unitsError && <Alert type="error" message={unitsError} showIcon />}
+    </Card>
     <Card title="Profile" className="account-card">
       <div className="profile-row">
         <Avatar size={72} src={avatarSrc}>{username[0].toUpperCase()}</Avatar>
@@ -250,7 +279,7 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
       {avatarError && <Alert type="error" message={avatarError} showIcon />}
     </Card>
     <Card title="Breweries" className="account-card" extra={<Button type="text" shape="circle" icon={<PlusOutlined />}
-      aria-label="New brewery" title="New brewery" onClick={() => openBreweryEditor('new')} />}>
+      aria-label="New brewery" title="New brewery" onClick={() => void openBreweryEditor('new')} />}>
       {workspaces.length ? workspaces.map(brewery => <div className="setting-row brewery-row" key={brewery.id}>
         <div><strong>{brewery.name}</strong>{brewery.id === activeWorkspaceId && <Tag color="green">Selected</Tag>}
           <div className="muted">{brewery.slug === null ? 'Root URLs · /batches' : `/brewery/${brewery.slug}`}</div>
@@ -261,27 +290,40 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
             aria-label={`Sync ${brewery.name}`} disabled={!!syncingWorkspaceId}
             onClick={() => void onManualSync(brewery.id)} /></Tooltip>
           <Button type="text" shape="circle" icon={<EditOutlined />} aria-label={`Edit ${brewery.name}`}
-            title="Edit brewery" onClick={() => openBreweryEditor(brewery)} />
+            title="Edit brewery" onClick={() => void openBreweryEditor(brewery)} />
         </div>
       </div>) : <Typography.Paragraph type="secondary">No breweries yet. Add one to start brewing.</Typography.Paragraph>}
     </Card>
     <Modal title={breweryEditor === 'new' ? 'New brewery' : 'Edit brewery'} open={!!breweryEditor} footer={null}
-      onCancel={() => { setBreweryEditor(null); breweryForm.resetFields(); }} destroyOnHidden>
+      onCancel={() => { breweryLoadSequence.current++; setBreweryEditor(null); loadedBreweryDefaults.current = null;
+        breweryForm.resetFields(); }} destroyOnHidden>
       <Form form={breweryForm} layout="vertical" onFinish={saveBrewery}>
         <Form.Item name="name" label="Brewery name" rules={[{ required: true, whitespace: true }, { max: 80 }]}>
-          <Input autoFocus maxLength={80} placeholder="e.g. Homebrew or Downtown Brewery" />
+          <Input autoFocus maxLength={80} disabled={breweryEditorLoading} placeholder="e.g. Homebrew or Downtown Brewery" />
         </Form.Item>
         {breweryEditor !== 'new' && <Form.Item name="slug" label="Brewery slug" rules={[
           { pattern: /^[a-z0-9]+(?:-[a-z0-9]+)*$/, message: 'Use lowercase letters, numbers, and single hyphens' }, { max: 48 }]}>
-          <Input maxLength={48} addonBefore="/brewery/" />
+          <Input maxLength={48} addonBefore="/brewery/" disabled={breweryEditorLoading} />
         </Form.Item>}
         {breweryEditor !== 'new' && <Typography.Paragraph type="secondary">
           Clear the slug to use root URLs such as /batches. Only one brewery can have no slug.
         </Typography.Paragraph>}
+        <Form.Item name="batch_size" label={`Default batch size (${preferredUnits.volume})`}
+          extra="Prefills new recipes. Clear to use the 5 US gal app default; existing recipes keep their saved size.">
+          <InputNumber className="full-width" min={0.01} precision={2} disabled={breweryEditorLoading}
+            placeholder={String(Number((convertUnit(appBatchSizeLiters, 'L', preferredUnits.volume) ?? appBatchSizeLiters).toFixed(2)))} />
+        </Form.Item>
+        <Form.Item name="mash_efficiency" label="Default mash efficiency (%)"
+          extra={`Used when no equipment, recent batch, or imported efficiency is available. Clear to use the ${appMashEfficiencyPct}% app default.`}>
+          <InputNumber className="full-width" min={1} max={100} precision={1} disabled={breweryEditorLoading}
+            placeholder={String(appMashEfficiencyPct)} />
+        </Form.Item>
+        {breweryEditorLoading && <Typography.Paragraph type="secondary">Loading brewery defaults…</Typography.Paragraph>}
         {breweryError && <Alert type="error" message={breweryError} className="form-alert" />}
         <div className="brewery-editor-actions">
-          <Button type="primary" htmlType="submit" loading={breweryBusy}>{breweryEditor === 'new' ? 'Create brewery' : 'Save brewery'}</Button>
-          {breweryEditor !== 'new' && breweryEditor && <Button danger icon={<DeleteOutlined />} disabled={breweryBusy}
+          <Button type="primary" htmlType="submit" loading={breweryBusy} disabled={breweryEditorLoading}>
+            {breweryEditor === 'new' ? 'Create brewery' : 'Save brewery'}</Button>
+          {breweryEditor !== 'new' && breweryEditor && <Button danger icon={<DeleteOutlined />} disabled={breweryBusy || breweryEditorLoading}
             onClick={() => { setBreweryError(''); setDeleteTarget(breweryEditor); }}>Delete brewery</Button>}
         </div>
       </Form>
@@ -291,27 +333,6 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
       <Typography.Paragraph>This permanently deletes this brewery’s batches, recipes, inventory, equipment, and photos from the server and this device.</Typography.Paragraph>
       {breweryError && <Alert type="error" message={breweryError} />}
     </Modal>
-    {db && <Card title="Recipe calculations" className="account-card">
-      <div className="setting-row"><div><strong>Default batch size</strong>
-        <div className="muted">Prefills new recipes in {workspaces.find(item => item.id === activeWorkspaceId)?.name || 'this brewery'}.
-          Clear to use the 5 US gal app default. Existing recipes keep their saved size.</div></div>
-        <InputNumber aria-label="Brewery default batch size" min={0.001} precision={2}
-          addonAfter={preferredUnits.volume} value={batchSizeDraft}
-          placeholder={String(Number((convertUnit(appBatchSizeLiters, 'L', preferredUnits.volume) ?? appBatchSizeLiters).toFixed(2)))}
-          disabled={batchSizeBusy} onChange={setBatchSizeDraft}
-          onBlur={() => { const saved = batchSizeLiters == null ? null
-            : Number((convertUnit(batchSizeLiters, 'L', preferredUnits.volume) ?? batchSizeLiters).toFixed(2));
-          if (batchSizeDraft !== saved) void saveBatchSize(batchSizeDraft); }} /></div>
-      {batchSizeError && <Alert type="error" message={batchSizeError} showIcon />}
-      <div className="setting-row"><div><strong>Default mash efficiency</strong>
-        <div className="muted">Used for recipes in {workspaces.find(item => item.id === activeWorkspaceId)?.name || 'this brewery'}
-          {' '}when no equipment, recent batch, or imported efficiency is available. Clear to use the {appMashEfficiencyPct}% app default.</div></div>
-        <InputNumber aria-label="Brewery default mash efficiency" min={1} max={100} precision={1}
-          addonAfter="%" value={mashEfficiencyDraft} placeholder={String(appMashEfficiencyPct)}
-          disabled={efficiencyBusy} onChange={setMashEfficiencyDraft}
-          onBlur={() => { if (mashEfficiencyDraft !== mashEfficiency) void saveMashEfficiency(mashEfficiencyDraft); }} /></div>
-      {efficiencyError && <Alert type="error" message={efficiencyError} showIcon />}
-    </Card>}
     <Card title="Security" className="account-card">
       {passwordChanged && <Alert type="success" message="Password changed. Other sessions have been signed out." showIcon />}
       <Button onClick={() => { setPasswordError(''); setPasswordOpen(true); }}>Change password</Button>
@@ -382,23 +403,5 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
         <Button type="primary" htmlType="submit" loading={passwordBusy}>Change password</Button>
       </Form>
     </Modal>
-    <Card title="Preferred units" className="account-card">
-      <Typography.Paragraph type="secondary" className="setting-description">Used as defaults when logging new values. Existing records keep their entered units.</Typography.Paragraph>
-      <div className="unit-grid">
-        <label>Temperature<Select aria-label="Preferred temperature unit" value={preferredUnits.temperature}
-          disabled={unitsBusy} options={[{ value: '°C', label: '°C' }, { value: '°F', label: '°F' }]}
-          onChange={value => void updateUnits({ ...preferredUnits, temperature: value })} /></label>
-        <label>Volume<Select aria-label="Preferred volume unit" value={preferredUnits.volume}
-          disabled={unitsBusy} options={[{ value: 'L', label: 'L' }, { value: 'US gal', label: 'US gal' }]}
-          onChange={value => void updateUnits({ ...preferredUnits, volume: value })} /></label>
-        <label>Mass<Select aria-label="Preferred mass unit" value={preferredUnits.mass}
-          disabled={unitsBusy} options={[{ value: 'g', label: 'g' }, { value: 'oz', label: 'oz' }, { value: 'lb + oz', label: 'lb + oz' }]}
-          onChange={value => void updateUnits({ ...preferredUnits, mass: value })} /></label>
-        <label>Pressure<Select aria-label="Preferred pressure unit" value={preferredUnits.pressure}
-          disabled={unitsBusy} options={[{ value: 'kPa', label: 'kPa' }, { value: 'psi', label: 'psi' }]}
-          onChange={value => void updateUnits({ ...preferredUnits, pressure: value })} /></label>
-      </div>
-      {unitsError && <Alert type="error" message={unitsError} showIcon />}
-    </Card>
   </div>;
 }

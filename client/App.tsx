@@ -562,7 +562,7 @@ export function App() {
   }, [db, workspaceId, refresh]);
 
   async function createWorkspace(name: string) {
-    if (!session) return;
+    if (!session) throw new Error('Sign in to create a brewery');
     const workspace = await api<Workspace>('/workspaces', 'POST', { name });
     const updated = { ...session, workspaces: [...session.workspaces, workspace] };
     rememberSession(updated);
@@ -570,6 +570,7 @@ export function App() {
     setWorkspaceId(workspace.id);
     localStorage.setItem(activeBreweryKey, workspace.id);
     setOpenedDb(null);
+    return workspace;
   }
 
   async function renameWorkspace(id: string, name: string, slug: string | null) {
@@ -691,7 +692,7 @@ export function App() {
               }}>{crumb.section === 'home' ? <HomeOutlined aria-hidden="true" /> : crumb.label}</a>
         }))} />}
         {section === 'settings' ? <AccountSection username={session.account.username} avatarSrc={avatarSrc}
-          workspaces={session.workspaces} activeWorkspaceId={workspaceId} db={db}
+          workspaces={session.workspaces} activeWorkspaceId={workspaceId}
           onCreateWorkspace={createWorkspace} onUpdateWorkspace={renameWorkspace} onDeleteWorkspace={removeWorkspace}
           onAvatarUploaded={() => { const updated = { ...session, account: { ...session.account, has_avatar: true } };
             rememberSession(updated); setSession(updated); setAvatarVersion(Date.now()); }}
