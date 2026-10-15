@@ -42,8 +42,11 @@ try {
   await page.getByText('New username. Choose a password to create your account.').waitFor();
   await page.getByLabel('Password', { exact: true }).fill('smoke12345');
   await page.getByLabel('Confirm password').fill('smoke12345');
+  await page.getByRole('radio', { name: /Imperial/ }).check();
   await page.getByRole('button', { name: 'Create account' }).click();
   await page.getByRole('button', { name: 'Account settings' }).waitFor({ timeout: 30_000 });
+  assert.deepEqual(await page.evaluate(async () => (await (await fetch('/api/me')).json()).preferred_units),
+    { temperature: '°F', volume: 'US gal', mass: 'lb + oz', pressure: 'psi' });
   assert.equal(new URL(page.url()).pathname, '/batch/protected-example', 'sign-in did not return to the requested route');
   if (!dev) {
     assert.ok(appAssets.some(url => url.includes('/main-')), 'main app was not downloaded after sign-in');
@@ -61,6 +64,7 @@ try {
   await signInPage.getByLabel('Username').fill(username.toUpperCase());
   await signInPage.getByText('Account found. Enter your password.').waitFor();
   assert.equal(await signInPage.getByLabel('Confirm password').isVisible(), false);
+  assert.equal(await signInPage.getByRole('radio', { name: /Imperial/ }).isVisible(), false);
   await signInPage.getByLabel('Password', { exact: true }).fill('smoke12345');
   await signInPage.getByRole('button', { name: 'Sign in' }).click();
   await signInPage.getByRole('button', { name: 'Account settings' }).waitFor({ timeout: 30_000 });

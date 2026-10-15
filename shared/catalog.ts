@@ -77,7 +77,7 @@ export const catalogSupplyTables = {
 export const catalogTables = [...Object.keys(catalogProductTables), ...Object.keys(catalogModelTables), ...Object.keys(catalogSupplyTables)] as const;
 
 export function unitForCategory(category: string, preferredMass: string): string {
-  if (category === 'Grain') return 'lb + oz';
+  if (category === 'Grain') return preferredMass === 'g' ? 'g' : 'lb + oz';
   if (category === 'Other fermentables') return preferredMass;
   if (category === 'Yeast') return 'packet';
   if (category === 'Packaging') return 'each';

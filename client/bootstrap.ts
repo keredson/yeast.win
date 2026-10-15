@@ -81,6 +81,10 @@ function login(message = ''): void {
     <p class="public-username-status" role="status" aria-live="polite"></p>
     <label>Password<input name="password" type="password" autocomplete="current-password" maxlength="256" required></label>
     <label class="public-confirm" hidden>Confirm password<input name="confirm_password" type="password" autocomplete="new-password" maxlength="256"></label>
+    <fieldset class="public-unit-system" hidden disabled><legend>Which units do you prefer?</legend>
+      <label><input type="radio" name="unit_system" value="metric" required><span>Metric<small>°C · L · g · kPa</small></span></label>
+      <label><input type="radio" name="unit_system" value="imperial" required><span>Imperial<small>°F · US gal · lb + oz · psi</small></span></label>
+    </fieldset>
     <button class="public-primary" type="submit">Continue</button></form></section></div></main>`;
   const showError = (value: string) => {
     const error = root.querySelector<HTMLElement>('.public-error')!;
@@ -92,6 +96,7 @@ function login(message = ''): void {
   const passwordInput = form.elements.namedItem('password') as HTMLInputElement;
   const confirmInput = form.elements.namedItem('confirm_password') as HTMLInputElement;
   const confirmLabel = form.querySelector<HTMLElement>('.public-confirm')!;
+  const unitSystemFieldset = form.querySelector<HTMLFieldSetElement>('.public-unit-system')!;
   const status = form.querySelector<HTMLElement>('.public-username-status')!;
   const button = form.querySelector<HTMLButtonElement>('button')!;
   let checkedUsername = '';
@@ -113,6 +118,8 @@ function login(message = ''): void {
       accountExists = result.exists;
       confirmLabel.hidden = result.exists;
       confirmInput.required = !result.exists;
+      unitSystemFieldset.hidden = result.exists;
+      unitSystemFieldset.disabled = result.exists;
       passwordInput.autocomplete = result.exists ? 'current-password' : 'new-password';
       button.textContent = result.exists ? 'Sign in' : 'Create account';
       status.textContent = result.exists ? 'Account found. Enter your password.'
@@ -135,6 +142,8 @@ function login(message = ''): void {
     accountExists = null;
     confirmLabel.hidden = true;
     confirmInput.required = false;
+    unitSystemFieldset.hidden = true;
+    unitSystemFieldset.disabled = true;
     passwordInput.autocomplete = 'current-password';
     button.textContent = 'Continue';
     showError('');
@@ -157,9 +166,11 @@ function login(message = ''): void {
       }
       if (!exists && password.length < 8) { showError('Use at least 8 characters for the password.'); return; }
       if (!exists && password !== confirmInput.value) { showError('Passwords do not match.'); return; }
+      const unitSystem = form.querySelector<HTMLInputElement>('input[name="unit_system"]:checked')?.value;
+      if (!exists && !unitSystem) { showError('Choose metric or imperial units.'); return; }
       const response = await fetch(`/api/${exists ? 'login' : 'register'}`, {
         method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify(exists ? { username, password } : { username, password, unit_system: unitSystem })
       });
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error || `Sign in failed (${response.status})`);

@@ -15,7 +15,7 @@ async function signIn(page, createAccount = false) {
   if (createAccount) {
     const shortPasswordStatus = await page.evaluate(async name => (await fetch('/api/register', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: name, password: 'short12' })
+      body: JSON.stringify({ username: name, password: 'short12', unit_system: 'metric' })
     })).status, username);
     if (shortPasswordStatus !== 400) throw new Error(`Seven-character password was accepted: ${shortPasswordStatus}`);
   }
@@ -30,7 +30,10 @@ async function signIn(page, createAccount = false) {
     await page.setViewportSize({ width: 1280, height: 900 });
   }
   await page.getByLabel('Password', { exact: true }).fill(password);
-  if (createAccount) await page.getByLabel('Confirm password').fill(password);
+  if (createAccount) {
+    await page.getByLabel('Confirm password').fill(password);
+    await page.getByRole('radio', { name: /Metric/ }).check();
+  }
   await page.locator('.public-card form button[type="submit"]').click();
   await page.getByRole('button', { name: 'Account settings' }).waitFor({ timeout: 30_000 });
   await navigateSection(page, 'Batches');

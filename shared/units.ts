@@ -9,6 +9,13 @@ export const defaultPreferredUnits: PreferredUnits = {
   temperature: '°C', volume: 'L', mass: 'g', pressure: 'kPa'
 };
 
+export type UnitSystem = 'metric' | 'imperial';
+
+export function preferredUnitsForSystem(system: UnitSystem): PreferredUnits {
+  return system === 'metric' ? { ...defaultPreferredUnits }
+    : { temperature: '°F', volume: 'US gal', mass: 'lb + oz', pressure: 'psi' };
+}
+
 export const unitGroups = {
   temperature: ['°C', '°F'],
   volume: ['mL', 'L', 'US fl oz', 'US gal'],

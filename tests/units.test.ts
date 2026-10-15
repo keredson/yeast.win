@@ -26,7 +26,7 @@ test('grain offers mass units without package counts', () => {
   assert.ok(!grain.includes('vial'));
   assert.ok(!grain.includes('bottle'));
   assert.equal(unitForCategory('Grain', 'oz'), 'lb + oz');
-  assert.equal(unitForCategory('Grain', 'g'), 'lb + oz');
+  assert.equal(unitForCategory('Grain', 'g'), 'g');
 });
 
 test('specific gravity is a unitless gravity scale', () => {

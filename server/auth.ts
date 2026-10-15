@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3';
 import { createId } from '../shared/id.ts';
 import { createWorkspace } from './db.ts';
 import { nowSeconds } from '../shared/schema.ts';
-import { defaultPreferredUnits, type PreferredUnits } from '../shared/units.ts';
+import { defaultPreferredUnits, preferredUnitsForSystem, type PreferredUnits, type UnitSystem } from '../shared/units.ts';
 
 export interface Account { id: string; username: string; has_avatar: boolean }
 const sessionSeconds = 30 * 24 * 60 * 60;
@@ -32,13 +32,14 @@ function createSession(db: Database.Database, accountId: string): string {
   return token;
 }
 
-export function register(db: Database.Database, username: string, password: string): string | null {
+export function register(db: Database.Database, username: string, password: string, unitSystem: UnitSystem): string | null {
   const normalized = username.trim().toLowerCase();
   return db.transaction(() => {
     if (usernameExists(db, normalized)) return null;
     const id = createId();
     db.prepare('INSERT INTO accounts(id, username, password_hash, created_at) VALUES (?, ?, ?, ?)')
       .run(id, normalized, passwordHash(password), nowSeconds());
+    savePreferredUnits(db, id, preferredUnitsForSystem(unitSystem));
     createWorkspace(db, id, 'Homebrew');
     return createSession(db, id);
   })();
