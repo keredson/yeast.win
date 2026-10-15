@@ -27,7 +27,6 @@ interface Props {
   onManualSync: () => void;
   autoSync: boolean;
   onAutoSyncChange: (enabled: boolean) => void;
-  onSignOut: () => void;
 }
 
 interface PasswordValues { currentPassword: string; newPassword: string; confirmPassword: string }
@@ -52,7 +51,7 @@ const raptPayload = `{
 export function AccountSection({ username, workspaces, activeWorkspaceId, db,
   onCreateWorkspace, onUpdateWorkspace, onDeleteWorkspace,
   avatarSrc, onAvatarUploaded, preferredUnits, onPreferredUnitsChange,
-  syncPhase, syncStatus, canSync, onManualSync, autoSync, onAutoSyncChange, onSignOut }: Props) {
+  syncPhase, syncStatus, canSync, onManualSync, autoSync, onAutoSyncChange }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [passwordForm] = Form.useForm<PasswordValues>();
   const [breweryForm] = Form.useForm<{ name: string; slug?: string }>();
@@ -409,6 +408,5 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
         ? Math.round(100 * imageDownloadProgress.done / imageDownloadProgress.total) : 100} />}
       {imageDownloadMessage && <Typography.Paragraph className="setting-description">{imageDownloadMessage}</Typography.Paragraph>}
     </Card>
-    <Button onClick={onSignOut}>Sign out</Button>
   </div>;
 }

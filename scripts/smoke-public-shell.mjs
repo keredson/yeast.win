@@ -44,10 +44,13 @@ try {
   await page.getByLabel('Confirm password').fill('smoke12345');
   await page.getByRole('radio', { name: /Imperial/ }).check();
   await page.getByRole('button', { name: 'Create account' }).click();
-  await page.getByRole('button', { name: 'Account settings' }).waitFor({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'Account menu' }).waitFor({ timeout: 30_000 });
   assert.deepEqual(await page.evaluate(async () => (await (await fetch('/api/me')).json()).preferred_units),
     { temperature: '°F', volume: 'US gal', mass: 'lb + oz', pressure: 'psi' });
   assert.equal(new URL(page.url()).pathname, '/batch/protected-example', 'sign-in did not return to the requested route');
+  await page.goto(`${base}/me`);
+  await page.waitForURL('**/settings');
+  await page.getByRole('heading', { name: 'Settings' }).waitFor();
   if (!dev) {
     assert.ok(appAssets.some(url => url.includes('/main-')), 'main app was not downloaded after sign-in');
     assert.ok(appAssets.some(url => url.includes('/crsqlite-')), 'SQLite WASM was not downloaded after sign-in');
@@ -56,7 +59,7 @@ try {
   if (!dev) {
     await context.setOffline(true);
     await page.reload();
-    await page.getByRole('button', { name: 'Account settings' }).waitFor({ timeout: 30_000 });
+    await page.getByRole('button', { name: 'Account menu' }).waitFor({ timeout: 30_000 });
   }
   const signInContext = await browser.newContext();
   const signInPage = await signInContext.newPage();
@@ -67,7 +70,13 @@ try {
   assert.equal(await signInPage.getByRole('radio', { name: /Imperial/ }).isVisible(), false);
   await signInPage.getByLabel('Password', { exact: true }).fill('smoke12345');
   await signInPage.getByRole('button', { name: 'Sign in' }).click();
-  await signInPage.getByRole('button', { name: 'Account settings' }).waitFor({ timeout: 30_000 });
+  await signInPage.getByRole('button', { name: 'Account menu' }).waitFor({ timeout: 30_000 });
   await signInContext.close();
+  await page.locator('.app-nav').getByRole('menuitem', { name: 'Home' }).click();
+  await page.locator('.app-nav').getByRole('menuitem', { name: 'Settings' }).click();
+  await page.waitForURL('**/settings');
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  await page.getByRole('menuitem', { name: 'Log out' }).click();
+  await page.getByRole('link', { name: 'Sign in' }).waitFor();
   console.log(`Light public routes, protected redirect, and authenticated app load passed${dev ? ' in dev' : ' with offline reopen'}`);
 } finally { await browser.close(); }

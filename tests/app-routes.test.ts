@@ -12,3 +12,9 @@ test('dashboard uses the root URL for the default brewery and the brewery base f
   assert.deepEqual(routeFromPath('/brewery/brewery/equipment/fermenter/f-01'),
     { section: 'equipment', selectedId: 'fermenter/f-01', slug: 'brewery' });
 });
+
+test('account settings have a standalone URL and old links resolve to it', () => {
+  assert.equal(routePath('settings', null, '/brewery/brewery'), '/settings');
+  assert.deepEqual(routeFromPath('/settings'), { section: 'settings', selectedId: null, slug: null });
+  assert.deepEqual(routeFromPath('/me'), routeFromPath('/settings'));
+});

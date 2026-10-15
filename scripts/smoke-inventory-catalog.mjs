@@ -15,8 +15,8 @@ try {
   await page.getByLabel('Password', { exact: true }).fill('smoke-test-1234');
   await page.getByLabel('Confirm password').fill('smoke-test-1234');
   await page.locator('.public-card form button[type="submit"]').click();
-  await page.getByRole('button', { name: 'Account settings' }).waitFor({ timeout: 30_000 });
-  await page.getByRole('button', { name: 'Account settings' }).click();
+  await page.getByRole('button', { name: 'Account menu' }).waitFor({ timeout: 30_000 });
+  await page.locator('.app-nav .ant-menu-item').filter({ hasText: 'Settings' }).click();
   await page.waitForFunction(() => {
     const button = document.querySelector('button[aria-label="Sync now"]');
     return button && !button.hasAttribute('disabled');

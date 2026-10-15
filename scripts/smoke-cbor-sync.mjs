@@ -37,7 +37,7 @@ try {
   await dialog.getByLabel('Batch name').fill(batchName);
   await dialog.getByRole('button', { name: 'Create batch' }).click();
   await first.getByRole('heading', { name: batchName }).waitFor();
-  await first.goto(`${baseUrl}/me`);
+  await first.goto(`${baseUrl}/settings`);
   await first.getByRole('button', { name: 'Sync now' }).click();
   await first.waitForFunction(() => {
     const id = JSON.parse(localStorage.getItem('brewlog:last-session')).workspaces[0].id;

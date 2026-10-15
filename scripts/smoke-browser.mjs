@@ -35,7 +35,7 @@ async function signIn(page, createAccount = false) {
     await page.getByRole('radio', { name: /Metric/ }).check();
   }
   await page.locator('.public-card form button[type="submit"]').click();
-  await page.getByRole('button', { name: 'Account settings' }).waitFor({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'Account menu' }).waitFor({ timeout: 30_000 });
   await navigateSection(page, 'Batches');
   await page.getByRole('button', { name: 'New batch' }).waitFor();
 }
@@ -115,7 +115,7 @@ try {
     throw new Error('Sync button is still in the header');
   }
 
-  await page.getByRole('button', { name: 'Account settings' }).click();
+  await navigateSection(page, 'Settings');
   await page.getByRole('button', { name: 'New brewery' }).click();
   await page.getByRole('dialog', { name: 'New brewery' }).waitFor();
   const secondBrewery = `Smoke brewery ${Date.now()}`;
@@ -718,7 +718,7 @@ try {
   await page.getByText('ph 5.2 pH').waitFor();
   console.log('Listed equipment together and hid used gear while preserving its measurement');
 
-  await page.getByRole('button', { name: 'Account settings' }).click();
+  await navigateSection(page, 'Settings');
   await page.getByRole('heading', { name: 'Settings' }).waitFor();
   if (await page.getByRole('heading', { name: 'Brewing defaults' }).count()) {
     throw new Error('Settings still exposes the aggregate wort loss default');
@@ -1043,7 +1043,7 @@ try {
   await navigateSection(page, 'Batches');
   await openBatch(page, 'Batch from recipe');
   await page.locator('.plan-card').getByText('2-row pale malt extra').waitFor();
-  await page.getByRole('button', { name: 'Account settings' }).click();
+  await navigateSection(page, 'Settings');
   await page.getByRole('heading', { name: 'Settings' }).waitFor();
   await page.getByRole('combobox', { name: 'Preferred mass unit' }).click();
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({ hasText: 'lb + oz' }).click();
@@ -1353,8 +1353,8 @@ try {
   if (forbiddenDelete !== 404) throw new Error(`Second account deleted first account's brewery: ${forbiddenDelete}`);
   console.log('Rejected duplicate username and isolated accounts');
 
-  await page.getByRole('button', { name: 'Account settings' }).click();
-  await page.waitForURL('**/me');
+  await navigateSection(page, 'Settings');
+  await page.waitForURL('**/settings');
   await page.getByRole('heading', { name: 'Settings' }).waitFor();
   await page.mouse.move(0, 0);
   await page.locator('.ant-tooltip').waitFor({ state: 'hidden' });
@@ -1367,7 +1367,7 @@ try {
   }
   await page.screenshot({ path: '/tmp/brewlog-account-mobile.png', fullPage: true });
   await page.setViewportSize({ width: 1280, height: 900 });
-  if (await page.getByText('Current brewery', { exact: true }).count()) throw new Error('Current brewery is still shown on /me');
+  if (await page.getByText('Current brewery', { exact: true }).count()) throw new Error('Current brewery is still shown on /settings');
   const syncButton = page.getByRole('button', { name: 'Sync now' });
   await syncButton.hover();
   await page.getByRole('tooltip').getByText(/Last synced \d+ sec ago · Click to sync/).waitFor();
@@ -1423,7 +1423,7 @@ try {
     throw new Error(`Preferred temperature unit was not used in the event form: ${preferredUnitText}`);
   }
   await page.getByRole('dialog', { name: 'Record: Check temperature' }).getByRole('button', { name: 'Close' }).click();
-  await page.getByRole('button', { name: 'Account settings' }).click();
+  await navigateSection(page, 'Settings');
   await page.getByRole('heading', { name: 'Settings' }).waitFor();
   console.log('Saved preferred units and used them in an event form');
 
@@ -1449,7 +1449,8 @@ try {
   if (await second.evaluate(async () => (await fetch('/api/me')).status) !== 401) {
     throw new Error('Password change did not revoke other sessions');
   }
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  await page.getByRole('menuitem', { name: 'Log out' }).click();
   await page.getByRole('link', { name: 'Sign in' }).click();
   await page.locator('.public-card form button[type="submit"]').waitFor();
   const oldPasswordStatus = await page.evaluate(async credentials => (await fetch('/api/login', {
@@ -1495,7 +1496,7 @@ try {
       .locator(`.recipe-type-icon[data-recipe-type="${type.toLowerCase()}"]`).waitFor();
   }
 
-  await page.getByRole('button', { name: 'Account settings' }).click();
+  await navigateSection(page, 'Settings');
   await page.getByRole('button', { name: 'Delete Homebrew' }).click();
   await page.getByRole('dialog', { name: 'Delete Homebrew?' }).getByRole('button', { name: 'Delete brewery' }).click();
   await page.getByRole('button', { name: 'Delete Homebrew' }).waitFor({ state: 'hidden' });
@@ -1510,7 +1511,7 @@ try {
   if (!new URL(page.url()).pathname.startsWith(`/brewery/${slug}/batch/`)) {
     throw new Error('Deleting the root brewery changed another brewery’s slug URL');
   }
-  await page.getByRole('button', { name: 'Account settings' }).click();
+  await navigateSection(page, 'Settings');
   await page.getByRole('button', { name: `Edit ${secondBrewery}` }).click();
   await page.getByRole('dialog', { name: 'Edit brewery' }).getByRole('textbox', { name: 'Brewery name' }).fill('Renamed brewery');
   await page.getByRole('dialog', { name: 'Edit brewery' }).getByRole('textbox', { name: 'Brewery slug' }).fill('');
@@ -1522,7 +1523,7 @@ try {
   if (!/^\/batch\/[A-Za-z0-9_-]{10,32}$/.test(new URL(page.url()).pathname)) {
     throw new Error('Clearing the remaining brewery slug did not claim root URLs');
   }
-  await page.getByRole('button', { name: 'Account settings' }).click();
+  await navigateSection(page, 'Settings');
   await page.getByRole('button', { name: 'Delete Renamed brewery' }).click();
   await page.getByRole('dialog', { name: 'Delete Renamed brewery?' }).getByRole('button', { name: 'Delete brewery' }).click();
   await page.getByText('No breweries yet. Add one to start brewing.').waitFor();

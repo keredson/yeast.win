@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppstoreOutlined, BookOutlined, DisconnectOutlined, EnvironmentOutlined, HomeOutlined, InboxOutlined, MenuOutlined, ToolOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Breadcrumb, Button, Drawer, Empty, Layout, Menu, Popover, Progress, Select, Spin, Tooltip } from 'antd';
+import { AppstoreOutlined, BookOutlined, DisconnectOutlined, EnvironmentOutlined, HomeOutlined, InboxOutlined, LogoutOutlined, MenuOutlined, SettingOutlined, ToolOutlined } from '@ant-design/icons';
+import { Alert, Avatar, Breadcrumb, Button, Drawer, Dropdown, Empty, Layout, Menu, Popover, Progress, Select, Spin, Tooltip } from 'antd';
 import { api, ApiError, ApiUnavailableError, ClientUpdateRequiredError, type PreferredUnits, type Session, type Workspace } from './api.ts';
 import { checkForAppUpdate } from './appUpdate.ts';
 import { defaultPreferredUnits } from '../shared/units.ts';
@@ -45,7 +45,7 @@ const navItems = [
   { key: 'equipment', label: 'Equipment', icon: ToolOutlined },
   { key: 'locations', label: 'Locations', icon: EnvironmentOutlined }
 ] as const;
-type RecordSection = Exclude<Section, 'me' | 'home'>;
+type RecordSection = Exclude<Section, 'settings' | 'home'>;
 type NavRecord = { id: string; name: string; recipe_type?: RecipeType | null };
 type RecentItems = Record<RecordSection, string[]>;
 const recordSections: RecordSection[] = ['batches', 'recipes', 'inventory', 'equipment', 'locations'];
@@ -53,7 +53,7 @@ const emptyRecents = (): RecentItems => ({ batches: [], recipes: [], inventory: 
 
 function SectionNavigation({ route, recent, records, onNavigate }: {
   route: Route; recent: RecentItems; records: Record<RecordSection, NavRecord[]>;
-  onNavigate: (section: RecordSection | 'home', id: string | null) => void;
+  onNavigate: (section: RecordSection | 'home' | 'settings', id: string | null) => void;
 }) {
   const items = [{ key: 'home', label: 'Home', icon: <HomeOutlined /> }, ...navItems.flatMap(({ key, label, icon: Icon }) => {
     const links = (key === 'inventory' || key === 'equipment' || key === 'locations' ? [] : recent[key]).map(id => records[key].find(item => item.id === id))
@@ -65,12 +65,12 @@ function SectionNavigation({ route, recent, records, onNavigate }: {
         <span className="nav-recent-title" title={item.name}>{item.name}</span>
       </span>
     }))];
-  })];
+  }), { key: 'settings', label: 'Settings', icon: <SettingOutlined /> }];
   return <Menu mode="inline"
-    selectedKeys={route.section === 'me' ? [] : [route.selectedId && route.section !== 'inventory' && route.section !== 'equipment' && route.section !== 'locations'
+    selectedKeys={[route.selectedId && route.section !== 'inventory' && route.section !== 'equipment' && route.section !== 'locations'
       ? `${route.section}:${route.selectedId}` : route.section]}
     items={items}
-    onClick={({ key }) => { const [section, id] = key.split(':'); onNavigate(section as RecordSection | 'home', id || null); }} />;
+    onClick={({ key }) => { const [section, id] = key.split(':'); onNavigate(section as RecordSection | 'home' | 'settings', id || null); }} />;
 }
 const cachedSessionKey = 'brewlog:last-session';
 const signedOutKey = 'brewlog:signed-out';
@@ -84,19 +84,22 @@ function initialBrewery(workspaces: Workspace[]): string | null {
   const remembered = localStorage.getItem(activeBreweryKey);
   if (linked) return workspaces.find(item => item.id === linked)?.id || workspaces[0]?.id || null;
   if (slug) return workspaces.find(item => item.slug === slug)?.id || workspaces[0]?.id || null;
-  if (location.pathname === '/me') return workspaces.find(item => item.id === remembered)?.id || workspaces[0]?.id || null;
+  if (routeFromPath(location.pathname).section === 'settings') return workspaces.find(item => item.id === remembered)?.id || workspaces[0]?.id || null;
   return workspaces.find(item => item.slug === null)?.id || workspaces[0]?.id || null;
 }
 
 function canonicalizeLocation(workspaces: Workspace[]): void {
   const linked = new URLSearchParams(location.search).get('brewery');
   const route = routeFromPath(location.pathname);
-  if (route.section === 'me') return;
+  if (route.section === 'settings') {
+    if (location.pathname !== '/settings' || location.search) history.replaceState(null, '', '/settings');
+    return;
+  }
   const workspace = linked ? workspaces.find(item => item.id === linked)
     : route.slug ? workspaces.find(item => item.slug === route.slug)
       : workspaces.find(item => item.slug === null);
   const target = workspace || workspaces[0];
-  const path = target ? routePath(route.section, workspace ? route.selectedId : null, workspaceBase(target.id, workspaces)) : '/me';
+  const path = target ? routePath(route.section, workspace ? route.selectedId : null, workspaceBase(target.id, workspaces)) : '/settings';
   if (location.pathname + location.search !== path) history.replaceState(null, '', path);
 }
 
@@ -302,7 +305,7 @@ export function App() {
       if (session) canonicalizeLocation(session.workspaces);
       const next = routeFromPath(location.pathname);
       setRoute(next);
-      if (next.section === 'me' || !session) return;
+      if (next.section === 'settings' || !session) return;
       const workspace = next.slug ? session.workspaces.find(item => item.slug === next.slug)
         : session.workspaces.find(item => item.slug === null);
       if (workspace) {
@@ -323,7 +326,7 @@ export function App() {
         next[name] = Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string').slice(0, 5) : [];
       } catch { next[name] = []; }
     }
-    if (route.section !== 'me' && route.section !== 'home' && route.selectedId) {
+    if (route.section !== 'settings' && route.section !== 'home' && route.selectedId) {
       const name = route.section;
       if (name !== 'recipes' || !next[name].includes(route.selectedId)) {
         next[name] = [route.selectedId, ...next[name].filter(id => id !== route.selectedId)].slice(0, 5);
@@ -377,7 +380,7 @@ export function App() {
     const base = workspaceBase(targetWorkspaceId, session?.workspaces || []);
     const path = routePath(next, null, base);
     if (location.pathname !== path || location.search) history.pushState(null, '', path);
-    setRoute({ section: next, selectedId: null, slug: next === 'me' ? null : base.split('/')[2] || null });
+    setRoute({ section: next, selectedId: null, slug: next === 'settings' ? null : base.split('/')[2] || null });
     setMenuOpen(false);
   }
 
@@ -607,7 +610,7 @@ export function App() {
       total: workspaceProgress.total + catalogSyncProgress.total }
     : workspaceProgress || (catalogSyncProgress ? { label: 'Updating catalog', ...catalogSyncProgress } : null);
   const breadcrumbRecords = { batches, recipes, inventory, supplies, equipment, equipmentModels, locations };
-  const crumbs = section !== 'me' && section !== 'home' && db
+  const crumbs = section !== 'settings' && section !== 'home' && db
     ? breadcrumbNodes(section, route.selectedId, breadcrumbRecords) : [];
 
   return <div className="app-shell">
@@ -639,11 +642,14 @@ export function App() {
           <Button className="connection-button" type="text" shape="circle" aria-label="Server disconnected"
             icon={<DisconnectOutlined />} />
         </Popover>}
-        <Tooltip title="Account settings">
-          <Button className="avatar-button" type="text" shape="circle" aria-label="Account settings" onClick={() => showSection('me')}>
+        <Dropdown trigger={['click']} placement="bottomRight" menu={{ items: [
+          { key: 'username', label: session.account.username, disabled: true },
+          { key: 'logout', label: 'Log out', icon: <LogoutOutlined /> }
+        ], onClick: ({ key }) => { if (key === 'logout') void signOut(); } }}>
+          <Button className="avatar-button" type="text" shape="circle" aria-label="Account menu">
             <Avatar size={32} src={avatarSrc}>{session.account.username[0].toUpperCase()}</Avatar>
           </Button>
-        </Tooltip>
+        </Dropdown>
       </div>
     </header>
 
@@ -651,12 +657,12 @@ export function App() {
       <Layout.Sider className="app-nav" width={220} theme="light" aria-label="Sections">
         <SectionNavigation route={route} recent={recent} records={{ batches: recentRecords.batches, recipes: recentRecords.recipes,
           inventory: [], equipment: [], locations: [] }}
-          onNavigate={(name, id) => name !== 'home' && id ? showItem(name, id) : showSection(name)} />
+          onNavigate={(name, id) => name !== 'home' && name !== 'settings' && id ? showItem(name, id) : showSection(name)} />
       </Layout.Sider>
       <Drawer className="mobile-nav-drawer" title="Sections" placement="left" width={250} open={menuOpen} onClose={() => setMenuOpen(false)}>
         <div className="drawer-nav"><SectionNavigation route={route} recent={recent} records={{ batches: recentRecords.batches, recipes: recentRecords.recipes,
           inventory: [], equipment: [], locations: [] }}
-          onNavigate={(name, id) => { if (name !== 'home' && id) showItem(name, id);
+          onNavigate={(name, id) => { if (name !== 'home' && name !== 'settings' && id) showItem(name, id);
             else showSection(name); setMenuOpen(false); }} /></div>
       </Drawer>
       <main className="app-main">
@@ -673,7 +679,7 @@ export function App() {
                 else showSection(crumb.section);
               }}>{crumb.section === 'home' ? <HomeOutlined aria-hidden="true" /> : crumb.label}</a>
         }))} />}
-        {section === 'me' ? <AccountSection username={session.account.username} avatarSrc={avatarSrc}
+        {section === 'settings' ? <AccountSection username={session.account.username} avatarSrc={avatarSrc}
           workspaces={session.workspaces} activeWorkspaceId={workspaceId} db={db}
           onCreateWorkspace={createWorkspace} onUpdateWorkspace={renameWorkspace} onDeleteWorkspace={removeWorkspace}
           onAvatarUploaded={() => { const updated = { ...session, account: { ...session.account, has_avatar: true } };
@@ -682,8 +688,8 @@ export function App() {
           syncPhase={syncPhase} syncStatus={timeSinceSync(lastSyncedAt, now)} canSync={!!db && !!workspaceId}
           onManualSync={() => { if (db && workspaceId) void runSync(db, workspaceId, true); }}
           autoSync={autoSync} onAutoSyncChange={enabled => { localStorage.setItem(autoSyncKey, enabled ? '1' : '0'); setAutoSync(enabled); }}
-          onSignOut={signOut} /> : !workspaceId ? <Empty description="Add a brewery in Settings to begin">
-            <Button type="primary" onClick={() => showSection('me')}>Open Settings</Button></Empty> :
+          /> : !workspaceId ? <Empty description="Add a brewery in Settings to begin">
+            <Button type="primary" onClick={() => showSection('settings')}>Open Settings</Button></Empty> :
           !db ? <div className="loading-screen"><Spin description="Opening data on this device" /></div>
             : section !== 'home' && (sectionData?.workspaceId !== workspaceId || sectionData.section !== section)
               ? <div className="loading-screen"><Spin description="Loading section" /></div> : <>
