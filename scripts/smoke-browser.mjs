@@ -355,7 +355,8 @@ try {
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option')
     .filter({ hasText: 'VEVOR Electric Brewing System 9.2 Gal/35 L' }).click();
   await useEquipment.getByRole('button', { name: 'Start using equipment' }).click();
-  await page.locator('.batch-timeline').getByText('Use VEVOR Electric Brewing System 9.2 Gal/35 L').waitFor();
+  await page.locator('.batch-timeline .title-edit-row strong')
+    .filter({ hasText: /^Use VEVOR Electric Brewing System 9\.2 Gal\/35 L · Unit [A-Za-z0-9_-]{6}$/ }).waitFor();
   await page.locator('.batch-timeline').getByRole('button', { name: 'Release' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Cancel' }).click();
   await page.locator('.batch-timeline').getByRole('button', { name: 'Release' }).waitFor();

@@ -89,8 +89,8 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
         const skipped = !happened && item.skipped_at != null;
         const usedEquipment = item.event_type === 'equipment_use'
           ? equipment.find(unit => unit.id === item.details.equipment_id) : undefined;
-        const detail = item.event_type === 'equipment_use' ? usedEquipment
-          ? usedEquipment.stock_id || `Unit ${usedEquipment.id.slice(0, 6)}` : undefined
+        const usedUnitLabel = usedEquipment && (usedEquipment.stock_id || `Unit ${usedEquipment.id.slice(0, 6)}`);
+        const detail = item.event_type === 'equipment_use' ? undefined
           : happened && ['addition', 'measurement', 'temperature_control', 'note', 'photo'].includes(item.event_type)
           ? details[item.id] : planDetailsLabel(item, equipmentNames) || details[item.id];
         const metadata = item.ended_at != null ? `${item.event_type === 'equipment_use' ? 'Released' : 'Ended'} ${formatTime(item.ended_at)}` : '';
@@ -99,7 +99,7 @@ export function EventTimeline({ events, batchStartAt, equipment = [], details = 
           <div className="timeline-card"><div><div className={`title-edit-row${isBatch ? '' : ' recipe-title-detail'}`}>
             {isBatch && item.event_type !== 'equipment_use' && <Button type="text" size="small" icon={<EditOutlined />} aria-label={`Edit ${item.title || kindLabel(item.event_type)}`}
               onClick={() => onEdit(item)} />}
-            <strong>{item.title || planKindLabel(item)}</strong>
+            <strong>{item.title || planKindLabel(item)}{usedUnitLabel && ` · ${usedUnitLabel}`}</strong>
             {item.details.gravity_role && <Tag color={item.details.gravity_role === 'og' ? 'blue' : 'purple'}
               className="gravity-role-tag">{item.details.gravity_role.toUpperCase()}</Tag>}
             {!isBatch && detail && <span className="recipe-event-detail">{detail}</span>}</div>
