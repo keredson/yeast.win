@@ -3,6 +3,10 @@ dist/
 data/
 vendor/
 .env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-*
 .DS_Store
 *.log
 .brewlog-api.sock
