@@ -617,41 +617,31 @@ export function App() {
   const activeBase = workspaceBase(workspaceId, session.workspaces);
   const workspaceProgress = syncPhase === 'syncing' && syncProgress
     ? { label: syncProgress.phase === 'uploading' ? 'Sending' : 'Applying', ...syncProgress } : null;
-  const headerProgress = workspaceProgress && catalogSyncProgress
+  const syncDisplayProgress = workspaceProgress && catalogSyncProgress
     ? { label: 'Syncing brewery and catalog', applied: workspaceProgress.applied + catalogSyncProgress.applied,
       total: workspaceProgress.total + catalogSyncProgress.total }
     : workspaceProgress || (catalogSyncProgress ? { label: 'Updating catalog', ...catalogSyncProgress } : null);
   const breadcrumbRecords = { batches, recipes, inventory, supplies, equipment, equipmentModels, locations };
   const crumbs = section !== 'settings' && section !== 'home' && db
     ? breadcrumbNodes(section, route.selectedId, breadcrumbRecords) : [];
+  const showBrewerySwitcher = session.workspaces.length > 1;
   const sidebar = (mobile: boolean) => <div className="nav-panel">
     {!mobile && <div className="nav-brand"><img src="/icon.svg" alt="" /><strong>Yeast.Win!</strong></div>}
-    <div className="nav-top">
-      <Select className="workspace-select" value={workspaceId || undefined} placeholder="Select brewery"
-        aria-label="Brewery" disabled={!session.workspaces.length}
+    {(showBrewerySwitcher || serverDisconnected) && <div className="nav-top">
+      {showBrewerySwitcher && <Select className="workspace-select" value={workspaceId || undefined} placeholder="Select brewery"
+        aria-label="Brewery"
         options={session.workspaces.map(item => ({ label: item.name, value: item.id }))}
         onChange={value => {
           setWorkspaceId(value); localStorage.setItem(activeBreweryKey, value); setOpenedDb(null); showSection('home', value);
           if (mobile) setMenuOpen(false);
-        }} />
-      {(headerProgress || serverDisconnected) && <div className="nav-status">
-        {headerProgress && <Tooltip title={`${headerProgress.label}: ${headerProgress.applied} of ${headerProgress.total} changes`}>
-          <div className="nav-sync-progress" role="status" aria-live="polite"
-            aria-label={`${headerProgress.label}: ${headerProgress.applied} of ${headerProgress.total} changes`}>
-            <Progress type="circle" percent={headerProgress.total
-              ? Math.round(headerProgress.applied / headerProgress.total * 100) : 100}
-              showInfo={false} size={28} strokeWidth={11} strokeColor="#e7b464" trailColor="#56736f" />
-            <span>{headerProgress.label}</span>
-          </div>
-        </Tooltip>}
-        {serverDisconnected && <Popover trigger="click" title="Server disconnected" content={<div className="connection-popover">
+        }} />}
+      {serverDisconnected && <div className="nav-status"><Popover trigger="click" title="Server disconnected" content={<div className="connection-popover">
           <p>Your brewing entries are saved on this device.</p>
           <p>They will sync when the server is available again.</p>
         </div>}>
           <Button className="connection-button" type="text" icon={<DisconnectOutlined />}>Server disconnected</Button>
-        </Popover>}
-      </div>}
-    </div>
+        </Popover></div>}
+    </div>}
     <nav className="nav-links" aria-label="Sections">
       <SectionNavigation route={route} recent={recent} records={{ batches: recentRecords.batches, recipes: recentRecords.recipes,
         inventory: [], equipment: [], locations: [] }}
@@ -659,6 +649,15 @@ export function App() {
           else showSection(name); if (mobile) setMenuOpen(false); }} />
     </nav>
     <div className="nav-footer">
+      {syncDisplayProgress && <Tooltip title={`${syncDisplayProgress.label}: ${syncDisplayProgress.applied} of ${syncDisplayProgress.total} changes`}>
+        <div className="nav-sync-progress" role="status" aria-live="polite"
+          aria-label={`${syncDisplayProgress.label}: ${syncDisplayProgress.applied} of ${syncDisplayProgress.total} changes`}>
+          <Progress type="circle" percent={syncDisplayProgress.total
+            ? Math.round(syncDisplayProgress.applied / syncDisplayProgress.total * 100) : 100}
+            showInfo={false} size={28} strokeWidth={11} strokeColor="#e7b464" trailColor="#56736f" />
+          <span>{syncDisplayProgress.label}</span>
+        </div>
+      </Tooltip>}
       <Dropdown trigger={['click']} placement="topRight" menu={{ items: [
         { key: 'username', label: session.account.username, disabled: true },
         { key: 'logout', label: 'Log out', icon: <LogoutOutlined /> }

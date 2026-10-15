@@ -51,11 +51,8 @@ try {
   await page.goto(`${base}/me`);
   await page.waitForURL('**/settings');
   assert.equal(await page.locator('.app-header').count(), 0, 'the old header is still present');
-  assert.equal(await page.locator('.app-nav').getByRole('combobox', { name: 'Brewery' }).isVisible(), true);
-  assert.equal(await page.locator('.app-nav').evaluate(nav =>
-    nav.querySelector('.nav-brand').getBoundingClientRect().bottom
-      <= nav.querySelector('.workspace-select').getBoundingClientRect().top), true,
-  'the desktop brewery selector is not below the brand');
+  assert.equal(await page.locator('.app-nav').getByRole('combobox', { name: 'Brewery' }).count(), 0,
+    'a single brewery should not show the switcher');
   assert.equal(await page.locator('.app-nav .nav-footer').getByRole('button', { name: 'Account menu' }).isVisible(), true);
   assert.equal(await page.locator('.account-page .ant-card').first().getByText('Profile').count(), 1);
   assert.equal(await page.locator('.account-page .ant-card').nth(1).getByText('Preferred units').count(), 1);
@@ -102,6 +99,11 @@ try {
     await newBrewery.getByRole('spinbutton', { name: 'Default batch size (US gal)' }).fill('7.5');
     await newBrewery.getByRole('spinbutton', { name: 'Default mash efficiency (%)' }).fill('72.5');
     await newBrewery.getByRole('button', { name: 'Create brewery' }).click();
+    await page.locator('.app-nav .workspace-select').waitFor();
+    assert.equal(await page.locator('.app-nav').evaluate(nav =>
+      nav.querySelector('.nav-brand').getBoundingClientRect().bottom
+        <= nav.querySelector('.workspace-select').getBoundingClientRect().top), true,
+    'the desktop brewery selector is not below the brand');
     await page.getByRole('button', { name: 'Edit Smoke second brewery' }).click();
     await page.waitForFunction(() => Number(document.querySelector('input[id="batch_size"]')?.value) === 7.5);
     assert.equal(Number(await breweryEditor.getByRole('spinbutton', { name: 'Default mash efficiency (%)' }).inputValue()), 72.5);
@@ -125,7 +127,8 @@ try {
   const mobileNavigation = page.getByRole('dialog', { name: 'Yeast.Win!' });
   assert.equal(await mobileNavigation.locator('.drawer-brand img[src="/icon.svg"]').count(), 1);
   assert.equal(await mobileNavigation.locator('.nav-brand').count(), 0, 'the drawer repeats its brand below the selector');
-  assert.equal(await mobileNavigation.getByRole('combobox', { name: 'Brewery' }).isVisible(), true);
+  if (dev) assert.equal(await mobileNavigation.getByRole('combobox', { name: 'Brewery' }).isVisible(), true);
+  else assert.equal(await mobileNavigation.getByRole('combobox', { name: 'Brewery' }).count(), 0);
   assert.equal(await mobileNavigation.getByRole('button', { name: 'Account menu' }).isVisible(), true);
   await mobileNavigation.getByRole('button', { name: 'Close' }).click();
   await page.goto(`${base}/batches`);

@@ -19,6 +19,7 @@ button, input, textarea { font: inherit; }
 .nav-panel .ant-btn.connection-button { width: 100%; justify-content: flex-start; color: #f1c375; padding-inline: 0; }
 .nav-links { min-height: 0; overflow-y: auto; flex: 1; }
 .nav-footer { border-top: 1px solid #42615b; padding: 14px 8px 0; }
+.nav-footer .nav-sync-progress { margin-bottom: 12px; }
 .nav-panel .ant-btn.avatar-button { display: flex; align-items: center; justify-content: flex-start; gap: 10px;
   width: 100%; height: auto; padding: 4px; color: white; text-align: left; }
 .nav-panel .ant-btn.avatar-button:hover { color: white; background: #29514a; }

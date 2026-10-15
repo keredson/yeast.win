@@ -112,6 +112,7 @@ try {
   console.log('Registered account and opened local SQLite');
 
   if (await page.locator('.app-header').count()) throw new Error('The old app header is still present');
+  if (await page.locator('.app-nav .workspace-select').count()) throw new Error('A single brewery should not show a switcher');
 
   await navigateSection(page, 'Settings');
   await page.getByRole('button', { name: 'New brewery' }).click();
@@ -158,7 +159,7 @@ try {
   if (new URL(page.url()).pathname !== '/') throw new Error('Homebrew should use the root dashboard URL');
   await navigateSection(page, 'Batches');
   await page.getByRole('button', { name: 'New batch' }).waitFor();
-  console.log('Created a brewery in Settings and switched from the header');
+  console.log('Created a brewery in Settings and switched from the sidebar');
 
   await page.getByRole('button', { name: 'New batch' }).click();
   await page.getByLabel('Batch name').fill(`Smoke batch ${Date.now()}`);
