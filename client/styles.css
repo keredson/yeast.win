@@ -5,6 +5,7 @@ body { background: #f6f4ed; color: #243b36; }
 button, input, textarea { font: inherit; }
 .app-shell { min-height: 100vh; }
 .mobile-menu-button { display: none !important; }
+.mobile-home-brand { display: none; }
 .app-body { min-height: 100vh; display: grid; grid-template-columns: 240px minmax(0, 1fr); }
 .app-nav { position: sticky !important; top: 0; height: 100vh; background: #193b39 !important; }
 .app-nav .ant-layout-sider-children, .nav-panel { height: 100%; }
@@ -313,10 +314,14 @@ button, input, textarea { font: inherit; }
   .app-body { display: block; }
   .app-nav { display: none !important; }
   .app-main { padding: 0 15px 50px; }
-  .page-navigation { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 56px;
+  .page-navigation { position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 56px;
     margin: 0 -15px 16px; padding: 8px 15px; background: #193b39; }
   .page-navigation .mobile-menu-button { display: inline-flex !important; flex: none; color: white !important; }
   .page-navigation .mobile-menu-button:hover { color: white !important; background: #29514a !important; }
+  .mobile-home-brand { position: absolute; left: 50%; transform: translateX(-50%); display: flex;
+    align-items: center; gap: 8px; color: white; white-space: nowrap; pointer-events: none; }
+  .mobile-home-brand img { width: 26px; height: 26px; border-radius: 8px; }
+  .mobile-home-brand strong { font-size: 20px; letter-spacing: -.03em; }
   .page-navigation .app-breadcrumb { min-width: 0; margin: 0; }
   .page-navigation .app-breadcrumb .ant-breadcrumb-link,
   .page-navigation .app-breadcrumb a { color: white; }

@@ -131,8 +131,17 @@ try {
   else assert.equal(await mobileNavigation.getByRole('combobox', { name: 'Brewery' }).count(), 0);
   assert.equal(await mobileNavigation.getByRole('button', { name: 'Account menu' }).isVisible(), true);
   await mobileNavigation.getByRole('button', { name: 'Close' }).click();
+  await page.goto(base);
+  await page.getByRole('heading', { name: 'Dashboard' }).waitFor();
+  assert.equal(await page.evaluate(() => {
+    const brand = document.querySelector('.mobile-home-brand');
+    const bounds = brand.getBoundingClientRect();
+    return getComputedStyle(brand).display !== 'none' && !!brand.querySelector('img[src="/icon.svg"]')
+      && Math.abs((bounds.left + bounds.right) / 2 - innerWidth / 2) < 1;
+  }), true, 'the mobile home brand is not centered in the navigation bar');
   await page.goto(`${base}/batches`);
   await page.getByRole('navigation', { name: 'Breadcrumb' }).waitFor();
+  assert.equal(await page.locator('.mobile-home-brand').count(), 0, 'the home brand replaced detail breadcrumbs');
   assert.equal(await page.evaluate(() => {
     const row = document.querySelector('.page-navigation');
     const menu = document.querySelector('.mobile-menu-button').getBoundingClientRect();

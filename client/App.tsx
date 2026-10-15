@@ -681,6 +681,9 @@ export function App() {
         <div className="page-navigation">
           <Button className="mobile-menu-button" type="text" shape="circle" aria-label="Open navigation"
             icon={<MenuOutlined />} onClick={() => setMenuOpen(true)} />
+          {section === 'home' && <div className="mobile-home-brand">
+            <img src="/icon.svg" alt="" /><strong>Yeast.Win!</strong>
+          </div>}
           {crumbs.length > 0 && <Breadcrumb className="app-breadcrumb" aria-label="Breadcrumb" items={crumbs.map((crumb, index) => ({
           title: index === crumbs.length - 1 ? <span aria-current="page" title={crumb.label}>{crumb.label}</span>
             : <a href={crumb.section === 'home' ? routePath('home', null, activeBase)
