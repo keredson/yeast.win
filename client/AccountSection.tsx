@@ -35,8 +35,8 @@ interface BreweryValues { name: string; slug?: string; batch_size: number | null
 interface RaptSetup {
   webhook_path: string | null;
   devices: { device_id: string; name: string; device_type: string; last_seen_at: number;
-    workspace_id: string | null; batch_id: string | null }[];
-  targets: { workspace_id: string; workspace_name: string; batch_id: string; batch_name: string }[];
+    workspace_id: string | null; equipment_id: string | null; batch_id: string | null; batch_name: string | null }[];
+  workspaces: Workspace[];
 }
 
 const raptPayload = `{
@@ -77,8 +77,11 @@ export function AccountSection({ username, fullName, onFullNameChange, workspace
   const [raptCopied, setRaptCopied] = useState<'url' | 'payload' | null>(null);
   const [unitsBusy, setUnitsBusy] = useState(false);
   const [unitsError, setUnitsError] = useState('');
-  async function refreshRapt() {
-    setRaptSetup(await api<RaptSetup>('/me/rapt'));
+  async function refreshRapt(syncEquipment = false) {
+    const setup = await api<RaptSetup>('/me/rapt');
+    setRaptSetup(setup);
+    if (syncEquipment) for (const id of new Set(setup.devices.map(device => device.workspace_id).filter(
+      (id): id is string => !!id))) await onManualSync(id);
   }
   useEffect(() => {
     let active = true;
@@ -110,15 +113,12 @@ export function AccountSection({ username, fullName, onFullNameChange, workspace
     catch (cause) { setRaptError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setRaptBusy(false); }
   }
-  async function setRaptAssignment(deviceId: string, target: string | undefined) {
+  async function setPillBrewery(deviceId: string, workspaceId: string | null, previousWorkspaceId: string | null) {
     setRaptDeviceBusy(deviceId); setRaptError('');
     try {
-      if (target) {
-        const selected = raptSetup?.targets.find(item => `${item.workspace_id}:${item.batch_id}` === target);
-        if (!selected) throw new Error('Choose a batch');
-        await api(`/me/rapt/devices/${deviceId}/assignment`, 'PUT',
-          { workspace_id: selected.workspace_id, batch_id: selected.batch_id });
-      } else await api(`/me/rapt/devices/${deviceId}/assignment`, 'DELETE');
+      await api(`/me/rapt/devices/${deviceId}/brewery`, 'PUT', { workspace_id: workspaceId });
+      for (const id of new Set([previousWorkspaceId, workspaceId].filter((value): value is string => !!value)))
+        await onManualSync(id);
       await refreshRapt();
     } catch (cause) { setRaptError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setRaptDeviceBusy(null); }
@@ -323,7 +323,7 @@ export function AccountSection({ username, fullName, onFullNameChange, workspace
       <div className="rapt-settings">
         <Typography.Paragraph type="secondary" className="setting-description">
           Create a Custom Web Hook in your RAPT account with method POST. Select the Pills you want to send here.
-          Only readings from Pills assigned below are added to batches.
+          If you have one brewery, discovered Pills are added to its equipment automatically.
         </Typography.Paragraph>
         <a href="https://app.rapt.io/integration/webhooks/list" target="_blank" rel="noreferrer">Open RAPT webhooks ↗</a>
         <label className="rapt-field-label" htmlFor="rapt-webhook-url">Webhook URL</label>
@@ -337,22 +337,30 @@ export function AccountSection({ username, fullName, onFullNameChange, workspace
         <div className="setting-row"><strong>Payload</strong><Button icon={<CopyOutlined />}
           onClick={() => void copyRapt(raptPayload, 'payload')}>{raptCopied === 'payload' ? 'Copied' : 'Copy payload'}</Button></div>
         <pre className="rapt-payload">{raptPayload}</pre>
-        <div className="setting-row"><strong>Your Pills</strong><Button onClick={() => void refreshRapt().catch(cause =>
+        <div className="setting-row"><strong>Your Pills</strong><Button onClick={() => void refreshRapt(true).catch(cause =>
           setRaptError(cause instanceof Error ? cause.message : String(cause)))}>Refresh</Button></div>
         {raptSetup?.devices.length ? raptSetup.devices.map(device => <div className="setting-row rapt-device" key={device.device_id}>
           <div><strong>{device.name}</strong><div className="muted">{device.device_type} · {device.device_id}</div></div>
-          <Select aria-label={`Batch for ${device.name}`} placeholder="Unassigned" allowClear
-            value={device.workspace_id && device.batch_id ? `${device.workspace_id}:${device.batch_id}` : undefined}
+          <Select aria-label={`Brewery for ${device.name}`} placeholder="Choose brewery" allowClear
+            value={device.workspace_id || undefined}
             disabled={raptDeviceBusy === device.device_id}
-            options={raptSetup.targets.map(target => ({ value: `${target.workspace_id}:${target.batch_id}`,
-              label: `${target.workspace_name} / ${target.batch_name}` }))}
-            onChange={value => void setRaptAssignment(device.device_id, value)} />
+            options={raptSetup.workspaces.map(workspace => ({ value: workspace.id, label: workspace.name }))}
+            onChange={value => {
+              const next = value || null;
+              if (device.workspace_id && device.workspace_id !== next) {
+                Modal.confirm({ title: next ? `Move ${device.name} to another brewery?` : `Remove ${device.name} from this brewery?`,
+                  content: device.batch_name
+                    ? `This will release the Pill from ${device.batch_name} and retain its history.`
+                    : 'Its equipment history will be retained.',
+                  okText: next ? 'Move Pill' : 'Remove Pill', onOk: () => setPillBrewery(device.device_id, next, device.workspace_id) });
+              } else void setPillBrewery(device.device_id, next, device.workspace_id);
+            }} />
         </div>) : <Typography.Paragraph type="secondary">
           No Pills received yet. Send a test reading from RAPT, then refresh.
         </Typography.Paragraph>}
         {raptError && <Alert type="error" message={raptError} showIcon />}
         <Popconfirm title="Delete the RAPT integration?"
-          description="The webhook URL will stop working and Pill assignments will be removed. Recorded batch readings stay in the log."
+          description="The webhook URL will stop working. Pill equipment and recorded readings stay in their breweries."
           okText="Delete integration" okButtonProps={{ danger: true }} onConfirm={() => void deleteRapt()}>
           <Button danger disabled={raptBusy}>Delete integration</Button>
         </Popconfirm>

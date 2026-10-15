@@ -62,11 +62,9 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
   const availableEquipment = equipment.filter(item => editingEquipmentUse?.ended_at != null
     || item.id === editingEquipmentUse?.details.equipment_id
     || !assignedEquipmentIds.has(item.id));
-  const hasRaptPill = equipment.some(item => /rapt pill/i.test(
-    equipmentModels.find(row => row.id === item.model_id)?.name || item.name));
   const equipmentLabel = (item: Equipment) => {
     const model = equipmentModels.find(row => row.id === item.model_id);
-    return `${model?.name || item.name} · ${item.stock_id || `Unit ${item.id.slice(0, 6)}`}`;
+    return `${item.name}${model ? ` · ${model.name}` : ''}`;
   };
   const currentEquipment = equipment.find(item => item.id === editingEquipmentUse?.details.equipment_id);
   useEffect(() => { setAssignEquipmentId(undefined); setEditingEquipmentUse(null); setEquipmentUseOpen(false); }, [selectedId]);
@@ -305,8 +303,6 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
           loading={equipmentBusy} onClick={() => void assignEquipment()}>
           {editingEquipmentUse ? 'Save equipment' : 'Start using equipment'}</Button>
       </div> : <p className="muted">Add an equipment unit before using it in this batch.</p>}
-      {hasRaptPill && <p className="muted">For automatic readings, also assign the device under <a href="/settings">Settings → RAPT.io</a>
-        {' '}after RAPT sends its first reading.</p>}
     </Modal>
     <Modal title="Batch settings" open={batchSizeOpen} onCancel={() => setBatchSizeOpen(false)}
       footer={null} destroyOnHidden>

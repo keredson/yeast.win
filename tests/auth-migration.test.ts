@@ -24,7 +24,7 @@ const { openAuthDb } = await import('../server/db.ts');
 test('legacy first brewery becomes the only root brewery', () => {
   const db = openAuthDb();
   try {
-    assert.equal(db.pragma('user_version', { simple: true }), 5);
+    assert.equal(db.pragma('user_version', { simple: true }), 6);
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'auth_meta'").get(), undefined);
     const rows = db.prepare('SELECT slug FROM workspaces WHERE owner_account_id = ? ORDER BY created_at, rowid')
       .all('account') as { slug: string | null }[];
@@ -48,7 +48,7 @@ test('auth upgrade respects the completed legacy root migration', () => {
   legacy.close();
   const db = openAuthDb();
   try {
-    assert.equal(db.pragma('user_version', { simple: true }), 5);
+    assert.equal(db.pragma('user_version', { simple: true }), 6);
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'auth_meta'").get(), undefined);
     assert.equal((db.prepare("SELECT id FROM workspaces WHERE slug IS NULL").get() as { id: string }).id, 'second');
   } finally { db.close(); }
@@ -63,7 +63,7 @@ test('auth upgrade preserves partially created RAPT tables and unrelated rows', 
   legacy.close();
   const db = openAuthDb();
   try {
-    assert.equal(db.pragma('user_version', { simple: true }), 5);
+    assert.equal(db.pragma('user_version', { simple: true }), 6);
     assert.equal((db.prepare("SELECT name FROM rapt_devices WHERE device_id = 'pill-one'").get() as
       { name: string }).name, 'Blue Pill');
     assert.equal((db.prepare("SELECT name FROM workspaces WHERE id = 'first'").get() as
@@ -82,7 +82,7 @@ test('auth upgrade adds nullable public profile visibility while preserving acco
   previous.close();
   const db = openAuthDb();
   try {
-    assert.equal(db.pragma('user_version', { simple: true }), 5);
+    assert.equal(db.pragma('user_version', { simple: true }), 6);
     assert.deepEqual(db.prepare('SELECT username, password_hash, hide_public_profile, time_zone FROM accounts WHERE id = ?')
       .get('brewer-one'), { username: 'brewer_one', password_hash: 'saved-hash', hide_public_profile: null, time_zone: null });
     assert.deepEqual((db.prepare('SELECT image_jpeg FROM account_avatars WHERE account_id = ?')
@@ -98,7 +98,7 @@ test('auth upgrade keeps visibility already added during a partial migration', (
   partial.close();
   const db = openAuthDb();
   try {
-    assert.equal(db.pragma('user_version', { simple: true }), 5);
+    assert.equal(db.pragma('user_version', { simple: true }), 6);
     assert.deepEqual(db.prepare("SELECT hide_public_profile, time_zone FROM accounts WHERE id = 'brewer-one'").get(),
       { hide_public_profile: 1, time_zone: 'Europe/Paris' });
     assert.equal((db.prepare("SELECT name FROM workspaces WHERE id = 'first'").get() as { name: string }).name, 'Homebrew');
@@ -133,7 +133,7 @@ test('version three auth database gains a time zone without resetting visibility
   old.close();
   const db = openAuthDb();
   try {
-    assert.equal(db.pragma('user_version', { simple: true }), 5);
+    assert.equal(db.pragma('user_version', { simple: true }), 6);
     assert.deepEqual(db.prepare("SELECT hide_public_profile, time_zone FROM accounts WHERE id = 'brewer-one'").get(),
       { hide_public_profile: 1, time_zone: null });
     assert.equal((db.prepare("SELECT data_json FROM brewer_activity_cache WHERE account_id = 'brewer-one'").get() as
@@ -149,7 +149,7 @@ test('version four auth database gains an optional full name and preserves exist
   old.close();
   const db = openAuthDb();
   try {
-    assert.equal(db.pragma('user_version', { simple: true }), 5);
+    assert.equal(db.pragma('user_version', { simple: true }), 6);
     assert.deepEqual(db.prepare("SELECT username, password_hash, hide_public_profile, time_zone, full_name FROM accounts WHERE id = 'brewer-one'").get(),
       { username: 'brewer_one', password_hash: 'saved-hash', hide_public_profile: 0, time_zone: 'Europe/Paris', full_name: null });
     assert.deepEqual((db.prepare("SELECT image_jpeg FROM account_avatars WHERE account_id = 'brewer-one'").get() as
@@ -165,10 +165,44 @@ test('partial full-name migration keeps existing names and unrelated rows', () =
   partial.close();
   const db = openAuthDb();
   try {
-    assert.equal(db.pragma('user_version', { simple: true }), 5);
+    assert.equal(db.pragma('user_version', { simple: true }), 6);
     assert.equal((db.prepare("SELECT full_name FROM accounts WHERE id = 'brewer-one'").get() as
       { full_name: string }).full_name, 'A Brewer');
     assert.equal((db.prepare("SELECT name FROM workspaces WHERE id = 'first'").get() as
       { name: string }).name, 'Homebrew');
+  } finally { db.close(); }
+});
+
+test('version five auth database gains Pill equipment links without losing devices or account data', () => {
+  const old = new Database(file);
+  old.exec(`ALTER TABLE rapt_devices DROP COLUMN workspace_id;
+    ALTER TABLE rapt_devices DROP COLUMN equipment_id;
+    ALTER TABLE rapt_devices DROP COLUMN legacy_migrated;
+    ALTER TABLE rapt_devices DROP COLUMN brewery_choice_made;
+    PRAGMA user_version = 5;`);
+  old.close();
+  const db = openAuthDb();
+  try {
+    assert.equal(db.pragma('user_version', { simple: true }), 6);
+    assert.deepEqual(db.prepare("SELECT name, workspace_id, equipment_id, legacy_migrated, brewery_choice_made FROM rapt_devices WHERE device_id = 'pill-one'").get(),
+      { name: 'Blue Pill', workspace_id: null, equipment_id: null, legacy_migrated: 0, brewery_choice_made: 0 });
+    assert.equal((db.prepare("SELECT full_name FROM accounts WHERE id = 'brewer-one'").get() as
+      { full_name: string }).full_name, 'A Brewer');
+  } finally { db.close(); }
+});
+
+test('partial Pill link migration preserves already stored brewery ownership', () => {
+  const partial = new Database(file);
+  partial.exec(`UPDATE rapt_devices SET workspace_id = 'first', equipment_id = 'existing-unit', legacy_migrated = 1
+    WHERE device_id = 'pill-one';
+    ALTER TABLE rapt_devices DROP COLUMN brewery_choice_made;
+    PRAGMA user_version = 5;`);
+  partial.close();
+  const db = openAuthDb();
+  try {
+    assert.equal(db.pragma('user_version', { simple: true }), 6);
+    assert.deepEqual(db.prepare("SELECT workspace_id, equipment_id, legacy_migrated, brewery_choice_made FROM rapt_devices WHERE device_id = 'pill-one'").get(),
+      { workspace_id: 'first', equipment_id: 'existing-unit', legacy_migrated: 1, brewery_choice_made: 0 });
+    assert.equal((db.prepare("SELECT name FROM workspaces WHERE id = 'first'").get() as { name: string }).name, 'Homebrew');
   } finally { db.close(); }
 });

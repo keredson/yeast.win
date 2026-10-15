@@ -111,6 +111,7 @@ try {
   await page.locator('.app-nav').getByRole('link', { name: 'Your profile' }).click();
   await page.waitForURL(`**/brewer/${username}`);
   await page.getByRole('heading', { name: 'Smoke Brewer' }).waitFor();
+  assert.equal(await page.locator('.public-brewer-card').evaluate(element => getComputedStyle(element).borderTopWidth), '0px');
   assert.equal(await page.locator('.brewer-page .public-brewer-card .public-brewer-handle').textContent(), `@${username}`);
   assert.equal(await page.getByRole('button', { name: 'Upload avatar' }).count(), 0);
   assert.equal(await page.locator('.app-nav').count(), 1, 'signed-in brewer page left the app shell');
@@ -277,6 +278,26 @@ try {
   await raptSettings.getByRole('button', { name: 'Close' }).click();
   await raptSettingsButton.click();
   assert.equal(await webhookUrl.inputValue(), firstWebhookUrl, 'reopening RAPT settings rotated the webhook URL');
+  assert.equal(await page.evaluate(async url => {
+    const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      device_id: 'smoke-pill-123', device_name: 'Smoke Pill', device_type: 'Hydrometer',
+      temperature: 19, gravity: 1.042, battery: 80, rssi: -45, created_date: new Date().toISOString()
+    }) });
+    return response.status;
+  }, firstWebhookUrl), 202);
+  await raptSettings.getByRole('button', { name: 'Refresh' }).click();
+  await raptSettings.getByRole('combobox', { name: 'Brewery for Smoke Pill' }).waitFor();
+  assert.equal(await raptSettings.getByRole('combobox', { name: 'Batch for Smoke Pill' }).count(), 0);
+  if (dev) {
+    const breweryChoice = raptSettings.getByRole('combobox', { name: 'Brewery for Smoke Pill' });
+    await breweryChoice.click();
+    await breweryChoice.press('ArrowDown');
+    await breweryChoice.press('Enter');
+  }
+  await page.waitForFunction(async () => {
+    const setup = await (await fetch('/api/me/rapt')).json();
+    return !!setup.devices.find(device => device.device_id === 'smoke-pill-123')?.equipment_id;
+  });
   await raptSettings.getByRole('button', { name: 'Delete integration' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Cancel' }).click();
   assert.equal(await webhookUrl.inputValue(), firstWebhookUrl, 'canceling integration deletion changed the URL');
@@ -293,6 +314,7 @@ try {
   await page.getByRole('link', { name: 'Sign in' }).waitFor();
   await page.goto(`${base}/brewer/${username}`);
   await page.getByRole('heading', { name: 'Smoke Brewer' }).waitFor();
+  assert.equal(await page.locator('.public-brewer-card').evaluate(element => getComputedStyle(element).borderTopWidth), '0px');
   assert.equal(await page.getByText(`@${username}`).isVisible(), true);
   assert.equal(await page.locator('.activity-scroll').evaluate(element => element.scrollWidth <= element.clientWidth), true,
     'public activity grid scrolls sideways on a phone');

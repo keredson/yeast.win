@@ -377,9 +377,10 @@ export async function assignEquipmentToBatch(db: DB, equipmentId: string, batchI
       AND removed_at IS NULL`, [equipmentId]);
     const batch = await tx.execO<{ id: string }>('SELECT id FROM batches WHERE id = ?', [batchId]);
     if (!equipment.length || !batch.length) throw new Error('Choose available equipment and a batch');
-    const existing = await tx.execO<{ id: string }>(`SELECT e.id FROM batch_events e
+    const existing = await tx.execO<{ id: string; batch_id: string }>(`SELECT e.id, e.batch_id FROM batch_events e
       JOIN equipment_use_events u ON u.event_id = e.id LEFT JOIN event_ends x ON x.id = e.id
-      WHERE u.equipment_id = ? AND e.batch_id = ? AND e.actual_at IS NOT NULL AND x.id IS NULL LIMIT 1`, [equipmentId, batchId]);
+      WHERE u.equipment_id = ? AND e.actual_at IS NOT NULL AND e.skipped_at IS NULL AND x.id IS NULL LIMIT 1`, [equipmentId]);
+    if (existing.length && existing[0].batch_id !== batchId) throw new Error('This equipment is already in use by another batch');
     if (!existing.length) {
       const id = createId();
       const now = nowSeconds();
@@ -2113,7 +2114,11 @@ export async function updateEquipmentModelMeasurementRange(db: DB, model: Equipm
 
 export async function deleteEquipment(db: DB, id: string): Promise<void> {
   await db.tx(async tx => {
-    await tx.exec('UPDATE equipment SET removed_at = ? WHERE id = ? AND removed_at IS NULL', [nowSeconds(), id]);
+    const at = nowSeconds();
+    await tx.exec(`INSERT INTO event_ends(id, ended_at) SELECT e.id, ? FROM batch_events e
+      JOIN equipment_use_events u ON u.event_id = e.id LEFT JOIN event_ends x ON x.id = e.id
+      WHERE u.equipment_id = ? AND e.actual_at IS NOT NULL AND x.id IS NULL`, [at, id]);
+    await tx.exec('UPDATE equipment SET removed_at = ? WHERE id = ? AND removed_at IS NULL', [at, id]);
     await tx.exec('DELETE FROM equipment_locations WHERE id = ?', [id]);
   });
 }
@@ -2122,6 +2127,9 @@ export async function deleteEquipmentUnits(db: DB, unitIds: string[]): Promise<v
   await db.tx(async tx => {
     const removedAt = nowSeconds();
     for (const id of unitIds) {
+      await tx.exec(`INSERT INTO event_ends(id, ended_at) SELECT e.id, ? FROM batch_events e
+        JOIN equipment_use_events u ON u.event_id = e.id LEFT JOIN event_ends x ON x.id = e.id
+        WHERE u.equipment_id = ? AND e.actual_at IS NOT NULL AND x.id IS NULL`, [removedAt, id]);
       await tx.exec('UPDATE equipment SET removed_at = ? WHERE id = ? AND removed_at IS NULL', [removedAt, id]);
       await tx.exec('DELETE FROM equipment_locations WHERE id = ?', [id]);
     }

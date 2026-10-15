@@ -17,8 +17,8 @@ import { requestAddress, requestIsSecure } from './http.ts';
 import { runtimeDeploymentInfo } from './buildInfo.ts';
 import { brewerActivity } from './brewerActivity.ts';
 import { registrationTimeZone, validTimeZone } from './timeZone.ts';
-import { assignRaptDevice, deleteRaptIntegration, ensureRaptToken, ingestRaptReading, parseRaptReading, raptConnection, raptConnectionForToken,
-  raptDevices, rotateRaptToken, unassignRaptDevice } from './rapt.ts';
+import { deleteRaptIntegration, ensureRaptToken, ingestRaptReading, parseRaptReading, raptConnection, raptConnectionForToken,
+  raptDevices, rotateRaptToken, setRaptBrewery } from './rapt.ts';
 
 assertCrSqliteAvailable();
 const authDb = openAuthDb();
@@ -276,12 +276,8 @@ const server = createServer(async (req, res) => {
     }
     if (pathname === '/api/me/rapt' && req.method === 'GET') {
       const connection = raptConnection(authDb, account.id);
-      const targets = ownerWorkspaces(account.id).flatMap(workspace =>
-        (getWorkspaceDb(workspace.id).prepare('SELECT id, name FROM batches ORDER BY updated_at DESC').all() as
-          { id: string; name: string }[]).map(batch => ({ workspace_id: workspace.id,
-            workspace_name: workspace.name, batch_id: batch.id, batch_name: batch.name })));
       return json(res, 200, { webhook_path: connection ? `/api/webhooks/rapt/${connection.token}` : null,
-        devices: raptDevices(authDb, account.id), targets });
+        devices: raptDevices(authDb, account.id, getWorkspaceDb), workspaces: ownerWorkspaces(account.id) });
     }
     if (pathname === '/api/me/rapt/webhook' && req.method === 'POST') {
       const secret = rotateRaptToken(authDb, account.id);
@@ -295,19 +291,13 @@ const server = createServer(async (req, res) => {
       deleteRaptIntegration(authDb, account.id);
       return json(res, 200, { ok: true });
     }
-    const raptAssignmentMatch = /^\/api\/me\/rapt\/devices\/([A-Za-z0-9_-]{8,64})\/assignment$/.exec(pathname);
-    if (raptAssignmentMatch && (req.method === 'PUT' || req.method === 'DELETE')) {
-      const deviceId = raptAssignmentMatch[1];
-      if (req.method === 'DELETE') {
-        unassignRaptDevice(authDb, account.id, deviceId);
-        return json(res, 200, { ok: true });
-      }
-      const body = await readJson(req, 4 * 1024) as { workspace_id?: unknown; batch_id?: unknown };
-      if (!body || !isValidId(body.workspace_id) || !isValidId(body.batch_id)
-        || !ownsWorkspace(account.id, body.workspace_id)) return json(res, 400, { error: 'Choose a batch in your brewery' });
-      const result = assignRaptDevice(authDb, account.id, deviceId, body.workspace_id, body.batch_id,
-        getWorkspaceDb(body.workspace_id));
-      if (result !== 'ok') return json(res, 404, { error: result === 'device_missing' ? 'Pill not found' : 'Batch not found' });
+    const raptBreweryMatch = /^\/api\/me\/rapt\/devices\/([A-Za-z0-9_-]{8,64})\/brewery$/.exec(pathname);
+    if (raptBreweryMatch && req.method === 'PUT') {
+      const body = await readJson(req, 4 * 1024) as { workspace_id?: unknown };
+      if (!body || body.workspace_id !== null && !isValidId(body.workspace_id))
+        return json(res, 400, { error: 'Choose a brewery' });
+      const result = setRaptBrewery(authDb, account.id, raptBreweryMatch[1], body.workspace_id, getWorkspaceDb);
+      if (result !== 'ok') return json(res, 404, { error: result === 'device_missing' ? 'Pill not found' : 'Brewery not found' });
       return json(res, 200, { ok: true });
     }
     if (pathname === '/api/catalog/sync' && req.method === 'GET') {

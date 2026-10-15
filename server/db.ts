@@ -10,7 +10,7 @@ const envPath = resolve(projectRoot, '.env');
 if (existsSync(envPath)) process.loadEnvFile(envPath);
 export const dataDir = resolve(projectRoot, process.env.BREWLOG_DATA_DIR || './data');
 const extensionPath = resolve(projectRoot, 'vendor/crsqlite.so');
-const authSchemaVersion = 5;
+const authSchemaVersion = 6;
 mkdirSync(dataDir, { recursive: true });
 
 export function assertCrSqliteAvailable(): void {
@@ -118,6 +118,10 @@ export function openAuthDb(): Database.Database {
         name TEXT NOT NULL,
         device_type TEXT NOT NULL,
         last_seen_at INTEGER NOT NULL,
+        workspace_id TEXT,
+        equipment_id TEXT,
+        legacy_migrated INTEGER NOT NULL DEFAULT 0,
+        brewery_choice_made INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (account_id, device_id)
       );
       CREATE TABLE IF NOT EXISTS rapt_assignments (
@@ -143,6 +147,15 @@ export function openAuthDb(): Database.Database {
         generated_at INTEGER NOT NULL
       );
     `);
+    const raptColumns = db.pragma('table_info(rapt_devices)') as { name: string }[];
+    if (!raptColumns.some(column => column.name === 'workspace_id'))
+      db.exec('ALTER TABLE rapt_devices ADD COLUMN workspace_id TEXT');
+    if (!raptColumns.some(column => column.name === 'equipment_id'))
+      db.exec('ALTER TABLE rapt_devices ADD COLUMN equipment_id TEXT');
+    if (!raptColumns.some(column => column.name === 'legacy_migrated'))
+      db.exec('ALTER TABLE rapt_devices ADD COLUMN legacy_migrated INTEGER NOT NULL DEFAULT 0');
+    if (!raptColumns.some(column => column.name === 'brewery_choice_made'))
+      db.exec('ALTER TABLE rapt_devices ADD COLUMN brewery_choice_made INTEGER NOT NULL DEFAULT 0');
     if (hasLegacyMeta) db.exec('DROP TABLE auth_meta');
     if (version < authSchemaVersion) db.pragma(`user_version = ${authSchemaVersion}`);
   })();

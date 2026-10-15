@@ -762,7 +762,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           { title: '', key: 'actions', width: 55, align: 'right', render: (_, row) => <Popconfirm
             title={row.child ? `Delete ${row.units.length} ${row.units.length === 1 ? 'unit' : 'units'} of ${row.model.name}${row.locationId ? ` at ${inventoryLocationPath(row.locationId, locations)}` : ''}?`
               : `Delete all units of ${row.model.name}?`}
-            description="The units are removed from your equipment list. Their batch history and calibrations remain."
+            description="The units are removed and released from active batches. Their history and calibrations remain."
             okText="Delete" okButtonProps={{ danger: true }} trigger={[]}
             open={indexDeleteRow?.key === row.key}
             onConfirm={() => void removeIndexRow()} onCancel={() => setIndexDeleteRow(null)}>
@@ -953,7 +953,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         </div>}
         <div className="equipment-delete"><Popconfirm
           title={`Delete unit ${item.name}?`}
-          description="This unit is removed from your equipment list. The model and its other units remain. Batch history and calibrations are retained."
+          description="This unit is removed and released from any active batch. Batch history and calibrations are retained."
           okText="Delete unit" okButtonProps={{ danger: true }} onConfirm={() => void remove()}>
           <Button type="text" danger>Delete unit</Button>
         </Popconfirm></div>

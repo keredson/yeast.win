@@ -3,8 +3,7 @@
 .public-brewer-login { color: #1f6b5b; font-size: 14px; font-weight: 700; text-decoration: none; white-space: nowrap; }
 .public-brewer-login:hover { color: #185848; text-decoration: underline; text-underline-offset: 4px; }
 .public-brewer-card { display: flex; align-items: center; gap: 26px; box-sizing: border-box; width: min(100%, 620px);
-  margin: clamp(55px, 12vw, 130px) auto 0; padding: clamp(24px, 5vw, 42px); border: 1px solid #e0e7dc;
-  border-radius: 18px; background: white; box-shadow: 0 24px 80px #24433716; }
+  margin: clamp(55px, 12vw, 130px) auto 0; }
 .public-brewer-card h1 { margin: 0; font-family: Georgia, serif; font-size: clamp(32px, 6vw, 48px); overflow-wrap: anywhere; }
 .public-brewer-card .public-eyebrow { margin: 0 0 8px; }
 .public-brewer-handle { margin: 6px 0 0; color: #526b60; }
