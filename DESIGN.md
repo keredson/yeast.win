@@ -235,9 +235,9 @@ CRR tables also cannot rely on checked foreign keys, non-primary-key uniqueness,
 
 ## RAPT and reminders
 
-- Bind a RAPT Pill identity to a batch for a defined time range. Preserve the external reading ID and source timestamp, deduplicate retries, and record the server receipt time.
-- One Pill reading becomes one actual measurement event with linked gravity and temperature values. Other sources, including manual hydrometers and refractometers, use the same measurement model and identify their own instrument/calibration.
-- Choose callback ingestion if RAPT offers a suitable authenticated callback; otherwise poll its API from the server. Do not assume an undocumented new API feature is available. If using a callback, publish only the required authenticated endpoint through the tunnel.
+- A private webhook URL identifies an account's RAPT connection. Device IDs discovered through that connection stay private to the account. Time-bounded assignments map each Pill to a batch in one of the account's breweries, and can be changed without moving old events. The auth DB stores the connection, device list, and assignment history.
+- RAPT's Custom Web Hook sends the device ID and source timestamp. One assigned Pill reading becomes one actual measurement event with linked gravity and temperature values. The event preserves the source timestamp and server receipt time; device ID plus source timestamp deduplicates retries. Other sources, including manual hydrometers and refractometers, use the same measurement model.
+- The current integration uses a random URL token as a bearer secret and requires the user to configure a Custom Web Hook in RAPT. It does not authenticate to the RAPT API or verify a RAPT signature. Publish only the webhook route through the tunnel where possible; rotate the URL if exposed.
 - The server evaluates planned due times and sends Web Push reminders such as a stepped nutrient feeding. The open PWA can also show local in-app reminders. Notification delivery is best effort; browser/platform support and machine availability affect it. The timeline remains the record of whether the action actually happened or was skipped.
 
 ## Operational needs

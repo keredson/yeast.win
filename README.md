@@ -48,7 +48,13 @@ run with `make provision`; subsequent local releases can be tested with `make de
 - Open `/me` from the avatar to manage breweries, upload an account avatar, choose preferred units, change your password, adjust automatic sync, or sign out. The sync icon there starts a manual sync and shows when sync last succeeded.
 - Use the same navigation on phones, tablets, and desktop screens. On phones, it opens in a left Drawer.
 
-Accounts can register and each account can own multiple private breweries. Sync covers each full brewery; sharing, per-batch permissions and filtered sync are later targets. RAPT Pill ingestion and server Web Push reminders are specified in [DESIGN.md](DESIGN.md) but are not wired up yet. A separate `data/catalog.sqlite` holds shared equipment and inventory entries. Signed-in devices keep a separate local CR-SQLite copy for offline search; the server sends catalog changes one way using a cursor. Copying an entry creates an independent brewery-owned item. Server catalog edits are tracked by CR-SQLite and do not require a manual version bump.
+Accounts can register and each account can own multiple private breweries. Sync covers each full brewery; sharing, per-batch permissions and filtered sync are later targets. RAPT Pill webhook ingestion is available; server Web Push reminders remain a later target. A separate `data/catalog.sqlite` holds shared equipment and inventory entries. Signed-in devices keep a separate local CR-SQLite copy for offline search; the server sends catalog changes one way using a cursor. Copying an entry creates an independent brewery-owned item. Server catalog edits are tracked by CR-SQLite and do not require a manual version bump.
+
+## RAPT Pill webhook
+
+In **Settings → RAPT Pill**, generate a private webhook URL. It must use a public HTTPS host that reaches this server; a localhost URL works only for local tests. In your RAPT account, create a Custom Web Hook with method POST, paste the URL, select the Pills to send, and use the JSON payload shown in Settings. After RAPT sends a reading, refresh Settings to see the discovered Pill and assign it to a batch in any of your breweries. Unassigned readings identify the Pill but do not create batch events.
+
+The URL belongs to the Yeast.Win! account, while each Pill's assignment chooses a brewery and batch. The server stores the connection, devices, and assignment history in its private auth database. An assigned reading creates one batch measurement event with gravity in SG and temperature in °C. The server uses the RAPT device ID and source timestamp to ignore repeated deliveries. Rotating the URL immediately invalidates the previous one; update the URL in RAPT afterward. This webhook setup requires manual configuration in RAPT and does not sign in to the RAPT API.
 
 ## Checks
 

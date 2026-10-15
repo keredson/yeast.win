@@ -10,7 +10,7 @@ const envPath = resolve(projectRoot, '.env');
 if (existsSync(envPath)) process.loadEnvFile(envPath);
 export const dataDir = resolve(projectRoot, process.env.BREWLOG_DATA_DIR || './data');
 const extensionPath = resolve(projectRoot, 'vendor/crsqlite.so');
-const authSchemaVersion = 1;
+const authSchemaVersion = 2;
 mkdirSync(dataDir, { recursive: true });
 
 export function assertCrSqliteAvailable(): void {
@@ -31,7 +31,6 @@ export function openAuthDb(): Database.Database {
   const db = new Database(join(dataDir, 'auth.sqlite'));
   db.pragma('journal_mode = WAL');
   const version = db.pragma('user_version', { simple: true }) as number;
-  if (version === authSchemaVersion) return db;
   if (version > authSchemaVersion) {
     db.close();
     throw new Error(`This server cannot open auth schema ${version}; update Yeast.Win! first.`);
@@ -71,7 +70,7 @@ export function openAuthDb(): Database.Database {
   const columns = db.pragma('table_info(workspaces)') as { name: string }[];
   if (!columns.some(column => column.name === 'slug')) db.exec('ALTER TABLE workspaces ADD COLUMN slug TEXT');
   const hasLegacyMeta = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_meta'").get();
-  const rootMigrationDone = version >= authSchemaVersion || (hasLegacyMeta
+  const rootMigrationDone = version >= 1 || (hasLegacyMeta
     && !!db.prepare("SELECT 1 FROM auth_meta WHERE key = 'nullable_root_slug_v1'").get());
   db.transaction(() => {
     if (!rootMigrationDone) {
@@ -97,6 +96,36 @@ export function openAuthDb(): Database.Database {
     }
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS workspaces_owner_slug ON workspaces(owner_account_id, slug)');
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS workspaces_one_root ON workspaces(owner_account_id) WHERE slug IS NULL');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS rapt_connections (
+        account_id TEXT PRIMARY KEY NOT NULL,
+        token TEXT NOT NULL UNIQUE,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS rapt_devices (
+        account_id TEXT NOT NULL,
+        device_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        device_type TEXT NOT NULL,
+        last_seen_at INTEGER NOT NULL,
+        PRIMARY KEY (account_id, device_id)
+      );
+      CREATE TABLE IF NOT EXISTS rapt_assignments (
+        id TEXT PRIMARY KEY NOT NULL,
+        account_id TEXT NOT NULL,
+        device_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        batch_id TEXT NOT NULL,
+        valid_from INTEGER NOT NULL,
+        valid_until INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS rapt_assignments_device_time
+        ON rapt_assignments(account_id, device_id, valid_from, valid_until);
+      CREATE UNIQUE INDEX IF NOT EXISTS rapt_assignments_one_active
+        ON rapt_assignments(account_id, device_id) WHERE valid_until IS NULL;
+      CREATE INDEX IF NOT EXISTS rapt_assignments_workspace
+        ON rapt_assignments(workspace_id);
+    `);
     if (hasLegacyMeta) db.exec('DROP TABLE auth_meta');
     if (version < authSchemaVersion) db.pragma(`user_version = ${authSchemaVersion}`);
   })();
@@ -133,6 +162,7 @@ export function deleteWorkspace(auth: Database.Database, ownerId: string, id: st
   const owned = auth.prepare('SELECT 1 FROM workspaces WHERE id = ? AND owner_account_id = ?').get(id, ownerId);
   if (!owned) return false;
   closeOpenDb();
+  auth.prepare('DELETE FROM rapt_assignments WHERE workspace_id = ?').run(id);
   const file = join(dataDir, `${id}.sqlite`);
   for (const path of [file, `${file}-wal`, `${file}-shm`]) if (existsSync(path)) unlinkSync(path);
   auth.prepare('DELETE FROM workspaces WHERE id = ? AND owner_account_id = ?').run(id, ownerId);

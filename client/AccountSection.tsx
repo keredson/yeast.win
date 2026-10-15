@@ -31,6 +31,23 @@ interface Props {
 }
 
 interface PasswordValues { currentPassword: string; newPassword: string; confirmPassword: string }
+interface RaptSetup {
+  webhook_path: string | null;
+  devices: { device_id: string; name: string; device_type: string; last_seen_at: number;
+    workspace_id: string | null; batch_id: string | null }[];
+  targets: { workspace_id: string; workspace_name: string; batch_id: string; batch_name: string }[];
+}
+
+const raptPayload = `{
+  "device_id": "@device_id",
+  "device_name": "@device_name",
+  "device_type": "@device_type",
+  "temperature": @temperature,
+  "gravity": @gravity,
+  "battery": @battery,
+  "rssi": @rssi,
+  "created_date": "@created_date"
+}`;
 
 export function AccountSection({ username, workspaces, activeWorkspaceId, db,
   onCreateWorkspace, onUpdateWorkspace, onDeleteWorkspace,
@@ -49,6 +66,11 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
   const [passwordError, setPasswordError] = useState('');
   const [passwordChanged, setPasswordChanged] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const [raptSetup, setRaptSetup] = useState<RaptSetup | null>(null);
+  const [raptBusy, setRaptBusy] = useState(false);
+  const [raptDeviceBusy, setRaptDeviceBusy] = useState<string | null>(null);
+  const [raptError, setRaptError] = useState('');
+  const [raptCopied, setRaptCopied] = useState(false);
   const [unitsBusy, setUnitsBusy] = useState(false);
   const [unitsError, setUnitsError] = useState('');
   const [mashEfficiency, setMashEfficiency] = useState<number | null>(null);
@@ -62,6 +84,34 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
   const [imageDownloadProgress, setImageDownloadProgress] = useState<{ done: number; total: number } | null>(null);
   const [imageDownloadMessage, setImageDownloadMessage] = useState('');
   const [imageDownloading, setImageDownloading] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void api<RaptSetup>('/me/rapt').then(result => { if (!cancelled) setRaptSetup(result); })
+      .catch(cause => { if (!cancelled) setRaptError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => { cancelled = true; };
+  }, []);
+  async function refreshRapt() {
+    setRaptSetup(await api<RaptSetup>('/me/rapt'));
+  }
+  async function rotateRaptWebhook() {
+    setRaptBusy(true); setRaptError(''); setRaptCopied(false);
+    try { await api('/me/rapt/webhook', 'POST'); await refreshRapt(); }
+    catch (cause) { setRaptError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setRaptBusy(false); }
+  }
+  async function setRaptAssignment(deviceId: string, target: string | undefined) {
+    setRaptDeviceBusy(deviceId); setRaptError('');
+    try {
+      if (target) {
+        const selected = raptSetup?.targets.find(item => `${item.workspace_id}:${item.batch_id}` === target);
+        if (!selected) throw new Error('Choose a batch');
+        await api(`/me/rapt/devices/${deviceId}/assignment`, 'PUT',
+          { workspace_id: selected.workspace_id, batch_id: selected.batch_id });
+      } else await api(`/me/rapt/devices/${deviceId}/assignment`, 'DELETE');
+      await refreshRapt();
+    } catch (cause) { setRaptError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setRaptDeviceBusy(null); }
+  }
   async function saveCatalogImages() {
     setImageDownloading(true);
     setImageDownloadMessage('');
@@ -261,6 +311,41 @@ export function AccountSection({ username, workspaces, activeWorkspaceId, db,
     <Card title="Security" className="account-card">
       {passwordChanged && <Alert type="success" message="Password changed. Other sessions have been signed out." showIcon />}
       <Button onClick={() => { setPasswordError(''); setPasswordOpen(true); }}>Change password</Button>
+    </Card>
+    <Card title="RAPT Pill" className="account-card">
+      <Typography.Paragraph type="secondary" className="setting-description">
+        Create a Custom Web Hook in your RAPT account with method POST. Select the Pills you want to send here.
+        Only readings from Pills assigned below are added to batches.
+      </Typography.Paragraph>
+      {raptSetup?.webhook_path ? <>
+        <Input aria-label="RAPT webhook URL" readOnly value={`${window.location.origin}${raptSetup.webhook_path}`} />
+        <div className="brewery-actions">
+          <Button onClick={() => { void navigator.clipboard.writeText(`${window.location.origin}${raptSetup.webhook_path}`)
+            .then(() => setRaptCopied(true)).catch(cause => setRaptError(cause instanceof Error ? cause.message : String(cause))); }}>
+            {raptCopied ? 'Copied' : 'Copy URL'}
+          </Button>
+          <Button loading={raptBusy} onClick={() => void rotateRaptWebhook()}>Rotate URL</Button>
+        </div>
+        <Typography.Paragraph type="secondary" className="setting-description">
+          Rotating the URL stops the old one. Update the Web Hook in RAPT after rotating.
+        </Typography.Paragraph>
+      </> : <Button loading={raptBusy} onClick={() => void rotateRaptWebhook()}>Generate webhook URL</Button>}
+      <Typography.Paragraph className="setting-description">Use this payload in the RAPT Web Hook:</Typography.Paragraph>
+      <pre>{raptPayload}</pre>
+      <div className="setting-row"><strong>Your Pills</strong><Button onClick={() => void refreshRapt().catch(cause =>
+        setRaptError(cause instanceof Error ? cause.message : String(cause)))}>Refresh</Button></div>
+      {raptSetup?.devices.length ? raptSetup.devices.map(device => <div className="setting-row" key={device.device_id}>
+        <div><strong>{device.name}</strong><div className="muted">{device.device_type} · {device.device_id}</div></div>
+        <Select aria-label={`Batch for ${device.name}`} placeholder="Unassigned" allowClear
+          value={device.workspace_id && device.batch_id ? `${device.workspace_id}:${device.batch_id}` : undefined}
+          style={{ minWidth: 220 }} disabled={raptDeviceBusy === device.device_id}
+          options={raptSetup.targets.map(target => ({ value: `${target.workspace_id}:${target.batch_id}`,
+            label: `${target.workspace_name} / ${target.batch_name}` }))}
+          onChange={value => void setRaptAssignment(device.device_id, value)} />
+      </div>) : <Typography.Paragraph type="secondary">
+        No Pills received yet. Send a test reading from RAPT, then refresh.
+      </Typography.Paragraph>}
+      {raptError && <Alert type="error" message={raptError} showIcon />}
     </Card>
     <Modal title="Change password" open={passwordOpen} onCancel={() => { setPasswordOpen(false); passwordForm.resetFields(); }}
       footer={null} destroyOnHidden>

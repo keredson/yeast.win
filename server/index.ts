@@ -12,6 +12,8 @@ import { syncSchemaConflict, syncSchemaHeader } from '../shared/syncSchema.ts';
 import { isValidId } from '../shared/schema.ts';
 import { validPreferredUnits } from '../shared/units.ts';
 import { requestAddress, requestIsSecure } from './http.ts';
+import { assignRaptDevice, ingestRaptReading, parseRaptReading, raptConnection, raptConnectionForToken,
+  raptDevices, rotateRaptToken, unassignRaptDevice } from './rapt.ts';
 
 assertCrSqliteAvailable();
 const authDb = openAuthDb();
@@ -31,6 +33,7 @@ const cookieName = sessionCookieName(devSocket || productionSocket || port);
 const loginFailures = new Map<string, { count: number; resetAt: number }>();
 const registrationAttempts = new Map<string, { count: number; resetAt: number }>();
 const passwordFailures = new Map<string, { count: number; resetAt: number }>();
+const raptRequests = new Map<string, { count: number; resetAt: number }>();
 const loginWindowMs = 15 * 60 * 1000;
 const loginLimit = 10;
 const registrationLimit = 20;
@@ -141,6 +144,23 @@ const server = createServer(async (req, res) => {
     const pathname = url.pathname;
     if (!pathname.startsWith('/api/')) return serveStatic(req, res, pathname);
     if (pathname === '/api/healthz' && req.method === 'GET') return json(res, 200, { ok: true });
+    const raptWebhookMatch = /^\/api\/webhooks\/rapt\/([^/]+)$/.exec(pathname);
+    if (raptWebhookMatch && req.method === 'POST') {
+      const connection = raptConnectionForToken(authDb, raptWebhookMatch[1]);
+      if (!connection) return json(res, 404, { error: 'Webhook not found' });
+      const now = Date.now();
+      const previous = raptRequests.get(connection.account_id);
+      const attempts = previous && previous.resetAt > now ? previous : { count: 0, resetAt: now + 60_000 };
+      if (attempts.count >= 120) return json(res, 429, { error: 'Too many readings' });
+      raptRequests.set(connection.account_id, { ...attempts, count: attempts.count + 1 });
+      let body: unknown;
+      try { body = await readJson(req, 8 * 1024); }
+      catch { return json(res, 400, { error: 'Expected a JSON reading under 8 KB' }); }
+      const reading = parseRaptReading(body);
+      if (!reading) return json(res, 400, { error: 'Invalid RAPT reading' });
+      const result = ingestRaptReading(authDb, connection.account_id, reading, getWorkspaceDb);
+      return json(res, result === 'unassigned' ? 202 : 200, { status: result });
+    }
     if (pathname === '/api/register' && req.method === 'POST') {
       const registrationKey = clientAddress(req);
       const now = Date.now();
@@ -183,6 +203,38 @@ const server = createServer(async (req, res) => {
 
     if (pathname === '/api/me' && req.method === 'GET') {
       return json(res, 200, { account, workspaces: ownerWorkspaces(account.id), preferred_units: getPreferredUnits(authDb, account.id) });
+    }
+    if (pathname === '/api/me/rapt' && req.method === 'GET') {
+      const connection = raptConnection(authDb, account.id);
+      const targets = ownerWorkspaces(account.id).flatMap(workspace =>
+        (getWorkspaceDb(workspace.id).prepare('SELECT id, name FROM batches ORDER BY updated_at DESC').all() as
+          { id: string; name: string }[]).map(batch => ({ workspace_id: workspace.id,
+            workspace_name: workspace.name, batch_id: batch.id, batch_name: batch.name })));
+      return json(res, 200, { webhook_path: connection ? `/api/webhooks/rapt/${connection.token}` : null,
+        devices: raptDevices(authDb, account.id), targets });
+    }
+    if (pathname === '/api/me/rapt/webhook' && req.method === 'POST') {
+      const secret = rotateRaptToken(authDb, account.id);
+      return json(res, 200, { webhook_path: `/api/webhooks/rapt/${secret}` });
+    }
+    if (pathname === '/api/me/rapt/webhook' && req.method === 'DELETE') {
+      authDb.prepare('DELETE FROM rapt_connections WHERE account_id = ?').run(account.id);
+      return json(res, 200, { ok: true });
+    }
+    const raptAssignmentMatch = /^\/api\/me\/rapt\/devices\/([A-Za-z0-9_-]{8,64})\/assignment$/.exec(pathname);
+    if (raptAssignmentMatch && (req.method === 'PUT' || req.method === 'DELETE')) {
+      const deviceId = raptAssignmentMatch[1];
+      if (req.method === 'DELETE') {
+        unassignRaptDevice(authDb, account.id, deviceId);
+        return json(res, 200, { ok: true });
+      }
+      const body = await readJson(req, 4 * 1024) as { workspace_id?: unknown; batch_id?: unknown };
+      if (!body || !isValidId(body.workspace_id) || !isValidId(body.batch_id)
+        || !ownsWorkspace(account.id, body.workspace_id)) return json(res, 400, { error: 'Choose a batch in your brewery' });
+      const result = assignRaptDevice(authDb, account.id, deviceId, body.workspace_id, body.batch_id,
+        getWorkspaceDb(body.workspace_id));
+      if (result !== 'ok') return json(res, 404, { error: result === 'device_missing' ? 'Pill not found' : 'Batch not found' });
+      return json(res, 200, { ok: true });
     }
     if (pathname === '/api/catalog/sync' && req.method === 'GET') {
       const conflict = syncSchemaConflict(req.headers[syncSchemaHeader.toLowerCase()] as string | undefined,

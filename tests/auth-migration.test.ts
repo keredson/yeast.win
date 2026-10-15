@@ -24,7 +24,7 @@ const { openAuthDb } = await import('../server/db.ts');
 test('legacy first brewery becomes the only root brewery', () => {
   const db = openAuthDb();
   try {
-    assert.equal(db.pragma('user_version', { simple: true }), 1);
+    assert.equal(db.pragma('user_version', { simple: true }), 2);
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'auth_meta'").get(), undefined);
     const rows = db.prepare('SELECT slug FROM workspaces WHERE owner_account_id = ? ORDER BY created_at, rowid')
       .all('account') as { slug: string | null }[];
@@ -48,8 +48,26 @@ test('auth upgrade respects the completed legacy root migration', () => {
   legacy.close();
   const db = openAuthDb();
   try {
-    assert.equal(db.pragma('user_version', { simple: true }), 1);
+    assert.equal(db.pragma('user_version', { simple: true }), 2);
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'auth_meta'").get(), undefined);
     assert.equal((db.prepare("SELECT id FROM workspaces WHERE slug IS NULL").get() as { id: string }).id, 'second');
+  } finally { db.close(); }
+});
+
+test('auth upgrade preserves partially created RAPT tables and unrelated rows', () => {
+  const legacy = new Database(file);
+  legacy.exec(`INSERT INTO rapt_devices(account_id, device_id, name, device_type, last_seen_at)
+    VALUES ('account', 'pill-one', 'Blue Pill', 'Hydrometer', 123);
+    DROP INDEX rapt_assignments_one_active;
+    PRAGMA user_version = 1;`);
+  legacy.close();
+  const db = openAuthDb();
+  try {
+    assert.equal(db.pragma('user_version', { simple: true }), 2);
+    assert.equal((db.prepare("SELECT name FROM rapt_devices WHERE device_id = 'pill-one'").get() as
+      { name: string }).name, 'Blue Pill');
+    assert.equal((db.prepare("SELECT name FROM workspaces WHERE id = 'first'").get() as
+      { name: string }).name, 'Homebrew');
+    assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'rapt_assignments_one_active'").get());
   } finally { db.close(); }
 });
