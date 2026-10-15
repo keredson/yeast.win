@@ -17,6 +17,8 @@ interface Props {
   onDeleteWorkspace: (id: string) => Promise<void>;
   avatarSrc?: string;
   onAvatarUploaded: () => void;
+  hidePublicProfile: boolean | null;
+  onHidePublicProfileChange: (hidden: boolean) => Promise<void>;
   preferredUnits: PreferredUnits;
   onPreferredUnitsChange: (units: PreferredUnits) => Promise<void>;
   syncingWorkspaceId: string | null;
@@ -46,7 +48,7 @@ const raptPayload = `{
 
 export function AccountSection({ username, workspaces, activeWorkspaceId,
   onCreateWorkspace, onUpdateWorkspace, onDeleteWorkspace,
-  avatarSrc, onAvatarUploaded, preferredUnits, onPreferredUnitsChange,
+  avatarSrc, onAvatarUploaded, hidePublicProfile, onHidePublicProfileChange, preferredUnits, onPreferredUnitsChange,
   syncingWorkspaceId, syncStatusFor, onManualSync }: Props) {
   const [passwordForm] = Form.useForm<PasswordValues>();
   const [breweryForm] = Form.useForm<BreweryValues>();
@@ -217,7 +219,8 @@ export function AccountSection({ username, workspaces, activeWorkspaceId,
 
   return <div className="account-page">
     <div className="section-heading"><div><div className="eyebrow">Account</div><h1>Settings</h1></div></div>
-    <ProfileCard username={username} avatarSrc={avatarSrc} onAvatarUploaded={onAvatarUploaded} />
+    <ProfileCard username={username} avatarSrc={avatarSrc} onAvatarUploaded={onAvatarUploaded}
+      hidePublicProfile={hidePublicProfile} onHidePublicProfileChange={onHidePublicProfileChange} />
     <Card title="Preferred units" className="account-card">
       <Typography.Paragraph type="secondary" className="setting-description">Used as defaults when logging new values. Existing records keep their entered units.</Typography.Paragraph>
       <div className="unit-grid">

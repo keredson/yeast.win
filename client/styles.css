@@ -29,6 +29,7 @@ button, input, textarea { font: inherit; }
 .nav-panel .ant-btn.nav-logout-button { flex: none; color: white; }
 .nav-panel .ant-btn.nav-logout-button:hover { color: white; background: #29514a; }
 .nav-account-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-visibility-row { align-items: center; }
 .connection-popover { max-width: 260px; }
 .connection-popover p { margin: 0; }
 .connection-popover p + p { margin-top: 8px; }

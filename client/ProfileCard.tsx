@@ -1,17 +1,28 @@
 import { useRef, useState } from 'react';
 import { UploadOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Button, Card } from 'antd';
+import { Alert, Avatar, Button, Card, Switch } from 'antd';
 
 interface Props {
   username: string;
   avatarSrc?: string;
   onAvatarUploaded: () => void;
+  hidePublicProfile: boolean | null;
+  onHidePublicProfileChange: (hidden: boolean) => Promise<void>;
 }
 
-export function ProfileCard({ username, avatarSrc, onAvatarUploaded }: Props) {
+export function ProfileCard({ username, avatarSrc, onAvatarUploaded, hidePublicProfile, onHidePublicProfileChange }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarError, setAvatarError] = useState('');
+  const [visibilityBusy, setVisibilityBusy] = useState(false);
+  const [visibilityError, setVisibilityError] = useState('');
+
+  async function updateVisibility(hidden: boolean) {
+    setVisibilityBusy(true); setVisibilityError('');
+    try { await onHidePublicProfileChange(hidden); }
+    catch (cause) { setVisibilityError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setVisibilityBusy(false); }
+  }
 
   async function uploadAvatar(file: File) {
     setAvatarBusy(true);
@@ -53,5 +64,11 @@ export function ProfileCard({ username, avatarSrc, onAvatarUploaded }: Props) {
       </div>
     </div>
     {avatarError && <Alert type="error" message={avatarError} showIcon />}
+    <div className="setting-row profile-visibility-row">
+      <div><strong>Hide public profile</strong><div className="muted">When enabled, visitors cannot view your brewer page or avatar.</div></div>
+      <Switch aria-label="Hide public profile" checked={hidePublicProfile === true} loading={visibilityBusy}
+        onChange={value => void updateVisibility(value)} />
+    </div>
+    {visibilityError && <Alert type="error" message={visibilityError} showIcon />}
   </Card>;
 }

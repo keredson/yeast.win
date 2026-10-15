@@ -24,7 +24,7 @@ const { openAuthDb } = await import('../server/db.ts');
 test('legacy first brewery becomes the only root brewery', () => {
   const db = openAuthDb();
   try {
-    assert.equal(db.pragma('user_version', { simple: true }), 2);
+    assert.equal(db.pragma('user_version', { simple: true }), 3);
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'auth_meta'").get(), undefined);
     const rows = db.prepare('SELECT slug FROM workspaces WHERE owner_account_id = ? ORDER BY created_at, rowid')
       .all('account') as { slug: string | null }[];
@@ -48,7 +48,7 @@ test('auth upgrade respects the completed legacy root migration', () => {
   legacy.close();
   const db = openAuthDb();
   try {
-    assert.equal(db.pragma('user_version', { simple: true }), 2);
+    assert.equal(db.pragma('user_version', { simple: true }), 3);
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'auth_meta'").get(), undefined);
     assert.equal((db.prepare("SELECT id FROM workspaces WHERE slug IS NULL").get() as { id: string }).id, 'second');
   } finally { db.close(); }
@@ -63,11 +63,61 @@ test('auth upgrade preserves partially created RAPT tables and unrelated rows', 
   legacy.close();
   const db = openAuthDb();
   try {
-    assert.equal(db.pragma('user_version', { simple: true }), 2);
+    assert.equal(db.pragma('user_version', { simple: true }), 3);
     assert.equal((db.prepare("SELECT name FROM rapt_devices WHERE device_id = 'pill-one'").get() as
       { name: string }).name, 'Blue Pill');
     assert.equal((db.prepare("SELECT name FROM workspaces WHERE id = 'first'").get() as
       { name: string }).name, 'Homebrew');
     assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'rapt_assignments_one_active'").get());
+  } finally { db.close(); }
+});
+
+test('auth upgrade adds nullable public profile visibility while preserving accounts and unrelated data', () => {
+  const previous = new Database(file);
+  previous.exec(`ALTER TABLE accounts DROP COLUMN hide_public_profile;
+    INSERT INTO accounts(id, username, password_hash, created_at) VALUES ('brewer-one', 'brewer_one', 'saved-hash', 123);
+    INSERT INTO account_avatars(account_id, image_jpeg, uploaded_at) VALUES ('brewer-one', x'010203', 456);
+    PRAGMA user_version = 2;`);
+  previous.close();
+  const db = openAuthDb();
+  try {
+    assert.equal(db.pragma('user_version', { simple: true }), 3);
+    assert.deepEqual(db.prepare('SELECT username, password_hash, hide_public_profile FROM accounts WHERE id = ?')
+      .get('brewer-one'), { username: 'brewer_one', password_hash: 'saved-hash', hide_public_profile: null });
+    assert.deepEqual((db.prepare('SELECT image_jpeg FROM account_avatars WHERE account_id = ?')
+      .get('brewer-one') as { image_jpeg: Buffer }).image_jpeg, Buffer.from([1, 2, 3]));
+    assert.equal((db.prepare("SELECT name FROM rapt_devices WHERE device_id = 'pill-one'").get() as
+      { name: string }).name, 'Blue Pill');
+  } finally { db.close(); }
+});
+
+test('auth upgrade keeps visibility already added during a partial migration', () => {
+  const partial = new Database(file);
+  partial.exec("UPDATE accounts SET hide_public_profile = 1 WHERE id = 'brewer-one'; PRAGMA user_version = 2;");
+  partial.close();
+  const db = openAuthDb();
+  try {
+    assert.equal(db.pragma('user_version', { simple: true }), 3);
+    assert.equal((db.prepare("SELECT hide_public_profile FROM accounts WHERE id = 'brewer-one'").get() as
+      { hide_public_profile: number }).hide_public_profile, 1);
+    assert.equal((db.prepare("SELECT name FROM workspaces WHERE id = 'first'").get() as { name: string }).name, 'Homebrew');
+  } finally { db.close(); }
+});
+
+test('public brewer visibility treats null as visible and hides both profile and avatar from visitors', async () => {
+  const { publicBrewer, publicBrewerAvatar, setPublicProfileHidden } = await import('../server/auth.ts');
+  const db = openAuthDb();
+  try {
+    db.prepare("UPDATE accounts SET hide_public_profile = NULL WHERE id = 'brewer-one'").run();
+    assert.deepEqual(publicBrewer(db, 'BREWER_ONE'), { username: 'brewer_one', has_avatar: true, hidden: false });
+    assert.deepEqual(publicBrewerAvatar(db, 'brewer_one'), Buffer.from([1, 2, 3]));
+    setPublicProfileHidden(db, 'brewer-one', true);
+    assert.equal(publicBrewer(db, 'brewer_one'), null);
+    assert.equal(publicBrewerAvatar(db, 'brewer_one'), null);
+    assert.deepEqual(publicBrewer(db, 'brewer_one', 'brewer-one'),
+      { username: 'brewer_one', has_avatar: true, hidden: true });
+    assert.deepEqual(publicBrewerAvatar(db, 'brewer_one', 'brewer-one'), Buffer.from([1, 2, 3]));
+    setPublicProfileHidden(db, 'brewer-one', false);
+    assert.deepEqual(publicBrewer(db, 'brewer_one'), { username: 'brewer_one', has_avatar: true, hidden: false });
   } finally { db.close(); }
 });

@@ -4,7 +4,7 @@ import type { SyncSchemaConflict } from '../shared/syncSchema.ts';
 
 export interface Workspace { id: string; name: string; slug: string | null }
 export interface Session {
-  account: { id: string; username: string; has_avatar: boolean };
+  account: { id: string; username: string; has_avatar: boolean; hide_public_profile: boolean | null };
   workspaces: Workspace[];
   preferred_units: PreferredUnits;
 }

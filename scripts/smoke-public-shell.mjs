@@ -55,7 +55,7 @@ try {
     'a single brewery should not show the switcher');
   assert.equal(await page.locator('.app-nav .nav-footer').getByRole('link', { name: 'Your profile' }).isVisible(), true);
   assert.equal(await page.locator('.app-nav .nav-footer').getByRole('button', { name: 'Log out' }).isVisible(), true);
-  assert.equal(await page.locator('.account-page .ant-card').first().getByText('Profile').count(), 1);
+  assert.equal(await page.locator('.account-page .ant-card').first().getByText('Profile', { exact: true }).count(), 1);
   assert.equal(await page.locator('.account-page .ant-card').nth(1).getByText('Preferred units').count(), 1);
   assert.equal(await page.locator('.account-page .ant-card').last().getByText('Security').count(), 1);
   assert.equal(await page.getByText('Recipe calculations').count(), 0);
@@ -85,8 +85,29 @@ try {
   await page.locator('.app-nav').getByRole('link', { name: 'Your profile' }).click();
   await page.waitForURL(`**/brewer/${username}`);
   await page.getByRole('heading', { name: username }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Upload avatar' }).count(), 0);
+  assert.equal(await page.locator('.app-nav').count(), 0, 'public brewer page rendered the private app shell');
+  assert.deepEqual(await page.evaluate(async name => {
+    const response = await fetch(`/api/brewer/${name}`);
+    return { status: response.status, body: await response.json() };
+  }, username), { status: 200, body: { username, has_avatar: false, hidden: false } });
   await page.goBack();
   await page.waitForURL('**/settings');
+  const hideProfile = page.getByRole('switch', { name: 'Hide public profile' });
+  assert.equal(await hideProfile.isChecked(), false, 'new accounts should have a visible public profile');
+  assert.equal(await page.evaluate(async () => (await (await fetch('/api/me')).json()).account.hide_public_profile), null);
+  await hideProfile.click();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('brewlog:last-session')).account.hide_public_profile === true);
+  assert.equal(await hideProfile.isChecked(), true);
+  const visitor = await browser.newContext();
+  const visitorPage = await visitor.newPage();
+  await visitorPage.goto(`${base}/brewer/${username}`);
+  await visitorPage.getByRole('heading', { name: 'Brewer not found' }).waitFor();
+  assert.equal(await visitorPage.evaluate(async name => (await fetch(`/api/brewer/${name}/avatar`)).status, username), 404);
+  await visitor.close();
+  await hideProfile.click();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('brewlog:last-session')).account.hide_public_profile === false);
+  assert.equal(await hideProfile.isChecked(), false);
   await page.locator('.app-nav').getByRole('menuitem', { name: 'Home' }).click();
   await page.locator('.app-nav').getByRole('menuitem', { name: 'About' }).click();
   await page.waitForURL('**/about');
@@ -221,5 +242,11 @@ try {
   await page.locator('.app-nav').getByRole('button', { name: 'Log out' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Log out' }).click();
   await page.getByRole('link', { name: 'Sign in' }).waitFor();
+  await page.goto(`${base}/brewer/${username}`);
+  await page.getByRole('heading', { name: username }).waitFor();
+  assert.equal(new URL(page.url()).pathname, `/brewer/${username}`, 'public profile redirected to sign in');
+  assert.equal(await page.getByRole('button', { name: 'Upload avatar' }).count(), 0);
+  await page.goto(`${base}/brewer/not-a-real-brewer`);
+  await page.getByRole('heading', { name: 'Brewer not found' }).waitFor();
   console.log(`Light public routes, protected redirect, and authenticated app load passed${dev ? ' in dev' : ' with offline reopen'}`);
 } finally { await browser.close(); }

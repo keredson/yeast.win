@@ -22,7 +22,6 @@ import { breadcrumbNodes, type BreadcrumbRecords, type BreadcrumbSection } from 
 import { routeFromPath, routePath, workspaceBase, type Route, type Section } from './appRoutes.ts';
 import { AccountSection } from './AccountSection.tsx';
 import { AboutSection } from './AboutSection.tsx';
-import { ProfileCard } from './ProfileCard.tsx';
 import { openLocalCatalog, syncLocalCatalog } from './catalog.ts';
 
 function recordPath(section: BreadcrumbSection, id: string | null, base: string, records: BreadcrumbRecords): string {
@@ -47,7 +46,7 @@ const navItems = [
   { key: 'equipment', label: 'Equipment', icon: ToolOutlined },
   { key: 'locations', label: 'Locations', icon: EnvironmentOutlined }
 ] as const;
-type RecordSection = Exclude<Section, 'settings' | 'about' | 'brewer' | 'home'>;
+type RecordSection = Exclude<Section, 'settings' | 'about' | 'home'>;
 type NavRecord = { id: string; name: string; recipe_type?: RecipeType | null };
 type RecentItems = Record<RecordSection, string[]>;
 const recordSections: RecordSection[] = ['batches', 'recipes', 'inventory', 'equipment', 'locations'];
@@ -86,7 +85,7 @@ function initialBrewery(workspaces: Workspace[]): string | null {
   const remembered = localStorage.getItem(activeBreweryKey);
   if (linked) return workspaces.find(item => item.id === linked)?.id || workspaces[0]?.id || null;
   if (slug) return workspaces.find(item => item.slug === slug)?.id || workspaces[0]?.id || null;
-  if (['settings', 'about', 'brewer'].includes(routeFromPath(location.pathname).section))
+  if (['settings', 'about'].includes(routeFromPath(location.pathname).section))
     return workspaces.find(item => item.id === remembered)?.id || workspaces[0]?.id || null;
   return workspaces.find(item => item.slug === null)?.id || workspaces[0]?.id || null;
 }
@@ -94,7 +93,7 @@ function initialBrewery(workspaces: Workspace[]): string | null {
 function canonicalizeLocation(workspaces: Workspace[]): void {
   const linked = new URLSearchParams(location.search).get('brewery');
   const route = routeFromPath(location.pathname);
-  if (route.section === 'settings' || route.section === 'about' || route.section === 'brewer') {
+  if (route.section === 'settings' || route.section === 'about') {
     const path = routePath(route.section, route.selectedId, '');
     if (location.pathname !== path || location.search) history.replaceState(null, '', path);
     return;
@@ -309,7 +308,7 @@ export function App() {
       if (session) canonicalizeLocation(session.workspaces);
       const next = routeFromPath(location.pathname);
       setRoute(next);
-      if (next.section === 'settings' || next.section === 'about' || next.section === 'brewer' || !session) return;
+      if (next.section === 'settings' || next.section === 'about' || !session) return;
       const workspace = next.slug ? session.workspaces.find(item => item.slug === next.slug)
         : session.workspaces.find(item => item.slug === null);
       if (workspace) {
@@ -330,7 +329,7 @@ export function App() {
         next[name] = Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string').slice(0, 5) : [];
       } catch { next[name] = []; }
     }
-    if (route.section !== 'settings' && route.section !== 'about' && route.section !== 'brewer' && route.section !== 'home' && route.selectedId) {
+    if (route.section !== 'settings' && route.section !== 'about' && route.section !== 'home' && route.selectedId) {
       const name = route.section;
       if (name !== 'recipes' || !next[name].includes(route.selectedId)) {
         next[name] = [route.selectedId, ...next[name].filter(id => id !== route.selectedId)].slice(0, 5);
@@ -385,15 +384,7 @@ export function App() {
     const path = routePath(next, null, base);
     if (location.pathname !== path || location.search) history.pushState(null, '', path);
     setRoute({ section: next, selectedId: null,
-      slug: next === 'settings' || next === 'about' || next === 'brewer' ? null : base.split('/')[2] || null });
-    setMenuOpen(false);
-  }
-
-  function showBrewer() {
-    if (!session) return;
-    const path = routePath('brewer', session.account.username, '');
-    if (location.pathname !== path || location.search) history.pushState(null, '', path);
-    setRoute(routeFromPath(path));
+      slug: next === 'settings' || next === 'about' ? null : base.split('/')[2] || null });
     setMenuOpen(false);
   }
 
@@ -624,6 +615,14 @@ export function App() {
     setSession(updated);
   }
 
+  async function updateProfileVisibility(hidden: boolean) {
+    if (!session) return;
+    await api('/me/profile', 'PATCH', { hide_public_profile: hidden });
+    const updated = { ...session, account: { ...session.account, hide_public_profile: hidden } };
+    rememberSession(updated);
+    setSession(updated);
+  }
+
   if (loading) return <div className="loading-screen"><Spin size="large" /></div>;
   if (!session) return <div className="loading-screen"><Spin size="large" /></div>;
   const avatarSrc = session.account.has_avatar ? `/api/me/avatar?v=${avatarVersion}` : undefined;
@@ -636,7 +635,7 @@ export function App() {
       total: workspaceProgress.total + catalogSyncProgress.total }
     : workspaceProgress || (catalogSyncProgress ? { label: 'Updating catalog', ...catalogSyncProgress } : null);
   const breadcrumbRecords = { batches, recipes, inventory, supplies, equipment, equipmentModels, locations };
-  const crumbs = section !== 'settings' && section !== 'about' && section !== 'brewer' && section !== 'home' && db
+  const crumbs = section !== 'settings' && section !== 'about' && section !== 'home' && db
     ? breadcrumbNodes(section, route.selectedId, breadcrumbRecords) : [];
   const showBrewerySwitcher = session.workspaces.length > 1;
   const sidebar = (mobile: boolean) => <div className="nav-panel">
@@ -659,7 +658,7 @@ export function App() {
     <nav className="nav-links" aria-label="Sections">
       <SectionNavigation route={route} recent={recent} records={{ batches: recentRecords.batches, recipes: recentRecords.recipes,
         inventory: [], equipment: [], locations: [] }}
-        onNavigate={(name, id) => { if (name !== 'home' && name !== 'settings' && name !== 'about' && name !== 'brewer' && id) showItem(name, id);
+        onNavigate={(name, id) => { if (name !== 'home' && name !== 'settings' && name !== 'about' && id) showItem(name, id);
           else showSection(name); if (mobile) setMenuOpen(false); }} />
     </nav>
     <div className="nav-footer">
@@ -673,9 +672,7 @@ export function App() {
         </div>
       </Tooltip>}
       <div className="nav-profile-row">
-        <a className="nav-profile-link" href={routePath('brewer', session.account.username, '')} aria-label="Your profile"
-          onClick={event => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-            event.preventDefault(); showBrewer(); }}>
+        <a className="nav-profile-link" href={`/brewer/${encodeURIComponent(session.account.username)}`} aria-label="Your profile">
           <Avatar size={32} src={avatarSrc}>{session.account.username[0].toUpperCase()}</Avatar>
           <span className="nav-account-name">{session.account.username}</span>
         </a>
@@ -716,17 +713,12 @@ export function App() {
           }))} />}
         </div>
         {error && <Alert type="warning" showIcon closable onClose={() => setError('')} message={error} className="page-alert" />}
-        {section === 'about' ? <AboutSection /> : section === 'brewer' ? <div className="account-page">
-          <div className="section-heading"><div><div className="eyebrow">Brewer</div><h1>{route.selectedId === session.account.username.toLowerCase()
-            ? session.account.username : 'Brewer not found'}</h1></div></div>
-          {route.selectedId === session.account.username.toLowerCase() && <ProfileCard username={session.account.username} avatarSrc={avatarSrc}
-            onAvatarUploaded={() => { const updated = { ...session, account: { ...session.account, has_avatar: true } };
-              rememberSession(updated); setSession(updated); setAvatarVersion(Date.now()); }} />}
-        </div> : section === 'settings' ? <AccountSection username={session.account.username} avatarSrc={avatarSrc}
+        {section === 'about' ? <AboutSection /> : section === 'settings' ? <AccountSection username={session.account.username} avatarSrc={avatarSrc}
           workspaces={session.workspaces} activeWorkspaceId={workspaceId}
           onCreateWorkspace={createWorkspace} onUpdateWorkspace={renameWorkspace} onDeleteWorkspace={removeWorkspace}
           onAvatarUploaded={() => { const updated = { ...session, account: { ...session.account, has_avatar: true } };
             rememberSession(updated); setSession(updated); setAvatarVersion(Date.now()); }}
+          hidePublicProfile={session.account.hide_public_profile} onHidePublicProfileChange={updateProfileVisibility}
           preferredUnits={preferredUnits} onPreferredUnitsChange={updatePreferredUnits}
           syncingWorkspaceId={manualSyncWorkspaceId || (syncPhase === 'syncing' ? workspaceId : null)}
           syncStatusFor={id => timeSinceSync(id === workspaceId ? lastSyncedAt

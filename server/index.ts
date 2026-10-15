@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import type Database from 'better-sqlite3';
 import { accountForToken, changePassword, clearSessionCookie, getAvatar, getPreferredUnits, login, logout,
-  readSessionCookie, register, saveAvatar, savePreferredUnits, sessionCookie, sessionCookieName,
+  publicBrewer, publicBrewerAvatar, readSessionCookie, register, saveAvatar, savePreferredUnits, setPublicProfileHidden, sessionCookie, sessionCookieName,
   usernameExists } from './auth.ts';
 import { assertCrSqliteAvailable, closeWorkspaceDb, createWorkspace, dataDir, deleteWorkspace, openAuthDb, openWorkspaceDb, projectRoot, updateWorkspace } from './db.ts';
 import { openCatalogDb } from './catalog.ts';
@@ -149,6 +149,19 @@ const server = createServer(async (req, res) => {
     if (pathname === '/api/healthz' && req.method === 'GET') return json(res, 200, { ok: true });
     if (pathname === '/api/about' && req.method === 'GET')
       return json(res, 200, runtimeDeploymentInfo(projectRoot, distDir, !!devSocket, startedAt));
+    const publicBrewerMatch = /^\/api\/brewer\/([A-Za-z0-9][A-Za-z0-9_-]{2,39})(\/avatar)?$/.exec(pathname);
+    if (publicBrewerMatch && req.method === 'GET') {
+      const viewerId = accountForToken(authDb, sessionToken(req))?.id;
+      if (publicBrewerMatch[2]) {
+        const image = publicBrewerAvatar(authDb, publicBrewerMatch[1], viewerId);
+        if (!image) return json(res, 404, { error: 'Avatar not found' });
+        res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': image.length,
+          'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+        return res.end(image);
+      }
+      const brewer = publicBrewer(authDb, publicBrewerMatch[1], viewerId);
+      return brewer ? json(res, 200, brewer) : json(res, 404, { error: 'Brewer not found' });
+    }
     const raptWebhookMatch = /^\/api\/webhooks\/rapt\/([^/]+)$/.exec(pathname);
     if (raptWebhookMatch && req.method === 'POST') {
       const connection = raptConnectionForToken(authDb, raptWebhookMatch[1]);
@@ -216,6 +229,13 @@ const server = createServer(async (req, res) => {
 
     if (pathname === '/api/me' && req.method === 'GET') {
       return json(res, 200, { account, workspaces: ownerWorkspaces(account.id), preferred_units: getPreferredUnits(authDb, account.id) });
+    }
+    if (pathname === '/api/me/profile' && req.method === 'PATCH') {
+      const body = await readJson(req, 1024) as { hide_public_profile?: unknown };
+      if (typeof body.hide_public_profile !== 'boolean')
+        return json(res, 400, { error: 'Choose whether to hide your public profile' });
+      setPublicProfileHidden(authDb, account.id, body.hide_public_profile);
+      return json(res, 200, { hide_public_profile: body.hide_public_profile });
     }
     if (pathname === '/api/me/rapt' && req.method === 'GET') {
       const connection = raptConnection(authDb, account.id);

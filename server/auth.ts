@@ -5,7 +5,7 @@ import { createWorkspace } from './db.ts';
 import { nowSeconds } from '../shared/schema.ts';
 import { defaultPreferredUnits, preferredUnitsForSystem, type PreferredUnits, type UnitSystem } from '../shared/units.ts';
 
-export interface Account { id: string; username: string; has_avatar: boolean }
+export interface Account { id: string; username: string; has_avatar: boolean; hide_public_profile: boolean | null }
 const sessionSeconds = 30 * 24 * 60 * 60;
 
 function passwordHash(password: string, salt = randomBytes(16).toString('hex')): string {
@@ -49,6 +49,27 @@ export function usernameExists(db: Database.Database, username: string): boolean
   return !!db.prepare('SELECT 1 FROM accounts WHERE lower(username) = ?').get(username.trim().toLowerCase());
 }
 
+export function publicBrewer(db: Database.Database, username: string, viewerId?: string):
+  { username: string; has_avatar: boolean; hidden: boolean } | null {
+  const row = db.prepare(`SELECT a.id, a.username, a.hide_public_profile,
+      EXISTS(SELECT 1 FROM account_avatars v WHERE v.account_id = a.id) AS has_avatar
+    FROM accounts a WHERE lower(a.username) = ?`).get(username.toLowerCase()) as
+    { id: string; username: string; has_avatar: number; hide_public_profile: number | null } | undefined;
+  if (!row || row.hide_public_profile === 1 && row.id !== viewerId) return null;
+  return { username: row.username, has_avatar: !!row.has_avatar, hidden: row.hide_public_profile === 1 };
+}
+
+export function publicBrewerAvatar(db: Database.Database, username: string, viewerId?: string): Buffer | null {
+  const row = db.prepare(`SELECT v.image_jpeg FROM account_avatars v JOIN accounts a ON a.id = v.account_id
+    WHERE lower(a.username) = ? AND (a.hide_public_profile IS NOT 1 OR a.id = ?)`)
+    .get(username.toLowerCase(), viewerId || '') as { image_jpeg: Buffer } | undefined;
+  return row?.image_jpeg || null;
+}
+
+export function setPublicProfileHidden(db: Database.Database, accountId: string, hidden: boolean): void {
+  db.prepare('UPDATE accounts SET hide_public_profile = ? WHERE id = ?').run(hidden ? 1 : 0, accountId);
+}
+
 export function login(db: Database.Database, username: string, password: string): string | null {
   const row = db.prepare('SELECT id, password_hash FROM accounts WHERE lower(username) = ?')
     .get(username.trim().toLowerCase()) as { id: string; password_hash: string } | undefined;
@@ -58,12 +79,13 @@ export function login(db: Database.Database, username: string, password: string)
 
 export function accountForToken(db: Database.Database, token: string | undefined): Account | null {
   if (!token) return null;
-  const row = db.prepare(`SELECT a.id, a.username,
+  const row = db.prepare(`SELECT a.id, a.username, a.hide_public_profile,
       EXISTS(SELECT 1 FROM account_avatars v WHERE v.account_id = a.id) AS has_avatar FROM sessions s
     JOIN accounts a ON a.id = s.account_id
     WHERE s.token_hash = ? AND s.expires_at > ?`)
-    .get(tokenHash(token), nowSeconds()) as { id: string; username: string; has_avatar: number } | undefined;
-  return row ? { ...row, has_avatar: !!row.has_avatar } : null;
+    .get(tokenHash(token), nowSeconds()) as { id: string; username: string; has_avatar: number; hide_public_profile: number | null } | undefined;
+  return row ? { ...row, has_avatar: !!row.has_avatar,
+    hide_public_profile: row.hide_public_profile === null ? null : row.hide_public_profile === 1 } : null;
 }
 
 export function changePassword(db: Database.Database, accountId: string, currentPassword: string,
