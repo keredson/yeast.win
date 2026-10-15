@@ -18,6 +18,12 @@ try {
   await page.goto(base);
   await page.getByRole('heading', { name: 'Make something. See what happens.' }).waitFor();
   assert.equal(await page.title(), 'Yeast.Win!');
+  const githubLinks = page.getByRole('link', { name: /Fork on GitHub|GitHub/ });
+  assert.equal(await githubLinks.count(), 2);
+  for (const githubLink of await githubLinks.all()) {
+    assert.equal(await githubLink.getAttribute('href'), 'https://github.com/keredson/yeast.win');
+    assert.equal(await githubLink.getAttribute('target'), '_blank');
+  }
   if (!dev) {
     await page.evaluate(() => navigator.serviceWorker?.ready);
     assert.deepEqual(appAssets, [], 'signed-out splash fetched app assets');
