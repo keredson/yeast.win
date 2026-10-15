@@ -110,7 +110,7 @@ export function LocationsSection({ db, basePath, locations, items, supplies, equ
   const equipmentRows = (rows: Equipment[]) => <div className="location-stock-list">{rows.map(unit =>
     <a key={unit.id} href={`${basePath}/equipment/${equipmentUnitPathSegment(unit, equipment, equipmentModels)}`}
       onClick={event => { event.preventDefault(); onEquipmentSelect(unit.id); }}>
-      <span>{unit.model_name || unit.name}</span><small>{unit.stock_id || `Unit ${unit.id.slice(0, 6)}`}</small>
+      <span>{unit.name}</span><small>{[unit.model_name, unit.stock_id].filter(Boolean).join(' · ')}</small>
     </a>)}</div>;
 
   return <div className="section-page">

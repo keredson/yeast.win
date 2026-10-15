@@ -11,7 +11,7 @@ import { assignEquipmentToBatch, createEquipment, createEquipmentUnit, deleteEqu
   addEquipmentModelCapability, removeEquipmentModelCapability, restoreEquipmentModelCapability,
   updateEquipmentBoilHeatLoss, clearEquipmentBoilHeatLoss,
   updateEquipmentModelBoilHeatLoss, clearEquipmentModelBoilHeatLoss,
-  updateEquipmentCalibration, updateEquipmentStockId,
+  updateEquipmentCalibration, updateEquipmentIdentity,
   updateEquipmentLocation,
   saveInventoryLocation, inventoryLocationPath,
   clearEquipmentModelOverride, clearEquipmentModelMeasurementOverrides,
@@ -324,7 +324,8 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     : !!catalogParent[modelCapabilityFlags[addingCapability as keyof typeof modelCapabilityFlags]]);
   const modelRangeChannel = selectedModel?.measurement_channels?.find(channel => channel.measurement_kind === editModelRange);
   const modelUnits = selectedModel ? equipment.filter(row => row.model_id === selectedModel.id) : [];
-  const sortedModelUnits = [...modelUnits].sort((a, b) => (a.stock_id || '').localeCompare(b.stock_id || '') || a.id.localeCompare(b.id));
+  const sortedModelUnits = [...modelUnits].sort((a, b) => a.name.localeCompare(b.name)
+    || (a.stock_id || '').localeCompare(b.stock_id || '') || a.id.localeCompare(b.id));
   const newCapacityUnit = Form.useWatch('capacity_unit', equipmentForm) as string | undefined;
   const newRangeUnit = Form.useWatch('measurement_unit', equipmentForm) as string | undefined;
   const editModelRangeUnit = Form.useWatch('measurement_unit', modelRangeForm) as string | undefined;
@@ -509,10 +510,10 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
 
-  async function saveIdentity(values: { stock_id?: string }) {
+  async function saveIdentity(values: { name: string; stock_id?: string }) {
     if (!item) return;
     try {
-      await updateEquipmentStockId(db, item, values.stock_id, equipment);
+      await updateEquipmentIdentity(db, item, values.name, values.stock_id, equipment);
       setEditIdentity(false); await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
@@ -860,12 +861,13 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
       </Dropdown>}
       {modelUnits.length > 0 && <Table<Equipment> className="equipment-table" dataSource={sortedModelUnits}
         rowKey="id" pagination={false} size="small" tableLayout="fixed" columns={[
-          { title: 'Stock ID', dataIndex: 'stock_id', width: '40%', render: (value, row) =>
+          { title: 'Unit', dataIndex: 'name', width: '40%', render: (value, row) =>
             <a href={`${basePath}/equipment/${equipmentUnitPathSegment(row, equipment, models)}`}
-              onClick={event => { event.preventDefault(); onSelect(row.id); }}>{value || `Unit ${row.id.slice(0, 6)}`}</a> },
-          { title: 'Location', key: 'location', width: '30%', render: (_: unknown, row: Equipment) =>
+              onClick={event => { event.preventDefault(); onSelect(row.id); }}>{value}</a> },
+          { title: 'Stock ID', dataIndex: 'stock_id', width: '20%', render: value => value || '—' },
+          { title: 'Location', key: 'location', width: '20%', render: (_: unknown, row: Equipment) =>
             inventoryLocationPath(row.location_id || null, locations) },
-          { title: 'Current batch', key: 'current-batch', width: '30%', render: (_: unknown, row: Equipment) => {
+          { title: 'Current batch', key: 'current-batch', width: '20%', render: (_: unknown, row: Equipment) => {
             const current = currentUses.filter(use => use.equipment_id === row.id);
             return current.length ? <div className="equipment-current-batches">{current.map(use =>
               <a key={use.id} href={`${basePath}/batch/${use.batch_id}`}
@@ -874,7 +876,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         ]} />}
     </section> : !item ? <Empty description="Equipment not found" /> : <section className="record-detail">
         <div className="content-heading"><div><span className="eyebrow">{equipmentKindLabel(item.kind)}</span>
-          <div className="equipment-title"><h2>{item.stock_id || `Unit ${item.id.slice(0, 6)}`}</h2></div></div></div>
+          <div className="equipment-title"><h2>{item.name}</h2></div></div></div>
         {itemModel && <article className="equipment-model-card" aria-label="Equipment model">
           {modelImageSrc && <img className="equipment-model-image" src={modelImageSrc} alt="" />}
           <div className="equipment-model-card-body">
@@ -889,8 +891,8 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         <section className="equipment-unit-section" aria-label="This unit">
         <h3>This unit</h3>
         <div className="equipment-parameters">
-          <div className="equipment-parameter"><span>Stock ID: {item.stock_id || 'Not set'}</span>
-            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit Stock ID" onClick={() => setEditIdentity(true)} /></div>
+          <div className="equipment-parameter"><span>Name: {item.name}<br />Stock ID: {item.stock_id || 'Not set'}</span>
+            <Button type="text" size="small" icon={<EditOutlined />} aria-label="Edit unit identity" onClick={() => setEditIdentity(true)} /></div>
           <div className="equipment-parameter"><span>Location: {inventoryLocationPath(item.location_id || null, locations)}</span>
             <Button type="text" size="small" icon={<EditOutlined />}
               aria-label="Edit equipment location" onClick={() => setEditLocation(true)} /></div>
@@ -946,7 +948,7 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           </div>}
         </div>}
         <div className="equipment-delete"><Popconfirm
-          title={item.stock_id ? `Delete unit ${item.stock_id}?` : 'Delete this unit?'}
+          title={`Delete unit ${item.name}?`}
           description="This unit is removed from your equipment list. The model and its other units remain. Batch history and calibrations are retained."
           okText="Delete unit" okButtonProps={{ danger: true }} onConfirm={() => void remove()}>
           <Button type="text" danger>Delete unit</Button>
@@ -1028,9 +1030,10 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
     <Modal title="Add equipment unit" open={addingUnit}
       onCancel={() => { setAddingUnit(false); setCatalogUnitModelId(null); }} footer={null} destroyOnHidden>
       <Form key={unitFormModel?.id || 'all'} form={unitForm} layout="vertical" preserve={false} initialValues={{ model_id: unitFormModel?.id }}
-        onFinish={async (values: { model_id: string; stock_id?: string; location_id?: string }) => {
+        onFinish={async (values: { model_id: string; name: string; stock_id?: string; location_id?: string }) => {
         try {
-          const id = await createEquipmentUnit(db, unitFormModel?.id || values.model_id, values.stock_id, values.location_id);
+          const id = await createEquipmentUnit(db, unitFormModel?.id || values.model_id,
+            values.name, values.stock_id, values.location_id);
           const fromCatalog = !!catalogUnitModelId;
           setAddingUnit(false); setCatalogUnitModelId(null);
           await onChanged();
@@ -1040,6 +1043,9 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
         {!unitFormModel && <Form.Item name="model_id" label="Model" rules={[{ required: true }]}>
           <Select showSearch optionFilterProp="label" options={models.map(model => ({ value: model.id, label: model.name }))} />
         </Form.Item>}
+        <Form.Item name="name" label="Unit name" rules={[{ required: true, whitespace: true }]}>
+          <Input placeholder="Blue Pill" maxLength={120} />
+        </Form.Item>
         <Form.Item name="stock_id" label="Stock ID"><Input maxLength={80} /></Form.Item>
         <Form.Item name="location_id" label="Location" normalize={(value, previousValue) => {
           if (value === newLocationOption) { openLocationCreate('unit'); return previousValue; }
@@ -1202,8 +1208,12 @@ export function EquipmentSection({ db, basePath, accountId, batches, equipment, 
           onClick={() => void resetPostBoilLoss()}>Restore to model</Button>}
       </Form>
     </Modal>
-    <Modal title="Edit Stock ID" open={editIdentity} onCancel={() => setEditIdentity(false)} footer={null} destroyOnHidden>
-      <Form key={item?.id} layout="vertical" onFinish={saveIdentity} initialValues={{ stock_id: item?.stock_id }}>
+    <Modal title="Edit unit" open={editIdentity} onCancel={() => setEditIdentity(false)} footer={null} destroyOnHidden>
+      <Form key={item?.id} layout="vertical" onFinish={saveIdentity}
+        initialValues={{ name: item?.name, stock_id: item?.stock_id }}>
+        <Form.Item name="name" label="Unit name" rules={[{ required: true, whitespace: true }]}>
+          <Input maxLength={120} />
+        </Form.Item>
         <Form.Item name="stock_id" label="Stock ID"><Input maxLength={80} /></Form.Item>
         <Button type="primary" htmlType="submit">Save unit</Button>
       </Form>

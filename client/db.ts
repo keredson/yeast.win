@@ -1561,9 +1561,11 @@ export async function saveEquipmentModelMedia(db: DB, modelId: string, productUr
     [image?.bytes || null, image?.mimeType || null, modelId]);
 }
 
-export async function createEquipmentUnit(db: DB, modelId: string, stockId?: string, locationId?: string | null): Promise<string> {
+export async function createEquipmentUnit(db: DB, modelId: string, name: string, stockId?: string,
+  locationId?: string | null): Promise<string> {
   const models = await db.execO<{ id: string; name: string }>('SELECT id, name FROM equipment_models WHERE id = ?', [modelId]);
   if (!models.length) throw new Error('Choose an equipment model');
+  if (!name.trim()) throw new Error('Enter an equipment unit name');
   if (stockId?.trim()) {
     const used = await db.execO<{ id: string }>('SELECT id FROM equipment WHERE stock_id = ? AND removed_at IS NULL', [stockId.trim()]);
     if (used.length) throw new Error('Stock ID is already in use');
@@ -1573,7 +1575,7 @@ export async function createEquipmentUnit(db: DB, modelId: string, stockId?: str
   const now = nowSeconds();
   await db.tx(async tx => {
     await tx.exec('INSERT INTO equipment(id, name, model_id, stock_id, added_at, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-      [id, models[0].name, modelId, stockId?.trim() || null, now, now]);
+      [id, name.trim(), modelId, stockId?.trim() || null, now, now]);
     if (locationId) await tx.exec('INSERT INTO equipment_locations(id, location_id) VALUES (?, ?)', [id, locationId]);
   });
   return id;
@@ -1664,12 +1666,14 @@ export async function latestMeasuredMashEfficiency(db: DB, equipmentId: string):
   return (await latestMeasuredMashEfficiencySource(db, equipmentId))?.value ?? null;
 }
 
-export async function updateEquipmentStockId(db: DB, item: Equipment, stockId: string | undefined,
+export async function updateEquipmentIdentity(db: DB, item: Equipment, name: string, stockId: string | undefined,
   equipment: Equipment[]): Promise<void> {
+  if (!name.trim()) throw new Error('Enter an equipment unit name');
   if (stockId?.trim() && equipment.some(row => row.id !== item.id && row.stock_id === stockId.trim())) {
     throw new Error('Stock ID is already in use');
   }
-  await db.exec('UPDATE equipment SET stock_id = ? WHERE id = ?', [stockId?.trim() || null, item.id]);
+  await db.exec('UPDATE equipment SET name = ?, stock_id = ? WHERE id = ?',
+    [name.trim(), stockId?.trim() || null, item.id]);
 }
 
 async function putEquipmentCapability(db: Pick<DB, 'exec'>, table: string, id: string,

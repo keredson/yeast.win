@@ -39,7 +39,7 @@ export function breadcrumbNodes(section: BreadcrumbSection, selectedId: string |
     if (!unit) return [home, root];
     const parent = records.equipmentModels.find(row => row.id === unit.model_id);
     return [home, root, ...(parent ? [{ label: parent.name, section, id: parent.id }] : []),
-      { label: unit.stock_id || `Unit ${unit.id.slice(0, 6)}`, section, id: unit.id }];
+      { label: unit.name, section, id: unit.id }];
   }
   const location = locationForPath(selectedId, records.locations);
   return location ? [home, root, ...locationAncestors(location, records.locations).map(row => ({
