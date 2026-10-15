@@ -277,7 +277,11 @@ const server = createServer(async (req, res) => {
     if (pathname === '/api/me/rapt' && req.method === 'GET') {
       const connection = raptConnection(authDb, account.id);
       return json(res, 200, { webhook_path: connection ? `/api/webhooks/rapt/${connection.token}` : null,
-        devices: raptDevices(authDb, account.id, getWorkspaceDb), workspaces: ownerWorkspaces(account.id) });
+        devices: raptDevices(authDb, account.id, getWorkspaceDb), workspaces: ownerWorkspaces(account.id),
+        // Already open tabs may still run the batch-assignment UI from an older bundle.
+        // Its settings view maps targets unconditionally, so keep an empty legacy field
+        // until those tabs have refreshed. Batch assignment now happens on the batch page.
+        targets: [] });
     }
     if (pathname === '/api/me/rapt/webhook' && req.method === 'POST') {
       const secret = rotateRaptToken(authDb, account.id);
