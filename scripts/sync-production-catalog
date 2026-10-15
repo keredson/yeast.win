@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 1 || ( "$1" != pull && "$1" != push ) ]]; then
+  echo "usage: $0 pull|push" >&2
+  exit 2
+fi
+
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+local_data="$root_dir/data"
+local_catalog="$local_data/catalog.sqlite"
+production_data=/var/lib/yeast-win/data
+production_catalog="$production_data/catalog.sqlite"
+production_release=/opt/yeast-win/current
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+staging="$(mktemp -d)"
+production_stopped=false
+
+cleanup() {
+  if [[ "$production_stopped" == true ]]; then
+    sudo systemctl start yeast-win.service || true
+  fi
+  rm -rf --one-file-system "$staging"
+}
+trap cleanup EXIT
+
+for command in node sudo systemctl install mktemp date; do
+  if ! command -v "$command" >/dev/null; then
+    echo "required command is missing: $command" >&2
+    exit 1
+  fi
+done
+
+sudo -v
+mkdir -p "$local_data/backups"
+
+if [[ "$1" == pull ]]; then
+  if command -v fuser >/dev/null \
+    && fuser -s "$local_catalog" "$local_catalog-wal" "$local_catalog-shm" 2>/dev/null; then
+    echo "the local catalog is open; stop yarn dev before pulling production" >&2
+    exit 1
+  fi
+
+  chmod 0777 "$staging"
+  sudo -H -u yeast-win env BREWLOG_DATA_DIR="$production_data" \
+    /usr/bin/node "$production_release/scripts/backup-catalog.mjs" "$staging/catalog.sqlite"
+
+  if [[ -f "$local_catalog" ]]; then
+    node "$root_dir/scripts/backup-catalog.mjs" \
+      "$local_data/backups/catalog-before-production-pull-$timestamp.sqlite"
+  fi
+  rm -f "$local_catalog-wal" "$local_catalog-shm"
+  install -m 0644 "$staging/catalog.sqlite" "$local_catalog"
+  echo "pulled production catalog to $local_catalog"
+  exit 0
+fi
+
+if [[ ! -f "$local_catalog" ]]; then
+  echo "local catalog not found: $local_catalog" >&2
+  exit 1
+fi
+
+node "$root_dir/scripts/backup-catalog.mjs" "$staging/catalog.sqlite"
+sudo -H -u yeast-win env BREWLOG_DATA_DIR="$production_data" \
+  /usr/bin/node "$production_release/scripts/backup-catalog.mjs" \
+  "$production_data/backups/catalog-before-local-push-$timestamp.sqlite"
+
+sudo systemctl stop yeast-win.service
+production_stopped=true
+sudo rm -f "$production_catalog-wal" "$production_catalog-shm"
+sudo install -o yeast-win -g yeast-win -m 0600 "$staging/catalog.sqlite" "$production_catalog"
+sudo systemctl start yeast-win.service
+production_stopped=false
+
+for _ in $(seq 1 30); do
+  if sudo -H -u yeast-win curl --fail --silent --show-error \
+    --unix-socket /run/yeast-win/app.sock http://localhost/api/healthz >/dev/null; then
+    echo "pushed local catalog to production"
+    exit 0
+  fi
+  sleep 1
+done
+
+echo "production did not become healthy after the catalog push" >&2
+sudo systemctl --no-pager --full status yeast-win.service >&2 || true
+exit 1

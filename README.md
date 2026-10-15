@@ -37,6 +37,12 @@ For a production installation with a dedicated runtime account, socket-activated
 systemd service, and Cloudflare Tunnel, see [deploy/README.md](deploy/README.md). The one-time host setup is
 run with `make provision`; subsequent local releases can be tested with `make deploy`.
 
+On that host, production is the catalog source of truth. With the development server stopped, run
+`make catalog-pull-production` to refresh `data/catalog.sqlite` from a consistent production snapshot.
+After making and reviewing local catalog edits, run `make catalog-push-production` to back up both copies,
+briefly stop the production service, promote the local catalog, restart, and health-check it. Normal Git
+deployments never copy catalog data.
+
 ## Current workflow
 
 - Create separate breweries for your home setup and commercial operation.
