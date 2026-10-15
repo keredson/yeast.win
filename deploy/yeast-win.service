@@ -6,18 +6,19 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=yeast-win
-Group=yeast-win
+Group=yeast-win-health
+SupplementaryGroups=yeast-win
 Environment=NODE_ENV=production
 EnvironmentFile=/etc/yeast-win/app.env
 RuntimeDirectory=yeast-win
-RuntimeDirectoryMode=0700
+RuntimeDirectoryMode=0710
 WorkingDirectory=/opt/yeast-win/current
 ExecStartPre=/usr/bin/test -f /opt/yeast-win/current/dist/index.html
 ExecStart=/usr/bin/node --import tsx server/index.ts
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s
-UMask=0077
+UMask=0007
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true

@@ -16,7 +16,7 @@ cleanup() {
 trap cleanup EXIT
 
 for command in git node python3 corepack curl unzip flock sudo visudo systemctl ssh-keygen openssl \
-  getent useradd install sed; do
+  getent groupadd useradd usermod install sed; do
   if ! command -v "$command" >/dev/null; then
     echo "required command is missing: $command" >&2
     exit 1
@@ -36,6 +36,10 @@ fi
 if ! getent passwd yeast-deploy >/dev/null; then
   sudo useradd --system --user-group --home-dir "$deploy_home" --shell /usr/sbin/nologin yeast-deploy
 fi
+if ! getent group yeast-win-health >/dev/null; then
+  sudo groupadd --system yeast-win-health
+fi
+sudo usermod --append --groups yeast-win-health yeast-deploy
 
 sudo install -d -o yeast-win -g yeast-win -m 0700 "$app_home" "$app_home/data"
 sudo install -d -o yeast-deploy -g yeast-deploy -m 0755 /opt/yeast-win /opt/yeast-win/releases
@@ -77,7 +81,7 @@ if [[ ! -f /etc/yeast-win/deploy-hook.env ]]; then
   sudo install -o root -g yeast-deploy -m 0640 "$hook_env" /etc/yeast-win/deploy-hook.env
 fi
 
-if [[ ! -d "$repository" ]]; then
+if ! sudo -H -u yeast-deploy test -d "$repository"; then
   bundle="$(mktemp --suffix=.bundle)"
   git -C "$root_dir" bundle create "$bundle" --all
   chmod 0644 "$bundle"
@@ -85,7 +89,7 @@ if [[ ! -d "$repository" ]]; then
 fi
 sudo -H -u yeast-deploy git --git-dir="$repository" remote set-url origin "$remote_url"
 
-if [[ ! -f "$deploy_home/.ssh/id_ed25519" ]]; then
+if ! sudo -H -u yeast-deploy test -f "$deploy_home/.ssh/id_ed25519"; then
   sudo -H -u yeast-deploy ssh-keygen -q -t ed25519 -N '' \
     -C 'yeast.win deployment' -f "$deploy_home/.ssh/id_ed25519"
 fi
