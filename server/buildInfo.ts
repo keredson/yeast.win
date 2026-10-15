@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { BuildInfo, DeploymentInfo } from '../shared/buildInfo.ts';
 
@@ -13,8 +13,11 @@ function version(root: string): string {
 }
 
 function releaseCommit(root: string): string | null {
-  const match = resolve(root).match(/\/releases\/(?:\.)?([0-9a-f]{40})(?:\.[^/]+\.tmp)?(?:\/|$)/);
-  return match?.[1] || null;
+  for (const path of [resolve(root), realpathSync(root)]) {
+    const match = path.match(/\/releases\/(?:\.)?([0-9a-f]{40})(?:\.[^/]+\.tmp)?(?:\/|$)/);
+    if (match) return match[1];
+  }
+  return null;
 }
 
 export function sourceBuildInfo(root: string, environment: BuildInfo['environment']): BuildInfo {
