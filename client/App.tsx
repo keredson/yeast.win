@@ -677,7 +677,6 @@ export function App() {
       <Drawer className="mobile-nav-drawer" title="Yeast.Win!" placement="left" width={260} open={menuOpen}
         onClose={() => setMenuOpen(false)}>{sidebar(true)}</Drawer>
       <main className="app-main">
-        {error && <Alert type="warning" showIcon closable onClose={() => setError('')} message={error} className="page-alert" />}
         <div className="page-navigation">
           <Button className="mobile-menu-button" type="text" shape="circle" aria-label="Open navigation"
             icon={<MenuOutlined />} onClick={() => setMenuOpen(true)} />
@@ -694,6 +693,7 @@ export function App() {
               }}>{crumb.section === 'home' ? <HomeOutlined aria-hidden="true" /> : crumb.label}</a>
           }))} />}
         </div>
+        {error && <Alert type="warning" showIcon closable onClose={() => setError('')} message={error} className="page-alert" />}
         {section === 'settings' ? <AccountSection username={session.account.username} avatarSrc={avatarSrc}
           workspaces={session.workspaces} activeWorkspaceId={workspaceId}
           onCreateWorkspace={createWorkspace} onUpdateWorkspace={renameWorkspace} onDeleteWorkspace={removeWorkspace}

@@ -125,10 +125,17 @@ try {
   await page.goto(`${base}/batches`);
   await page.getByRole('navigation', { name: 'Breadcrumb' }).waitFor();
   assert.equal(await page.evaluate(() => {
+    const row = document.querySelector('.page-navigation');
     const menu = document.querySelector('.mobile-menu-button').getBoundingClientRect();
-    const crumbs = document.querySelector('.app-breadcrumb').getBoundingClientRect();
-    return crumbs.left >= menu.right && Math.abs(crumbs.top - menu.top) < 20;
-  }), true, 'mobile breadcrumbs are not beside the menu button');
+    const breadcrumb = document.querySelector('.app-breadcrumb');
+    const crumbs = breadcrumb.getBoundingClientRect();
+    const rowBounds = row.getBoundingClientRect();
+    return rowBounds.left === 0 && rowBounds.right === innerWidth
+      && crumbs.left >= menu.right && Math.abs(crumbs.top - menu.top) < 20
+      && getComputedStyle(row).backgroundColor === 'rgb(25, 59, 57)'
+      && getComputedStyle(document.querySelector('.mobile-menu-button')).color === 'rgb(255, 255, 255)'
+      && getComputedStyle(breadcrumb.querySelector('a')).color === 'rgb(255, 255, 255)';
+  }), true, 'mobile navigation does not place light breadcrumbs beside the menu on dark green');
   await page.goto(`${base}/settings`);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
     'brewery actions overflow the Settings page on a narrow phone');
