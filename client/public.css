@@ -36,13 +36,13 @@ button, input { font: inherit; }
 .splash-shell { max-width: 1200px; }
 .splash-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .splash-nav { display: flex; align-items: center; gap: 18px; }
-.splash-github { display: inline-flex; align-items: center; gap: 5px; padding: 8px 11px; border: 1px solid #b9c7bd;
-  border-radius: 9px; color: #204c42; font-size: 14px; font-weight: 700; text-decoration: none; }
-.splash-github:hover { border-color: #718c7e; background: #fffdf7; }
+.splash-github { color: #526b60; font-size: 14px; font-weight: 650; text-decoration: none; }
+.splash-github:hover { text-decoration: underline; text-underline-offset: 4px; }
 .splash-github-narrow { display: none; }
-.splash-signin { color: #204c42; font-weight: 700; text-decoration: none; }
+.splash-signin { display: inline-flex; align-items: center; gap: 5px; padding: 8px 12px; border: 1px solid #1f6b5b;
+  border-radius: 9px; background: #1f6b5b; color: white; font-weight: 700; text-decoration: none; }
 .splash-signin span { margin-left: 5px; }
-.splash-signin:hover { text-decoration: underline; text-underline-offset: 4px; }
+.splash-signin:hover { border-color: #185848; background: #185848; }
 .splash-hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, .94fr); align-items: center;
   gap: clamp(40px, 5vw, 88px); min-height: min(730px, calc(100vh - 180px)); padding: 40px 0 44px; }
 .splash-copy { position: relative; z-index: 1; }
@@ -128,7 +128,6 @@ button, input { font: inherit; }
   .splash-header .public-brand { gap: 9px; font-size: 22px; }
   .splash-header .public-brand img { width: 36px; height: 36px; }
   .splash-nav { gap: 11px; }
-  .splash-github { padding: 7px 9px; }
   .splash-github-wide { display: none; }
   .splash-github-narrow { display: inline; }
   .splash-signin { font-size: 14px; }
