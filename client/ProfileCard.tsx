@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { UploadOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Button, Card, Switch } from 'antd';
+import { Alert, Avatar, Button, Card, Select, Switch } from 'antd';
 
 interface Props {
   username: string;
@@ -8,20 +8,34 @@ interface Props {
   onAvatarUploaded: () => void;
   hidePublicProfile: boolean | null;
   onHidePublicProfileChange: (hidden: boolean) => Promise<void>;
+  timeZone: string | null;
+  onTimeZoneChange: (timeZone: string) => Promise<void>;
 }
 
-export function ProfileCard({ username, avatarSrc, onAvatarUploaded, hidePublicProfile, onHidePublicProfileChange }: Props) {
+const timeZones = Array.from(new Set(['UTC', ...Intl.supportedValuesOf('timeZone')])).sort();
+
+export function ProfileCard({ username, avatarSrc, onAvatarUploaded, hidePublicProfile, onHidePublicProfileChange,
+  timeZone, onTimeZoneChange }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarError, setAvatarError] = useState('');
   const [visibilityBusy, setVisibilityBusy] = useState(false);
   const [visibilityError, setVisibilityError] = useState('');
+  const [timeZoneBusy, setTimeZoneBusy] = useState(false);
+  const [timeZoneError, setTimeZoneError] = useState('');
 
   async function updateVisibility(hidden: boolean) {
     setVisibilityBusy(true); setVisibilityError('');
     try { await onHidePublicProfileChange(hidden); }
     catch (cause) { setVisibilityError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setVisibilityBusy(false); }
+  }
+
+  async function updateTimeZone(value: string) {
+    setTimeZoneBusy(true); setTimeZoneError('');
+    try { await onTimeZoneChange(value); }
+    catch (cause) { setTimeZoneError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setTimeZoneBusy(false); }
   }
 
   async function uploadAvatar(file: File) {
@@ -70,5 +84,12 @@ export function ProfileCard({ username, avatarSrc, onAvatarUploaded, hidePublicP
         onChange={value => void updateVisibility(value)} />
     </div>
     {visibilityError && <Alert type="error" message={visibilityError} showIcon />}
+    <div className="setting-row profile-time-zone-row">
+      <div><strong>Time zone</strong></div>
+      <Select aria-label="Time zone" showSearch value={timeZone || 'UTC'} disabled={timeZoneBusy}
+        options={timeZones.map(value => ({ value, label: value.replaceAll('_', ' ') }))}
+        onChange={value => void updateTimeZone(value)} />
+    </div>
+    {timeZoneError && <Alert type="error" message={timeZoneError} showIcon />}
   </Card>;
 }

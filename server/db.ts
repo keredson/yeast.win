@@ -10,7 +10,7 @@ const envPath = resolve(projectRoot, '.env');
 if (existsSync(envPath)) process.loadEnvFile(envPath);
 export const dataDir = resolve(projectRoot, process.env.BREWLOG_DATA_DIR || './data');
 const extensionPath = resolve(projectRoot, 'vendor/crsqlite.so');
-const authSchemaVersion = 3;
+const authSchemaVersion = 4;
 mkdirSync(dataDir, { recursive: true });
 
 export function assertCrSqliteAvailable(): void {
@@ -41,7 +41,8 @@ export function openAuthDb(): Database.Database {
       username TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
       created_at INTEGER NOT NULL,
-      hide_public_profile INTEGER DEFAULT NULL CHECK (hide_public_profile IN (0, 1) OR hide_public_profile IS NULL)
+      hide_public_profile INTEGER DEFAULT NULL CHECK (hide_public_profile IN (0, 1) OR hide_public_profile IS NULL),
+      time_zone TEXT
     );
     CREATE TABLE IF NOT EXISTS sessions (
       token_hash TEXT PRIMARY KEY NOT NULL,
@@ -73,6 +74,8 @@ export function openAuthDb(): Database.Database {
   const accountColumns = db.pragma('table_info(accounts)') as { name: string }[];
   if (!accountColumns.some(column => column.name === 'hide_public_profile'))
     db.exec('ALTER TABLE accounts ADD COLUMN hide_public_profile INTEGER DEFAULT NULL CHECK (hide_public_profile IN (0, 1) OR hide_public_profile IS NULL)');
+  if (!accountColumns.some(column => column.name === 'time_zone'))
+    db.exec('ALTER TABLE accounts ADD COLUMN time_zone TEXT');
   const hasLegacyMeta = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_meta'").get();
   const rootMigrationDone = version >= 1 || (hasLegacyMeta
     && !!db.prepare("SELECT 1 FROM auth_meta WHERE key = 'nullable_root_slug_v1'").get());
@@ -129,6 +132,13 @@ export function openAuthDb(): Database.Database {
         ON rapt_assignments(account_id, device_id) WHERE valid_until IS NULL;
       CREATE INDEX IF NOT EXISTS rapt_assignments_workspace
         ON rapt_assignments(workspace_id);
+      CREATE TABLE IF NOT EXISTS brewer_activity_cache (
+        account_id TEXT PRIMARY KEY NOT NULL,
+        time_zone TEXT NOT NULL,
+        through_date TEXT NOT NULL,
+        data_json TEXT NOT NULL,
+        generated_at INTEGER NOT NULL
+      );
     `);
     if (hasLegacyMeta) db.exec('DROP TABLE auth_meta');
     if (version < authSchemaVersion) db.pragma(`user_version = ${authSchemaVersion}`);

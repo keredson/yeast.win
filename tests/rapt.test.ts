@@ -36,13 +36,18 @@ const body = (timestamp: string) => ({
 
 test('RAPT tokens are private to an account and rotation invalidates the old URL', () => {
   const old = ensureRaptToken(auth, 'account-a');
+  assert.match(old, /^[A-Za-z0-9_-]{21}$/);
   assert.equal(ensureRaptToken(auth, 'account-a'), old);
   const other = rotateRaptToken(auth, 'account-b');
+  assert.match(other, /^[A-Za-z0-9_-]{21}$/);
   assert.equal(raptConnectionForToken(auth, old)?.account_id, 'account-a');
   assert.equal(raptConnectionForToken(auth, other)?.account_id, 'account-b');
   const current = rotateRaptToken(auth, 'account-a');
   assert.equal(raptConnectionForToken(auth, old), null);
   assert.equal(raptConnectionForToken(auth, current)?.account_id, 'account-a');
+  const legacyToken = 'A'.repeat(43);
+  auth.prepare('UPDATE rapt_connections SET token = ? WHERE account_id = ?').run(legacyToken, 'account-b');
+  assert.equal(raptConnectionForToken(auth, legacyToken)?.account_id, 'account-b');
 });
 
 test('RAPT readings validate values and keep unassigned devices private', () => {

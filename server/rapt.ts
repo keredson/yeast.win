@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { nanoid } from 'nanoid';
 import type Database from 'better-sqlite3';
 import { createId } from '../shared/id.ts';
 import { nowSeconds } from '../shared/schema.ts';
@@ -19,13 +19,13 @@ export function raptConnection(auth: Database.Database, accountId: string): Rapt
 }
 
 export function raptConnectionForToken(auth: Database.Database, token: string): RaptConnection | null {
-  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+  if (!/^[A-Za-z0-9_-]{21}(?:[A-Za-z0-9_-]{22})?$/.test(token)) return null;
   return auth.prepare('SELECT account_id, token FROM rapt_connections WHERE token = ?')
     .get(token) as RaptConnection | undefined || null;
 }
 
 export function rotateRaptToken(auth: Database.Database, accountId: string): string {
-  const token = randomBytes(32).toString('base64url');
+  const token = nanoid();
   auth.prepare(`INSERT INTO rapt_connections(account_id, token, created_at) VALUES (?, ?, ?)
     ON CONFLICT(account_id) DO UPDATE SET token = excluded.token, created_at = excluded.created_at`)
     .run(accountId, token, nowSeconds());
@@ -34,7 +34,7 @@ export function rotateRaptToken(auth: Database.Database, accountId: string): str
 
 export function ensureRaptToken(auth: Database.Database, accountId: string): string {
   auth.prepare(`INSERT OR IGNORE INTO rapt_connections(account_id, token, created_at) VALUES (?, ?, ?)`)
-    .run(accountId, randomBytes(32).toString('base64url'), nowSeconds());
+    .run(accountId, nanoid(), nowSeconds());
   return raptConnection(auth, accountId)!.token;
 }
 

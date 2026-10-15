@@ -305,7 +305,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
           loading={equipmentBusy} onClick={() => void assignEquipment()}>
           {editingEquipmentUse ? 'Save equipment' : 'Start using equipment'}</Button>
       </div> : <p className="muted">Add an equipment unit before using it in this batch.</p>}
-      {hasRaptPill && <p className="muted">For automatic readings, also assign the device under <a href="/settings">Settings → RAPT Pill</a>
+      {hasRaptPill && <p className="muted">For automatic readings, also assign the device under <a href="/settings">Settings → RAPT.io</a>
         {' '}after RAPT sends its first reading.</p>}
     </Modal>
     <Modal title="Batch settings" open={batchSizeOpen} onCancel={() => setBatchSizeOpen(false)}

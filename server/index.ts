@@ -3,7 +3,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import type Database from 'better-sqlite3';
 import { accountForToken, changePassword, clearSessionCookie, getAvatar, getPreferredUnits, login, logout,
-  publicBrewer, publicBrewerAvatar, readSessionCookie, register, saveAvatar, savePreferredUnits, setPublicProfileHidden, sessionCookie, sessionCookieName,
+  publicBrewer, publicBrewerAvatar, readSessionCookie, register, saveAvatar, savePreferredUnits, saveTimeZone,
+  setPublicProfileHidden, sessionCookie, sessionCookieName,
   usernameExists } from './auth.ts';
 import { assertCrSqliteAvailable, closeWorkspaceDb, createWorkspace, dataDir, deleteWorkspace, openAuthDb, openWorkspaceDb, projectRoot, updateWorkspace } from './db.ts';
 import { openCatalogDb } from './catalog.ts';
@@ -14,6 +15,8 @@ import { isValidId } from '../shared/schema.ts';
 import { validPreferredUnits } from '../shared/units.ts';
 import { requestAddress, requestIsSecure } from './http.ts';
 import { runtimeDeploymentInfo } from './buildInfo.ts';
+import { brewerActivity } from './brewerActivity.ts';
+import { registrationTimeZone, validTimeZone } from './timeZone.ts';
 import { assignRaptDevice, deleteRaptIntegration, ensureRaptToken, ingestRaptReading, parseRaptReading, raptConnection, raptConnectionForToken,
   raptDevices, rotateRaptToken, unassignRaptDevice } from './rapt.ts';
 
@@ -149,18 +152,26 @@ const server = createServer(async (req, res) => {
     if (pathname === '/api/healthz' && req.method === 'GET') return json(res, 200, { ok: true });
     if (pathname === '/api/about' && req.method === 'GET')
       return json(res, 200, runtimeDeploymentInfo(projectRoot, distDir, !!devSocket, startedAt));
-    const publicBrewerMatch = /^\/api\/brewer\/([A-Za-z0-9][A-Za-z0-9_-]{2,39})(\/avatar)?$/.exec(pathname);
+    const publicBrewerMatch = /^\/api\/brewer\/([A-Za-z0-9][A-Za-z0-9_-]{2,39})(\/avatar|\/activity)?$/.exec(pathname);
     if (publicBrewerMatch && req.method === 'GET') {
       const viewerId = accountForToken(authDb, sessionToken(req))?.id;
+      const brewer = publicBrewer(authDb, publicBrewerMatch[1], viewerId);
+      if (!brewer) return json(res, 404, { error: 'Brewer not found' });
       if (publicBrewerMatch[2]) {
+        if (publicBrewerMatch[2] === '/activity') {
+          const owner = authDb.prepare('SELECT id, time_zone FROM accounts WHERE lower(username) = ?')
+            .get(brewer.username) as { id: string; time_zone: string | null };
+          const result = brewerActivity(authDb, owner.id, validTimeZone(owner.time_zone) ? owner.time_zone : 'UTC',
+            ownerWorkspaces(owner.id).map(workspace => workspace.id), getWorkspaceDb);
+          return json(res, 200, result);
+        }
         const image = publicBrewerAvatar(authDb, publicBrewerMatch[1], viewerId);
         if (!image) return json(res, 404, { error: 'Avatar not found' });
         res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': image.length,
           'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
         return res.end(image);
       }
-      const brewer = publicBrewer(authDb, publicBrewerMatch[1], viewerId);
-      return brewer ? json(res, 200, brewer) : json(res, 404, { error: 'Brewer not found' });
+      return json(res, 200, brewer);
     }
     const raptWebhookMatch = /^\/api\/webhooks\/rapt\/([^/]+)$/.exec(pathname);
     if (raptWebhookMatch && req.method === 'POST') {
@@ -191,7 +202,7 @@ const server = createServer(async (req, res) => {
       const attempts = previous && previous.resetAt > now ? previous : { count: 0, resetAt: now + loginWindowMs };
       if (attempts.count >= registrationLimit) return json(res, 429, { error: 'Too many registrations. Try again later.' });
       registrationAttempts.set(registrationKey, { ...attempts, count: attempts.count + 1 });
-      const body = await readJson(req, 4 * 1024) as { username?: unknown; password?: unknown; unit_system?: unknown };
+      const body = await readJson(req, 4 * 1024) as { username?: unknown; password?: unknown; unit_system?: unknown; time_zone?: unknown };
       if (typeof body.username !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{2,39}$/.test(body.username.trim())) {
         return json(res, 400, { error: 'Username must be 3–40 letters, numbers, underscores, or hyphens' });
       }
@@ -201,7 +212,8 @@ const server = createServer(async (req, res) => {
       if (body.unit_system !== 'metric' && body.unit_system !== 'imperial') {
         return json(res, 400, { error: 'Choose metric or imperial units' });
       }
-      const token = register(authDb, body.username, body.password, body.unit_system);
+      const token = register(authDb, body.username, body.password, body.unit_system,
+        registrationTimeZone(clientAddress(req), body.time_zone));
       if (!token) return json(res, 409, { error: 'Username is already taken' });
       return json(res, 201, { ok: true }, { 'Set-Cookie': sessionCookie(token, secureRequest(req), cookieName) });
     }
@@ -236,6 +248,12 @@ const server = createServer(async (req, res) => {
         return json(res, 400, { error: 'Choose whether to hide your public profile' });
       setPublicProfileHidden(authDb, account.id, body.hide_public_profile);
       return json(res, 200, { hide_public_profile: body.hide_public_profile });
+    }
+    if (pathname === '/api/me/time-zone' && req.method === 'PATCH') {
+      const body = await readJson(req, 1024) as { time_zone?: unknown };
+      if (!validTimeZone(body.time_zone)) return json(res, 400, { error: 'Choose a valid time zone' });
+      saveTimeZone(authDb, account.id, body.time_zone);
+      return json(res, 200, { time_zone: body.time_zone });
     }
     if (pathname === '/api/me/rapt' && req.method === 'GET') {
       const connection = raptConnection(authDb, account.id);

@@ -30,6 +30,10 @@ button, input, textarea { font: inherit; }
 .nav-panel .ant-btn.nav-logout-button:hover { color: white; background: #29514a; }
 .nav-account-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile-visibility-row { align-items: center; }
+.profile-time-zone-row { align-items: center; gap: 16px; }
+.profile-time-zone-row .ant-select { width: min(100%, 250px); flex: none; }
+@media (max-width: 520px) { .profile-time-zone-row { align-items: stretch; flex-direction: column; }
+  .profile-time-zone-row .ant-select { width: 100%; } }
 .connection-popover { max-width: 260px; }
 .connection-popover p { margin: 0; }
 .connection-popover p + p { margin-top: 8px; }
@@ -54,6 +58,7 @@ button, input, textarea { font: inherit; }
 .account-page .ant-btn.sync-button { flex: none; color: #1d604f; border: 0 !important; box-shadow: none; }
 .account-page { max-width: 680px; display: flex; flex-direction: column; gap: 18px; }
 .about-page { max-width: 720px; display: flex; flex-direction: column; gap: 18px; }
+.brewer-page { max-width: 820px; display: flex; flex-direction: column; gap: 18px; }
 .about-page .ant-typography { margin-bottom: 0; }
 .deployment-details { display: grid; grid-template-columns: minmax(110px, 150px) minmax(0, 1fr); gap: 10px 16px; margin: 0; }
 .deployment-details dt { color: #728079; }

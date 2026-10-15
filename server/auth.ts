@@ -5,7 +5,7 @@ import { createWorkspace } from './db.ts';
 import { nowSeconds } from '../shared/schema.ts';
 import { defaultPreferredUnits, preferredUnitsForSystem, type PreferredUnits, type UnitSystem } from '../shared/units.ts';
 
-export interface Account { id: string; username: string; has_avatar: boolean; hide_public_profile: boolean | null }
+export interface Account { id: string; username: string; has_avatar: boolean; hide_public_profile: boolean | null; time_zone: string | null }
 const sessionSeconds = 30 * 24 * 60 * 60;
 
 function passwordHash(password: string, salt = randomBytes(16).toString('hex')): string {
@@ -32,13 +32,13 @@ function createSession(db: Database.Database, accountId: string): string {
   return token;
 }
 
-export function register(db: Database.Database, username: string, password: string, unitSystem: UnitSystem): string | null {
+export function register(db: Database.Database, username: string, password: string, unitSystem: UnitSystem, timeZone: string): string | null {
   const normalized = username.trim().toLowerCase();
   return db.transaction(() => {
     if (usernameExists(db, normalized)) return null;
     const id = createId();
-    db.prepare('INSERT INTO accounts(id, username, password_hash, created_at) VALUES (?, ?, ?, ?)')
-      .run(id, normalized, passwordHash(password), nowSeconds());
+    db.prepare('INSERT INTO accounts(id, username, password_hash, created_at, time_zone) VALUES (?, ?, ?, ?, ?)')
+      .run(id, normalized, passwordHash(password), nowSeconds(), timeZone);
     savePreferredUnits(db, id, preferredUnitsForSystem(unitSystem));
     createWorkspace(db, id, 'Homebrew');
     return createSession(db, id);
@@ -79,11 +79,11 @@ export function login(db: Database.Database, username: string, password: string)
 
 export function accountForToken(db: Database.Database, token: string | undefined): Account | null {
   if (!token) return null;
-  const row = db.prepare(`SELECT a.id, a.username, a.hide_public_profile,
+  const row = db.prepare(`SELECT a.id, a.username, a.hide_public_profile, a.time_zone,
       EXISTS(SELECT 1 FROM account_avatars v WHERE v.account_id = a.id) AS has_avatar FROM sessions s
     JOIN accounts a ON a.id = s.account_id
     WHERE s.token_hash = ? AND s.expires_at > ?`)
-    .get(tokenHash(token), nowSeconds()) as { id: string; username: string; has_avatar: number; hide_public_profile: number | null } | undefined;
+    .get(tokenHash(token), nowSeconds()) as { id: string; username: string; has_avatar: number; hide_public_profile: number | null; time_zone: string | null } | undefined;
   return row ? { ...row, has_avatar: !!row.has_avatar,
     hide_public_profile: row.hide_public_profile === null ? null : row.hide_public_profile === 1 } : null;
 }
@@ -129,6 +129,10 @@ export function savePreferredUnits(db: Database.Database, accountId: string, uni
     temperature_unit = excluded.temperature_unit, volume_unit = excluded.volume_unit,
     mass_unit = excluded.mass_unit, pressure_unit = excluded.pressure_unit`)
     .run(accountId, units.temperature, units.volume, units.mass, units.pressure);
+}
+
+export function saveTimeZone(db: Database.Database, accountId: string, timeZone: string): void {
+  db.prepare('UPDATE accounts SET time_zone = ? WHERE id = ?').run(timeZone, accountId);
 }
 
 export function logout(db: Database.Database, token: string | undefined): void {

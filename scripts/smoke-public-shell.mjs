@@ -86,13 +86,26 @@ try {
   await page.waitForURL(`**/brewer/${username}`);
   await page.getByRole('heading', { name: username }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Upload avatar' }).count(), 0);
-  assert.equal(await page.locator('.app-nav').count(), 0, 'public brewer page rendered the private app shell');
+  assert.equal(await page.locator('.app-nav').count(), 1, 'signed-in brewer page left the app shell');
+  await page.locator('.activity-day').first().waitFor();
+  assert.equal(await page.locator('.activity-day').count(), 365);
+  const activityBeforeToday = await page.evaluate(async name => (await (await fetch(`/api/brewer/${name}/activity`)).json()), username);
+  assert.equal(activityBeforeToday.days.length, 365);
+  assert.notEqual(activityBeforeToday.through_date, new Intl.DateTimeFormat('en-CA', {
+    timeZone: activityBeforeToday.time_zone, year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date()));
   assert.deepEqual(await page.evaluate(async name => {
     const response = await fetch(`/api/brewer/${name}`);
     return { status: response.status, body: await response.json() };
   }, username), { status: 200, body: { username, has_avatar: false, hidden: false } });
   await page.goBack();
   await page.waitForURL('**/settings');
+  const timeZone = page.getByRole('combobox', { name: 'Time zone' });
+  await timeZone.click();
+  await timeZone.fill('America/Los Angeles');
+  await page.getByText('America/Los Angeles', { exact: true }).last().click();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('brewlog:last-session')).account.time_zone === 'America/Los_Angeles');
+  assert.equal((await page.evaluate(async () => (await (await fetch('/api/me')).json()).account.time_zone)), 'America/Los_Angeles');
   const hideProfile = page.getByRole('switch', { name: 'Hide public profile' });
   assert.equal(await hideProfile.isChecked(), false, 'new accounts should have a visible public profile');
   assert.equal(await page.evaluate(async () => (await (await fetch('/api/me')).json()).account.hide_public_profile), null);
@@ -166,6 +179,7 @@ try {
     await breweryEditor.getByRole('spinbutton', { name: 'Default batch size (US gal)' }).fill('6.25');
     await breweryEditor.getByRole('spinbutton', { name: 'Default mash efficiency (%)' }).fill('68');
     await breweryEditor.getByRole('button', { name: 'Save brewery' }).click();
+    await breweryEditor.waitFor({ state: 'hidden' });
     await page.getByRole('button', { name: 'Edit Homebrew' }).click();
     await page.waitForFunction(() => document.querySelector('input[id="batch_size"]')?.value === '6.25');
     assert.equal(Number(await breweryEditor.getByRole('spinbutton', { name: 'Default mash efficiency (%)' }).inputValue()), 68);
@@ -212,14 +226,16 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
     'brewery actions overflow the Settings page on a narrow phone');
   await page.setViewportSize({ width: 1280, height: 900 });
-  const raptSettingsButton = page.getByRole('button', { name: 'RAPT Pill settings' });
-  await raptSettingsButton.click();
-  const raptSettings = page.getByRole('dialog', { name: 'RAPT Pill' });
+  const addRaptButton = page.getByRole('button', { name: 'Add RAPT.io integration' });
+  await addRaptButton.click();
+  const raptSettingsButton = page.getByRole('button', { name: 'RAPT.io settings' });
+  await raptSettingsButton.waitFor();
+  const raptSettings = page.getByRole('dialog', { name: 'RAPT.io' });
   const webhookUrl = raptSettings.getByRole('textbox', { name: 'RAPT webhook URL' });
   await webhookUrl.waitFor();
   await page.waitForFunction(() => !!document.querySelector('input[aria-label="RAPT webhook URL"]')?.value);
   const firstWebhookUrl = await webhookUrl.inputValue();
-  assert.match(firstWebhookUrl, /\/api\/webhooks\/rapt\/[A-Za-z0-9_-]{43}$/);
+  assert.match(firstWebhookUrl, /\/api\/webhooks\/rapt\/[A-Za-z0-9_-]{21}$/);
   assert.equal(await raptSettings.getByRole('link', { name: /Open RAPT webhooks/ }).getAttribute('href'),
     'https://app.rapt.io/integration/webhooks/list');
   await raptSettings.getByRole('button', { name: 'Copy RAPT webhook URL' }).click();
@@ -235,6 +251,7 @@ try {
   await raptSettings.getByRole('button', { name: 'Delete integration' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Delete integration' }).click();
   await raptSettings.waitFor({ state: 'hidden' });
+  await addRaptButton.waitFor();
   assert.equal((await page.evaluate(async () => (await (await fetch('/api/me/rapt')).json()).webhook_path)), null);
   await page.locator('.app-nav').getByRole('button', { name: 'Log out' }).click();
   await page.locator('.ant-popconfirm').getByRole('button', { name: 'Cancel' }).click();
@@ -246,6 +263,9 @@ try {
   await page.getByRole('heading', { name: username }).waitFor();
   assert.equal(new URL(page.url()).pathname, `/brewer/${username}`, 'public profile redirected to sign in');
   assert.equal(await page.getByRole('button', { name: 'Upload avatar' }).count(), 0);
+  assert.equal(await page.locator('.app-nav').count(), 0, 'signed-out brewer page loaded the app shell');
+  await page.locator('.activity-day').first().waitFor();
+  assert.equal(await page.locator('.activity-day').count(), 365);
   await page.goto(`${base}/brewer/not-a-real-brewer`);
   await page.getByRole('heading', { name: 'Brewer not found' }).waitFor();
   console.log(`Light public routes, protected redirect, and authenticated app load passed${dev ? ' in dev' : ' with offline reopen'}`);

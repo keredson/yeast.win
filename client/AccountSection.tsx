@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CopyOutlined, DeleteOutlined, EditOutlined, PlusOutlined, SettingOutlined, SyncOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Select, Tag, Tooltip, Typography } from 'antd';
 import { api, type PreferredUnits, type Workspace } from './api.ts';
@@ -19,6 +19,8 @@ interface Props {
   onAvatarUploaded: () => void;
   hidePublicProfile: boolean | null;
   onHidePublicProfileChange: (hidden: boolean) => Promise<void>;
+  timeZone: string | null;
+  onTimeZoneChange: (timeZone: string) => Promise<void>;
   preferredUnits: PreferredUnits;
   onPreferredUnitsChange: (units: PreferredUnits) => Promise<void>;
   syncingWorkspaceId: string | null;
@@ -48,7 +50,8 @@ const raptPayload = `{
 
 export function AccountSection({ username, workspaces, activeWorkspaceId,
   onCreateWorkspace, onUpdateWorkspace, onDeleteWorkspace,
-  avatarSrc, onAvatarUploaded, hidePublicProfile, onHidePublicProfileChange, preferredUnits, onPreferredUnitsChange,
+  avatarSrc, onAvatarUploaded, hidePublicProfile, onHidePublicProfileChange, timeZone, onTimeZoneChange,
+  preferredUnits, onPreferredUnitsChange,
   syncingWorkspaceId, syncStatusFor, onManualSync }: Props) {
   const [passwordForm] = Form.useForm<PasswordValues>();
   const [breweryForm] = Form.useForm<BreweryValues>();
@@ -64,6 +67,7 @@ export function AccountSection({ username, workspaces, activeWorkspaceId,
   const [passwordChanged, setPasswordChanged] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [raptSetup, setRaptSetup] = useState<RaptSetup | null>(null);
+  const [raptLoaded, setRaptLoaded] = useState(false);
   const [raptOpen, setRaptOpen] = useState(false);
   const [raptBusy, setRaptBusy] = useState(false);
   const [raptDeviceBusy, setRaptDeviceBusy] = useState<string | null>(null);
@@ -74,6 +78,13 @@ export function AccountSection({ username, workspaces, activeWorkspaceId,
   async function refreshRapt() {
     setRaptSetup(await api<RaptSetup>('/me/rapt'));
   }
+  useEffect(() => {
+    let active = true;
+    void api<RaptSetup>('/me/rapt').then(result => { if (active) setRaptSetup(result); })
+      .catch(cause => { if (active) setRaptError(cause instanceof Error ? cause.message : String(cause)); })
+      .finally(() => { if (active) setRaptLoaded(true); });
+    return () => { active = false; };
+  }, []);
   async function openRaptSettings() {
     setRaptOpen(true); setRaptBusy(true); setRaptError(''); setRaptCopied(null);
     try {
@@ -220,9 +231,9 @@ export function AccountSection({ username, workspaces, activeWorkspaceId,
   return <div className="account-page">
     <div className="section-heading"><div><div className="eyebrow">Account</div><h1>Settings</h1></div></div>
     <ProfileCard username={username} avatarSrc={avatarSrc} onAvatarUploaded={onAvatarUploaded}
-      hidePublicProfile={hidePublicProfile} onHidePublicProfileChange={onHidePublicProfileChange} />
+      hidePublicProfile={hidePublicProfile} onHidePublicProfileChange={onHidePublicProfileChange}
+      timeZone={timeZone} onTimeZoneChange={onTimeZoneChange} />
     <Card title="Preferred units" className="account-card">
-      <Typography.Paragraph type="secondary" className="setting-description">Used as defaults when logging new values. Existing records keep their entered units.</Typography.Paragraph>
       <div className="unit-grid">
         <label>Temperature<Select aria-label="Preferred temperature unit" value={preferredUnits.temperature}
           disabled={unitsBusy} options={[{ value: '°C', label: '°C' }, { value: '°F', label: '°F' }]}
@@ -296,12 +307,15 @@ export function AccountSection({ username, workspaces, activeWorkspaceId,
     </Modal>
     <Card title="Integrations" className="account-card integrations-card">
       <table className="integrations-table"><tbody><tr>
-        <th scope="row"><strong>RAPT Pill</strong><span className="muted">Automatic Pill readings for batches</span></th>
-        <td><Button type="text" shape="circle" icon={<SettingOutlined />} aria-label="RAPT Pill settings"
-          title="RAPT Pill settings" onClick={() => void openRaptSettings()} /></td>
+        <th scope="row"><strong>RAPT.io</strong></th>
+        <td><Button type="text" shape="circle" loading={!raptLoaded}
+          icon={raptSetup?.webhook_path ? <SettingOutlined /> : <PlusOutlined />}
+          aria-label={raptSetup?.webhook_path ? 'RAPT.io settings' : 'Add RAPT.io integration'}
+          title={raptSetup?.webhook_path ? 'RAPT.io settings' : 'Add RAPT.io integration'}
+          onClick={() => void openRaptSettings()} /></td>
       </tr></tbody></table>
     </Card>
-    <Modal title="RAPT Pill" open={raptOpen} onCancel={() => setRaptOpen(false)} footer={null}
+    <Modal title="RAPT.io" open={raptOpen} onCancel={() => setRaptOpen(false)} footer={null}
       width={640} destroyOnHidden>
       <div className="rapt-settings">
         <Typography.Paragraph type="secondary" className="setting-description">

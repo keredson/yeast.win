@@ -20,39 +20,6 @@ function brand(): string {
   return '<div class="public-brand"><img src="/icon.svg" alt="" width="42" height="42"><strong>Yeast.Win!</strong></div>';
 }
 
-async function brewerProfile(username: string): Promise<void> {
-  root.innerHTML = `<main class="public-page"><div class="public-shell"><header class="splash-header">
-    <a class="public-brand-link" href="/">${brand()}</a><a class="splash-signin" href="/">Open Yeast.Win! <span aria-hidden="true">↗</span></a>
-    </header><section class="public-brewer-card" aria-live="polite"><p>Loading brewer…</p></section></div></main>`;
-  const card = root.querySelector<HTMLElement>('.public-brewer-card')!;
-  try {
-    const response = await fetch(`/api/brewer/${encodeURIComponent(username)}`, { cache: 'no-store' });
-    if (response.status === 404) {
-      card.innerHTML = '<h1>Brewer not found</h1><p>There is no brewer at this address.</p>';
-      return;
-    }
-    if (!response.ok) throw new Error('Could not load this brewer.');
-    const brewer = await response.json() as { username: string; has_avatar: boolean; hidden: boolean };
-    card.innerHTML = '<div class="public-brewer-avatar"></div><div><p class="public-eyebrow">Brewer</p><h1></h1></div>';
-    card.querySelector('h1')!.textContent = brewer.username;
-    if (brewer.hidden) {
-      const notice = document.createElement('p');
-      notice.className = 'public-brewer-hidden';
-      notice.textContent = 'This profile is hidden from visitors.';
-      card.querySelector('div:last-child')!.append(notice);
-    }
-    const avatar = card.querySelector<HTMLElement>('.public-brewer-avatar')!;
-    if (brewer.has_avatar) {
-      const image = document.createElement('img');
-      image.src = `/api/brewer/${encodeURIComponent(brewer.username)}/avatar`;
-      image.alt = '';
-      avatar.append(image);
-    } else avatar.textContent = brewer.username[0].toUpperCase();
-  } catch {
-    card.innerHTML = '<h1>Profile unavailable</h1><p>Could not load this brewer. Try again later.</p>';
-  }
-}
-
 function splash(): void {
   root.innerHTML = `<main class="public-page splash-page"><div class="public-shell splash-shell">
     <header class="splash-header">${brand()}<nav class="splash-nav" aria-label="Landing page">
@@ -203,7 +170,8 @@ function login(message = ''): void {
       if (!exists && !unitSystem) { showError('Choose metric or imperial units.'); return; }
       const response = await fetch(`/api/${exists ? 'login' : 'register'}`, {
         method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(exists ? { username, password } : { username, password, unit_system: unitSystem })
+        body: JSON.stringify(exists ? { username, password } : { username, password, unit_system: unitSystem,
+          time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone || null })
       });
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error || `Sign in failed (${response.status})`);
@@ -295,7 +263,6 @@ async function loadApp(): Promise<void> {
 
 async function start(): Promise<void> {
   const brewer = /^\/brewer\/([A-Za-z0-9][A-Za-z0-9_-]{2,39})$/.exec(location.pathname);
-  if (brewer) { await brewerProfile(brewer[1]); return; }
   if (localStorage.getItem(signedOutKey) !== '1') {
     try {
       const response = await fetch('/api/me', { credentials: 'same-origin' });
@@ -309,6 +276,7 @@ async function start(): Promise<void> {
       if (localStorage.getItem(cachedSessionKey)) { await loadApp(); return; }
     }
   }
+  if (brewer) { const { showPublicBrewer } = await import('./publicBrewer.ts'); await showPublicBrewer(brewer[1]); return; }
   if (location.pathname === '/') splash();
   else {
     if (location.pathname !== '/login') history.replaceState(null, '', loginPath());

@@ -1,0 +1,13 @@
+.public-brand-link { color: inherit; text-decoration: none; }
+.public-brewer-card { display: flex; align-items: center; gap: 26px; width: min(100%, 620px);
+  margin: clamp(55px, 12vw, 130px) auto 0; padding: clamp(24px, 5vw, 42px); border: 1px solid #e0e7dc;
+  border-radius: 18px; background: white; box-shadow: 0 24px 80px #24433716; }
+.public-brewer-card h1 { margin: 0; font-family: Georgia, serif; font-size: clamp(32px, 6vw, 48px); overflow-wrap: anywhere; }
+.public-brewer-card .public-eyebrow { margin: 0 0 8px; }
+.public-brewer-hidden { margin: 12px 0 0; color: #896128; }
+.public-brewer-avatar { display: grid; flex: none; place-items: center; width: 104px; height: 104px; overflow: hidden;
+  border-radius: 50%; background: #e7b464; color: #193b39; font-size: 44px; font-weight: 700; }
+.public-brewer-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.public-activity-card { max-width: 760px; margin: 24px auto 0; padding: clamp(22px, 4vw, 32px);
+  border: 1px solid #e0e7dc; border-radius: 18px; background: white; }
+@media (max-width: 480px) { .public-brewer-card { gap: 18px; } .public-brewer-avatar { width: 76px; height: 76px; font-size: 32px; } }
