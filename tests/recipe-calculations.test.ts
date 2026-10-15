@@ -222,9 +222,40 @@ test('cider recipe asks for sugar inputs rather than grain mash equipment', () =
   const result = calculateRecipe([], [], [], { target_fermenter_volume_liters: 19 }, {}, {}, 'cider');
   assert.equal(result.originalGravity, null);
   assert.equal(result.targetLiters, 19);
-  assert.ok(result.missing.some(message => message.includes('fermentable sugar inputs')));
+  assert.ok(result.missing.some(message => message.includes('typical °Brix')));
   assert.ok(result.missing.every(message => !message.includes('grain') && !message.includes('mash')));
 });
+
+test('honey and maple syrup contribute to OG without mash efficiency', () => {
+  const sweeteners: (PlanInput & { id: string })[] = [
+    { id: 'honey', event_type: 'addition', title: 'Honey', details: {
+      item_category: 'Other fermentables', catalog_item_id: 'honey', quantity: 32, unit: 'US fl oz' } },
+    { id: 'maple', event_type: 'addition', title: 'Maple syrup', details: {
+      item_category: 'Other fermentables', catalog_item_id: 'maple', quantity: 32, unit: 'US fl oz' } }
+  ];
+  const catalog = [
+    { id: 'honey', name: 'Honey', category: 'Other fermentables', unit: 'kg', typical_brix: 82 },
+    { id: 'maple', name: 'Maple syrup', category: 'Other fermentables', unit: 'kg', typical_brix: 67 }
+  ];
+  for (const type of ['mead', 'beer']) {
+    const result = calculateRecipe(sweeteners, [], [], { target_fermenter_volume_liters: 18.92705892 }, {},
+      {}, type, null, 'batch', catalog);
+    assert.ok(result.originalGravity! > 1.035 && result.originalGravity! < 1.05);
+    assert.equal(result.mashEfficiencyPct, null);
+    assert.ok(result.sources.originalGravity.some(line => line.includes('Honey: 32 US fl oz; 82 °Brix')));
+    assert.ok(result.sources.originalGravity.some(line => line.includes('Maple syrup: 32 US fl oz; 67 °Brix')));
+  }
+});
+
+test('an unquantified or unknown sweetener keeps expected OG unavailable', () => {
+  const sweetener: PlanInput & { id: string } = { id: 'honey', event_type: 'addition', title: 'Honey',
+    details: { item_category: 'Other fermentables', quantity: 1, unit: 'kg' } };
+  const result = calculateRecipe([sweetener], [], [], { target_fermenter_volume_liters: 19 }, {},
+    {}, 'mead');
+  assert.equal(result.originalGravity, null);
+  assert.ok(result.unavailable.originalGravity.some(line => line.includes('typical °Brix for Honey')));
+});
+
 
 test('batch size tooltip identifies saved assumptions and explicit recipe settings', () => {
   const assumed = calculateRecipe([], [], [],

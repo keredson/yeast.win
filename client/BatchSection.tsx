@@ -220,7 +220,7 @@ export function BatchSection({ db, basePath, accountId, batches, recipes, equipm
           aria-label="Batch settings" title="Batch settings" onClick={() => void openBatchSize()} /></div></div>
       {calculation?.batchId === selectedId && <CalculationsCard estimate={calculation.estimate}
         volumeUnit={preferredUnits.volume} showColor={calculation.recipeType === 'beer'}
-        showMashEfficiency={calculation.recipeType === 'beer'} label="Batch details" />}
+        showMashEfficiency={calculation.estimate.mashEfficiencyPct != null} label="Batch details" />}
       <EventTimeline events={events} batchStartAt={batch.created_at} equipment={equipment} details={details} photos={photos}
         onEdit={event => event.actual_at != null ? void recordOrEdit(event as ActualEvent) : setEditingPlan(event as ActualEvent)}
         onRecord={event => void recordOrEdit(event)}

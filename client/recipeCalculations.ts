@@ -30,6 +30,12 @@ export interface BatchGravityReadings { original?: number | null; final?: number
 // Product and brewery values always take precedence over these broad defaults.
 export const appGrainYields = { base: 78, kilned: 75, caramel: 70, roasted: 65, flaked: 70, other: 75 } as const;
 
+// Approximate sucrose-solution density at 20 °C for volume-based sweeteners.
+// °Brix is mass percent soluble solids; this is an estimate for mixed sugars such as honey.
+function brixDensity(brix: number): number {
+  return 1 + brix / (258.6 - brix / 258.2 * 227.1);
+}
+
 export function grainClassForName(name: string): keyof typeof appGrainYields {
   const text = name.toLowerCase();
   if (/roast|chocolate|black|carafa|dehusk/.test(text)) return 'roasted';
@@ -77,16 +83,6 @@ export function calculateRecipe(events: Event[], inventory: InventoryRecord[], e
     : assumedSize ? `assumed from ${assumedSize} because the recipe had no size` : 'recipe settings'}).`] : [];
   const targetHelp = batch ? 'Batch size is not set for this batch.' : 'Set Batch size in recipe settings.';
   if (!targetLiters) { missing.push(targetHelp); gravityMissing.push(targetHelp); colorMissing.push(targetHelp); }
-  if (recipeType !== 'beer') return { targetLiters, originalGravity: null, finalGravity: null, abvPct: null,
-    usedAppYeastAttenuation: false, measuredOriginalGravity: false, measuredFinalGravity: false, colorSrm: null,
-    efficiencyLabel: null, mashEfficiencyPct: null, measuredMashEfficiency: false,
-    missing: [...missing, `Gravity and alcohol estimates for this ${context} type need fermentable sugar inputs.`],
-    sources: { targetLiters: targetSources, originalGravity: [], finalGravity: [], abvPct: [], colorSrm: [], mashEfficiency: [] },
-    unavailable: { targetLiters: targetLiters ? [] : [targetHelp],
-      originalGravity: [`Gravity estimates for this ${context} type need fermentable sugar inputs.`],
-      finalGravity: [`Gravity estimates for this ${context} type need fermentable sugar inputs.`],
-      abvPct: [`Alcohol estimates for this ${context} type need fermentable sugar inputs.`], colorSrm: [], mashEfficiency: [] } };
-
   const ingredient = (event: Event) => {
     const details = event.details;
     const item = inventory.find(row => row.id === details.stock_bucket_id)
@@ -102,6 +98,8 @@ export function calculateRecipe(events: Event[], inventory: InventoryRecord[], e
   const mashEquipmentId = String(drainDetails.mash_equipment_id || mash?.details.equipment_id || '');
   const mashEquipment = equipment.find(item => item.id === mashEquipmentId);
   const mashSpecs: EquipmentSpecifications = mashEquipment || {};
+  const hasGrain = recipeType === 'beer' && events.some(event => event.event_type === 'addition'
+    && ingredient(event).category === 'Grain');
   const validEfficiency = (value: unknown) => { const parsed = positive(value); return parsed != null && parsed <= 100 ? parsed : null; };
   const importedBrewhouseEfficiency = validEfficiency(recipeInputs.brewhouse_efficiency_pct);
   const snapshotEfficiency = batch ? validEfficiency(eventInputs[drain?.id || '']?.mash_efficiency_pct) : null;
@@ -112,8 +110,8 @@ export function calculateRecipe(events: Event[], inventory: InventoryRecord[], e
   const measuredEfficiency = batch && measuredMashEfficiencyPct != null
     && Number.isFinite(measuredMashEfficiencyPct) && measuredMashEfficiencyPct >= 0 && measuredMashEfficiencyPct <= 105
     ? measuredMashEfficiencyPct : null;
-  const mashEfficiency = measuredEfficiency ?? modelEfficiency ?? recentEfficiency
-    ?? (importedBrewhouseEfficiency == null ? breweryEfficiency ?? appMashEfficiencyPct : null);
+  const mashEfficiency = hasGrain ? measuredEfficiency ?? modelEfficiency ?? recentEfficiency
+    ?? (importedBrewhouseEfficiency == null ? breweryEfficiency ?? appMashEfficiencyPct : null) : null;
   const gravitySources = [...targetSources];
   const colorSources = [...targetSources];
   let efficiencyLabel: string | null = null;
@@ -148,11 +146,11 @@ export function calculateRecipe(events: Event[], inventory: InventoryRecord[], e
       ? `Post-boil wort retained: ${wortLoss} L (batch input).`
       : `Post-boil wort retained: ${wortLoss} L${lossSources.length ? ` (${lossSources.join(', ')})` : ' (no linked equipment loss set)'}.`);
   }
-  if (efficiency == null && importedBrewhouseEfficiency != null) {
+  if (hasGrain && efficiency == null && importedBrewhouseEfficiency != null) {
     efficiency = importedBrewhouseEfficiency;
     efficiencyLabel = `${efficiency}% ${batch ? 'batch' : 'imported'} brewhouse efficiency`;
     gravitySources.push(`Brewhouse efficiency: ${efficiency}% (${batch ? 'batch input' : 'imported recipe'}).`);
-  } else if (efficiency == null && mashEfficiency == null) {
+  } else if (hasGrain && efficiency == null && mashEfficiency == null) {
     const message = 'Set mash efficiency on the mash equipment, or import a brewhouse efficiency.';
     missing.push(message); gravityMissing.push(message);
   }
@@ -161,18 +159,35 @@ export function calculateRecipe(events: Event[], inventory: InventoryRecord[], e
   let maltColorUnits = 0;
   let colorReady = true;
   let grainCount = 0;
+  let sugarCount = 0;
+  let sugarPointGallons = 0;
   for (const event of events) {
     if (event.event_type !== 'addition') continue;
     const details = event.details;
     const { item, catalogItem, category } = ingredient(event);
     if (category === 'Other fermentables') {
       const name = String(details.item_name || event.title);
-      gravityMissing.push(`Expected OG does not yet include ${name}.`);
-      colorMissing.push(`Estimated beer color does not yet include ${name}.`);
-      colorReady = false;
+      if (recipeType === 'beer') {
+        colorMissing.push(`Estimated beer color does not yet include ${name}.`);
+        colorReady = false;
+      }
+      const brix = positive(item?.typical_brix ?? catalogItem?.typical_brix);
+      const amount = positive(details.quantity);
+      const unit = String(details.unit || '');
+      const pounds = amount == null ? null : convertUnit(amount, unit, 'lb');
+      const liters = amount == null ? null : convertUnit(amount, unit, 'L');
+      if (brix == null || brix > 100 || (pounds == null && liters == null)) {
+        gravityMissing.push(`Set an amount and typical °Brix for ${name} to estimate OG.`);
+        continue;
+      }
+      const sugarPounds = (pounds ?? (liters! * brixDensity(brix) / 0.45359237)) * brix / 100;
+      sugarPointGallons += sugarPounds * 46;
+      sugarCount++;
+      gravitySources.push(`${name}: ${amount} ${unit}; ${brix} °Brix (${item?.typical_brix != null
+        ? 'brewery ingredient' : 'catalog ingredient'}); sugar contributes without mash efficiency.`);
       continue;
     }
-    if (category !== 'Grain' && category !== 'Adjunct') continue;
+    if (recipeType !== 'beer' || category !== 'Grain' && category !== 'Adjunct') continue;
     if (category === 'Adjunct') {
       const message = 'Gravity estimates do not yet include adjunct extract.';
       missing.push(message); gravityMissing.push(message);
@@ -211,23 +226,25 @@ export function calculateRecipe(events: Event[], inventory: InventoryRecord[], e
     }
     potentialPointGallons += pounds * 46 * yieldPct / 100;
   }
-  if (!grainCount) { const message = 'Add grain with an amount and extract yield.';
+  if (!grainCount && !sugarCount) { const message = recipeType === 'beer'
+    ? 'Add grain or another fermentable with an amount and extract yield or °Brix.'
+    : 'Add a fermentable with an amount and typical °Brix.';
     missing.push(message); gravityMissing.push(message); }
-  const canEstimateGravity = !!targetLiters && efficiency != null && grainCount > 0
+  const canEstimateGravity = !!targetLiters && (grainCount === 0 || efficiency != null) && (grainCount > 0 || sugarCount > 0)
     && !gravityMissing.some(message => message.includes('adjunct') || message.startsWith('Set an amount')
       || message.startsWith('Expected OG does not yet include'));
   const gallons = extractVolume == null ? null : convertUnit(extractVolume, 'L', 'US gal');
   const targetGallons = targetLiters == null ? null : convertUnit(targetLiters, 'L', 'US gal');
   // Morey's beer color approximation from malt color units (MCU).
   // https://beersmith.com/BeerSmithHelp.pdf
-  const colorSrm = colorReady && targetGallons && targetGallons > 0 && maltColorUnits > 0
+  const colorSrm = recipeType === 'beer' && colorReady && targetGallons && targetGallons > 0 && maltColorUnits > 0
     ? 1.4922 * (maltColorUnits / targetGallons) ** 0.6859 : null;
-  if (grainCount && !colorReady) { const message = 'Set an amount and color value for each fermentable.';
+  if (recipeType === 'beer' && grainCount && !colorReady) { const message = 'Set an amount and color value for each fermentable.';
     missing.push(message); colorMissing.push(message); }
-  if (!grainCount) colorMissing.push('Add grain with an amount and color value.');
-  if (grainCount && colorReady && maltColorUnits <= 0) colorMissing.push('Set a color value above zero for a fermentable.');
+  if (recipeType === 'beer' && !grainCount) colorMissing.push('Add grain with an amount and color value.');
+  if (recipeType === 'beer' && grainCount && colorReady && maltColorUnits <= 0) colorMissing.push('Set a color value above zero for a fermentable.');
   const estimatedOriginalGravity = canEstimateGravity && gallons && gallons > 0
-    ? 1 + potentialPointGallons * efficiency! / 100 / gallons / 1000 : null;
+    ? 1 + (potentialPointGallons * (efficiency ?? 0) / 100 + sugarPointGallons) / gallons / 1000 : null;
   const measuredGravity = (value: unknown) => { const parsed = Number(value); return value != null
     && Number.isFinite(parsed) && parsed > 0.9 && parsed < 2 ? parsed : null; };
   const recordedOriginalGravity = batch ? measuredGravity(readings.original) : null;
