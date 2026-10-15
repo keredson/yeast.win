@@ -81,7 +81,7 @@ if [[ ! -f /etc/yeast-win/deploy-hook.env ]]; then
   sudo install -o root -g yeast-deploy -m 0640 "$hook_env" /etc/yeast-win/deploy-hook.env
 fi
 
-if [[ ! -d "$repository" ]]; then
+if ! sudo -H -u yeast-deploy test -d "$repository"; then
   bundle="$(mktemp --suffix=.bundle)"
   git -C "$root_dir" bundle create "$bundle" --all
   chmod 0644 "$bundle"
@@ -89,7 +89,7 @@ if [[ ! -d "$repository" ]]; then
 fi
 sudo -H -u yeast-deploy git --git-dir="$repository" remote set-url origin "$remote_url"
 
-if [[ ! -f "$deploy_home/.ssh/id_ed25519" ]]; then
+if ! sudo -H -u yeast-deploy test -f "$deploy_home/.ssh/id_ed25519"; then
   sudo -H -u yeast-deploy ssh-keygen -q -t ed25519 -N '' \
     -C 'yeast.win deployment' -f "$deploy_home/.ssh/id_ed25519"
 fi
