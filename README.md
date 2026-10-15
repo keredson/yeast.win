@@ -12,7 +12,7 @@ yarn setup:sqlite
 yarn dev
 ```
 
-Open the app and choose **Create account**. Each new account gets a private brewery named Homebrew. Create, rename, change the URL slug, or delete breweries in **Settings**; the selector at the top of the sidebar switches between them. Usernames are case insensitive; passwords must be at least 8 characters. An `.env` file is optional if you want to change the data directory; see `.env.example`.
+Open the app and choose **Create account**. Each new account gets a private brewery named Homebrew. Create, rename, change the URL slug, or delete breweries in **Settings**; the selector below the Yeast.Win! mark in the sidebar switches between them. Usernames are case insensitive; passwords must be at least 8 characters. An `.env` file is optional if you want to change the data directory; see `.env.example`.
 
 This starts the API on `.brewlog-api.sock` in this checkout and Vite on the first free port from 5173. Open the URL printed by Vite. Vite proxies API requests through the checkout's Unix socket. The browser stores its local database in IndexedDB through CR-SQLite's persistent virtual file system. After a successful sign-in, the same device can reopen its local batches while the server is unavailable.
 

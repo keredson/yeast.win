@@ -625,6 +625,7 @@ export function App() {
   const crumbs = section !== 'settings' && section !== 'home' && db
     ? breadcrumbNodes(section, route.selectedId, breadcrumbRecords) : [];
   const sidebar = (mobile: boolean) => <div className="nav-panel">
+    {!mobile && <div className="nav-brand"><img src="/icon.svg" alt="" /><strong>Yeast.Win!</strong></div>}
     <div className="nav-top">
       <Select className="workspace-select" value={workspaceId || undefined} placeholder="Select brewery"
         aria-label="Brewery" disabled={!session.workspaces.length}
@@ -651,7 +652,6 @@ export function App() {
         </Popover>}
       </div>}
     </div>
-    {!mobile && <div className="nav-brand"><img src="/icon.svg" alt="" /><strong>Yeast.Win!</strong></div>}
     <nav className="nav-links" aria-label="Sections">
       <SectionNavigation route={route} recent={recent} records={{ batches: recentRecords.batches, recipes: recentRecords.recipes,
         inventory: [], equipment: [], locations: [] }}

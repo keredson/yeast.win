@@ -52,6 +52,10 @@ try {
   await page.waitForURL('**/settings');
   assert.equal(await page.locator('.app-header').count(), 0, 'the old header is still present');
   assert.equal(await page.locator('.app-nav').getByRole('combobox', { name: 'Brewery' }).isVisible(), true);
+  assert.equal(await page.locator('.app-nav').evaluate(nav =>
+    nav.querySelector('.nav-brand').getBoundingClientRect().bottom
+      <= nav.querySelector('.workspace-select').getBoundingClientRect().top), true,
+  'the desktop brewery selector is not below the brand');
   assert.equal(await page.locator('.app-nav .nav-footer').getByRole('button', { name: 'Account menu' }).isVisible(), true);
   assert.equal(await page.locator('.account-page .ant-card').first().getByText('Profile').count(), 1);
   assert.equal(await page.locator('.account-page .ant-card').nth(1).getByText('Preferred units').count(), 1);
