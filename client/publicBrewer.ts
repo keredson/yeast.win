@@ -5,7 +5,7 @@ export async function showPublicBrewer(username: string): Promise<void> {
   const root = document.getElementById('root')!;
   root.innerHTML = `<main class="public-page"><div class="public-shell"><header class="splash-header">
     <a class="public-brand-link" href="/"><div class="public-brand"><img src="/icon.svg" alt="" width="42" height="42"><strong>Yeast.Win!</strong></div></a>
-    <a class="splash-signin" href="/">Open Yeast.Win! <span aria-hidden="true">↗</span></a>
+    <a class="public-brewer-login" href="/login?next=${encodeURIComponent(`/brewer/${username}`)}">Log in / Join <span aria-hidden="true">↗</span></a>
     </header><section class="public-brewer-card" aria-live="polite"><p>Loading brewer…</p></section></div></main>`;
   const card = root.querySelector<HTMLElement>('.public-brewer-card')!;
   try {

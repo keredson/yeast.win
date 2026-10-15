@@ -266,6 +266,12 @@ try {
   assert.equal(await page.locator('.app-nav').count(), 0, 'signed-out brewer page loaded the app shell');
   await page.locator('.activity-day').first().waitFor();
   assert.equal(await page.locator('.activity-day').count(), 365);
+  const profileLogin = page.getByRole('link', { name: 'Log in / Join' });
+  assert.equal(await profileLogin.evaluate(link => getComputedStyle(link).borderTopWidth), '0px');
+  assert.equal(new URL(await profileLogin.getAttribute('href'), base).searchParams.get('next'), `/brewer/${username}`);
+  await profileLogin.click();
+  await page.getByRole('heading', { name: 'Sign in or create an account' }).waitFor();
+  assert.equal(new URL(page.url()).searchParams.get('next'), `/brewer/${username}`);
   await page.goto(`${base}/brewer/not-a-real-brewer`);
   await page.getByRole('heading', { name: 'Brewer not found' }).waitFor();
   console.log(`Light public routes, protected redirect, and authenticated app load passed${dev ? ' in dev' : ' with offline reopen'}`);
