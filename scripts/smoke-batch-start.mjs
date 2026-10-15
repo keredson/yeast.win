@@ -48,6 +48,7 @@ try {
     await newBatch(`${type} template trial`, `${type} template`);
     await page.getByText('Pitch yeast', { exact: true }).first().waitFor();
     await page.getByText('Package batch', { exact: true }).first().waitFor();
+    if (type === 'Mead') await page.getByText('Add honey', { exact: true }).first().waitFor();
   }
 
   await newBatch('Repeat trial', 'Previous batch', 'Beer template trial');

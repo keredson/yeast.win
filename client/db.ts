@@ -829,6 +829,10 @@ export function recipeTemplatePlans(recipeType: RecipeType, temperatureUnit: '°
       insert(transferId, 'transfer', 'Transfer to fermenter', chillId,
         { anchor_point: 'end', purpose: 'to_fermenter' }, 7);
     }
+    if (recipeType === 'mead') {
+      insert(createId(), 'addition', 'Add honey', null,
+        { item_category: 'Other fermentables', item_name: 'Honey', catalog_item_id: 'generic_honey' }, 0);
+    }
     const gravityId = createId();
     insert(gravityId, 'measurement', 'Measure original specific gravity', recipeType === 'beer' ? transferId : null,
       { measurement_kind: 'gravity', target_unit: 'SG', gravity_role: 'og' }, recipeType === 'beer' ? 8 : 1);
