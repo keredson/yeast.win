@@ -4,38 +4,45 @@ html, body, #root { min-height: 100%; margin: 0; }
 body { background: #f6f4ed; color: #243b36; }
 button, input, textarea { font: inherit; }
 .app-shell { min-height: 100vh; }
-.app-header { height: 60px; padding: 0 clamp(20px, 3vw, 52px); background: #193b39; color: white; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
-.brand { display: flex; align-items: center; gap: 12px; white-space: nowrap; }
-.header-brand-row { display: flex; align-items: center; gap: 12px; }
 .mobile-menu-button { display: none !important; }
-.brand strong { display: block; font-size: 23px; letter-spacing: -.03em; line-height: 1.05; }
-.brand small { display: block; margin-top: 4px; opacity: .72; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; }
-.brand-mark { display: block; width: 34px; height: 34px; border-radius: 11px; }
-.header-sync-progress { display: flex; align-items: center; justify-content: center; flex: none; width: 32px; height: 32px; }
-.header-controls { display: flex; align-items: center; gap: 10px; }
-.workspace-select { width: 200px; }
-.app-header .ant-btn { color: white; border-color: #56736f; background: transparent; }
-.app-header .ant-btn:hover { background: #29514a !important; color: white !important; }
-.app-header .ant-btn.connection-button { color: #f1c375; border: 0 !important; font-size: 20px; }
+.app-body { min-height: 100vh; display: grid; grid-template-columns: 240px minmax(0, 1fr); }
+.app-nav { position: sticky !important; top: 0; height: 100vh; background: #193b39 !important; }
+.app-nav .ant-layout-sider-children, .nav-panel { height: 100%; }
+.nav-panel { display: flex; flex-direction: column; min-height: 0; padding: 24px 12px 16px; color: white; }
+.nav-top { padding: 0 8px 20px; }
+.workspace-select { width: 100%; }
+.nav-brand { display: flex; align-items: center; gap: 10px; padding: 0 12px 16px; white-space: nowrap; }
+.nav-brand img { width: 30px; height: 30px; border-radius: 9px; }
+.nav-brand strong { font-size: 19px; letter-spacing: -.03em; }
+.nav-status { display: flex; flex-direction: column; gap: 8px; padding-top: 14px; }
+.nav-sync-progress { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #dce8e2; }
+.nav-panel .ant-btn.connection-button { width: 100%; justify-content: flex-start; color: #f1c375; padding-inline: 0; }
+.nav-links { min-height: 0; overflow-y: auto; flex: 1; }
+.nav-footer { border-top: 1px solid #42615b; padding: 14px 8px 0; }
+.nav-panel .ant-btn.avatar-button { display: flex; align-items: center; justify-content: flex-start; gap: 10px;
+  width: 100%; height: auto; padding: 4px; color: white; text-align: left; }
+.nav-panel .ant-btn.avatar-button:hover { color: white; background: #29514a; }
+.nav-panel .avatar-button .ant-avatar { flex: none; background: #e7b464; color: #193b39; font-weight: 700; }
+.nav-account-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .connection-popover { max-width: 260px; }
 .connection-popover p { margin: 0; }
 .connection-popover p + p { margin-top: 8px; }
-.app-body { max-width: 1580px; margin: 0 auto; padding: 28px clamp(18px, 3vw, 52px) 64px; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: clamp(20px, 3vw, 48px); }
-.app-nav { align-self: start; position: sticky; top: 24px; background: transparent !important; }
-.app-nav .ant-menu, .drawer-nav .ant-menu { background: transparent; border-inline-end: 0 !important; }
-.app-nav .ant-menu-item, .drawer-nav .ant-menu-item { margin-inline: 0; width: 100%; font-weight: 650; }
-.app-nav .ant-menu-item-selected, .drawer-nav .ant-menu-item-selected { color: #1d604f; background: #e3ebe3; }
+.nav-panel .ant-menu { background: transparent; border-inline-end: 0 !important; }
+.nav-panel .ant-menu-item { margin-inline: 0; width: 100%; font-weight: 650; }
+.nav-panel .ant-menu-item-selected { color: white; background: #356b5d; }
 .nav-recent-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.app-nav .nav-recent-item, .drawer-nav .nav-recent-item { padding-left: 42px !important; font-weight: 400; font-size: 13px; }
+.nav-panel .nav-recent-item { padding-left: 42px !important; font-weight: 400; font-size: 13px; }
 .nav-recent-label { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.app-main { min-width: 0; }
+.mobile-nav-drawer .ant-drawer-header, .mobile-nav-drawer .ant-drawer-body { background: #193b39; color: white; }
+.mobile-nav-drawer .ant-drawer-header { border-bottom: 1px solid #42615b; }
+.mobile-nav-drawer .ant-drawer-title, .mobile-nav-drawer .ant-drawer-close { color: white; }
+.mobile-nav-drawer .ant-drawer-body { padding: 0; min-height: 0; }
+.app-main { min-width: 0; width: 100%; max-width: 1340px; padding: 28px clamp(18px, 3vw, 52px) 64px; }
 .app-breadcrumb { max-width: 1050px; margin: 0 0 15px; overflow-x: auto; white-space: nowrap; scrollbar-width: thin; }
 .app-breadcrumb ol { width: max-content; flex-wrap: nowrap; }
 .app-breadcrumb .ant-breadcrumb-link { display: inline-block; max-width: min(42vw, 300px); overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .app-breadcrumb a { color: #356b53; }
 .account-page .ant-btn.sync-button { flex: none; color: #1d604f; border: 0 !important; box-shadow: none; }
-.app-header .ant-btn.avatar-button { display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 0 !important; box-shadow: none; background: transparent; }
-.app-header .avatar-button .ant-avatar { background: #e7b464; color: #193b39; font-weight: 700; }
 .account-page { max-width: 680px; display: flex; flex-direction: column; gap: 18px; }
 .account-page .section-heading { margin-bottom: 4px; }
 .account-card .ant-card-body { display: flex; flex-direction: column; gap: 16px; }
@@ -298,22 +305,13 @@ button, input, textarea { font: inherit; }
 .full-width { width: 100%; }
 .calibration-data { background: #f4f6f1; border-radius: 8px; padding: 10px; margin: 10px 0 0; overflow-x: auto; font-size: 12px; }
 .loading-screen { min-height: 60vh; display: grid; place-items: center; }
-@media (max-width: 1050px) {
-  .app-body { gap: 24px; }
-}
 @media (max-width: 720px) {
-  .app-header { height: auto; min-height: 56px; padding: 8px 18px; flex-wrap: wrap; gap: 8px; }
-  .brand strong { font-size: 20px; }
-  .brand small { font-size: 9px; }
-  .brand-mark { width: 30px; height: 30px; }
-  .header-brand-row { justify-content: flex-start; }
-  .mobile-menu-button { display: inline-flex !important; color: white !important; }
-  .header-controls { margin-left: auto; gap: 8px; }
-  .header-controls .avatar-button { margin-left: auto; }
-  .workspace-select { flex: 1; width: auto; min-width: 90px; }
-  .header-controls .ant-btn { font-size: 12px; padding-inline: 9px; }
-  .app-body { display: block; padding: 16px 15px 50px; }
+  .app-body { display: block; }
   .app-nav { display: none !important; }
+  .app-main { padding: 16px 15px 50px; }
+  .page-navigation { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 12px; }
+  .mobile-menu-button { display: inline-flex !important; flex: none; color: #193b39 !important; }
+  .page-navigation .app-breadcrumb { min-width: 0; margin: 0; }
   .section-heading h1, .content-heading h2 { font-size: 29px; }
   .content-heading { flex-wrap: wrap; margin-bottom: 20px; }
   .heading-actions { justify-content: start; width: 100%; }
@@ -321,10 +319,6 @@ button, input, textarea { font: inherit; }
   .unit-grid { grid-template-columns: 1fr; }
   .rapt-device { align-items: stretch; flex-direction: column; gap: 8px; }
   .rapt-device .ant-select { width: 100%; }
-}
-@media (max-width: 360px) {
-  .header-controls { flex-wrap: wrap; }
-  .workspace-select { order: -1; flex: 1 1 100%; }
 }
 .import-recipe-choices, .import-inventory-toggle { margin: 20px 0; }
 .import-recipe-list { display: grid; gap: 10px; margin-top: 10px; }

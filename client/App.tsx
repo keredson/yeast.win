@@ -66,7 +66,7 @@ function SectionNavigation({ route, recent, records, onNavigate }: {
       </span>
     }))];
   }), { key: 'settings', label: 'Settings', icon: <SettingOutlined /> }];
-  return <Menu mode="inline"
+  return <Menu mode="inline" theme="dark"
     selectedKeys={[route.selectedId && route.section !== 'inventory' && route.section !== 'equipment' && route.section !== 'locations'
       ? `${route.section}:${route.selectedId}` : route.section]}
     items={items}
@@ -624,62 +624,64 @@ export function App() {
   const breadcrumbRecords = { batches, recipes, inventory, supplies, equipment, equipmentModels, locations };
   const crumbs = section !== 'settings' && section !== 'home' && db
     ? breadcrumbNodes(section, route.selectedId, breadcrumbRecords) : [];
-
-  return <div className="app-shell">
-    <header className="app-header">
-      <div className="header-brand-row">
-        <Button className="mobile-menu-button" type="text" shape="circle" aria-label="Open navigation"
-          icon={<MenuOutlined />} onClick={() => setMenuOpen(true)} />
-        <div className="brand"><img className="brand-mark" src="/icon.svg" alt="" /><strong>Yeast.Win!</strong></div>
-      </div>
-      <div className="header-controls">
+  const sidebar = (mobile: boolean) => <div className="nav-panel">
+    <div className="nav-top">
+      <Select className="workspace-select" value={workspaceId || undefined} placeholder="Select brewery"
+        aria-label="Brewery" disabled={!session.workspaces.length}
+        options={session.workspaces.map(item => ({ label: item.name, value: item.id }))}
+        onChange={value => {
+          setWorkspaceId(value); localStorage.setItem(activeBreweryKey, value); setOpenedDb(null); showSection('home', value);
+          if (mobile) setMenuOpen(false);
+        }} />
+      {(headerProgress || serverDisconnected) && <div className="nav-status">
         {headerProgress && <Tooltip title={`${headerProgress.label}: ${headerProgress.applied} of ${headerProgress.total} changes`}>
-          <div className="header-sync-progress" role="status" aria-live="polite"
+          <div className="nav-sync-progress" role="status" aria-live="polite"
             aria-label={`${headerProgress.label}: ${headerProgress.applied} of ${headerProgress.total} changes`}>
             <Progress type="circle" percent={headerProgress.total
               ? Math.round(headerProgress.applied / headerProgress.total * 100) : 100}
               showInfo={false} size={28} strokeWidth={11} strokeColor="#e7b464" trailColor="#56736f" />
+            <span>{headerProgress.label}</span>
           </div>
         </Tooltip>}
-        {session.workspaces.length > 1 && <Select className="workspace-select" value={workspaceId}
-          aria-label="Brewery"
-          options={session.workspaces.map(item => ({ label: item.name, value: item.id }))}
-          onChange={value => {
-            setWorkspaceId(value); localStorage.setItem(activeBreweryKey, value); setOpenedDb(null); showSection('home', value);
-          }} />}
         {serverDisconnected && <Popover trigger="click" title="Server disconnected" content={<div className="connection-popover">
           <p>Your brewing entries are saved on this device.</p>
           <p>They will sync when the server is available again.</p>
         </div>}>
-          <Button className="connection-button" type="text" shape="circle" aria-label="Server disconnected"
-            icon={<DisconnectOutlined />} />
+          <Button className="connection-button" type="text" icon={<DisconnectOutlined />}>Server disconnected</Button>
         </Popover>}
-        <Dropdown trigger={['click']} placement="bottomRight" menu={{ items: [
-          { key: 'username', label: session.account.username, disabled: true },
-          { key: 'logout', label: 'Log out', icon: <LogoutOutlined /> }
-        ], onClick: ({ key }) => { if (key === 'logout') void signOut(); } }}>
-          <Button className="avatar-button" type="text" shape="circle" aria-label="Account menu">
-            <Avatar size={32} src={avatarSrc}>{session.account.username[0].toUpperCase()}</Avatar>
-          </Button>
-        </Dropdown>
-      </div>
-    </header>
+      </div>}
+    </div>
+    <div className="nav-brand"><img src="/icon.svg" alt="" /><strong>Yeast.Win!</strong></div>
+    <nav className="nav-links" aria-label="Sections">
+      <SectionNavigation route={route} recent={recent} records={{ batches: recentRecords.batches, recipes: recentRecords.recipes,
+        inventory: [], equipment: [], locations: [] }}
+        onNavigate={(name, id) => { if (name !== 'home' && name !== 'settings' && id) showItem(name, id);
+          else showSection(name); if (mobile) setMenuOpen(false); }} />
+    </nav>
+    <div className="nav-footer">
+      <Dropdown trigger={['click']} placement="topRight" menu={{ items: [
+        { key: 'username', label: session.account.username, disabled: true },
+        { key: 'logout', label: 'Log out', icon: <LogoutOutlined /> }
+      ], onClick: ({ key }) => { if (key === 'logout') void signOut(); } }}>
+        <Button className="avatar-button" type="text" aria-label="Account menu">
+          <Avatar size={32} src={avatarSrc}>{session.account.username[0].toUpperCase()}</Avatar>
+          <span className="nav-account-name">{session.account.username}</span>
+        </Button>
+      </Dropdown>
+    </div>
+  </div>;
 
+  return <div className="app-shell">
     <div className="app-body">
-      <Layout.Sider className="app-nav" width={220} theme="light" aria-label="Sections">
-        <SectionNavigation route={route} recent={recent} records={{ batches: recentRecords.batches, recipes: recentRecords.recipes,
-          inventory: [], equipment: [], locations: [] }}
-          onNavigate={(name, id) => name !== 'home' && name !== 'settings' && id ? showItem(name, id) : showSection(name)} />
-      </Layout.Sider>
-      <Drawer className="mobile-nav-drawer" title="Sections" placement="left" width={250} open={menuOpen} onClose={() => setMenuOpen(false)}>
-        <div className="drawer-nav"><SectionNavigation route={route} recent={recent} records={{ batches: recentRecords.batches, recipes: recentRecords.recipes,
-          inventory: [], equipment: [], locations: [] }}
-          onNavigate={(name, id) => { if (name !== 'home' && name !== 'settings' && id) showItem(name, id);
-            else showSection(name); setMenuOpen(false); }} /></div>
-      </Drawer>
+      <Layout.Sider className="app-nav" width={240} theme="dark">{sidebar(false)}</Layout.Sider>
+      <Drawer className="mobile-nav-drawer" title="Yeast.Win!" placement="left" width={260} open={menuOpen}
+        onClose={() => setMenuOpen(false)}>{sidebar(true)}</Drawer>
       <main className="app-main">
         {error && <Alert type="warning" showIcon closable onClose={() => setError('')} message={error} className="page-alert" />}
-        {crumbs.length > 0 && <Breadcrumb className="app-breadcrumb" aria-label="Breadcrumb" items={crumbs.map((crumb, index) => ({
+        <div className="page-navigation">
+          <Button className="mobile-menu-button" type="text" shape="circle" aria-label="Open navigation"
+            icon={<MenuOutlined />} onClick={() => setMenuOpen(true)} />
+          {crumbs.length > 0 && <Breadcrumb className="app-breadcrumb" aria-label="Breadcrumb" items={crumbs.map((crumb, index) => ({
           title: index === crumbs.length - 1 ? <span aria-current="page" title={crumb.label}>{crumb.label}</span>
             : <a href={crumb.section === 'home' ? routePath('home', null, activeBase)
               : recordPath(crumb.section, crumb.id, activeBase, breadcrumbRecords)} title={crumb.label}
@@ -690,7 +692,8 @@ export function App() {
                 if (crumb.section !== 'home' && crumb.id) showItem(crumb.section, crumb.id);
                 else showSection(crumb.section);
               }}>{crumb.section === 'home' ? <HomeOutlined aria-hidden="true" /> : crumb.label}</a>
-        }))} />}
+          }))} />}
+        </div>
         {section === 'settings' ? <AccountSection username={session.account.username} avatarSrc={avatarSrc}
           workspaces={session.workspaces} activeWorkspaceId={workspaceId}
           onCreateWorkspace={createWorkspace} onUpdateWorkspace={renameWorkspace} onDeleteWorkspace={removeWorkspace}

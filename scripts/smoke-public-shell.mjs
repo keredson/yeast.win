@@ -50,6 +50,9 @@ try {
   assert.equal(new URL(page.url()).pathname, '/batch/protected-example', 'sign-in did not return to the requested route');
   await page.goto(`${base}/me`);
   await page.waitForURL('**/settings');
+  assert.equal(await page.locator('.app-header').count(), 0, 'the old header is still present');
+  assert.equal(await page.locator('.app-nav').getByRole('combobox', { name: 'Brewery' }).isVisible(), true);
+  assert.equal(await page.locator('.app-nav .nav-footer').getByRole('button', { name: 'Account menu' }).isVisible(), true);
   assert.equal(await page.locator('.account-page .ant-card').first().getByText('Profile').count(), 1);
   assert.equal(await page.locator('.account-page .ant-card').nth(1).getByText('Preferred units').count(), 1);
   assert.equal(await page.locator('.account-page .ant-card').last().getByText('Security').count(), 1);
@@ -110,10 +113,23 @@ try {
     await page.getByRole('button', { name: 'Sync Homebrew' }).click();
     const homebrewId = await page.evaluate(() => JSON.parse(localStorage.getItem('brewlog:last-session')).workspaces[0].id);
     await page.waitForFunction(id => Number(localStorage.getItem(`brewlog:last-sync:${id}`)) > 0, homebrewId);
-    assert.equal(await page.locator('.workspace-select').getByText('Smoke second brewery').isVisible(), true,
+    assert.equal(await page.locator('.app-nav .workspace-select').getByText('Smoke second brewery').isVisible(), true,
       'syncing Homebrew changed the selected brewery');
   }
   await page.setViewportSize({ width: 320, height: 720 });
+  await page.getByRole('button', { name: 'Open navigation' }).click();
+  const mobileNavigation = page.getByRole('dialog', { name: 'Yeast.Win!' });
+  assert.equal(await mobileNavigation.getByRole('combobox', { name: 'Brewery' }).isVisible(), true);
+  assert.equal(await mobileNavigation.getByRole('button', { name: 'Account menu' }).isVisible(), true);
+  await mobileNavigation.getByRole('button', { name: 'Close' }).click();
+  await page.goto(`${base}/batches`);
+  await page.getByRole('navigation', { name: 'Breadcrumb' }).waitFor();
+  assert.equal(await page.evaluate(() => {
+    const menu = document.querySelector('.mobile-menu-button').getBoundingClientRect();
+    const crumbs = document.querySelector('.app-breadcrumb').getBoundingClientRect();
+    return crumbs.left >= menu.right && Math.abs(crumbs.top - menu.top) < 20;
+  }), true, 'mobile breadcrumbs are not beside the menu button');
+  await page.goto(`${base}/settings`);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
     'brewery actions overflow the Settings page on a narrow phone');
   await page.setViewportSize({ width: 1280, height: 900 });

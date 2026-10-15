@@ -252,7 +252,7 @@ export function AccountSection({ username, workspaces, activeWorkspaceId,
     <Card title="Profile" className="account-card">
       <div className="profile-row">
         <Avatar size={72} src={avatarSrc}>{username[0].toUpperCase()}</Avatar>
-        <div><strong>{username}</strong><div className="muted">Your account avatar appears in the header.</div>
+        <div><strong>{username}</strong><div className="muted">Your account avatar appears at the bottom of the navigation.</div>
           <input ref={fileInput} className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp"
             aria-label="Avatar image" onChange={event => { const file = event.target.files?.[0]; if (file) void uploadAvatar(file); }} />
           <Button icon={<UploadOutlined />} loading={avatarBusy} onClick={() => fileInput.current?.click()}>Upload avatar</Button>

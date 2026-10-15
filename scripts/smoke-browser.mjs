@@ -111,9 +111,7 @@ try {
   await signIn(page, true);
   console.log('Registered account and opened local SQLite');
 
-  if (await page.locator('.app-header').getByRole('button', { name: 'Sync now' }).count()) {
-    throw new Error('Sync button is still in the header');
-  }
+  if (await page.locator('.app-header').count()) throw new Error('The old app header is still present');
 
   await navigateSection(page, 'Settings');
   await page.getByRole('button', { name: 'New brewery' }).click();
@@ -121,7 +119,7 @@ try {
   const secondBrewery = `Smoke brewery ${Date.now()}`;
   await page.getByRole('textbox', { name: 'Brewery name' }).fill(secondBrewery);
   await page.getByRole('dialog', { name: 'New brewery' }).getByRole('button', { name: 'Create brewery' }).click();
-  await page.locator('.workspace-select').getByText(secondBrewery).waitFor();
+  await page.locator('.app-nav .workspace-select').getByText(secondBrewery).waitFor();
   await page.getByRole('combobox', { name: 'Brewery' }).click();
   if (await page.getByText('＋ New brewery').count()) throw new Error('Brewery creation is still in the switcher');
   await page.keyboard.press('Escape');
@@ -146,7 +144,7 @@ try {
   }
   await page.getByRole('combobox', { name: 'Brewery' }).click();
   await page.getByText('Homebrew', { exact: true }).last().click();
-  await page.locator('.workspace-select').getByText('Homebrew').waitFor();
+  await page.locator('.app-nav .workspace-select').getByText('Homebrew').waitFor();
   if (new URL(page.url()).pathname !== '/') throw new Error('Homebrew should use the root dashboard URL');
   await navigateSection(page, 'Batches');
   await page.getByRole('button', { name: 'New batch' }).waitFor();
@@ -1322,7 +1320,7 @@ try {
   await second.getByRole('heading', { name: 'Second brewery batch' }).waitFor({ timeout: 30_000 });
   await second.getByRole('combobox', { name: 'Brewery' }).click();
   await second.getByText('Homebrew', { exact: true }).last().click();
-  await second.locator('.workspace-select').getByText('Homebrew').waitFor();
+  await second.locator('.app-nav .workspace-select').getByText('Homebrew').waitFor();
   await openBatch(second, batchName);
   await second.getByRole('heading', { name: batchName }).waitFor({ timeout: 30_000 });
   await second.locator('.photo-grid img').waitFor();
@@ -1390,7 +1388,7 @@ try {
     return canvas.toDataURL('image/png').split(',')[1];
   });
   await page.getByLabel('Avatar image').setInputFiles({ name: 'avatar.png', mimeType: 'image/png', buffer: Buffer.from(avatarData, 'base64') });
-  await page.locator('.app-header .ant-avatar img').waitFor();
+  await page.locator('.app-nav .nav-footer .ant-avatar img').waitFor();
   const avatarResponse = await page.evaluate(async () => {
     const response = await fetch('/api/me/avatar');
     return { status: response.status, type: response.headers.get('content-type'), size: (await response.arrayBuffer()).byteLength };
@@ -1408,7 +1406,7 @@ try {
   await page.waitForFunction(async () => (await (await fetch('/api/me')).json()).preferred_units.temperature === '°F');
   await page.reload();
   await page.getByRole('heading', { name: 'Settings' }).waitFor();
-  await page.locator('.app-header .ant-avatar img').waitFor();
+  await page.locator('.app-nav .nav-footer .ant-avatar img').waitFor();
   const secondUnits = await second.evaluate(async () => (await (await fetch('/api/me')).json()).preferred_units.temperature);
   if (secondUnits !== '°F') throw new Error('Preferred units did not persist across devices');
   await navigateSection(page, 'Batches');
