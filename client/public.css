@@ -18,13 +18,13 @@ button, input { font: inherit; }
 .public-primary:disabled { opacity: .6; cursor: wait; }
 .public-card { width: min(100%, 440px); margin: clamp(50px, 10vw, 105px) auto 0; padding: 30px; border: 1px solid #e0e7dc;
   border-radius: 18px; background: white; box-shadow: 0 24px 80px #24433716; }
-.public-card h1 { margin: 12px 0 25px; font-family: Georgia, serif; font-size: 30px; }
+.public-card h1 { margin: 12px 0 12px; font-family: Georgia, serif; font-size: 30px; }
 .public-back { color: #526b60; text-decoration: none; font-size: 14px; }
-.public-tabs { display: flex; gap: 8px; margin-bottom: 25px; padding: 4px; border-radius: 10px; background: #e9eee7; }
-.public-tabs a { flex: 1; padding: 9px; border-radius: 7px; color: #526b60; text-align: center; text-decoration: none; }
-.public-tabs .selected { background: white; color: #1d604f; box-shadow: 0 1px 5px #24433716; }
+.public-intro { margin: 0 0 24px; color: #526b60; line-height: 1.5; }
 .public-card form { display: grid; gap: 18px; }
 .public-card label { display: grid; gap: 7px; font-size: 14px; font-weight: 600; }
+.public-card label[hidden] { display: none; }
+.public-username-status { min-height: 1.25em; margin: -10px 0 -6px; color: #526b60; font-size: 13px; }
 .public-card input { width: 100%; min-height: 42px; padding: 9px 12px; border: 1px solid #c9d5ca; border-radius: 9px; }
 .public-card input:focus { outline: 2px solid #1f6b5b; outline-offset: 1px; }
 .public-card .public-primary { width: 100%; margin-top: 4px; }

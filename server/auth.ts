@@ -35,13 +35,17 @@ function createSession(db: Database.Database, accountId: string): string {
 export function register(db: Database.Database, username: string, password: string): string | null {
   const normalized = username.trim().toLowerCase();
   return db.transaction(() => {
-    if (db.prepare('SELECT 1 FROM accounts WHERE lower(username) = ?').get(normalized)) return null;
+    if (usernameExists(db, normalized)) return null;
     const id = createId();
     db.prepare('INSERT INTO accounts(id, username, password_hash, created_at) VALUES (?, ?, ?, ?)')
       .run(id, normalized, passwordHash(password), nowSeconds());
     createWorkspace(db, id, 'Homebrew');
     return createSession(db, id);
   })();
+}
+
+export function usernameExists(db: Database.Database, username: string): boolean {
+  return !!db.prepare('SELECT 1 FROM accounts WHERE lower(username) = ?').get(username.trim().toLowerCase());
 }
 
 export function login(db: Database.Database, username: string, password: string): string | null {

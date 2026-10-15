@@ -13,20 +13,22 @@ async function signIn(page, createAccount = false) {
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(`${baseUrl}/login`);
   if (createAccount) {
-    await page.getByRole('link', { name: 'Create account' }).click();
     const shortPasswordStatus = await page.evaluate(async name => (await fetch('/api/register', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: name, password: 'short12' })
     })).status, username);
     if (shortPasswordStatus !== 400) throw new Error(`Seven-character password was accepted: ${shortPasswordStatus}`);
+  }
+  await page.getByLabel('Username').fill(username);
+  await page.getByRole('button', { name: createAccount ? 'Create account' : 'Sign in' }).waitFor();
+  if (createAccount) {
     await page.setViewportSize({ width: 320, height: 720 });
     if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) {
       throw new Error('Signup page has horizontal overflow on a narrow phone');
     }
     await page.screenshot({ path: '/tmp/brewlog-signup-mobile.png', fullPage: true });
     await page.setViewportSize({ width: 1280, height: 900 });
-  } else await page.getByRole('link', { name: 'Sign in' }).click();
-  await page.getByLabel('Username').fill(username);
+  }
   await page.getByLabel('Password', { exact: true }).fill(password);
   if (createAccount) await page.getByLabel('Confirm password').fill(password);
   await page.locator('.public-card form button[type="submit"]').click();

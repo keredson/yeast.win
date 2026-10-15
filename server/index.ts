@@ -3,7 +3,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import type Database from 'better-sqlite3';
 import { accountForToken, changePassword, clearSessionCookie, getAvatar, getPreferredUnits, login, logout,
-  readSessionCookie, register, saveAvatar, savePreferredUnits, sessionCookie, sessionCookieName } from './auth.ts';
+  readSessionCookie, register, saveAvatar, savePreferredUnits, sessionCookie, sessionCookieName,
+  usernameExists } from './auth.ts';
 import { assertCrSqliteAvailable, closeWorkspaceDb, createWorkspace, dataDir, deleteWorkspace, openAuthDb, openWorkspaceDb, projectRoot, updateWorkspace } from './db.ts';
 import { openCatalogDb } from './catalog.ts';
 import { receiveCborChanges, streamCborChanges } from './sync.ts';
@@ -160,6 +161,11 @@ const server = createServer(async (req, res) => {
       if (!reading) return json(res, 400, { error: 'Invalid RAPT reading' });
       const result = ingestRaptReading(authDb, connection.account_id, reading, getWorkspaceDb);
       return json(res, result === 'unassigned' ? 202 : 200, { status: result });
+    }
+    if (pathname === '/api/username' && req.method === 'GET') {
+      const username = url.searchParams.get('username')?.trim();
+      if (!username || username.length > 40) return json(res, 400, { error: 'Enter a username up to 40 characters' });
+      return json(res, 200, { exists: usernameExists(authDb, username) }, { 'Cache-Control': 'no-store' });
     }
     if (pathname === '/api/register' && req.method === 'POST') {
       const registrationKey = clientAddress(req);

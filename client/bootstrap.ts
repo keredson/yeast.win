@@ -28,7 +28,7 @@ function splash(): void {
         <p class="public-eyebrow">A fermentation notebook · Free and open source</p>
         <h1>Make something.<br><em>See what happens.</em></h1>
         <p class="splash-intro">Start with a recipe, a rough idea, or whatever you throw together. Keep a record of what you tried, what happened, and what you might change next time.</p>
-        <div class="public-actions"><a class="public-primary" href="/login?mode=signup">Start your notebook <span aria-hidden="true">→</span></a>
+        <div class="public-actions"><a class="public-primary" href="/login">Start your notebook <span aria-hidden="true">→</span></a>
           <a class="public-secondary" href="/login">I have an account</a></div>
         <p class="splash-note"><span aria-hidden="true">●</span> Your batches stay available on this device, even offline.</p>
       </div>
@@ -62,44 +62,98 @@ function splash(): void {
     </section>
     <section class="splash-offline"><div><p class="public-eyebrow">Keep making, even offline</p>
       <h2>Take the notebook with you.</h2><p>Open your batches without a connection. Changes sync when you reconnect and use the app again.</p></div>
-      <a href="/login?mode=signup">Get started <span aria-hidden="true">→</span></a></section>
+      <a href="/login">Get started <span aria-hidden="true">→</span></a></section>
     <footer class="splash-footer"><span>Yeast.Win! · Free and open source</span><span>Made for curious fermenters.</span></footer>
   </div></main>`;
 }
 
 function login(message = ''): void {
-  const mode = new URLSearchParams(location.search).get('mode') === 'signup' ? 'signup' : 'login';
   root.innerHTML = `<main class="public-page"><div class="public-shell">${brand()}
     <section class="public-card"><a class="public-back" href="/">← Home</a>
-    <h1>${mode === 'signup' ? 'Create your account' : 'Sign in'}</h1>
-    <div class="public-tabs"><a class="${mode === 'login' ? 'selected' : ''}" href="/login${location.search.includes('next=') ? `?next=${encodeURIComponent(destination())}` : ''}">Sign in</a>
-    <a class="${mode === 'signup' ? 'selected' : ''}" href="/login?mode=signup&next=${encodeURIComponent(destination())}">Create account</a></div>
+    <h1>Sign in or create an account</h1>
+    <p class="public-intro">Enter your username. We'll find your account or help you create one.</p>
     <p class="public-error" role="alert" hidden></p>
     <form id="account-form"><label>Username<input name="username" autocomplete="username" maxlength="40" required></label>
-    <label>Password<input name="password" type="password" autocomplete="${mode === 'signup' ? 'new-password' : 'current-password'}" maxlength="256" required></label>
-    ${mode === 'signup' ? '<label>Confirm password<input name="confirm_password" type="password" autocomplete="new-password" maxlength="256" required></label>' : ''}
-    <button class="public-primary" type="submit">${mode === 'signup' ? 'Create my account' : 'Sign in'}</button></form></section></div></main>`;
+    <p class="public-username-status" role="status" aria-live="polite"></p>
+    <label>Password<input name="password" type="password" autocomplete="current-password" maxlength="256" required></label>
+    <label class="public-confirm" hidden>Confirm password<input name="confirm_password" type="password" autocomplete="new-password" maxlength="256"></label>
+    <button class="public-primary" type="submit">Continue</button></form></section></div></main>`;
   const showError = (value: string) => {
     const error = root.querySelector<HTMLElement>('.public-error')!;
     error.textContent = value;
     error.hidden = !value;
   };
-  showError(message);
-  root.querySelector('form')!.addEventListener('submit', async event => {
-    event.preventDefault();
-    const form = event.currentTarget as HTMLFormElement;
-    const data = new FormData(form);
-    const username = String(data.get('username') || '').trim();
-    const password = String(data.get('password') || '');
-    if (mode === 'signup' && !/^[A-Za-z0-9][A-Za-z0-9_-]{2,39}$/.test(username)) {
-      showError('Use 3–40 letters, numbers, _ or - for the username.'); return;
+  const form = root.querySelector<HTMLFormElement>('#account-form')!;
+  const usernameInput = form.elements.namedItem('username') as HTMLInputElement;
+  const passwordInput = form.elements.namedItem('password') as HTMLInputElement;
+  const confirmInput = form.elements.namedItem('confirm_password') as HTMLInputElement;
+  const confirmLabel = form.querySelector<HTMLElement>('.public-confirm')!;
+  const status = form.querySelector<HTMLElement>('.public-username-status')!;
+  const button = form.querySelector<HTMLButtonElement>('button')!;
+  let checkedUsername = '';
+  let accountExists: boolean | null = null;
+  let checkSequence = 0;
+  let checkTimer: number | undefined;
+
+  async function checkUsername(username: string): Promise<boolean | null> {
+    const sequence = ++checkSequence;
+    status.textContent = 'Checking username…';
+    try {
+      const response = await fetch(`/api/username?username=${encodeURIComponent(username)}`, {
+        credentials: 'same-origin', cache: 'no-store'
+      });
+      if (!response.ok) throw new Error('Could not check the username. Try again.');
+      const result = await response.json() as { exists: boolean };
+      if (sequence !== checkSequence || usernameInput.value.trim() !== username) return null;
+      checkedUsername = username.toLowerCase();
+      accountExists = result.exists;
+      confirmLabel.hidden = result.exists;
+      confirmInput.required = !result.exists;
+      passwordInput.autocomplete = result.exists ? 'current-password' : 'new-password';
+      button.textContent = result.exists ? 'Sign in' : 'Create account';
+      status.textContent = result.exists ? 'Account found. Enter your password.'
+        : 'New username. Choose a password to create your account.';
+      showError('');
+      return result.exists;
+    } catch (cause) {
+      if (sequence === checkSequence) {
+        status.textContent = '';
+        showError(cause instanceof Error ? cause.message : 'Could not check the username. Try again.');
+      }
+      return null;
     }
-    if (mode === 'signup' && password.length < 8) { showError('Use at least 8 characters for the password.'); return; }
-    if (mode === 'signup' && password !== data.get('confirm_password')) { showError('Passwords do not match.'); return; }
-    const button = form.querySelector('button')!;
+  }
+
+  usernameInput.addEventListener('input', () => {
+    window.clearTimeout(checkTimer);
+    checkSequence++;
+    checkedUsername = '';
+    accountExists = null;
+    confirmLabel.hidden = true;
+    confirmInput.required = false;
+    passwordInput.autocomplete = 'current-password';
+    button.textContent = 'Continue';
+    showError('');
+    const username = usernameInput.value.trim();
+    status.textContent = username ? 'Checking username…' : '';
+    if (username) checkTimer = window.setTimeout(() => void checkUsername(username), 350);
+  });
+  showError(message);
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
     button.disabled = true;
     try {
-      const response = await fetch(`/api/${mode === 'signup' ? 'register' : 'login'}`, {
+      window.clearTimeout(checkTimer);
+      const username = usernameInput.value.trim();
+      const exists = checkedUsername === username.toLowerCase() ? accountExists : await checkUsername(username);
+      if (exists === null || usernameInput.value.trim() !== username) return;
+      const password = passwordInput.value;
+      if (!exists && !/^[A-Za-z0-9][A-Za-z0-9_-]{2,39}$/.test(username)) {
+        showError('Use 3–40 letters, numbers, _ or - for the username.'); return;
+      }
+      if (!exists && password.length < 8) { showError('Use at least 8 characters for the password.'); return; }
+      if (!exists && password !== confirmInput.value) { showError('Passwords do not match.'); return; }
+      const response = await fetch(`/api/${exists ? 'login' : 'register'}`, {
         method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
       });
@@ -110,6 +164,7 @@ function login(message = ''): void {
       await loadApp();
     } catch (cause) {
       showError(cause instanceof Error ? cause.message : 'Could not sign in. Try again.');
+    } finally {
       button.disabled = false;
     }
   });

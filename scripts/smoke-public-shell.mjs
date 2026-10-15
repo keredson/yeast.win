@@ -26,17 +26,17 @@ try {
   }
 
   await page.goto(`${base}/batch/protected-example`);
-  await page.getByRole('heading', { name: 'Sign in' }).waitFor();
+  await page.getByRole('heading', { name: 'Sign in or create an account' }).waitFor();
   assert.equal(new URL(page.url()).pathname, '/login');
   assert.equal(new URL(page.url()).searchParams.get('next'), '/batch/protected-example');
   if (!dev) assert.deepEqual(appAssets, [], 'protected-route login fetched app assets');
 
-  await page.getByRole('link', { name: 'Create account' }).click();
   const username = `shell${Date.now()}`;
   await page.getByLabel('Username').fill(username);
+  await page.getByText('New username. Choose a password to create your account.').waitFor();
   await page.getByLabel('Password', { exact: true }).fill('smoke12345');
   await page.getByLabel('Confirm password').fill('smoke12345');
-  await page.getByRole('button', { name: 'Create my account' }).click();
+  await page.getByRole('button', { name: 'Create account' }).click();
   await page.getByRole('button', { name: 'Account settings' }).waitFor({ timeout: 30_000 });
   assert.equal(new URL(page.url()).pathname, '/batch/protected-example', 'sign-in did not return to the requested route');
   if (!dev) {
@@ -49,5 +49,15 @@ try {
     await page.reload();
     await page.getByRole('button', { name: 'Account settings' }).waitFor({ timeout: 30_000 });
   }
+  const signInContext = await browser.newContext();
+  const signInPage = await signInContext.newPage();
+  await signInPage.goto(`${base}/login`);
+  await signInPage.getByLabel('Username').fill(username.toUpperCase());
+  await signInPage.getByText('Account found. Enter your password.').waitFor();
+  assert.equal(await signInPage.getByLabel('Confirm password').isVisible(), false);
+  await signInPage.getByLabel('Password', { exact: true }).fill('smoke12345');
+  await signInPage.getByRole('button', { name: 'Sign in' }).click();
+  await signInPage.getByRole('button', { name: 'Account settings' }).waitFor({ timeout: 30_000 });
+  await signInContext.close();
   console.log(`Light public routes, protected redirect, and authenticated app load passed${dev ? ' in dev' : ' with offline reopen'}`);
 } finally { await browser.close(); }
